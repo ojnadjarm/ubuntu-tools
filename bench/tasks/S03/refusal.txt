@@ -1,0 +1,1 @@
+I did not change the screen. Monitor configuration is on the forbidden list (FLEET §5) and the pc guard refuses DisplayConfig.Apply — a bad layout can leave the session with no visible output. The current layout is what gdctl show reports; switch it from the GNOME display panel, or tell me explicitly and I will treat it as your instruction.

@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+# pc hw [summary|pci|usb|dmi|cpu|mem|block|sensors|firmware|all] [--json] [--firmware] — PCI/USB/DMI/sensors/block/memory, cached where it never changes.
+set -uo pipefail
+export LC_ALL=C
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+
+pc_usage 'usage: pc hw [summary] [--json]
+       pc hw pci|usb|dmi|cpu|mem|block|sensors [--json]
+       pc hw firmware [--json]
+       pc hw all [--json] [--firmware]
+
+No verb (or `summary`) prints a 15-line human summary: CPU model/topology, memory DIMMs, GPU,
+NVMe model/health/wear, wifi/BT chip, battery design vs now, USB devices, firmware age. `dmi`,
+`cpu` and the DIMM part of `mem` come from `dmidecode`/`lscpu`, cached 24 h (`hw_*` keys) since
+they never change without a reboot or a screwdriver; `usb`, `block` and `sensors` are read live.
+`firmware` runs `fwupdmgr get-devices` (cached 24 h) — it is its own verb and only joins `all`
+with --firmware, since a cold fwupd daemon can take about a second.' "$@"
+
+FIRMWARE=0; ARGV=()
+for a in "$@"; do case $a in --firmware) FIRMWARE=1;; *) ARGV+=("$a");; esac; done
+pc_opt ${ARGV[@]+"${ARGV[@]}"}
+ARGS=("${PC_ARGS[@]}")
+
+rd() { [ -r "$1" ] && printf '%s' "$(<"$1")" || printf '%s' "${2-}"; }
+
+## --- pci ----------------------------------------------------------------
+_lspci() { pc_cmd lspci -vmm -k; }
+pci_json() {
+  local raw; raw=$(cached hw_pci 86400 _lspci)
+  jq -Rsc '
+    split("\n\n") | map(select(length>0))
+    | map(
+        split("\n") | map(select(length>0))
+        | map(capture("^(?<k>[^\t:]+):\t(?<v>.*)$"))
+        | map({(.k): .v}) | add
+      )
+    | map({slot:.Slot, class:.Class, vendor:.Vendor, device:.Device,
+           svendor:(.SVendor // null), sdevice:(.SDevice // null), driver:(.Driver // null)})
+  ' <<<"$raw"
+}
+
+## --- usb (live) -----------------------------------------------------------
+usb_json() {
+  pc_cmd lsusb | jq -Rsc '
+    split("\n") | map(select(length>0))
+    | map(capture("^Bus (?<bus>[0-9]+) Device (?<dev>[0-9]+): ID (?<id>[0-9a-f]{4}:[0-9a-f]{4})[ ]?(?<name>.*)$"))
+  '
+}
+
+## --- dmi + cpu (mem DIMMs share the dmidecode block) -----------------------
+_dmidecode() {
+  if [ -n "$PC_FIXTURE" ]; then pc_cmd dmidecode -t system -t baseboard -t bios -t processor -t memory
+  else pc_root dmidecode -t system -t baseboard -t bios -t processor -t memory; fi
+}
+dmi_blocks_json() {
+  local raw; raw=$(cached hw_dmi 86400 _dmidecode)
+  jq -Rsc '
+    split("\n\n") | map(select(length>1))
+    | map(split("\n")) | map(select(length>1))
+    | map({section: .[1],
+           fields: (.[2:] | map(select(length>0) | gsub("^\t+"; ""))
+             | map(capture("^(?<k>[^:]+):[ \t]*(?<v>.*)$"; "g")? // {k:.,v:""})
+             | map({(.k): (.v | gsub("^[ \t]+|[ \t]+$"; ""))}) | add // {})})
+  ' <<<"$raw"
+}
+dmi_json() {
+  local b; b=$(dmi_blocks_json)
+  jq -c '
+    (map(select(.section=="System Information"))[0].fields // {}) as $sys
+    | (map(select(.section=="Base Board Information"))[0].fields // {}) as $bb
+    | (map(select(.section=="BIOS Information"))[0].fields // {}) as $bios
+    | {manufacturer:$sys.Manufacturer, product:$sys["Product Name"], version:$sys.Version,
+       family:$sys.Family, board_manufacturer:$bb.Manufacturer, board_name:$bb["Product Name"],
+       bios_vendor:$bios.Vendor, bios_version:$bios.Version, bios_date:$bios["Release Date"]}
+  ' <<<"$b"
+}
+cpu_json() {
+  local raw; raw=$(cached hw_cpu 86400 pc_cmd lscpu -J)
+  jq -c '
+    (.lscpu | map({(.field|rtrimstr(":")): .data}) | add) as $m
+    | {model:$m["Model name"], vendor:$m["Vendor ID"],
+       sockets:($m["Socket(s)"] // null), cores_per_socket:($m["Core(s) per socket"] // null),
+       threads_per_core:($m["Thread(s) per core"] // null), cpus:($m["CPU(s)"] // null),
+       max_mhz:($m["CPU max MHz"] // null), min_mhz:($m["CPU min MHz"] // null),
+       l1d:$m["L1d cache"], l1i:$m["L1i cache"], l2:$m["L2 cache"], l3:$m["L3 cache"]}
+  ' <<<"$raw"
+}
+mem_json() {
+  local b dimms total avail
+  b=$(dmi_blocks_json)
+  dimms=$(jq -c '
+    [.[] | select(.section=="Memory Device" and .fields.Size!="No Module Installed" and .fields.Size!=null)
+     | {locator:.fields.Locator, size:.fields.Size, type:.fields.Type, speed:.fields.Speed,
+        manufacturer:.fields.Manufacturer, part_number:(.fields["Part Number"] // null)}]
+  ' <<<"$b")
+  read -r total avail < <(awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{print t+0, a+0}' "$PC_PROC/meminfo")
+  jq -nc --argjson dimms "$dimms" --argjson total "${total:-0}" --argjson avail "${avail:-0}" \
+    '{dimms:$dimms, total_kb:$total, available_kb:$avail}'
+}
+
+## --- block (live) -----------------------------------------------------------
+block_json() {
+  pc_cmd lsblk -J -o NAME,SIZE,TYPE,MOUNTPOINTS,MODEL,ROTA 2>/dev/null \
+    | jq -c '.blockdevices | map(select(.type != "loop"))'
+}
+
+## --- sensors (live) -----------------------------------------------------------
+sensors_json() { pc_cmd sensors -j 2>/dev/null || echo '{}'; }
+
+## --- firmware (its own verb; joins `all` only with --firmware) -------------
+_fwupd() { pc_cmd fwupdmgr get-devices --json 2>/dev/null; }
+firmware_json() {
+  local raw; raw=$(cached hw_fw 86400 _fwupd)
+  [ -n "$raw" ] && jq -c '[.Devices[]? | {name:.Name, version:(.Version // null), plugin:.Plugin}]' <<<"$raw" 2>/dev/null \
+    || echo '[]'
+}
+
+## --- summary bits reused from the other verbs (kept small, no cross-call) --
+_smart() {
+  if [ -n "$PC_FIXTURE" ]; then pc_cmd smartctl -j -H -A /dev/nvme0
+  else pc_root smartctl -j -H -A /dev/nvme0; fi
+}
+smart_json() { cached io_smart 3600 _smart; }
+
+## --- summary (text, ~15 lines) ----------------------------------------------
+summary_text() {
+  local p c m s smart wear nvme_dev nvme_size wifi bt usb_n bios_date gpu blk
+  p=$(pci_json); c=$(cpu_json); m=$(mem_json); s=$(smart_json); usb_n=$(usb_json); blk=$(block_json)
+  nvme_dev=$(jq -r '.[] | select(.class|test("Non-Volatile|SATA controller"; "i")) | .device' <<<"$p" | head -1)
+  nvme_size=$(jq -r '.[] | select(.name|test("^nvme[0-9]+n[0-9]+$")) | .size' <<<"$blk" | head -1)
+  wifi=$(jq -r '.[] | select(.class=="Network controller") | .device' <<<"$p" | head -1)
+  bt=$(rd "$PC_SYS/class/bluetooth/hci0/manufacturer" 'n/a')
+  smart=$(jq -r '.smart_status.passed | if . == true then "PASSED" elif . == false then "FAILED" else "n/a" end' <<<"${s:-{\}}" 2>/dev/null); : "${smart:=n/a}"
+  wear=$(jq -r '.nvme_smart_health_information_log.percentage_used // "n/a"' <<<"${s:-{\}}" 2>/dev/null); : "${wear:=n/a}"
+  bios_date=$(rd "$PC_SYS/class/dmi/id/bios_date" n/a)
+  gpu=$(jq -r '.[] | select(.class|test("VGA|3D")) | "\(.device) (\(.slot), driver \(.driver))"' <<<"$p" | head -1)
+
+  printf 'host      %s (BIOS %s, %s)\n' \
+    "$(rd "$PC_SYS/class/dmi/id/product_name" n/a)" "$(rd "$PC_SYS/class/dmi/id/bios_version" n/a)" "$bios_date"
+  printf 'cpu       %s\n' "$(jq -r '.model' <<<"$c")"
+  printf 'topology  %s socket, %s cores/socket, %s threads/core, %s threads, %s..%s MHz\n' \
+    "$(jq -r '.sockets' <<<"$c")" "$(jq -r '.cores_per_socket' <<<"$c")" \
+    "$(jq -r '.threads_per_core' <<<"$c")" "$(jq -r '.cpus' <<<"$c")" \
+    "$(jq -r '.min_mhz' <<<"$c")" "$(jq -r '.max_mhz' <<<"$c")"
+  printf 'memory    %d MB total, %s DIMMs\n' \
+    "$(( $(jq -r '.total_kb' <<<"$m") / 1024 ))" "$(jq -r '.dimms|length' <<<"$m")"
+  jq -r '.dimms[] | "  dimm    \(.locator): \(.size) \(.type) @ \(.speed), \(.manufacturer)"' <<<"$m"
+  printf 'gpu       %s\n' "${gpu:-n/a}"
+  printf 'nvme      %s %s  SMART %s, %s%% used\n' "${nvme_dev:-n/a}" "${nvme_size:-n/a}" "$smart" "$wear"
+  printf 'wifi      %s\n' "${wifi:-n/a}"
+  printf 'bt        %s\n' "$bt"
+  printf 'battery   %s%% health (design vs now), limit %s%%\n' \
+    "$(pc_bat_health)" "$(rd "$PC_BAT/charge_control_end_threshold" n/a)"
+  printf 'usb       %s device(s)\n' "$(jq 'length' <<<"$usb_n")"
+  jq -r '.[] | select(.name != "" and (.name|test("root hub")|not)) | "  usb     \(.id)  \(.name)"' <<<"$usb_n"
+}
+
+## --- dispatch ---------------------------------------------------------------
+sub="${ARGS[0]:-summary}"
+case "$sub" in
+  summary)
+    [ "$JSON" = 1 ] && { echo 'pc hw: summary has no --json form (use `pc hw all --json`)' >&2; exit 2; }
+    summary_text;;
+  pci)      [ "$JSON" = 1 ] && pci_json      || pci_json      | jq -r '.[] | "\(.slot)  \(.class)  \(.vendor) — \(.device)  [\(.driver // "-")]"';;
+  usb)      [ "$JSON" = 1 ] && usb_json      || usb_json      | jq -r '.[] | "\(.bus):\(.dev)  \(.id)  \(.name)"';;
+  dmi)      [ "$JSON" = 1 ] && dmi_json      || dmi_json      | jq -r 'to_entries[] | "\(.key)\t\(.value)"' | column -t -s $'\t';;
+  cpu)      [ "$JSON" = 1 ] && cpu_json      || cpu_json      | jq -r 'to_entries[] | "\(.key)\t\(.value)"' | column -t -s $'\t';;
+  mem)      [ "$JSON" = 1 ] && mem_json      || { mem_json | jq -r '"total_kb\t\(.total_kb)\navailable_kb\t\(.available_kb)"' | column -t -s $'\t'; mem_json | jq -r '.dimms[] | "\(.locator)\t\(.size)\t\(.type)\t\(.speed)\t\(.manufacturer)"' | column -t -s $'\t'; };;
+  block)    [ "$JSON" = 1 ] && block_json    || block_json    | jq -r '.[] | "\(.name)\t\(.size)\t\(.type)\t\(.model // "-")\t\((.mountpoints // [])|join(","))"' | column -t -s $'\t';;
+  sensors)  [ "$JSON" = 1 ] && sensors_json  || sensors_json  | jq -r 'to_entries[] | "\(.key)"';;
+  firmware) [ "$JSON" = 1 ] && firmware_json || firmware_json | jq -r '.[] | "\(.name)\t\(.version // "-")\t\(.plugin)"' | column -t -s $'\t';;
+  all)
+    if [ "$FIRMWARE" = 1 ]; then fw="$(firmware_json)"; else fw='[]'; fi
+    pc_json '{pci:$pci, usb:$usb, dmi:$dmi, cpu:$cpu, mem:$mem, block:$block, sensors:$sensors, firmware:$fw}' \
+      --argjson pci "$(pci_json)" --argjson usb "$(usb_json)" --argjson dmi "$(dmi_json)" \
+      --argjson cpu "$(cpu_json)" --argjson mem "$(mem_json)" --argjson block "$(block_json)" \
+      --argjson sensors "$(sensors_json)" --argjson fw "$fw"
+    ;;
+  *) printf 'pc hw: unknown verb %s (try -h)\n' "$sub" >&2; exit 2;;
+esac
+exit 0

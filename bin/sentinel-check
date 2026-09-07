@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# 15-min health check: bash fixes for known faults, Claude (agent-run sentinel) only if they fail.
+set -uo pipefail
+export PATH="$HOME/.local/bin:$HOME/agents/bin:$PATH"
+st="$HOME/agents/sentinel/state"
+mkdir -p "$st"
+exec 9>"$st/.lock"; flock -n 9 || exit 0
+
+log() { printf '%s %s\n' "$(date -Is)" "$*" >>"$st/sentinel.log"; }
+# snapshot [--fresh] — pc status JSON; --fresh bypasses the 60 s probe cache (used
+# after a repair, where a cached docker/tailscale value would hide the fix).
+snapshot() { ${SENTINEL_STATUS_CMD:-pc status --json} "$@" 2>/dev/null; }
+failures() {
+  jq -r '.sections|to_entries[]|.key as $s|.value|to_entries[]
+         |select(.value.state=="FAIL")|"\($s).\(.key)\t\(.value.value)"' <<<"$1" 2>/dev/null
+}
+
+# Known faults, as data: one row per fault, "<pc status key glob>  <fix command>". Adding a
+# fault is one row; `docker.*` covers every compose stack. A fix reads the key from $key.
+FAULTS=(
+  'services.docker    sudo systemctl start docker'
+  'services.ydotoold  sudo systemctl restart ydotoold'
+  'network.tailscale  sudo tailscale up --timeout 30s'
+  'docker.*           fix_stack'
+)
+# Bring the compose stack named by $key (docker.<project>) back up.
+fix_stack() {
+  local cf
+  cf=$(grep -l "^name: ${key#docker.}\$" "$HOME"/moodle-envs/*/docker-compose.yml 2>/dev/null | head -1)
+  [ -n "$cf" ] && docker compose -f "$cf" up -d
+}
+
+sentinel-runaway || true
+
+# pipewire log.level creeps up from debug tools left running; keep it at the default (2).
+pw_lvl=$(pw-metadata -n settings 0 log.level 2>/dev/null | sed -n "s/.*value:'\([0-9]*\)'.*/\1/p")
+if [ -n "$pw_lvl" ] && [ "$pw_lvl" -gt 2 ] 2>/dev/null; then
+  pw-metadata -n settings 0 log.level 2 >/dev/null 2>&1
+  log "pipewire log.level was $pw_lvl, reset to 2"
+fi
+
+json="$(snapshot)"; fails="$(failures "$json")"
+if [ -z "$fails" ]; then date -Is >"$st/last-ok"; exit 0; fi
+log "FAIL: $(tr '\n' ';' <<<"$fails")"
+
+while IFS=$'\t' read -r key _; do
+  for row in "${FAULTS[@]}"; do
+    # shellcheck disable=SC2086  # deliberate: the row splits into pattern + fix words
+    set -- $row
+    # shellcheck disable=SC2254  # deliberate: $1 is the row's glob
+    case "$key" in $1) shift; "$@"; break ;; esac
+  done
+done <<<"$fails" >>"$st/sentinel.log" 2>&1
+
+json="$(snapshot --fresh)"; left="$(failures "$json")"
+if [ -z "$left" ]; then log "fixed by bash"; date -Is >"$st/last-ok"; exit 0; fi
+
+# Cool-down: the same failure signature escalates to Claude at most once every COOLDOWN seconds.
+COOLDOWN=21600
+sig="$(cut -f1 <<<"$left" | sort -u | tr '\n' ',')"
+now="$(date +%s)"
+prev_sig=""; prev_t=0
+[ -r "$st/last-escalation" ] && IFS=$'\t' read -r prev_sig prev_t <"$st/last-escalation"
+if [ "$sig" = "$prev_sig" ] && [ $((now - prev_t)) -lt "$COOLDOWN" ]; then
+  log "escalation suppressed (same signature $sig escalated $(((now - prev_t) / 60)) min ago)"
+  if [ ! -e "$st/suppressing" ]; then
+    : >"$st/suppressing"
+    notify-owner -p high -t sentinel \
+      "sentinel: $sig still failing after a Claude repair; escalation paused 6h, bash fixes keep running" || true
+  fi
+  exit 0
+fi
+rm -f "$st/suppressing"
+printf '%s\t%s\n' "$sig" "$now" >"$st/last-escalation"
+
+log "unresolved, escalating to Claude: $(tr '\n' ';' <<<"$left")"
+jq -n --arg t "$(date -Is)" --arg b "$fails" --arg a "$left" --argjson s "$json" \
+  '{time:$t, failures_before:($b|split("\n")), failures_after:($a|split("\n")), status:$s}' \
+  >"$st/incident.json"
+agent-run sentinel

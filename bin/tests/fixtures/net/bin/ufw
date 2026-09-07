@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+cat <<'TXT'
+Status: active
+Logging: on (low)
+Default: deny (incoming), allow (outgoing), deny (routed)
+New profiles: skip
+
+To                         Action      From
+--                         ------      ----
+Anywhere on tailscale0     ALLOW IN    Anywhere
+22/tcp                     ALLOW IN    192.168.1.0/24
+8052/tcp                   ALLOW IN    192.168.1.0/24
+19998/tcp                  ALLOW IN    192.168.1.0/24
+19999/tcp                  ALLOW IN    192.168.1.0/24
+Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)
+TXT

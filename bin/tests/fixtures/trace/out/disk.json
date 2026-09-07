@@ -1,0 +1,3 @@
+{"type": "attached_probes", "count": 2, "data": {"probes": 2}}
+{"type": "map", "data": {"@bytes": {"bash,RA": 16384, "pw-top,RA": 36864, "dd,WS": 8388608}}}
+{"type": "map", "data": {"@ops": {"pw-top,RA": 1, "bash,RA": 1, "dd,WS": 72}}}

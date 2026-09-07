@@ -1,0 +1,43 @@
+I: Bus=0019 Vendor=0000 Product=0005 Version=0000
+N: Name="Lid Switch"
+P: Phys=PNP0C0D/button/input0
+S: Sysfs=/devices/pci0000:00/0000:00:1f.0/PNP0C09:01/PNP0C0D:01/input/input0
+U: Uniq=
+H: Handlers=event0 
+B: PROP=0
+B: EV=21
+B: SW=1
+
+I: Bus=0011 Vendor=0001 Product=0001 Version=ab83
+N: Name="AT Translated Set 2 keyboard"
+P: Phys=isa0060/serio0/input0
+S: Sysfs=/devices/platform/i8042/serio0/input/input3
+U: Uniq=
+H: Handlers=sysrq kbd event3 leds 
+B: PROP=0
+B: EV=120013
+B: KEY=402000007 ff803078f800d001 feffffdfffcfffff fffffffffffffffe
+B: MSC=10
+B: LED=7
+
+I: Bus=0006 Vendor=2333 Product=6666 Version=0001
+N: Name="ydotoold virtual device"
+P: Phys=
+S: Sysfs=/devices/virtual/input/input16
+U: Uniq=
+H: Handlers=sysrq rfkill kbd mouse2 event13 
+B: PROP=0
+B: EV=7
+B: KEY=ffffffffff 0 ffffff0003007f 1000f7fffffff 7fe001fffff000f 7ffffffffffffff ffffffff0003fdff 7fff8fff00ff03ff 1ffffffffffff07 ffffffffffffffff ffffffffffefffff fffffffffffffffe
+B: REL=147
+
+I: Bus=0005 Vendor=054c Product=0000 Version=0000
+N: Name="WF-1000XM5 (AVRCP)"
+P: Phys=ac:80:0a:27:65:6c
+S: Sysfs=/devices/virtual/input/input99
+U: Uniq=ac:80:0a:27:65:6c
+H: Handlers=kbd event20 
+B: PROP=0
+B: EV=100013
+B: KEY=2fc800 145200000000 0
+

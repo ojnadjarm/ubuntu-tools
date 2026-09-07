@@ -1,0 +1,242 @@
+#!/usr/bin/env bash
+# pc power status|rapl|gpu|battery|profiles|profile|platform|epp|governor|turbo|charge-limit — watts, GPU, battery and the power profiles; mutations ledgered.
+set -uo pipefail
+export LC_ALL=C
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+SELF="$(readlink -f "$0")"
+
+pc_usage 'usage: pc power [status] [--seconds 0.3] [--deep] [--json]
+       pc power rapl|gpu|battery|profiles [--seconds N] [--json]
+       pc power profile power-saver|balanced|performance [--apply]
+       pc power platform quiet|balanced|performance [--apply]
+       pc power epp <default|performance|balance_performance|balance_power|power> [--apply]
+       pc power governor <performance|powersave> [--apply]
+       pc power turbo on|off [--apply]
+       pc power charge-limit <40..100> [--apply]
+
+Watts come from the powercap RAPL counters sampled over --seconds (default 0.3, root read);
+--deep adds one turbostat run. Mutations print `would: …` and change nothing without --apply;
+with it they are recorded in the change ledger and undoable with `pc undo`. Fan control is
+refused (FLEET §5) — `pc thermal fan` reads it.' "$@"
+
+DEEP=0; ARGV=()
+for a in "$@"; do case $a in --deep) DEEP=1;; *) ARGV+=("$a");; esac; done
+pc_opt ${ARGV[@]+"${ARGV[@]}"}
+secs=$SECONDS_; [ "$secs" = 0 ] && secs=0.3
+# to_ms 0.3 -> 300; integer milliseconds keep the watt arithmetic in bash (no awk/bc fork).
+to_ms() { local s=$1 i=${1%%.*} f; f=${s#*.}; [ "$f" = "$s" ] && f=0; f="${f}00"; printf '%d' $((10#${i:-0} * 1000 + 10#${f:0:3})); }
+win_ms=$(to_ms "$secs"); [ "$win_ms" -gt 0 ] || win_ms=300
+# mW -> "12.34"
+w() { printf '%d.%02d' $(( ${1:-0} / 1000 )) $(( (${1:-0} % 1000) / 10 )); }
+rd() { [ -r "$1" ] && printf '%s' "$(<"$1")" || printf '%s' "${2-}"; }
+
+## --- RAPL -------------------------------------------------------------------
+# PC_SYS2 (tests only) makes the second sample come from a second captured tree.
+: "${PC_SYS2:=$PC_SYS}"
+RN=() RP=() RM=()
+for d in "$PC_SYS"/class/powercap/intel-rapl:*; do
+  [ -f "$d/energy_uj" ] && [ -f "$d/name" ] || continue
+  RN+=("$(<"$d/name")"); RP+=("$d/energy_uj"); RM+=("$(<"$d/max_energy_range_uj")")
+done
+# One pass over every counter: builtin reads when they are ours, a single sudo cat when not.
+sample() {
+  local root=$1 p out=()
+  for p in "${RP[@]}"; do out+=("${root}${p#$PC_SYS}"); done
+  if [ "${#out[@]}" = 0 ]; then return 0; fi
+  if [ -r "${out[0]}" ]; then for p in "${out[@]}"; do printf '%s\n' "$(<"$p")"; done
+  else pc_root cat "${out[@]}"; fi
+}
+rapl_mw=()   # milliwatts, parallel to RN
+gpu_rc6=0
+rapl_read() {
+  local -a e1 e2; local t1 t2 r1 r2 i d el
+  r1=$(rd "$PC_SYS/class/drm/card1/gt/gt0/rc6_residency_ms" 0); t1=${EPOCHREALTIME/./}
+  mapfile -t e1 < <(sample "$PC_SYS")
+  sleep "$secs"
+  mapfile -t e2 < <(sample "$PC_SYS2")
+  r2=$(rd "$PC_SYS2/class/drm/card1/gt/gt0/rc6_residency_ms" 0); t2=${EPOCHREALTIME/./}
+  el=$(( (t2 - t1) / 1000 )); [ "$el" -gt 0 ] || el=$win_ms
+  for i in "${!RN[@]}"; do
+    d=$(( ${e2[i]:-0} - ${e1[i]:-0} ))
+    [ "$d" -lt 0 ] && d=$(( d + ${RM[i]:-0} ))       # energy_uj wraps at max_energy_range_uj
+    rapl_mw+=( $(( d / el )) )                        # uJ/ms == mW
+  done
+  gpu_rc6=$(( (r2 - r1) * 100 / el )); [ "$gpu_rc6" -gt 100 ] && gpu_rc6=100
+  [ "$gpu_rc6" -lt 0 ] && gpu_rc6=0
+}
+mw_of() { local i; for i in "${!RN[@]}"; do [ "${RN[i]}" = "$1" ] && { printf '%s' "${rapl_mw[i]:-0}"; return; }; done; printf 0; }
+pl1_w() { local u; u=$(rd "$PC_SYS/class/powercap/intel-rapl:0/constraint_0_power_limit_uw" 0); printf '%d' $(( u / 1000000 )); }
+
+## --- GPU --------------------------------------------------------------------
+GT="$PC_SYS/class/drm/card1/gt/gt0"
+gpu_reasons() {
+  local f n out=
+  for f in "$GT"/throttle_reason_*; do
+    n=${f##*/throttle_reason_}; [ "$n" = status ] && continue
+    [ "$(rd "$f" 0)" = 1 ] && out="$out $n"
+  done
+  printf '%s' "${out# }"
+}
+
+## --- battery ----------------------------------------------------------------
+ac_online() { local f; for f in "$PC_SYS"/class/power_supply/A[CD]*/online; do [ -r "$f" ] && { printf '%s' "$(<"$f")"; return; }; done; printf 1; }
+
+## --- profiles ---------------------------------------------------------------
+CPU0="$PC_SYS/devices/system/cpu/cpu0/cpufreq"
+PSTATE="$PC_SYS/devices/system/cpu/intel_pstate"
+ppd_get() { cached ppd 60 pc_cmd powerprofilesctl get; }
+turbo_state() { [ "$(rd "$PSTATE/no_turbo" 0)" = 0 ] && printf on || printf off; }
+
+## --- mutations --------------------------------------------------------------
+# apply_change <target> <before> <after> <verb> <read-cmd> <cmd…>
+apply_change() {
+  local target=$1 before=$2 after=$3 verb=$4 read=$5; shift 5
+  [ "$before" = "$after" ] && { printf 'already: %s %s\n' "$target" "$after"; return 0; }
+  PC_READ_CMD="$read" pc_apply "$target" "$before" "$after" \
+    "$(printf '%q %q %q --apply' "$SELF" "$verb" "$before")" "$@"
+}
+need_arg() { [ -n "${1:-}" ] || { printf 'pc power: %s needs a value (see -h)\n' "$2" >&2; exit 2; }; }
+one_of() { local v=$1 l=$2; case " $l " in *" $v "*) return 0;; esac; printf 'pc power: %s is not one of: %s\n' "$v" "$l" >&2; exit 2; }
+# write_all <value> <file…> — one root shell, one write per policy.
+write_all() { local v=$1; shift; pc_root sh -c 'v=$1; shift; for f do printf %s "$v" >"$f" || exit 1; done' _ "$v" "$@"; }
+
+sub="${PC_ARGS[0]:-status}"; arg="${PC_ARGS[1]:-}"
+case "$sub" in
+  fan) pc_guard "pwm1_enable";;   # always refuses: fan control is read-only in v1
+  profile)
+    need_arg "$arg" profile; one_of "$arg" 'power-saver balanced performance'
+    apply_change powerprofiles "$(ppd_get)" "$arg" profile 'powerprofilesctl get' \
+      powerprofilesctl set "$arg"; exit $?;;
+  platform)
+    f="$PC_SYS/firmware/acpi/platform_profile"
+    need_arg "$arg" platform; one_of "$arg" "$(rd "${f}_choices")"
+    apply_change platform_profile "$(rd "$f")" "$arg" platform "cat $f" write_all "$arg" "$f"; exit $?;;
+  epp)
+    need_arg "$arg" epp; one_of "$arg" "$(rd "$CPU0/energy_performance_available_preferences")"
+    apply_change epp "$(rd "$CPU0/energy_performance_preference")" "$arg" epp \
+      "cat $CPU0/energy_performance_preference" \
+      write_all "$arg" "$PC_SYS"/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; exit $?;;
+  governor)
+    need_arg "$arg" governor; one_of "$arg" "$(rd "$CPU0/scaling_available_governors")"
+    apply_change governor "$(rd "$CPU0/scaling_governor")" "$arg" governor \
+      "cat $CPU0/scaling_governor" \
+      write_all "$arg" "$PC_SYS"/devices/system/cpu/cpu*/cpufreq/scaling_governor; exit $?;;
+  turbo)
+    need_arg "$arg" turbo; one_of "$arg" 'on off'
+    v=1; [ "$arg" = on ] && v=0
+    apply_change turbo "$(turbo_state)" "$arg" turbo \
+      "[ \"\$(cat $PSTATE/no_turbo)\" = 0 ] && echo on || echo off" \
+      write_all "$v" "$PSTATE/no_turbo"; exit $?;;
+  charge-limit)
+    need_arg "$arg" charge-limit
+    case $arg in ''|*[!0-9]*) arg=0;; esac
+    [ "$arg" -ge 40 ] && [ "$arg" -le 100 ] || { echo 'pc power: charge-limit takes 40..100' >&2; exit 2; }
+    f="$PC_BAT/charge_control_end_threshold"
+    apply_change charge-limit "$(rd "$f")" "$arg" charge-limit "cat $f" write_all "$arg" "$f"; exit $?;;
+  status|rapl|gpu|battery|profiles) ;;
+  *) printf 'pc power: unknown verb %s (try -h)\n' "$sub" >&2; exit 2;;
+esac
+
+## --- read-only verbs --------------------------------------------------------
+case "$sub" in status|rapl|gpu) rapl_read;; esac
+
+rapl_json() {
+  pc_json '{seconds:$s,package_w:$p,core_w:$c,uncore_w:$u,psys_w:$y,pl1_w:$l}' -c \
+    --argjson s "$(w "$win_ms")" --argjson p "$(w "$(mw_of package-0)")" \
+    --argjson c "$(w "$(mw_of core)")" --argjson u "$(w "$(mw_of uncore)")" \
+    --argjson y "$(w "$(mw_of psys)")" --argjson l "$(pl1_w)"
+}
+gpu_json() {
+  pc_json '{act_mhz:$a,cur_mhz:$c,min_mhz:$mn,max_mhz:$mx,rp0_mhz:$r0,rp1_mhz:$r1,rpn_mhz:$rn,
+            punit_req_mhz:$pr,rc6_enable:$re,rc6_pct:$rc,throttle:($t|split(" ")|map(select(.!=""))),
+            runtime_status:$rs}' -c \
+    --argjson a "$(rd "$GT/rps_act_freq_mhz" 0)" --argjson c "$(rd "$GT/rps_cur_freq_mhz" 0)" \
+    --argjson mn "$(rd "$GT/rps_min_freq_mhz" 0)" --argjson mx "$(rd "$GT/rps_max_freq_mhz" 0)" \
+    --argjson r0 "$(rd "$GT/rps_RP0_freq_mhz" 0)" --argjson r1 "$(rd "$GT/rps_RP1_freq_mhz" 0)" \
+    --argjson rn "$(rd "$GT/rps_RPn_freq_mhz" 0)" --argjson pr "$(rd "$GT/punit_req_freq_mhz" 0)" \
+    --argjson re "$(rd "$GT/rc6_enable" 0)" --argjson rc "$gpu_rc6" --arg t "$(gpu_reasons)" \
+    --arg rs "$(rd "$PC_SYS/class/drm/card1/device/power/runtime_status" unknown)"
+}
+bat_json() {
+  pc_json '{status:$st,capacity_pct:$cap,health_pct:$h,energy_full_uwh:$ef,design_uwh:$ed,
+            cycles:$cy,charge_limit:$cl,power_w:$pw,ac:$ac}' -c \
+    --arg st "$(rd "$PC_BAT/status" unknown)" --argjson cap "$(rd "$PC_BAT/capacity" 0)" \
+    --argjson h "$(pc_bat_health)" --argjson ef "$(rd "$PC_BAT/energy_full" 0)" \
+    --argjson ed "$(rd "$PC_BAT/energy_full_design" 0)" --argjson cy "$(rd "$PC_BAT/cycle_count" 0)" \
+    --argjson cl "$(rd "$PC_BAT/charge_control_end_threshold" 0)" \
+    --argjson pw "$(w $(( $(rd "$PC_BAT/power_now" 0) / 1000 )))" \
+    --argjson ac "$([ "$(ac_online)" = 1 ] && echo true || echo false)"
+}
+prof_json() {
+  pc_json '{ppd:$ppd,platform:$pf,platform_choices:($pfc|split(" ")),asus_throttle_policy:$at,
+            pstate:$ps,turbo:$tb,governor:$gv,governors:($gvs|split(" ")),epp:$epp,
+            epps:($epps|split(" ")|map(select(.!="")))}' -c \
+    --arg ppd "$(ppd_get)" --arg pf "$(rd "$PC_SYS/firmware/acpi/platform_profile" unknown)" \
+    --arg pfc "$(rd "$PC_SYS/firmware/acpi/platform_profile_choices")" \
+    --argjson at "$(rd "$PC_SYS/devices/platform/asus-nb-wmi/throttle_thermal_policy" 0)" \
+    --arg ps "$(rd "$PSTATE/status" unknown)" \
+    --argjson tb "$([ "$(turbo_state)" = on ] && echo true || echo false)" \
+    --arg gv "$(rd "$CPU0/scaling_governor" unknown)" \
+    --arg gvs "$(rd "$CPU0/scaling_available_governors")" \
+    --arg epp "$(rd "$CPU0/energy_performance_preference" unknown)" \
+    --arg epps "$(rd "$CPU0/energy_performance_available_preferences")"
+}
+deep_json() {
+  local out; out=$(pc_root turbostat --quiet --show PkgWatt,CorWatt,GFXWatt,Busy%,Bzy_MHz \
+    --interval 0.5 --num_iterations 1 2>/dev/null | awk 'NR==2{print $1,$2,$3,$4,$5}')
+  set -- $out
+  pc_json '{busy_pct:$b,bzy_mhz:$m,pkg_w:$p,cor_w:$c,gfx_w:$g}' -c \
+    --argjson b "${1:-0}" --argjson m "${2:-0}" --argjson p "${3:-0}" \
+    --argjson c "${4:-0}" --argjson g "${5:-0}"
+}
+
+if [ "$JSON" = 1 ]; then
+  case "$sub" in
+    rapl) rapl_json;; gpu) gpu_json;; battery) bat_json;; profiles) prof_json;;
+    status)
+      if [ "$DEEP" = 1 ]; then
+        pc_json '{rapl:$r,gpu:$g,battery:$b,profiles:$p,deep:$d}' \
+          --argjson r "$(rapl_json)" --argjson g "$(gpu_json)" --argjson b "$(bat_json)" \
+          --argjson p "$(prof_json)" --argjson d "$(deep_json)"
+      else
+        pc_json '{rapl:$r,gpu:$g,battery:$b,profiles:$p}' \
+          --argjson r "$(rapl_json)" --argjson g "$(gpu_json)" --argjson b "$(bat_json)" \
+          --argjson p "$(prof_json)"
+      fi;;
+  esac
+  exit 0
+fi
+
+t_rapl() {
+  printf 'watts   package %s  core %s  uncore %s  psys %s   (PL1 %s W, %s s window)\n' \
+    "$(w "$(mw_of package-0)")" "$(w "$(mw_of core)")" "$(w "$(mw_of uncore)")" \
+    "$(w "$(mw_of psys)")" "$(pl1_w)" "$(w "$win_ms")"
+}
+t_gpu() {
+  local r; r=$(gpu_reasons); : "${r:=none}"
+  printf 'gpu     %s MHz (cur %s, %s-%s)  rc6 %s%%  throttle %s  runtime %s\n' \
+    "$(rd "$GT/rps_act_freq_mhz" 0)" "$(rd "$GT/rps_cur_freq_mhz" 0)" \
+    "$(rd "$GT/rps_min_freq_mhz" 0)" "$(rd "$GT/rps_max_freq_mhz" 0)" "$gpu_rc6" "$r" \
+    "$(rd "$PC_SYS/class/drm/card1/device/power/runtime_status" unknown)"
+}
+t_bat() {
+  printf 'battery %s%%  health %s%%  limit %s  %s  %s W  cycles %s  %s\n' \
+    "$(rd "$PC_BAT/capacity" 0)" "$(pc_bat_health)" "$(rd "$PC_BAT/charge_control_end_threshold" '-')" \
+    "$(rd "$PC_BAT/status" unknown)" "$(w $(( $(rd "$PC_BAT/power_now" 0) / 1000 )))" \
+    "$(rd "$PC_BAT/cycle_count" 0)" "$([ "$(ac_online)" = 1 ] && echo AC || echo battery)"
+}
+t_prof() {
+  printf 'profile ppd %s  platform %s  asus %s  pstate %s  turbo %s  gov %s  epp %s\n' \
+    "$(ppd_get)" "$(rd "$PC_SYS/firmware/acpi/platform_profile" unknown)" \
+    "$(rd "$PC_SYS/devices/platform/asus-nb-wmi/throttle_thermal_policy" '-')" \
+    "$(rd "$PSTATE/status" unknown)" "$(turbo_state)" "$(rd "$CPU0/scaling_governor" unknown)" \
+    "$(rd "$CPU0/energy_performance_preference" unknown)"
+}
+case "$sub" in
+  rapl) t_rapl;; gpu) t_gpu;; battery) t_bat;; profiles) t_prof;;
+  status)
+    t_rapl; t_gpu; t_bat; t_prof
+    [ "$DEEP" = 1 ] && deep_json | jq -r '"deep    busy \(.busy_pct)%  \(.bzy_mhz) MHz  pkg \(.pkg_w) W  cor \(.cor_w) W  gfx \(.gfx_w) W"';;
+esac
+exit 0

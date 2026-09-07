@@ -1,0 +1,4 @@
+[
+  {"unit":"ydotoold.service","load":"loaded","active":"active","sub":"running","description":"ydotoold"},
+  {"unit":"ssh.service","load":"loaded","active":"active","sub":"running","description":"OpenSSH server"}
+]

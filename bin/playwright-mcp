@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Playwright MCP launcher: nvm node, pinned binary, headless unless PW_HEADED=1.
+export NVM_DIR="$HOME/.nvm"
+. "$NVM_DIR/nvm.sh" --no-use
+nvm use --silent v24.20.0 >/dev/null
+
+case "${PW_PROFILE:-default}" in
+  *[!A-Za-z0-9_-]*) echo "bad PW_PROFILE: use only [A-Za-z0-9_-]" >&2; exit 2;;
+esac
+
+# Keep the shared output dir bounded.
+find "$HOME/agents/browser/out" -type f -mtime +7 -delete 2>/dev/null
+
+profile="$HOME/agents/browser/profile-${PW_PROFILE:-default}"
+# Drop restored tabs; --restore-last-session (config) is only there to keep session cookies.
+rm -rf "$profile/Default/Sessions"
+
+args=()
+[ "${PW_HEADED:-0}" = "1" ] || args+=(--headless)
+args+=(--user-data-dir "$profile")
+
+exec "$NVM_DIR/versions/node/v24.20.0/bin/playwright-mcp" "${args[@]}" "$@"

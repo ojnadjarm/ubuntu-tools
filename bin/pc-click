@@ -1,0 +1,18 @@
+#!/bin/bash
+# pc click X Y [left|right|middle] [--double] — move to X Y and click.
+. "$(dirname "$(readlink -f "$0")")/env.sh"
+u="usage: pc click X Y [left|right|middle] [--double]"
+btn=left; dbl=0; x=""; y=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) echo "$u"; exit 0;;
+    --double) dbl=1;;
+    left|right|middle) btn="$1";;
+    *) [ -z "$x" ] && x="$1" || y="$1";;
+  esac; shift
+done
+[ -n "$y" ] || { echo "$u" >&2; exit 2; }
+pc_moveto "$x" "$y"
+case "$btn" in right) b=0xC1;; middle) b=0xC2;; *) b=0xC0;; esac
+[ "$dbl" = 1 ] && exec ydotool click --repeat 2 --next-delay 40 "$b" >/dev/null
+exec ydotool click "$b" >/dev/null

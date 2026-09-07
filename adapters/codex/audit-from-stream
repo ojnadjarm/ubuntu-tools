@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+"""codex adapter: convert its JSON event stream (one object per line, on stdin) into audit records.
+
+STUB — the field names below are the documented shape; no codex CLI is installed on this machine,
+so they have never been checked against a real stream. Verify them against the installed CLI's own
+output before wiring this into agent-exec, the way adapters/opencode did in GH16.
+Schema: KB/audit.md."""
+import importlib.util, json, os, sys
+
+_p = os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', '..', 'hooks', 'audit-log.py')
+_s = importlib.util.spec_from_file_location('audit_core', _p)
+core = importlib.util.module_from_spec(_s)
+_s.loader.exec_module(core)
+
+SESSION = os.environ.get('AGENT_SESSION_ID', '')
+CWD = os.environ.get('PWD', '')
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line.startswith('{'):
+        continue
+    try:
+        ev = json.loads(line)
+    except ValueError:
+        continue
+    if ev.get('type') not in ('tool_call', 'function_call', 'tool_use'):
+        continue
+    args = ev.get('arguments') or ev.get('input') or {}
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except ValueError:
+            args = {'command': args}
+    core.record(ev.get('name') or ev.get('tool') or '?', args,
+                ev.get('cwd', CWD), ev.get('session_id', SESSION))

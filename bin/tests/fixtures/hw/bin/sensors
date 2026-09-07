@@ -1,0 +1,6 @@
+#!/bin/sh
+cat <<'EOF'
+{"coretemp-isa-0000":{"Adapter":"ISA adapter","Package id 0":{"temp1_input":60.0}},
+ "mt7921_phy0-pci-0200":{"Adapter":"PCI adapter","temp1":{"temp1_input":58.0}},
+ "nvme-pci-e100":{"Adapter":"PCI adapter","Composite":{"temp1_input":33.8}}}
+EOF

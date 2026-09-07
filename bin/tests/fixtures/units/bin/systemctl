@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Fake systemctl for PC_FIXTURE=tests/fixtures/units — list-units/list-timers --output=json for
+# both managers, plus `show <unit> -p LoadState|FragmentPath --value` for resolve_scope's
+# fixture units (pt13-user-only, pt13-system-only, pt13-both).
+set -uo pipefail
+dir="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+scope=system
+[ "${1:-}" = --user ] && { scope=user; shift; }
+case "$*" in
+  *list-units*) cat "$dir/../list-units-$scope.json"; exit 0;;
+  *list-timers*) cat "$dir/../list-timers-$scope.json"; exit 0;;
+esac
+if [ "${1:-}" = show ]; then
+  unit=${2:-}; prop=${4:-}
+  case "$unit/$prop/$scope" in
+    pt13-user-only/LoadState/user) echo loaded;;
+    pt13-user-only/LoadState/system) echo not-found;;
+    pt13-system-only/LoadState/user) echo not-found;;
+    pt13-system-only/LoadState/system) echo loaded;;
+    pt13-both/LoadState/user) echo loaded;;
+    pt13-both/LoadState/system) echo loaded;;
+    pt13-both/FragmentPath/user) echo "$HOME/.config/systemd/user/pt13-both.service";;
+    *) exit 0;;
+  esac
+  exit 0
+fi
+echo "fixture systemctl: unhandled args: $*" >&2; exit 1

@@ -1,0 +1,3 @@
+NAME                                TYPE      SIGNATURE RESULT/VALUE FLAGS
+org.freedesktop.DBus.Peer           interface -         -            -
+.Ping                               method    -         -            -

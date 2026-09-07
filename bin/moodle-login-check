@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# moodle-login-check <ver> — curl-only check that a Moodle env answers and its login page renders.
+set -uo pipefail
+ver="${1:-}"
+[ -z "$ver" ] && { echo "usage: moodle-login-check <ver>"; exit 2; }
+cfg="$HOME/moodle-envs/$ver/www/config.php"
+[ -f "$cfg" ] || { echo "no env $ver (missing $cfg)"; exit 1; }
+url="$(sed -n "s/.*\$CFG->wwwroot[[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" "$cfg" | head -1)"
+code="$(curl -sS -o /dev/null -w '%{http_code}' -m 15 "$url/login/index.php")"
+body="$(curl -sS -m 15 "$url/login/index.php")"
+echo "url:   $url"
+echo "http:  $code"
+if [ "$code" = 200 ] && grep -q 'name="username"' <<<"$body"; then
+  echo "login: OK (form rendered)"
+  exit 0
+fi
+echo "login: FAIL"
+exit 1

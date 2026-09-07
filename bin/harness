@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# harness — the agent-agnostic session entry point.
+# `harness context` prints everything a session must know before it acts: the machine brief,
+# the output rules, and the project guidelines when the cwd is a Moodle project. It is the
+# single source the per-agent SessionStart wrappers in adapters/*/hooks/ call.
+set -uo pipefail
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+# shellcheck source=/dev/null
+[ -r "$BIN/env.sh" ] && . "$BIN/env.sh"
+
+usage() {
+  cat <<'U'
+usage: harness context [--brief] [--json] [--moodle]
+       --brief   the one-line machine brief only
+       --json    SessionStart hook JSON (systemMessage + hookSpecificOutput.additionalContext)
+       --moodle  include the project guidelines even when detection finds no Moodle root
+Instruction files are read from $HARNESS_CONTEXT_DIR (default ~/.claude).
+U
+}
+
+[ "${1:-}" = context ] || { usage >&2; exit 2; }
+shift
+BRIEF=0; JSON=0; FORCE=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --brief) BRIEF=1;; --json) JSON=1;; --moodle) FORCE=1;;
+    -h|--help) usage; exit 0;;
+    *) echo "harness: unknown option $1" >&2; usage >&2; exit 2;;
+  esac
+  shift
+done
+
+brief=$(timeout 5 "$BIN/pc" status --brief 2>/dev/null) || brief=""
+case "$PWD" in
+  "$HOME/the-dark-eye"*)
+    pf=$(timeout 3 "$BIN/agent-preflight" --brief 2>/dev/null | tr -s "\n " "  ")
+    [ -n "$pf" ] && [ -n "$brief" ] && brief="$brief | eye: $pf";;
+esac
+
+if [ "$BRIEF" = 1 ]; then
+  [ -n "$brief" ] && printf '%s\n' "$brief"
+  exit 0
+fi
+
+root=""
+if [ "$FORCE" = 1 ]; then root="${CLAUDE_PROJECT_DIR:-$PWD}"
+elif [ -x "$HARNESS_CONTEXT_DIR/hooks/moodle-detect.sh" ]; then
+  root="$("$HARNESS_CONTEXT_DIR/hooks/moodle-detect.sh" 2>/dev/null)" || root=""
+fi
+
+python3 - "$brief" "$root" "$HARNESS_CONTEXT_DIR" "$JSON" <<'PY'
+import json, os, re, sys
+
+brief, root, base, as_json = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4] == "1"
+
+def read(rel):
+    path = os.path.join(base, rel)
+    return open(path).read() if os.path.exists(path) else ""
+
+adhd = re.sub(r"\A---\n.*?\n---\n", "", read("skills/i-have-adhd/SKILL.md"), count=1, flags=re.S)
+parts = ["=== ADHD OUTPUT MODE — active for this whole session ===", adhd]
+banner = "Harness: ADHD mode on"
+if root:
+    parts += [
+        "=== MOODLE PROJECT DETECTED — these rules are mandatory for this session ===",
+        read("moodle-guidelines.md"),
+        read("moodle-tips.md"),
+        "BEFORE writing or reviewing any PHP, read $HOME/.claude/moodle-coding-style.md.\n"
+        "WHEN code is complete, run the /moodle-ci skill (phpcs + PHPUnit).",
+    ]
+    banner += f" · Moodle guidelines loaded ({root})"
+session_ctx = "\n\n".join(p for p in parts if p)
+
+machine_msg = machine_ctx = ""
+if brief:
+    machine_msg = f"Machine: {brief}"
+    machine_ctx = (
+        f"Machine now: {brief}. Run `pc status` (or `pc status --json`) for detail; "
+        "never ask the owner about machine state you can read. "
+        "Facts and runbooks: ~/agents/KB/."
+    )
+
+if as_json:
+    print(json.dumps({
+        "systemMessage": " · ".join(x for x in (banner, machine_msg) if x),
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": "\n\n".join(x for x in (session_ctx, machine_ctx) if x),
+        },
+    }))
+else:
+    print("\n\n".join(x for x in (machine_ctx, session_ctx) if x))
+PY
+exit 0

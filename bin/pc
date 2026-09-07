@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# pc — machine CLI; `pc <sub> [args]` runs ~/agents/bin/pc-<sub>.
+set -uo pipefail
+d="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+sub="${1:-help}"; [ $# -gt 0 ] && shift
+if [ "$sub" = help ] || [ "$sub" = --help ] || [ "$sub" = -h ]; then
+  # Line 2 of every pc-* script is its `pc <sub> … — description` signature (PLAN-PCTOOLS §1).
+  if [ "${1:-}" != --md ]; then
+    printf 'usage: pc <command> [args]\ncommands:\n'
+    for f in "$d"/pc-*; do
+      [ -x "$f" ] || continue
+      { read -r _; IFS= read -r l; } <"$f"
+      l="${l###}"; l="${l#\"\"\"}"; l="${l%\"\"\"}"; l="${l# }"
+      printf '  %s\n' "$l"
+    done
+    exit 0
+  fi
+
+  # --md: grouped by layer (PLAN-PCTOOLS §2) into ~/agents/KB/pc-cli.md's shape — one table per
+  # layer, `pc <sub> -h`'s first usage line, and the warm bench time from BASELINE-PCTOOLS.md.
+  declare -A LAYER=(
+    [a11y-click]=desktop [click]=desktop [click-text]=desktop [clip]=desktop [drag]=desktop
+    [find]=desktop [key]=desktop [mode]=desktop [move]=desktop [notify]=desktop [open]=desktop
+    [scroll]=desktop [see]=desktop [selftest]=desktop [shot]=desktop [spotify]=desktop
+    [status]=desktop [tree]=desktop [type]=desktop [wait]=desktop [wait-for]=desktop [win]=desktop
+    [hw]=kernel [io]=kernel [kernel]=kernel [net]=kernel [power]=kernel [thermal]=kernel
+    [top]=kernel [trace]=kernel
+    [audio]=session [bt]=session [dbus]=session [input]=session [mutter]=session
+    [docker]=services [journal]=services [units]=services
+    [bench]=safety [doctor]=safety [explain]=safety [undo]=safety
+  )
+  LAYERS=(desktop kernel session services safety)
+  declare -A TITLE=(
+    [desktop]='Desktop — screen, pointer, keyboard, windows (the original layer)'
+    [kernel]='Kernel & hardware — CPU/wake, IO, power, thermal, tracing, net, hw'
+    [session]='Session bus — D-Bus, the compositor, evdev, PipeWire, bluez'
+    [services]='Services — systemd units, journal, docker'
+    [safety]='Safety net — the change ledger, docs, benchmarks, health'
+  )
+
+  declare -A BENCH
+  BASE="$d/tests/BASELINE-PCTOOLS.md"
+  if [ -f "$BASE" ]; then
+    while IFS=$'\t' read -r bs bw; do BENCH[$bs]=$bw; done < <(awk -F'\\|' '
+      /<!-- pc-bench:begin -->/{g=1; next} /<!-- pc-bench:end -->/{g=0}
+      g && NF >= 6 {
+        cmd=$3; gsub(/^[ \t]+|[ \t]+$/, "", cmd); gsub(/`/, "", cmd); sub(/^pc /, "", cmd)
+        split(cmd, a, " "); warm = $4; gsub(/^[ \t]+|[ \t]+$/, "", warm)
+        print a[1] "\t" warm
+      }' "$BASE")
+  fi
+
+  printf '# pc-cli.md — every `pc` command, generated\n\n'
+  printf 'Regenerate: `pc help --md > ~/agents/KB/pc-cli.md`. Never hand-edit.\n\n'
+  for layer in "${LAYERS[@]}"; do
+    printf '## %s\n\n' "${TITLE[$layer]}"
+    printf '| command | description | usage | bench (warm) |\n|---|---|---|---|\n'
+    for f in "$d"/pc-*; do
+      [ -x "$f" ] || continue
+      s="${f##*/pc-}"
+      [ "${LAYER[$s]:-}" = "$layer" ] || continue
+      { read -r _; IFS= read -r l; } <"$f"
+      l="${l###}"; l="${l#\"\"\"}"; l="${l%\"\"\"}"; l="${l# }"
+      usage=$("$f" -h 2>/dev/null | head -1); usage="${usage#usage: }"
+      desc="${l#* — }"; desc="${desc//|/\\|}"; usage="${usage//|/\\|}"
+      printf '| `pc %s` | %s | `%s` | %s |\n' "$s" "$desc" "$usage" "${BENCH[$s]:-—}"
+    done
+    printf '\n'
+  done
+
+  cat <<'MD'
+## Mutations, the ledger and `pc undo`
+
+Every mutating verb is read-only by default: without `--apply` it prints `would: <before> →
+<after>` and exits 0. With `--apply` the change is recorded before and after in
+`~/agents/log/changes.jsonl`, and the last line printed is `rollback: pc undo <id>`. `pc undo
+list [-n N]` / `pc undo show <id>` read the ledger back; `pc undo <id>|--last [--apply]`
+replays the inverse. Budgets (PLAN-PCTOOLS §1 rule 4): <= 0.5 s wall warm for a snapshot
+command, <= 0.6 s when a sampling window is intrinsic (`top`, `power`, `io`, `thermal`); `pc
+trace` is the declared exception (bpftrace floor 0.4 s + the window, always under `timeout`).
+
+## Guard list (`pclib.sh`, FLEET §5)
+
+A guarded verb exits 3 with the FLEET §5 line, `--apply` or not: `DisplayConfig.Apply*` /
+`SetBacklight` (monitor config); `login1` Reboot/PowerOff/Suspend/Hibernate/HybridSleep (power
+state); a `systemctl`/D-Bus stop or restart on `ssh*`/`ufw`/`tailscaled` (a second access
+path); `org.gnome.Shell.Eval` (arbitrary code in the shell); `SessionManager`
+Logout/Reboot/Shutdown; `ScreenSaver.SetActive true` (locking the screen); edits under
+`/etc/sudoers*`/`/etc/ssh`/`/etc/ufw`; `tmux kill-*` on the session `claude`;
+`dark-eye.service` restart unless `PC_ORCHESTRATOR=1`; fan `pwm1_enable`.
+MD
+  exit 0
+fi
+t="$d/pc-$sub"
+[ -x "$t" ] || { echo "pc: unknown command '$sub' (try: pc help)" >&2; exit 127; }
+exec "$t" "$@"

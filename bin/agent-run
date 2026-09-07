@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Run one persistent agent once: agent-exec with the fleet preamble, logs, index row, REPORT.md.
+set -uo pipefail
+name="${1:-}"
+[ -n "$name" ] || { echo "usage: agent-run <name>" >&2; exit 2; }
+dir="$HOME/agents/$name"
+[ -r "$dir/BRIEF.md" ] || { echo "agent-run: no $dir/BRIEF.md" >&2; exit 2; }
+. "$HOME/agents/bin/fleetlib.sh"
+fleet_path
+
+MODEL=opus; TIMEOUT=3600; BUDGET_USD=""
+# shellcheck source=/dev/null
+[ -r "$dir/agent.env" ] && . "$dir/agent.env"
+
+mkdir -p "$dir/logs" "$dir/state"
+fleet_lock "$dir/.lock" 8 || { echo "agent-run: $name is already running" >&2; exit 0; }
+
+ts="$(date +%Y-%m-%d-%H%M%S)-$(tr -dc 'a-z0-9' </dev/urandom | head -c4)"
+log="$dir/logs/$ts.log"; out="$dir/logs/$ts.json"; idx="$dir/logs/index.tsv"
+meta="$dir/logs/$ts.meta.json"
+[ -s "$idx" ] || printf 'start\tend\texit\tseconds\tcost_usd\tlog\n' >"$idx"
+start="$(date -Is)"; t0=$SECONDS
+: >"$dir/REPORT.md"   # rewritten from scratch every run; the agent appends its own lines
+
+finish() {
+  local rc="$1" end cost secs body
+  trap - EXIT TERM INT
+  end="$(date -Is)"; secs=$((SECONDS - t0))
+  cost="$(jq -r '.cost_usd // empty' "$meta" 2>/dev/null)"
+  [ -n "$cost" ] || cost="$(jq -r '.total_cost_usd // empty' "$out" 2>/dev/null)"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$start" "$end" "$rc" "$secs" "${cost:-}" "$log" >>"$idx"
+  body="$(sed '/^# .* — last run$/,/^cost_usd: /d' "$dir/REPORT.md" 2>/dev/null)"
+  { printf '# %s — last run\n\nstart: %s\nend: %s\nexit: %s\nseconds: %s\ncost_usd: %s\n' \
+      "$name" "$start" "$end" "$rc" "$secs" "${cost:-}"
+    printf '%s\n' "$body"
+  } >"$dir/.report.tmp" && mv "$dir/.report.tmp" "$dir/REPORT.md"
+  [ "$rc" = 0 ] || notify-owner -p high -t agent-run "agent $name failed (exit $rc)" >/dev/null 2>&1
+  exit "$rc"
+}
+
+# HARNESS_AGENT set (config.env) -> the adapter layer; unset -> the pre-GH07 direct call.
+if [ -n "${HARNESS_AGENT:-}" ]; then
+  cmd=(agent-exec --prompt-file "$dir/BRIEF.md" --system-file "$HOME/agents/AGENT-PREAMBLE.md"
+       --model "$MODEL" --cwd "$dir" --name "$name" --timeout "$TIMEOUT"
+       --raw-out "$out" --meta-out "$meta" --pid-file "$dir/state/pid")
+  [ -n "$BUDGET_USD" ] && cmd+=(--budget-usd "$BUDGET_USD")
+else
+  cmd=(timeout "$TIMEOUT" claude -p "$(cat "$dir/BRIEF.md")"
+       --model "$MODEL" --permission-mode bypassPermissions --name "agent-$name"
+       --append-system-prompt "$(cat "$HOME/agents/AGENT-PREAMBLE.md")" --output-format json)
+  [ -n "$BUDGET_USD" ] && cmd+=(--max-budget-usd "$BUDGET_USD")
+fi
+
+cd "$dir" || exit 1
+if [ -n "${HARNESS_AGENT:-}" ]; then
+  "${cmd[@]}" >>"$log" 2>>"$log" </dev/null &
+else
+  "${cmd[@]}" >"$out" 2>"$log" </dev/null &
+fi
+child=$!
+trap 'kill "$child" 2>/dev/null; wait "$child" 2>/dev/null; finish 143' TERM
+trap 'kill "$child" 2>/dev/null; wait "$child" 2>/dev/null; finish 130' INT
+wait "$child"; rc=$?
+[ -n "${HARNESS_AGENT:-}" ] || jq -r '.result // empty' "$out" >>"$log" 2>/dev/null
+finish "$rc"

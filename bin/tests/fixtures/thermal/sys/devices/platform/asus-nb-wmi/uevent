@@ -1,0 +1,2 @@
+DRIVER=asus-nb-wmi
+MODALIAS=platform:asus-nb-wmi

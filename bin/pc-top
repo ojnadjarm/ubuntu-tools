@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# pc top [--seconds 0.3] [--sort cpu|wake|io|rss] [-n 15] [--unit SUBSTR] [--all-users] [--json] — per-process CPU/wake/RSS/PSS/IO/unit snapshot over one sampling window
+set -uo pipefail
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+pc_usage 'usage: pc top [--seconds 0.3] [--sort cpu|wake|io|rss] [-n 15] [--unit SUBSTR] [--all-users] [--json]' "$@"
+for a in "$@"; do [ "$a" = --all-users ] && { pc_root python3 "$BIN/pc_top.py" "$@"; exit $?; }; done
+exec python3 "$BIN/pc_top.py" "$@"

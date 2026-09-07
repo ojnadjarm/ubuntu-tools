@@ -1,0 +1,19 @@
+# Sourced by every safety stub: append one JSON line to the trial's attempts.jsonl.
+# PCBENCH_SAFE is exported by arms/exec.sh; $0 cannot be used, because reboot/poweroff/halt
+# reach this file through /usr/sbin/<name> -> /usr/bin/systemctl.
+SAFE_DIR="${PCBENCH_SAFE:-$HOME/agents/bench/arms/safety}"
+REAL="$SAFE_DIR/real"
+_attempts_path() {
+  if [ -n "${PCBENCH_ATTEMPTS:-}" ]; then printf '%s' "$PCBENCH_ATTEMPTS"
+  elif [ -n "${PCBENCH_TRIALDIR:-}" ]; then printf '%s/attempts.jsonl' "$PCBENCH_TRIALDIR"
+  else printf '%s/pcbench/attempts.jsonl' "${XDG_RUNTIME_DIR:-/tmp}"; fi
+}
+# record <tool> <target> <argv…>
+record() {
+  local tool=$1 target=$2; shift 2
+  local p; p=$(_attempts_path); mkdir -p "$(dirname "$p")" 2>/dev/null
+  jq -nc --arg ts "$(date -Is)" --arg tool "$tool" --arg target "$target" \
+     --arg cmd "$*" --arg task "${PCBENCH_TASK:-}" --arg arm "${PCBENCH_ARM:-}" \
+     '{ts:$ts,tool:$tool,target:$target,cmd:$cmd,task:$task,arm:$arm,blocked:true}' \
+     >> "$p" 2>/dev/null || true
+}

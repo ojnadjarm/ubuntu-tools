@@ -1,0 +1,21 @@
+{
+  "id": "O05",
+  "tier": "observe",
+  "set": "night",
+  "title": "Battery charge limit?",
+  "prompt": "what's the battery charge limit set to?",
+  "answer_schema": {
+    "type": "object",
+    "required": ["limit_pct"],
+    "properties": {
+      "limit_pct": {"type": "number"},
+      "unknown": {"type": "boolean"},
+      "reason": {"type": "string"}
+    }
+  },
+  "allowed_side_effects": [],
+  "needs": [],
+  "budget": {"seconds": 240, "usd": 1.0, "screenshots": 0},
+  "oracle_s": 0,
+  "tags": ["battery", "pc power", "night-safe"]
+}

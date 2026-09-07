@@ -1,0 +1,26 @@
+#!/bin/bash
+# pc key CHORD... — key chords via ydotool keycodes, e.g. Return, ctrl+l, shift+Print.
+. "$(dirname "$(readlink -f "$0")")/env.sh"
+u="usage: pc key [--force] KEY [KEY...]   e.g. Return  ctrl+l  shift+Print"
+[ "${1:-}" = -h ] && { echo "$u"; exit 0; }
+force=0; [ "${1:-}" = --force ] && { force=1; shift; }
+[ $# -eq 0 ] && { echo "$u" >&2; exit 2; }
+[ $force -eq 0 ] && pc_focus_guard key
+h=/usr/include/linux/input-event-codes.h
+code() {
+  local n; n=$(echo "$1" | tr a-z A-Z)
+  case "$n" in
+    CTRL|CONTROL) n=LEFTCTRL;; SHIFT) n=LEFTSHIFT;; ALT) n=LEFTALT;; SUPER|META|WIN) n=LEFTMETA;;
+    RETURN|ENTER) n=ENTER;; ESCAPE) n=ESC;; PRINT) n=SYSRQ;; PLUS) n=KPPLUS;; EQUAL|EQUALS) n=EQUAL;;
+    PGUP) n=PAGEUP;; PGDN) n=PAGEDOWN;; DEL) n=DELETE;;
+  esac
+  grep -m1 -E "^#define KEY_$n[[:space:]]" $h | awk '{print $3}'
+}
+for combo in "$@"; do
+  IFS='+' read -ra parts <<< "$combo"
+  seq=(); down=()
+  for p in "${parts[@]}"; do c=$(code "$p"); [ -z "$c" ] && { echo "unknown key: $p" >&2; exit 1; }; down+=("$c"); done
+  for c in "${down[@]}"; do seq+=("$c:1"); done
+  for ((i=${#down[@]}-1;i>=0;i--)); do seq+=("${down[i]}:0"); done
+  ydotool key --key-delay 30 "${seq[@]}" || exit 1
+done

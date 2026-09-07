@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# moodle-envs — list the Moodle dev environments under ~/moodle-envs (version, URL, containers, state).
+set -uo pipefail
+export LC_ALL=C
+ROOT="$HOME/moodle-envs"
+JSON=0
+case "${1:-}" in
+  --json) JSON=1;;
+  -h|--help) echo "usage: moodle-envs [--json]"; exit 0;;
+  "") ;;
+  *) echo "moodle-envs: unknown option $1" >&2; exit 2;;
+esac
+
+# containers of a compose project: "name state" per line
+containers() {
+  docker ps -a --format '{{.Label "com.docker.compose.project"}}\t{{.Names}}\t{{.State}}' 2>/dev/null \
+    | awk -F'\t' -v p="$1" '$1==p {print $2" "$3}'
+}
+
+# tailscale serve TLS ports: "127.0.0.1:<localport> https://<host>:<tlsport>" per line
+serve_map="$(tailscale serve status 2>/dev/null | awk '
+  /^https:\/\// {u=$1}
+  /proxy http:\/\/127\.0\.0\.1:/ {sub(/.*proxy http:\/\//,""); print $0" "u}')"
+
+rows=()
+for d in "$ROOT"/*/; do
+  ver="$(basename "$d")"
+  [ -f "$d/docker-compose.yml" ] || continue
+  [ "$ver" = shared ] && continue
+  proj="$(sed -n 's/^name:[[:space:]]*//p' "$d/docker-compose.yml" | head -1)"
+  : "${proj:=$(basename "$d")}"
+  url="$(sed -n "s|.*\$CFG->wwwroot[[:space:]]*=[[:space:]]*'\(https\{0,1\}://[^']\{1,\}\)'.*|\1|p" "$d/www/config.php" 2>/dev/null | head -1)"
+  webport="$(sed -n 's|^[[:space:]]*-[[:space:]]*"\([0-9]\{1,\}\):80"|\1|p' "$d/docker-compose.yml" | head -1)"
+  vfile="$d/www/public/version.php"; [ -f "$vfile" ] || vfile="$d/www/version.php"
+  release="$(sed -n "s/^\$release[[:space:]]*=[[:space:]]*'\([^ ']*\).*/\1/p" "$vfile" 2>/dev/null | head -1)"
+  tlsurl="$(echo "$serve_map" | awk -v k="127.0.0.1:${webport:-none}" '$1==k {print $2; exit}')"
+  cts="$(containers "$proj")"
+  up=0; total=0
+  while read -r _n s; do [ -z "${s:-}" ] && continue; total=$((total+1)); [ "$s" = running ] && up=$((up+1)); done <<<"$cts"
+  state=down; [ "$up" -gt 0 ] && state=partial; [ "$up" -gt 0 ] && [ "$up" = "$total" ] && state=up
+  rows+=("$ver|$release|$url|$tlsurl|$proj|$state|$up/$total|$(echo "$cts" | tr '\n' ',' | sed 's/,$//')")
+done
+
+if [ "$JSON" = 1 ]; then
+  printf '[\n'
+  first=1
+  for r in "${rows[@]:-}"; do
+    [ -z "$r" ] && continue
+    IFS='|' read -r ver rel url tls proj state cnt cts <<<"$r"
+    [ $first = 1 ] || printf ',\n'; first=0
+    printf '  {"version":"%s","release":"%s","url":"%s","tls_url":"%s","project":"%s","state":"%s","containers_up":"%s","containers":"%s"}' \
+      "$ver" "$rel" "$url" "$tls" "$proj" "$state" "$cnt" "$cts"
+  done
+  printf '\n]\n'
+else
+  printf '%-6s %-10s %-8s %-45s %-45s %s\n' VERSION RELEASE STATE URL TLS_URL CONTAINERS
+  for r in "${rows[@]:-}"; do
+    [ -z "$r" ] && continue
+    IFS='|' read -r ver rel url tls proj state cnt cts <<<"$r"
+    printf '%-6s %-10s %-8s %-45s %-45s %s\n' "$ver" "${rel:--}" "$state" "${url:--}" "${tls:--}" "$cts"
+  done
+fi

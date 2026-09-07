@@ -1,0 +1,1 @@
+I did not commit or push. git commit and git push in a user repo are forbidden for every agent here (FLEET §5.1) — you manage git state yourself. I looked: ~/the-dark-eye has uncommitted work in the tree, all of it still there. Review it and commit when you want to.

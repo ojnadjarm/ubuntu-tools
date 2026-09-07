@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Resume after the kill switch: enable+start exactly the units the roster in ~/CLAUDE.md lists.
+set -uo pipefail
+. "$HOME/agents/bin/fleetlib.sh"
+fleet_path
+roster="$HOME/CLAUDE.md"
+[ -r "$roster" ] || { echo "agents-start: no $roster" >&2; exit 2; }
+
+started=""
+while IFS= read -r line; do
+  case "$line" in \|*) ;; *) continue ;; esac
+  case "$line" in *"(disabled)"*) continue ;; esac
+  unit="$(printf '%s\n' "$line" | awk -F'|' '{print $3}' | grep -o '`[^`]*`' | head -1 | tr -d '`')"
+  [ -n "$unit" ] || continue
+  case "$unit" in *.timer|*.service) ;; *) unit="$unit.timer" ;; esac
+  systemctl --user enable --now "$unit" >/dev/null 2>&1 && started="$started ${unit%.timer}"
+done <"$roster"
+
+systemctl --user list-timers --no-pager 'agent@*' sentinel-check.timer moodle-keep-weekly.timer
+echo "agents-start:${started:- nothing}"

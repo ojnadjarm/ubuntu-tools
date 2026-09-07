@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Recorded gsettings for the pc-mutter tests: the agent-mode workspace keys.
+case "$*" in
+  *num-workspaces*) echo 1;;
+  *dynamic-workspaces*) echo false;;
+  *) exit 2;;
+esac

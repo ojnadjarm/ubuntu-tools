@@ -1,0 +1,21 @@
+{
+  "id": "D04",
+  "tier": "diagnose",
+  "set": "night",
+  "title": "Disk writer",
+  "prompt": "something keeps writing to the disk, what is it?",
+  "answer_schema": {
+    "type": "object",
+    "required": ["culprit"],
+    "properties": {
+      "culprit": {"type": "string"},
+      "unknown": {"type": "boolean"},
+      "reason": {"type": "string"}
+    }
+  },
+  "allowed_side_effects": ["pcbench_units"],
+  "needs": [],
+  "budget": {"seconds": 480, "usd": 1.5, "screenshots": 0},
+  "oracle_s": 0,
+  "tags": ["disk", "pc trace", "pc io"]
+}

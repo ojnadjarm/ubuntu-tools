@@ -1,0 +1,16 @@
+#!/bin/bash
+# pc a11y-click "name" [--role R] [--app SUB] — find a UI element by name and click it (or do its action).
+. "$(dirname "$(readlink -f "$0")")/env.sh"
+name=""; role=(); app=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) echo 'usage: pc a11y-click "name" [--role R] [--app SUB]'; exit 0;;
+    --role) role=(--role "$2"); shift 2;;
+    --app) app="$2"; shift 2;;
+    *) name="$1"; shift;;
+  esac
+done
+[ -n "$name" ] || { echo 'usage: pc a11y-click "name" [--role R] [--app SUB]' >&2; exit 2; }
+out="$(python3 "$PC_BIN/a11y_tree.py" "$app" --click --find "$name" "${role[@]}")" || exit 1
+[ "$out" = action ] && exit 0
+exec "$PC_BIN/pc-click" $out

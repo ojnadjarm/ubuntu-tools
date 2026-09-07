@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Stub systemctl for the pc-bt tests: `is-active dark-eye-ptt` answers $FIX_SIDECAR (default active).
+[ "$1" = --user ] && shift
+[ "$1" = is-active ] || exit 1
+printf '%s\n' "${FIX_SIDECAR:-active}"
+[ "${FIX_SIDECAR:-active}" = active ] || exit 3

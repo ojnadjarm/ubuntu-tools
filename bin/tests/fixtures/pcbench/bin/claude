@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Fake `claude` for pcbench tests: ignores every flag and replays a recorded stream-json
+# transcript on stdout. Costs nothing, takes ~0 s. $PCBENCH_FAKE_STREAM picks the fixture.
+exec cat "${PCBENCH_FAKE_STREAM:-$(cd "$(dirname "$(readlink -f "$0")")/../streams" && pwd)/d01-new.jsonl}"

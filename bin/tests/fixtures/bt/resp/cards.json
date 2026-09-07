@@ -1,0 +1,39 @@
+[
+  {
+    "index": 42,
+    "name": "bluez_card.AC_80_0A_27_65_6C",
+    "driver": "bluez5",
+    "active_profile": "a2dp-sink",
+    "profiles": {
+      "a2dp-sink": {
+        "description": "a2dp-sink",
+        "available": true
+      },
+      "a2dp-sink-sbc": {
+        "description": "a2dp-sink-sbc",
+        "available": true
+      },
+      "a2dp-sink-sbc_xq": {
+        "description": "a2dp-sink-sbc_xq",
+        "available": true
+      },
+      "headset-head-unit": {
+        "description": "headset-head-unit",
+        "available": true
+      },
+      "headset-head-unit-cvsd": {
+        "description": "headset-head-unit-cvsd",
+        "available": true
+      },
+      "off": {
+        "description": "off",
+        "available": true
+      }
+    },
+    "properties": {
+      "device.description": "WF-1000XM5",
+      "api.bluez5.address": "AC:80:0A:27:65:6C"
+    },
+    "ports": {}
+  }
+]

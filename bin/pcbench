@@ -1,0 +1,854 @@
+#!/usr/bin/env python3
+"""pcbench — run a task pack against a toolbox arm, classify the trajectory, report the A/B.
+
+Subcommands: list · validate · arm · parse · run · report.  Design: PLAN-PCBENCH §2, corrected
+by bench/spike/SPIKE.md (no --max-turns; budget = --max-budget-usd + timeout; `< /dev/null`;
+--setting-sources user; --disallowedTools Agent).  Task schema: bench/SCHEMA.md.
+"""
+import argparse, fcntl, json, os, re, shutil, statistics, subprocess, sys, time
+from collections import Counter
+from datetime import datetime, timezone
+
+HOME = os.path.expanduser("~")
+BENCH = os.path.join(HOME, "agents", "bench")
+TASKS = os.path.join(BENCH, "tasks")
+ARMS = os.path.join(BENCH, "arms")
+RUNS = os.path.join(BENCH, "runs")
+HELPERS = os.path.join(HOME, "agents", "bin", "pcbench.d")
+LOCK = os.path.join(BENCH, ".lock")
+PREAMBLE = os.path.join(BENCH, "TRIAL-PREAMBLE.md")
+FP_FIELDS = ["default_sink", "null_modules", "power_profile", "failed_user_units", "docker",
+             "monitors", "tailscale", "ufw", "tmux_claude", "pc_mode", "win_list",
+             "ledger_lines", "uptime_since", "dark_eye_head", "pcbench_units"]
+TIERS = ["observe", "diagnose", "change", "safety", "desktop"]
+SETS = ["night", "day"]
+NEEDS = ["buds_absent", "buds_present", "owner_go", "tv_desktop"]
+PROPOSAL_FIVE = ["D01", "C01", "D02", "D03", "O01"]
+
+
+def die(msg, code=2):
+    print("pcbench: " + msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def sh(cmd, **kw):
+    """Run a shell string, return (rc, stdout)."""
+    p = subprocess.run(cmd, shell=True, capture_output=True, text=True, **kw)
+    return p.returncode, p.stdout.strip()
+
+
+# --------------------------------------------------------------------------- tasks
+
+def task_dirs():
+    if not os.path.isdir(TASKS):
+        return []
+    return sorted(d for d in os.listdir(TASKS)
+                  if not d.startswith("_") and os.path.isdir(os.path.join(TASKS, d)))
+
+
+def load_task(tid):
+    path = os.path.join(TASKS, tid, "task.json")
+    with open(path) as f:
+        t = json.load(f)
+    t["_dir"] = os.path.join(TASKS, tid)
+    return t
+
+
+def load_tasks(sets=None, tiers=None, ids=None):
+    out = []
+    for tid in task_dirs():
+        if ids and tid not in ids:
+            continue
+        try:
+            t = load_task(tid)
+        except Exception as e:
+            die("task %s: %s" % (tid, e))
+        if sets and t.get("set") not in sets:
+            continue
+        if tiers and t.get("tier") not in tiers:
+            continue
+        out.append(t)
+    return out
+
+
+def validate_task(tid):
+    """Return a list of problem strings ([] = valid)."""
+    d = os.path.join(TASKS, tid)
+    bad = []
+    for f in ("task.json", "setup.sh", "check.sh", "teardown.sh", "solve.sh"):
+        p = os.path.join(d, f)
+        if not os.path.isfile(p):
+            bad.append("missing " + f)
+        elif f.endswith(".sh") and not os.access(p, os.X_OK):
+            bad.append(f + " not executable")
+    if "missing task.json" in bad:
+        return bad
+    try:
+        t = json.load(open(os.path.join(d, "task.json")))
+    except Exception as e:
+        return bad + ["task.json is not JSON: %s" % e]
+    for k in ("id", "tier", "set", "title", "prompt", "answer_schema", "allowed_side_effects",
+              "needs", "budget", "tags"):
+        if k not in t:
+            bad.append("task.json missing key " + k)
+    if t.get("id") != tid:
+        bad.append("id %r != directory %r" % (t.get("id"), tid))
+    elif not re.match(r"^[ODCSX][0-9]{2}$", tid):
+        bad.append("id %r does not match ^[ODCSX][0-9]{2}$" % tid)
+    if t.get("tier") not in TIERS:
+        bad.append("tier %r not in %s" % (t.get("tier"), TIERS))
+    if t.get("set") not in SETS:
+        bad.append("set %r not in %s" % (t.get("set"), SETS))
+    for n in t.get("needs", []) or []:
+        if n not in NEEDS:
+            bad.append("needs %r not in %s" % (n, NEEDS))
+    for f in t.get("allowed_side_effects", []) or []:
+        if f not in FP_FIELDS:
+            bad.append("allowed_side_effects %r is not a fingerprint field" % f)
+    b = t.get("budget") or {}
+    for k in ("seconds", "usd", "screenshots"):
+        if k not in b:
+            bad.append("budget missing " + k)
+    if "turns" in b:
+        bad.append("budget.turns is dead (--max-turns no longer exists, SPIKE §2)")
+    s = t.get("answer_schema") or {}
+    if s.get("type") != "object" or not s.get("required"):
+        bad.append("answer_schema must be an object schema with `required`")
+    props = set((s.get("properties") or {}).keys())
+    if not (("unknown" in props or "did_it" in props) and "reason" in props):
+        bad.append("answer_schema needs an escape channel: unknown|did_it plus reason")
+    if re.search(r"\bpc [a-z]|--apply|systemctl|pactl|docker ", t.get("prompt", "")):
+        bad.append("prompt mentions tools; it must be the owner's words")
+    return bad
+
+
+def oracle_check(tid, verbose=False):
+    """solve.sh's answer must pass check.sh and a canned wrong answer must fail it."""
+    d = os.path.join(TASKS, tid)
+    env = dict(os.environ, PCBENCH_RUN="oracle", PCBENCH_TASK=tid, PCBENCH_ARM="new",
+               PCBENCH_I="0", PCBENCH_TRIALDIR=d)
+    rc, _ = sh("bash %s/setup.sh" % d, cwd=d, env=env)
+    try:
+        if rc != 0:
+            return ["setup.sh exit %d" % rc]
+        p = subprocess.run(["bash", "%s/solve.sh" % d], capture_output=True, text=True,
+                           cwd=d, env=env)
+        if p.returncode != 0:
+            return ["solve.sh exit %d: %s" % (p.returncode, p.stderr.strip()[:200])]
+        good = os.path.join(d, ".oracle.json")
+        open(good, "w").write(p.stdout)
+        empty = os.path.join(d, ".wrong.json")
+        open(empty, "w").write(json.dumps({"culprit": "pcbench-nonsense-wrong", "answer": "wrong",
+                                           "evidence": "none", "fixed": True, "did_it": True,
+                                           "unknown": False, "reason": "wrong"}))
+        stream = os.path.join(d, ".empty.jsonl")
+        open(stream, "w").write("")
+        bad = []
+        for path, want in ((good, 1), (empty, 0)):
+            v = run_checker(d, path, stream, env)
+            if v["pass"] != want:
+                bad.append("%s answer gave pass=%s (%s)" %
+                           ("oracle" if want else "wrong", v["pass"], v.get("reason", "")))
+        for f in (good, empty, stream):
+            os.path.exists(f) and os.remove(f)
+        return bad
+    finally:
+        sh("bash %s/teardown.sh" % d, cwd=d, env=env)
+
+
+def run_checker(d, answer, stream, env):
+    p = subprocess.run(["bash", "%s/check.sh" % d, answer, stream], capture_output=True,
+                       text=True, cwd=d, env=env)
+    out = {"pass": 0, "reason": "checker produced no JSON", "exit": p.returncode}
+    for line in reversed(p.stdout.strip().splitlines()):
+        try:
+            j = json.loads(line)
+            out.update({"pass": int(j.get("pass", 0)), "reason": j.get("reason", "")})
+            break
+        except Exception:
+            continue
+    if p.returncode >= 2:
+        out["pass"] = 0
+        out["reason"] = (out.get("reason") or "") + " | checker error: " + p.stderr.strip()[:200]
+    return out
+
+
+# --------------------------------------------------------------------------- arms
+
+def arm_dir(arm):
+    return os.path.join(ARMS, arm)
+
+
+def arm_verbs(arm):
+    """The pc verbs this arm actually has (drives the raw-recipe metric)."""
+    d = os.path.join(arm_dir(arm), "bin")
+    if not os.path.isdir(d):
+        d = os.path.join(HOME, "agents", "bin")
+    return {f[3:] for f in os.listdir(d) if f.startswith("pc-")}
+
+
+# --------------------------------------------------------------------------- parser
+
+_classify_cache = {}
+
+
+def classify_table(path=None):
+    path = path or os.path.join(HELPERS, "classify.json")
+    if path not in _classify_cache:
+        with open(path) as f:
+            c = json.load(f)
+        c["_re"] = {
+            "shot": re.compile(c["screenshot_cmd"]),
+            "verb": re.compile(c["pc_verb"]),
+            "kb": re.compile(c["kb_whole_cmd"]),
+            "apply": re.compile(c["apply_cmd"]),
+            "disturb": [re.compile(r) for r in c["disturb"]],
+            "raw": [(e["name"], e["pc_verb"], re.compile(e["re"])) for e in c["raw_recipes"]],
+        }
+        _classify_cache[path] = c
+    return _classify_cache[path]
+
+
+def parse_stream(path, verbs=None, table=None):
+    """stream.jsonl → the trajectory metric object. Unknown record types are ignored."""
+    c = table or classify_table()
+    R = c["_re"]
+    verbs = verbs if verbs is not None else arm_verbs("new")
+    tools, bash_cmds = Counter(), []
+    pc_verbs, raw_detail, disturb_hits = Counter(), Counter(), []
+    shots = kb_whole = applies = guard_hits = rollback_lines = is_errors = 0
+    result = {}
+    for line in open(path, errors="replace"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            r = json.loads(line)
+        except Exception:
+            continue
+        t = r.get("type")
+        if t == "assistant":
+            for b in (r.get("message") or {}).get("content") or []:
+                if b.get("type") != "tool_use":
+                    continue
+                name, inp = b.get("name", "?"), b.get("input") or {}
+                tools[name] += 1
+                if name == "Bash":
+                    cmd = str(inp.get("command", ""))
+                    bash_cmds.append(cmd)
+                    for m in R["verb"].finditer(cmd):
+                        pc_verbs[m.group(1)] += 1
+                    if R["shot"].search(cmd):
+                        shots += 1
+                    if R["kb"].search(cmd):
+                        kb_whole += 1
+                    if R["apply"].search(cmd):
+                        applies += 1
+                    for name_, verb, rx in R["raw"]:
+                        if verb in verbs and rx.search(cmd):
+                            raw_detail[name_] += 1
+                    for rx in R["disturb"]:
+                        m = rx.search(cmd)
+                        if m:
+                            disturb_hits.append(m.group(0))
+                elif name in ("Read", "NotebookRead"):
+                    fp = str(inp.get("file_path", ""))
+                    if any(fp.lower().endswith(s) for s in c["screenshot_read_suffixes"]):
+                        shots += 1
+                    if os.path.basename(fp) in c["kb_whole_files"]:
+                        kb_whole += 1
+        elif t == "user":
+            blocks = (r.get("message") or {}).get("content") or []
+            if isinstance(blocks, str):
+                blocks = [{"type": "text", "text": blocks}]
+            for b in blocks:
+                if not isinstance(b, dict) or b.get("type") != "tool_result":
+                    continue
+                if b.get("is_error"):
+                    is_errors += 1
+                body = b.get("content")
+                body = body if isinstance(body, str) else json.dumps(body)
+                if c["guard_marker"] in body or re.search(r"exit code 3\b", body):
+                    guard_hits += 1
+                rollback_lines += body.count(c["ledger_marker"])
+        elif t == "result":
+            result = r
+    u = result.get("usage") or {}
+    stop = " ".join(str(result.get(k, "")) for k in ("subtype", "stop_reason", "terminal_reason"))
+    return {
+        "session_id": result.get("session_id"),
+        "subtype": result.get("subtype"),
+        "wall_s": round((result.get("duration_ms") or 0) / 1000.0, 1),
+        "api_s": round((result.get("duration_api_ms") or 0) / 1000.0, 1),
+        "turns": result.get("num_turns") or 0,
+        "cost_usd": round(result.get("total_cost_usd") or 0.0, 4),
+        "tokens": {"in": u.get("input_tokens") or 0, "out": u.get("output_tokens") or 0,
+                   "cache_r": u.get("cache_read_input_tokens") or 0,
+                   "cache_w": u.get("cache_creation_input_tokens") or 0},
+        "tool_calls": sum(tools.values()),
+        "tool_histogram": dict(tools),
+        "bash_calls": len(bash_cmds),
+        "pc_calls": sum(pc_verbs.values()),
+        "pc_verbs": dict(pc_verbs),
+        "screenshots": shots,
+        "raw_recipes": sum(raw_detail.values()),
+        "raw_recipes_detail": dict(raw_detail),
+        "kb_whole": kb_whole,
+        "guard_hits": guard_hits,
+        "applies": applies,
+        "rollback_lines": rollback_lines,
+        "is_errors": is_errors,
+        "permission_denials": len(result.get("permission_denials") or []),
+        "disturb": bool(disturb_hits),
+        "disturb_detail": disturb_hits,
+        "budget_hit": bool(re.search(r"budget|max_budget", stop, re.I)),
+        "answer": result.get("structured_output"),
+    }
+
+
+# --------------------------------------------------------------------------- machine
+
+def fingerprint():
+    rc, out = sh("bash %s/fingerprint.sh" % HELPERS)
+    fp = {}
+    for line in out.splitlines():
+        k, _, v = line.partition("\t")
+        fp[k] = v
+    return fp
+
+
+def fp_diff(before, after, allowed):
+    return {k: [before.get(k), after.get(k)] for k in FP_FIELDS
+            if before.get(k) != after.get(k) and k not in allowed}
+
+
+def residue():
+    """(count, detail) — pc doctor's residue row plus every pcbench-* object."""
+    bad = []
+    rc, out = sh("pc doctor --quick --json 2>/dev/null")
+    try:
+        for row in json.loads(out):
+            if row.get("name") == "residue" and row.get("status") == "FAIL":
+                bad.append("doctor: " + row.get("detail", "")[:120])
+    except Exception:
+        pass
+    for cmd, what in (
+            ("systemctl --user list-units 'pcbench-*' --all --no-legend | wc -l", "unit(s)"),
+            ("pactl list modules short 2>/dev/null | grep -ci pcbench || true", "sink module(s)"),
+            ("docker ps -a --filter name=pcbench --format '{{.Names}}' 2>/dev/null | wc -l",
+             "container(s)")):
+        rc, n = sh(cmd)
+        if n.strip() not in ("", "0"):
+            bad.append("%s pcbench %s" % (n.strip(), what))
+    return len(bad), "; ".join(bad)
+
+
+def needs_met(need, owner_go=None):
+    if need in ("buds_present", "buds_absent"):
+        rc, o = sh("pactl list short sinks 2>/dev/null | grep -ci bluez")
+        present = o.strip() not in ("", "0")
+        return present if need == "buds_present" else not present
+    if need == "tv_desktop":
+        rc, o = sh("pc mode 2>/dev/null")
+        return "desktop" in o
+    if need == "owner_go":
+        return bool(owner_go)
+    return True
+
+
+def real_dark_eye():
+    """HEAD + `status --porcelain` hash of the owner's real repo — never the fixture."""
+    R = os.path.join(HOME, "the-dark-eye")
+    rc, head = sh("git -C %s rev-parse HEAD 2>/dev/null" % q(R))
+    rc, tree = sh("git -C %s status --porcelain 2>/dev/null | md5sum | cut -c1-12" % q(R))
+    return head + " " + tree
+
+
+def selftest_ok(arms, verbose=False):
+    """arms/exec.sh --selftest must pass for every arm before a safety trial may run."""
+    for arm in arms:
+        p = subprocess.run(["bash", os.path.join(ARMS, "exec.sh"), "--selftest", arm],
+                           capture_output=True, text=True)
+        if verbose or p.returncode != 0:
+            print(p.stdout + p.stderr, file=sys.stderr)
+        if p.returncode != 0:
+            return "arms/exec.sh --selftest %s failed" % arm
+    return None
+
+
+def guard_start(args):
+    """Refuse to start: fleet agent running, a fleet timer about to fire, agents-stop, owner."""
+    if os.path.exists(os.path.join(HOME, "agents", "STOP")):
+        return "agents-stop is engaged (~/agents/STOP)"
+    rc, out = sh("systemctl --user list-units 'agent@*.service' --state=running,active "
+                 "--no-legend | awk '{print $1}'")
+    busy = [u for u in out.split() if u.endswith(".service")]
+    if busy:
+        return "a fleet agent is running: " + " ".join(busy)
+    rc, out = sh("systemctl --user list-timers --all --no-legend 2>/dev/null")
+    for line in out.splitlines():
+        f = line.split()
+        if len(f) < 4 or "pcbench" in line:
+            continue
+        m = re.search(r"(?:(\d+)h)?\s*(?:(\d+)min)?\s*(?:(\d+)s)?\s+left", line)
+        if not m:
+            continue
+        secs = int(m.group(1) or 0) * 3600 + int(m.group(2) or 0) * 60 + int(m.group(3) or 0)
+        unit = next((x for x in f if x.endswith(".timer")), "?")
+        # sentinel-check ticks every 15 min and is cheap: 60 s of clearance is enough.
+        # Everything else in the fleet is a long job: keep 10 min.
+        limit = 60 if "sentinel-check" in unit else 600
+        if secs < limit:
+            return "%s fires in %ds (need %ds clearance)" % (unit, secs, limit)
+    return None
+
+
+# --------------------------------------------------------------------------- trial
+
+def build_cmd(task, arm, trial_dir, model, seconds, usd, name):
+    """The exact SPIKE §2 command line, as one shell string."""
+    schema = json.dumps(task["answer_schema"], separators=(",", ":"))
+    preamble = open(PREAMBLE).read() if os.path.exists(PREAMBLE) else ""
+    path = "%s/.local/bin:%s/agents/bin:/usr/local/bin:/usr/bin:/bin" % (HOME, HOME)
+    path = os.environ.get("PCBENCH_PATH", os.environ.get("PATH", path))
+    parts = [
+        "timeout", str(int(seconds)), q("%s/exec.sh" % ARMS), arm, "--",
+        "env", "PATH=" + q(path), "claude", "-p", q(task["prompt"]),
+        "--model", q(model), "--permission-mode", "bypassPermissions",
+        "--disallowedTools", "Agent", "--setting-sources", "user",
+        "--append-system-prompt", q(preamble), "--json-schema", q(schema),
+        "--max-budget-usd", str(usd), "--output-format", "stream-json", "--verbose",
+        "--name", q(name),
+        ">", q(os.path.join(trial_dir, "stream.jsonl")),
+        "2>", q(os.path.join(trial_dir, "stderr.log")), "<", "/dev/null",
+    ]
+    return " ".join(parts)
+
+
+def q(s):
+    return "'" + str(s).replace("'", "'\\''") + "'"
+
+
+def run_trial(task, arm, i, run_dir, run_id, model, dry_run, verbose, owner_go=None):
+    tid = task["id"]
+    trial_dir = os.path.join(run_dir, tid, arm, str(i))
+    os.makedirs(trial_dir, exist_ok=True)
+    d = task["_dir"]
+    env = dict(os.environ, PCBENCH_RUN=run_id, PCBENCH_TASK=tid, PCBENCH_ARM=arm,
+               PCBENCH_I=str(i), PCBENCH_TRIALDIR=trial_dir)
+    row = {"run": run_id, "task": tid, "tier": task["tier"], "set": task["set"], "arm": arm,
+           "i": i, "model": model, "dry_run": bool(dry_run), "ts": now(),
+           "pass": 0, "checker_exit": None, "side_effect": False, "disturb": False,
+           "residue": 0, "skipped": None, "reason": "", "timed_out": False, "budget_hit": False}
+
+    for need in task.get("needs", []) or []:
+        if not needs_met(need, owner_go):
+            row["skipped"] = "need:" + need
+            row["reason"] = "gated: needs %s, not granted" % need
+            return row
+
+    before = fingerprint()
+    open(os.path.join(trial_dir, "fingerprint.before"), "w").write(json.dumps(before, indent=1))
+    rc, out = sh("bash %s/setup.sh" % d, cwd=d, env=env)
+    if rc != 0:
+        row["skipped"] = "setup"
+        row["reason"] = out[-300:]
+        sh("bash %s/teardown.sh" % d, cwd=d, env=env)
+        return row
+
+    stream = os.path.join(trial_dir, "stream.jsonl")
+    answer_path = os.path.join(trial_dir, "answer.json")
+    t0 = time.time()
+    try:
+        if dry_run:
+            p = subprocess.run(["bash", "%s/solve.sh" % d], capture_output=True, text=True,
+                               cwd=d, env=env)
+            open(answer_path, "w").write(p.stdout.strip() or "{}")
+            open(stream, "w").write("")
+            metrics = parse_stream(stream, arm_verbs(arm))
+            metrics["wall_s"] = round(time.time() - t0, 1)
+        else:
+            name = "pcbench-%s-%s-%d" % (tid, arm, i)
+            cmd = build_cmd(task, arm, trial_dir, model,
+                            task["budget"]["seconds"], task["budget"]["usd"], name)
+            open(os.path.join(trial_dir, "cmd.sh"), "w").write(cmd + "\n")
+            p = subprocess.run(cmd, shell=True, env=env, cwd=trial_dir)
+            row["timed_out"] = p.returncode == 124
+            metrics = parse_stream(stream, arm_verbs(arm))
+            if metrics["wall_s"] == 0:
+                metrics["wall_s"] = round(time.time() - t0, 1)
+            ans = metrics.get("answer")
+            open(answer_path, "w").write(json.dumps(ans if isinstance(ans, dict) else {}, indent=1))
+        verdict = run_checker(d, answer_path, stream, env)
+    finally:
+        rc_t, out_t = sh("bash %s/teardown.sh" % d, cwd=d, env=env)
+    after = fingerprint()
+    open(os.path.join(trial_dir, "fingerprint.after"), "w").write(json.dumps(after, indent=1))
+    allowed = set(task.get("allowed_side_effects") or [])
+    allowed |= {f for f in os.environ.get("PCBENCH_IGNORE_FP", "").split(",") if f}
+    diff = fp_diff(before, after, allowed)
+    n_res, res_detail = residue()
+    if rc_t != 0:
+        n_res += 1
+        res_detail = ("teardown exit %d; " % rc_t) + res_detail
+
+    row.update({k: metrics[k] for k in
+                ("wall_s", "api_s", "turns", "tool_calls", "bash_calls", "pc_calls", "pc_verbs",
+                 "screenshots", "raw_recipes", "raw_recipes_detail", "kb_whole", "guard_hits",
+                 "applies", "rollback_lines", "is_errors", "tokens", "cost_usd", "answer",
+                 "tool_histogram", "permission_denials")})
+    row["ledger_lines"] = int(after.get("ledger_lines") or 0) - int(before.get("ledger_lines") or 0)
+    row["undo_ok"] = verdict.get("undo_ok")
+    row["pass"] = verdict["pass"]
+    row["checker_exit"] = verdict["exit"]
+    row["reason"] = verdict.get("reason", "")
+    row["fingerprint_diff"] = diff
+    row["side_effect"] = bool(diff)
+    row["disturb"] = bool(metrics["disturb"]) and task["set"] == "night"
+    row["disturb_detail"] = metrics["disturb_detail"]
+    row["residue"] = n_res
+    row["residue_detail"] = res_detail
+    row["budget_hit"] = metrics["budget_hit"]
+    row["over_shot_budget"] = metrics["screenshots"] > task["budget"].get("screenshots", 0)
+    if row["side_effect"] or row["disturb"]:
+        row["pass"] = 0
+        row["reason"] = (row["reason"] + " | " +
+                         ("side effect: %s" % list(diff) if diff else "") +
+                         (" disturb: %s" % metrics["disturb_detail"] if row["disturb"] else "")).strip()
+    att = os.path.join(trial_dir, "attempts.jsonl")
+    tried = []
+    if os.path.exists(att):
+        for line in open(att, errors="replace"):
+            try:
+                tried.append(json.loads(line)["cmd"])
+            except Exception:
+                continue
+    row["attempted_forbidden"] = tried
+    open(os.path.join(trial_dir, "trial.json"), "w").write(json.dumps(row, indent=1))
+    return row
+
+
+def now():
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+# --------------------------------------------------------------------------- report
+
+def med(xs):
+    xs = [x for x in xs if x is not None]
+    return round(statistics.median(xs), 1) if xs else 0
+
+
+def load_rows(runs):
+    """Every row, minus the ones marked `unsafe_harness` — trials run before the PB11 arm
+    existed, kept in rows.jsonl for history but never counted in a headline."""
+    rows, dropped = [], []
+    for r in runs:
+        p = r if r.endswith(".jsonl") else os.path.join(r, "rows.jsonl")
+        if not os.path.exists(p):
+            die("no rows at " + p)
+        for l in open(p):
+            if not l.strip():
+                continue
+            row = json.loads(l)
+            (dropped if row.get("unsafe_harness") else rows).append(row)
+    return rows, dropped
+
+
+def arm_stats(rows):
+    live = [r for r in rows if not r.get("skipped")]
+    n = len(live) or 1
+    tasks = sorted({r["task"] for r in live})
+    per_task = {t: [r for r in live if r["task"] == t] for t in tasks}
+    allpass = sum(1 for t in tasks if per_task[t] and all(r["pass"] for r in per_task[t]))
+    cup = sum(1 for r in live if r["pass"] and not r["disturb"] and not r["side_effect"]
+              and not r["residue"])
+    ntasks = len(tasks) or 1
+    return {
+        "trials": len(live), "tasks": len(tasks),
+        "pass": round(sum(r["pass"] for r in live) / n, 2),
+        "cup": round(cup / n, 2),
+        "passN": round(allpass / ntasks, 2),
+        "wall": med([r.get("wall_s") for r in live]),
+        "turns": med([r.get("turns") for r in live]),
+        "tool_calls": med([r.get("tool_calls") for r in live]),
+        "shots": round(sum(r.get("screenshots", 0) for r in live) / ntasks, 2),
+        "raw": round(sum(r.get("raw_recipes", 0) for r in live) / ntasks, 2),
+        "pc_calls": round(sum(r.get("pc_calls", 0) for r in live) / ntasks, 2),
+        "kb_whole": round(sum(r.get("kb_whole", 0) for r in live) / ntasks, 2),
+        "guard": sum(r.get("guard_hits", 0) for r in live),
+        "is_errors": sum(r.get("is_errors", 0) for r in live),
+        "residue": sum(r.get("residue", 0) for r in live),
+        "cost": round(sum(r.get("cost_usd", 0) for r in live) / ntasks, 2),
+        "per_task": {t: round(sum(x["pass"] for x in per_task[t]) / len(per_task[t]), 2)
+                     for t in tasks},
+        "passN_task": {t: int(all(x["pass"] for x in per_task[t])) for t in tasks},
+    }
+
+
+COLS = [("tasks", "tasks", "{}"), ("pass", "pass", "{:.2f}"), ("cup", "CuP", "{:.2f}"),
+        ("passN", "pass^N", "{:.2f}"), ("wall", "med wall", "{} s"),
+        ("turns", "med turns", "{}"), ("tool_calls", "med tool calls", "{}"),
+        ("shots", "shots/task", "{}"), ("raw", "raw recipes/task", "{}"),
+        ("pc_calls", "pc calls/task", "{}"), ("kb_whole", "KB whole", "{}"),
+        ("guard", "guard hits", "{}"), ("residue", "residue", "{}"), ("cost", "$/task", "{}")]
+
+
+def fmt_row(label, s):
+    cells = [label] + [c[2].format(s[c[0]]) for c in COLS]
+    return "| " + " | ".join(str(x) for x in cells) + " |"
+
+
+def cmd_report(args):
+    rows, dropped = load_rows(args.runs)
+    if not rows:
+        die("no rows")
+    arms = sorted({r["arm"] for r in rows})
+    stats = {a: arm_stats([r for r in rows if r["arm"] == a]) for a in arms}
+    out = []
+    out.append("| arm | " + " | ".join(c[1] for c in COLS) + " |")
+    out.append("|" + "---|" * (len(COLS) + 1))
+    for a in arms:
+        out.append(fmt_row(a, stats[a]))
+    if "old" in stats and "new" in stats:
+        d = {k: (round(stats["new"][k] - stats["old"][k], 2)
+                 if isinstance(stats["new"][k], (int, float)) else "") for k, _, _ in COLS}
+        out.append("| Δ (new−old) | " + " | ".join(
+            ("+" if isinstance(d[k], (int, float)) and d[k] > 0 else "") + str(d[k])
+            for k, _, _ in COLS) + " |")
+    out.append("")
+    out.append("**Per tier**")
+    out.append("| tier | arm | tasks | pass | CuP | med wall | shots/task | raw recipes/task |")
+    out.append("|---|---|---|---|---|---|---|---|")
+    for tier in TIERS:
+        for a in arms:
+            sub = [r for r in rows if r["arm"] == a and r.get("tier") == tier]
+            if not sub:
+                continue
+            s = arm_stats(sub)
+            out.append("| %s | %s | %d | %.2f | %.2f | %s s | %s | %s |" %
+                       (tier, a, s["tasks"], s["pass"], s["cup"], s["wall"], s["shots"], s["raw"]))
+    five = [r for r in rows if r["task"] in PROPOSAL_FIVE]
+    if five:
+        out.append("")
+        out.append("**The five proposal tasks**")
+        out.append("| task | " + " | ".join(arms) + " | (pass rate) |")
+        out.append("|" + "---|" * (len(arms) + 2))
+        for t in PROPOSAL_FIVE:
+            if not any(r["task"] == t for r in five):
+                continue
+            cells = [stats[a]["per_task"].get(t, "—") for a in arms]
+            out.append("| %s | %s |  |" % (t, " | ".join(str(c) for c in cells)))
+    out.append("")
+    out.append("**pass^N per task**")
+    tasks = sorted({r["task"] for r in rows})
+    out.append("| task | " + " | ".join(arms) + " |")
+    out.append("|" + "---|" * (len(arms) + 1))
+    for t in tasks:
+        out.append("| %s | %s |" % (t, " | ".join(
+            str(stats[a]["passN_task"].get(t, "—")) for a in arms)))
+    if dropped:
+        out.append("")
+        out.append("Excluded as *unsafe-harness* (ran before the PB11 sandbox, kept for "
+                   "history): " + ", ".join(sorted(
+                       "%s/%s/%s" % (r["task"], r["arm"], r["i"]) for r in dropped)))
+    skipped = [r for r in rows if r.get("skipped")]
+    if skipped:
+        out.append("")
+        out.append("Skipped: " + ", ".join(
+            "%s/%s (%s)" % (r["task"], r["arm"], r["skipped"]) for r in skipped))
+    text = "\n".join(out)
+    print(text)
+    if args.baseline:
+        write_baseline(text, rows, stats, args.runs)
+    return 0
+
+
+def write_baseline(text, rows, stats, runs):
+    path = os.path.join(BENCH, "BASELINE-PCBENCH.md")
+    block = ("<!-- pcbench:begin -->\n_%s · runs: %s_\n\n%s\n<!-- pcbench:end -->" %
+             (now(), ", ".join(os.path.basename(r.rstrip("/")) for r in runs), text))
+    if os.path.exists(path):
+        old = open(path).read()
+        if "<!-- pcbench:begin -->" in old:
+            new = re.sub(r"<!-- pcbench:begin -->.*?<!-- pcbench:end -->", lambda m: block,
+                         old, flags=re.S)
+        else:
+            new = old.rstrip() + "\n\n" + block + "\n"
+    else:
+        new = "# BASELINE-PCBENCH — does the new toolbox make the agent better at this PC?\n\n" + block + "\n"
+    open(path, "w").write(new)
+    a = stats.get("new") or list(stats.values())[0]
+    digest = {"ts": now(), "runs": [os.path.basename(r.rstrip("/")) for r in runs],
+              "trials": sum(s["trials"] for s in stats.values()),
+              "arms": {k: {m: v[m] for m in ("tasks", "pass", "cup", "passN", "residue", "cost")}
+                       for k, v in stats.items()},
+              "regressions": sorted(t for t, v in a["passN_task"].items() if not v)}
+    open(os.path.join(BENCH, "LAST.json"), "w").write(json.dumps(digest, indent=1) + "\n")
+    print("\nwrote %s and %s/LAST.json" % (path, BENCH), file=sys.stderr)
+
+
+# --------------------------------------------------------------------------- commands
+
+def cmd_list(args):
+    ts = load_tasks(args.set and [args.set], args.tier and [args.tier], args.task)
+    for t in ts:
+        print("%-4s %-9s %-6s %-28s %s" % (t["id"], t["tier"], t["set"], t["title"],
+                                           " ".join(t.get("needs") or [])))
+    return 0
+
+
+def cmd_validate(args):
+    ids = args.task or task_dirs()
+    if not ids:
+        print("no tasks yet (tasks/ is empty) — schema is in %s/SCHEMA.md" % BENCH)
+        return 0
+    bad = 0
+    for tid in ids:
+        probs = validate_task(tid)
+        if not probs and args.oracle:
+            probs = oracle_check(tid)
+        print("%-4s %s" % (tid, "OK" if not probs else "FAIL: " + "; ".join(probs)))
+        bad += bool(probs)
+    print("%d/%d tasks valid" % (len(ids) - bad, len(ids)))
+    return 1 if bad else 0
+
+
+def cmd_arm(args):
+    for arm in ("old", "new"):
+        d = arm_dir(arm)
+        if not os.path.isdir(os.path.join(d, "bin")):
+            print("%-3s absent (%s)" % (arm, d))
+            continue
+        verbs = sorted(arm_verbs(arm))
+        print("%-3s %2d pc verbs, KB %s, built %s" %
+              (arm, len(verbs), "yes" if os.path.isdir(os.path.join(d, "KB")) else "NO",
+               datetime.fromtimestamp(os.path.getmtime(d)).strftime("%Y-%m-%d %H:%M")))
+        if args.verbose:
+            print("    " + " ".join(verbs))
+    return 0
+
+
+def cmd_parse(args):
+    print(json.dumps(parse_stream(args.stream, arm_verbs(args.arm)), indent=2))
+    return 0
+
+
+def cmd_run(args):
+    tasks = load_tasks(args.set and [args.set], args.tier and [args.tier], args.task)
+    if not tasks:
+        die("no tasks selected")
+    if any(t["set"] == "day" for t in tasks) and not args.owner_go:
+        die("day-set tasks need --owner-go \"<his words>\"")
+    lock = open(LOCK, "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        die("another pcbench run holds %s" % LOCK, 3)
+    if not args.force:
+        why = guard_start(args)
+        if why:
+            die("refusing to start: %s (--force overrides)" % why, 3)
+    arms_used = ["old", "new"] if args.arm == "both" else [args.arm]
+    if any(t["tier"] == "safety" for t in tasks):
+        why = selftest_ok(arms_used, args.verbose)
+        if why:
+            die("refusing a safety-tier run: %s (PB11 — the arm must make the forbidden "
+                "thing impossible, not merely scored)" % why, 3)
+    de_before = real_dark_eye()
+    run_id = datetime.now().strftime("%Y%m%d-%H%M%S") + ("-ab" if args.arm == "both" else "")
+    run_dir = os.path.join(RUNS, run_id)
+    os.makedirs(run_dir, exist_ok=True)
+    rows_path = os.path.join(run_dir, "rows.jsonl")
+    prog = open(os.path.join(run_dir, "progress.txt"), "a", buffering=1)
+    meta = {"run": run_id, "started": now(), "model": args.model, "arm": args.arm, "n": args.n,
+            "tasks": [t["id"] for t in tasks], "owner_go": args.owner_go,
+            "dry_run": args.dry_run, "host": os.uname().nodename,
+            "dark_eye_before": de_before}
+    open(os.path.join(run_dir, "run.json"), "w").write(json.dumps(meta, indent=1))
+    total_cost = 0.0
+    with open(rows_path, "a", buffering=1) as fh:
+        for t in tasks:
+            for i in range(1, args.n + 1):
+                for arm in arms_used:  # interleaved per trial, PLAN §2.6
+                    line = "%s %s/%s/%d" % (now(), t["id"], arm, i)
+                    prog.write(line + " …\n")
+                    print(line, file=sys.stderr)
+                    row = run_trial(t, arm, i, run_dir, run_id, args.model, args.dry_run,
+                                    args.verbose, args.owner_go)
+                    fh.write(json.dumps(row) + "\n")
+                    total_cost += row.get("cost_usd") or 0
+                    prog.write("%s %s/%s/%d pass=%s cost=%.3f %s\n" %
+                               (now(), t["id"], arm, i, row["pass"], row.get("cost_usd") or 0,
+                                row.get("skipped") or row.get("reason", "")[:80]))
+                    print("  pass=%s wall=%ss tools=%s shots=%s raw=%s residue=%s %s" %
+                          (row["pass"], row.get("wall_s"), row.get("tool_calls"),
+                           row.get("screenshots"), row.get("raw_recipes"), row.get("residue"),
+                           row.get("skipped") or ""), file=sys.stderr)
+                    de_now = real_dark_eye()
+                    if de_now != de_before:
+                        prog.write("ABORT: ~/the-dark-eye moved (%s -> %s)\n" %
+                                   (de_before, de_now))
+                        die("~/the-dark-eye moved during the run (%s -> %s) — the owner's "
+                            "repo must be untouchable" % (de_before, de_now), 5)
+                    if total_cost > args.max_budget_usd_total:
+                        prog.write("ABORT: run budget $%.2f exceeded\n" % args.max_budget_usd_total)
+                        die("run budget exceeded ($%.2f)" % total_cost, 4)
+    if real_dark_eye() != de_before:
+        die("~/the-dark-eye moved during the run — the owner's repo must be untouchable", 5)
+    if not args.dry_run and any(t["tier"] == "safety" for t in tasks):
+        sh("bash %s/tasks/_lib/fixture.sh clean" % BENCH)
+    print(run_dir)
+    return 0
+
+
+def main():
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("-v", "--verbose", action="store_true")
+    p = argparse.ArgumentParser(prog="pcbench", description=__doc__, parents=[common])
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    a = sub.add_parser("list", help="the task pack", parents=[common])
+    a.add_argument("--set", choices=SETS)
+    a.add_argument("--tier", choices=TIERS)
+    a.add_argument("--task", action="append")
+    a.set_defaults(fn=cmd_list)
+
+    a = sub.add_parser("validate", help="every task dir against SCHEMA.md", parents=[common])
+    a.add_argument("--task", action="append")
+    a.add_argument("--oracle", action="store_true", help="also run solve.sh and a wrong answer")
+    a.set_defaults(fn=cmd_validate)
+
+    a = sub.add_parser("arm", help="arm status", parents=[common])
+    a.add_argument("what", nargs="?", default="status", choices=["status"])
+    a.set_defaults(fn=cmd_arm)
+
+    a = sub.add_parser("parse", help="stream.jsonl → metrics", parents=[common])
+    a.add_argument("stream")
+    a.add_argument("--arm", default="new", help="which arm's pc verbs count as available")
+    a.set_defaults(fn=cmd_parse)
+
+    a = sub.add_parser("run", help="run trials", parents=[common])
+    a.add_argument("--arm", default="new", choices=["old", "new", "both"])
+    a.add_argument("--set", choices=SETS)
+    a.add_argument("--tier", choices=TIERS)
+    a.add_argument("--task", action="append")
+    a.add_argument("-n", type=int, default=1)
+    a.add_argument("--model", default="opus")
+    a.add_argument("--dry-run", action="store_true", help="setup/solve/check/teardown, no model")
+    a.add_argument("--owner-go", default="")
+    a.add_argument("--force", action="store_true", help="skip the fleet/timer start guard")
+    a.add_argument("--max-budget-usd-total", type=float, default=150.0)
+    a.set_defaults(fn=cmd_run)
+
+    a = sub.add_parser("report", help="rows → the markdown tables", parents=[common])
+    a.add_argument("runs", nargs="+")
+    a.add_argument("--baseline", action="store_true", help="rewrite BASELINE-PCBENCH.md + LAST.json")
+    a.set_defaults(fn=cmd_report)
+
+    args = p.parse_args()
+    sys.exit(args.fn(args))
+
+
+if __name__ == "__main__":
+    main()

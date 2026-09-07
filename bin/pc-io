@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# pc io [disks|procs|smart] [--seconds 0.3] [-n 5] [--json] — disk throughput/latency, top IO procs, SMART (default: disks + top 5 procs)
+# shellcheck disable=SC2034
+set -uo pipefail
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+pc_usage 'usage: pc io [disks|procs|smart] [--seconds 0.3] [-n 5] [--json]
+  disks   Δ reads/writes/sectors/ms per block device over the window -> MB/s, IOPS, await
+  procs   top IO-consuming processes over the window (pc_top.py --sort io)
+  smart   cached (1h) `smartctl -j -H -A /dev/nvme0` summary
+  default disks + top 5 procs' "$@"
+
+PC_SUB='pc io'; PC_EXTRA_FLAGS=(-n:); SECONDS_=0.3
+pc_opt "$@"
+SECONDS_W=$SECONDS_; N=${PC_OPT[-n]-5}; VERB=disks_and_procs
+for a in ${PC_ARGS[@]+"${PC_ARGS[@]}"}; do
+  case $a in disks|procs|smart) VERB=$a;; *) echo "pc io: unknown argument $a" >&2; exit 2;; esac
+done
+
+# disks_json <seconds> — one JSON object keyed by device name, MB/s + IOPS + await(ms) over the window.
+disks_json() {
+  local w=$1
+  local fx=0; [ -n "$PC_FIXTURE" ] && fx=1
+  python3 - "$PC_PROC/diskstats" "$w" "$fx" <<'PY'
+import sys, time, json, os
+path, w, fixture = sys.argv[1], float(sys.argv[2]), sys.argv[3] == "1"
+
+def read(tick):
+    p = f"{path}.{tick}" if fixture and os.path.exists(f"{path}.{tick}") else path
+    rows = {}
+    with open(p) as f:
+        for line in f:
+            f_ = line.split()
+            name = f_[2]
+            if name[-1].isdigit() and any(name.startswith(p) for p in ("loop", "ram")):
+                continue
+            rd_ios, rd_sec, rd_ms = int(f_[3]), int(f_[5]), int(f_[6])
+            wr_ios, wr_sec, wr_ms = int(f_[7]), int(f_[9]), int(f_[10])
+            rows[name] = (rd_ios, rd_sec, rd_ms, wr_ios, wr_sec, wr_ms)
+    return rows
+
+a = read(0)
+if not fixture:
+    time.sleep(w)
+b = read(1)
+out = {}
+for name, av in a.items():
+    bv = b.get(name)
+    if not bv:
+        continue
+    rd_ios = max(0, bv[0] - av[0]); rd_sec = max(0, bv[1] - av[1]); rd_ms = max(0, bv[2] - av[2])
+    wr_ios = max(0, bv[3] - av[3]); wr_sec = max(0, bv[4] - av[4]); wr_ms = max(0, bv[5] - av[5])
+    ios = rd_ios + wr_ios
+    await_ms = round((rd_ms + wr_ms) / ios, 2) if ios else 0.0
+    out[name] = {
+        "read_mb_s": round(rd_sec * 512 / 1e6 / w, 3),
+        "write_mb_s": round(wr_sec * 512 / 1e6 / w, 3),
+        "read_iops": round(rd_ios / w, 1),
+        "write_iops": round(wr_ios / w, 1),
+        "await_ms": await_ms,
+    }
+print(json.dumps(out))
+PY
+}
+
+do_disks() {
+  local out; out=$(disks_json "$SECONDS_W")
+  if [ "$JSON" = 1 ]; then
+    printf '%s\n' "$out"
+  else
+    printf '%-14s %10s %10s %8s %8s %9s\n' device read_MB/s write_MB/s r_iops w_iops await_ms
+    jq -r 'to_entries[] | [.key, .value.read_mb_s, .value.write_mb_s, .value.read_iops, .value.write_iops, .value.await_ms] | @tsv' \
+      <<<"$out" | while IFS=$'\t' read -r dev rmb wmb riops wiops await; do
+        printf '%-14s %10s %10s %8s %8s %9s\n' "$dev" "$rmb" "$wmb" "$riops" "$wiops" "$await"
+      done
+  fi
+}
+
+do_procs() {
+  python3 "$BIN/pc_top.py" --seconds "$SECONDS_W" --sort io -n "$N" $([ "$JSON" = 1 ] && echo --json)
+}
+
+_smart() { [ -n "$PC_FIXTURE" ] && pc_cmd smartctl -j -H -A /dev/nvme0 || pc_root smartctl -j -H -A /dev/nvme0; }
+do_smart() {
+  local raw; raw=$(cached io_smart 3600 _smart)
+  if [ "$JSON" = 1 ]; then
+    jq -c '{passed: .smart_status.passed, health: .nvme_smart_health_information_log}' <<<"${raw:-{\}}" 2>/dev/null \
+      || echo '{}'
+  else
+    jq -r '
+      .smart_status.passed as $p
+      | .nvme_smart_health_information_log as $h
+      | "SMART overall-health self-assessment test result: " + (if $p then "PASSED" else "FAILED" end)
+        + "\ntemperature: \($h.temperature) C  percentage_used: \($h.percentage_used)%  "
+        + "available_spare: \($h.available_spare)%  media_errors: \($h.media_errors)  "
+        + "power_on_hours: \($h.power_on_hours)"' <<<"${raw:-{\}}" 2>/dev/null || echo "pc io smart: no SMART data (needs sudo -n smartctl)"
+  fi
+}
+
+case "$VERB" in
+  disks) do_disks;;
+  procs) do_procs;;
+  smart) do_smart;;
+  disks_and_procs)
+    # Both samplers share the same window; run them in parallel so the combined wall time
+    # stays close to one window, not two.
+    dtmp=$(mktemp); ptmp=$(mktemp); trap 'rm -f "$dtmp" "$ptmp"' EXIT
+    disks_json "$SECONDS_W" >"$dtmp" &
+    python3 "$BIN/pc_top.py" --seconds "$SECONDS_W" --sort io -n "$N" --json >"$ptmp" &
+    wait
+    if [ "$JSON" = 1 ]; then
+      jq -n --argjson disks "$(<"$dtmp")" --argjson procs "$(<"$ptmp")" '{disks:$disks, procs:$procs}'
+    else
+      printf '%-14s %10s %10s %8s %8s %9s\n' device read_MB/s write_MB/s r_iops w_iops await_ms
+      jq -r 'to_entries[] | [.key, .value.read_mb_s, .value.write_mb_s, .value.read_iops, .value.write_iops, .value.await_ms] | @tsv' \
+        "$dtmp" | while IFS=$'\t' read -r dev rmb wmb riops wiops await; do
+          printf '%-14s %10s %10s %8s %8s %9s\n' "$dev" "$rmb" "$wmb" "$riops" "$wiops" "$await"
+        done
+      echo
+      echo "top $N by IO:"
+      printf '%7s %-20s %9s %9s %s\n' pid comm io_r/s io_w/s unit
+      jq -r '.[] | [.pid, .comm, (.io_r/1024|round), (.io_w/1024|round), .unit] | @tsv' "$ptmp" \
+        | while IFS=$'\t' read -r pid comm r w unit; do printf '%7s %-20.20s %8sK %8sK %s\n' "$pid" "$comm" "$r" "$w" "$unit"; done
+    fi
+    ;;
+esac

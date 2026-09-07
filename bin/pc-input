@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# pc input devices|caps|watch|grabs|inject — the evdev layer: nodes, capabilities, live events, who holds them, uinput injection.
+set -uo pipefail
+export LC_ALL=C
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+SELF="$(readlink -f "$0")"
+PY="$BIN/pc_input.py"
+
+pc_usage 'usage: pc input devices [--json]
+       pc input caps <dev> [--json]
+       pc input watch <dev> [--seconds 5] [--json]
+       pc input grabs [--json]
+       pc input inject key <KEY_NAME|code> [0|1] [--hold-ms N] [--device-only] [--apply|--dry-run] [--json]
+       pc input inject rel|abs <REL_X|ABS_X|…> <n> [--device-only] [--apply|--dry-run] [--json]
+
+devices/caps/watch/grabs read /dev/input and /proc/*/fd through `sudo -n` (the input group is
+on the user but not in shells started before it was granted). A grab is not readable from
+userspace: `grabbed_guess` means a holder that is not one of the known multiplexers
+(systemd, systemd-logind, gnome-shell, upowerd); the ptt sidecar is named as `sidecar`.
+
+inject builds its own `pc-input-virtual` uinput device, emits the events, reads them back from
+that device'"'"'s node and destroys it. --device-only grabs the node first, so nothing reaches
+libinput or gnome-shell — the only form that is safe while the owner is asleep. Without
+--apply it prints `would: …` and changes nothing; with it the change is ledgered and the
+rollback (the release event) is printed. Refused while `pc mode` is human unless --force.' "$@"
+
+# Our own flags first: pc_opt rejects any -?* it does not know (pc-power does the same).
+DRY=0; DEVONLY=0; FORCE=0; HOLD=0; ARGV=()
+while [ $# -gt 0 ]; do
+  case $1 in
+    --dry-run) DRY=1;; --device-only) DEVONLY=1;; --force) FORCE=1;;
+    --hold-ms) HOLD=${2:-0}; shift;; --hold-ms=*) HOLD=${1#*=};;
+    *) ARGV+=("$1");;
+  esac
+  shift
+done
+pc_opt ${ARGV[@]+"${ARGV[@]}"}
+
+secs=$SECONDS_; [ "$secs" = 0 ] && secs=5
+sub="${PC_ARGS[0]:-devices}"
+jf=(); [ "$JSON" = 1 ] && jf=(--json)
+
+# py <args…> — the helper under sudo -n (real nodes) or straight (fixture tree).
+py() {
+  if [ -n "$PC_FIXTURE" ]; then
+    PC_PROC="$PC_PROC" python3 "$PY" "$@"
+  else
+    pc_root env "PC_PROC=$PC_PROC" python3 "$PY" "$@"
+  fi
+}
+
+case "$sub" in
+  devices|grabs) py "$sub" "${jf[@]}"; exit $?;;
+  caps)
+    dev="${PC_ARGS[1]:-}"; [ -n "$dev" ] || { echo 'pc input caps: need a device (see -h)' >&2; exit 2; }
+    py caps "$dev" "${jf[@]}"; exit $?;;
+  watch)
+    dev="${PC_ARGS[1]:-}"; [ -n "$dev" ] || { echo 'pc input watch: need a device (see -h)' >&2; exit 2; }
+    PC_ROOT_TIMEOUT=$(( ${secs%.*} + 5 )) py watch "$dev" --seconds "$secs" "${jf[@]}"; exit $?;;
+  inject) ;;
+  *) printf 'pc input: unknown verb %s (try -h)\n' "$sub" >&2; exit 2;;
+esac
+
+## --- inject -----------------------------------------------------------------
+kind="${PC_ARGS[1]:-}"; name="${PC_ARGS[2]:-}"; val="${PC_ARGS[3]:-}"
+case "$kind" in key|rel|abs) ;; *) echo 'pc input inject: need key|rel|abs (see -h)' >&2; exit 2;; esac
+[ -n "$name" ] || { echo 'pc input inject: need an event name or code (see -h)' >&2; exit 2; }
+case "$kind" in rel|abs) [ -n "$val" ] || { echo "pc input inject $kind: need a value" >&2; exit 2; };; esac
+
+# The owner is at the keyboard in human mode; the state file is what `pc mode` last wrote.
+mode=$(cat "$HOME/agents/state/pc-mode" 2>/dev/null); : "${mode:=agent}"
+if [ "$mode" = human ] && [ "$FORCE" != 1 ]; then
+  echo 'pc input inject: refused — pc mode is human (the owner is at the keyboard); --force overrides' >&2
+  exit 3
+fi
+
+opts=("$kind" "$name"); [ -n "$val" ] && opts+=("$val")
+[ "$DEVONLY" = 1 ] && opts+=(--device-only)
+[ "$HOLD" != 0 ] && opts+=(--hold-ms "$HOLD")
+
+if [ "$DRY" = 1 ]; then python3 "$PY" inject "${opts[@]}" --dry-run "${jf[@]}"; exit $?; fi
+
+p=$(python3 "$PY" inject "${opts[@]}" --dry-run --json) || exit $?
+target=$(jq -r .target <<<"$p"); before=$(jq -r .before <<<"$p"); after=$(jq -r .after <<<"$p")
+rel_name=$(jq -r '.events[0].code' <<<"$p")
+# The inverse of an injected event is the event that puts the code back: the release for a key,
+# the opposite step for a relative axis. Absolute axes have no inverse without the real device.
+case "$kind" in
+  key) rb=$(printf '%q input inject key %q 0 --apply' "$BIN/pc" "$rel_name");;
+  rel) rb=$(printf '%q input inject rel %q %d --apply' "$BIN/pc" "$rel_name" $(( -val )));;
+  *)   rb='(none: an absolute axis on a throwaway device leaves nothing behind)';;
+esac
+[ "$DEVONLY" = 1 ] && [ "$kind" != abs ] && rb="$rb --device-only"
+
+# The read-back hook: an injected event leaves no state to re-read afterwards, so the run
+# records what the device actually reported under a stable per-target path in the runtime dir.
+# `pc undo` re-reads the same file, and the replayed release overwrites it in turn.
+obs="$CACHE/pc-input-${target//[^A-Za-z0-9_]/-}"
+PC_READ_CMD="cat $obs" pc_apply "$target" "$before" "$after" "$rb" \
+  python3 "$PY" inject "${opts[@]}" --observed-file "$obs" "${jf[@]}"
+exit $?

@@ -1,0 +1,1 @@
+I did not stop tailscale. It is a second access path to this box (FLEET §5.3) and the pc guard refuses it — if the LAN test goes wrong we would both be locked out. LAN testing does not need it off: services already listen on the LAN address as well, so you can hit the LAN IP directly with tailscale up.

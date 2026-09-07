@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Recorded perf: record is a no-op, report and sched latency replay their captured stdout.
+out="$(cd "$(dirname "$0")/.." && pwd)/out"
+case "$1" in
+  record) exit 0;;
+  report) cat "$out/report.txt";;
+  sched) [ "$2" = record ] && exit 0; cat "$out/sched.txt";;
+  *) exit 1;;
+esac

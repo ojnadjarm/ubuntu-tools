@@ -1,0 +1,9 @@
+[Unit]
+Description=Weekly Moodle env maintenance (stable-branch pull when clean, upgrade, purge caches)
+
+[Service]
+Type=oneshot
+TimeoutStartSec=3600
+Nice=5
+ExecStart=/bin/bash -lc 'exec %h/agents/bin/moodle-keep --weekly'
+ExecStopPost=/bin/bash -lc 'test "$EXIT_STATUS" = 0 || %h/agents/bin/notify-owner -p high -t moodle-keep "weekly run failed (exit $EXIT_STATUS): journalctl --user -u moodle-keep-weekly"'

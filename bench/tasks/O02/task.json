@@ -1,0 +1,22 @@
+{
+  "id": "O02",
+  "tier": "observe",
+  "set": "night",
+  "title": "Where is the sound going?",
+  "prompt": "which output is the sound going to right now?",
+  "answer_schema": {
+    "type": "object",
+    "required": ["sink", "is_buds"],
+    "properties": {
+      "sink": {"type": "string"},
+      "is_buds": {"type": "boolean"},
+      "unknown": {"type": "boolean"},
+      "reason": {"type": "string"}
+    }
+  },
+  "allowed_side_effects": [],
+  "needs": [],
+  "budget": {"seconds": 240, "usd": 1.0, "screenshots": 0},
+  "oracle_s": 0,
+  "tags": ["audio", "pc audio", "night-safe"]
+}

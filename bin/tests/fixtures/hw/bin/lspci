@@ -1,0 +1,71 @@
+#!/bin/sh
+cat <<'EOF'
+Slot:	00:00.0
+Class:	Host bridge
+Vendor:	Intel Corporation
+Device:	Device 4621
+SVendor:	ASUSTeK Computer Inc.
+SDevice:	Device 1e42
+Rev:	02
+ProgIf:	00
+IOMMUGroup:	1
+
+Slot:	00:02.0
+Class:	VGA compatible controller
+Vendor:	Intel Corporation
+Device:	Alder Lake-P GT2 [Iris Xe Graphics]
+SVendor:	ASUSTeK Computer Inc.
+SDevice:	Device 1e42
+Rev:	0c
+ProgIf:	00
+Driver:	i915
+Module:	i915
+IOMMUGroup:	0
+
+Slot:	00:0e.0
+Class:	RAID bus controller
+Vendor:	Intel Corporation
+Device:	Volume Management Device NVMe RAID Controller
+SVendor:	ASUSTeK Computer Inc.
+SDevice:	Device 1e42
+Rev:	02
+ProgIf:	00
+Driver:	vmd
+Module:	vmd
+IOMMUGroup:	3
+
+Slot:	e1:00.0
+Class:	Non-Volatile memory controller
+Vendor:	Intel Corporation
+Device:	SSD 670p Series [Keystone Harbor]
+SVendor:	Intel Corporation
+SDevice:	Device 390b
+Rev:	01
+ProgIf:	02
+Driver:	nvme
+Module:	nvme
+IOMMUGroup:	16
+
+Slot:	02:00.0
+Class:	Network controller
+Vendor:	MEDIATEK Corp.
+Device:	MT7921 802.11ax PCIe Wireless Network Adapter [Filogic 330]
+SVendor:	AzureWave
+SDevice:	Device 4680
+ProgIf:	00
+Driver:	mt7921e
+Module:	mt7921e
+IOMMUGroup:	14
+
+Slot:	00:1f.3
+Class:	Audio device
+Vendor:	Intel Corporation
+Device:	Alder Lake PCH-P High Definition Audio Controller
+SVendor:	ASUSTeK Computer Inc.
+SDevice:	Device 1e42
+Rev:	01
+ProgIf:	00
+Driver:	snd_hda_intel
+Module:	snd_hda_intel
+IOMMUGroup:	9
+EOF

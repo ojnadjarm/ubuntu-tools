@@ -1,0 +1,273 @@
+#!/usr/bin/env bash
+# pc audio graph|sinks|sources|streams|links|devices|xruns|default|move|vol|mute|loglevel|residue — the PipeWire graph as JSON; mutations ledgered.
+set -uo pipefail
+export LC_ALL=C
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+SELF="$(readlink -f "$0")"
+
+pc_usage 'usage: pc audio [graph] [--json]
+       pc audio sinks|sources|streams|links|devices [--json]
+       pc audio xruns [--seconds 1] [--json]
+       pc audio default [sink|source] [<name>] [--apply]
+       pc audio move <stream-id|app-name> <sink-name|earbuds|tv> [--apply]
+       pc audio vol <node> <0-150%|+N|-N> [--apply]
+       pc audio mute <node> on|off|toggle [--apply]
+       pc audio loglevel [0-5] [--apply]
+       pc audio residue [--json]
+
+Nodes are matched by name (node.name or application.name), never index — the bluez node index
+changes on every A2DP<->HFP switch (toolbox §4). `earbuds`/`tv` resolve to the known sink names.
+Mutations print `would: <before> → <after>` without --apply; with it they are ledgered and
+undoable with `pc undo`. `loglevel` above 2 should not be left raised (quirks: pipewire log
+storm) — undo it promptly.' "$@"
+
+pc_opt "$@"
+sub="${PC_ARGS[0]:-graph}"; a1="${PC_ARGS[1]:-}"; a2="${PC_ARGS[2]:-}"
+
+DUMP=$(pc_cmd pw-dump)
+
+## --- lookups over $DUMP ------------------------------------------------------
+meta_val() { # meta_val <metadata.name> <key> — the metadata value (string or number), unquoted.
+  jq -r --arg m "$1" --arg k "$2" '
+    .[] | select(.type=="PipeWire:Interface:Metadata" and .props["metadata.name"]==$m)
+    | (.metadata[]? | select(.key==$k) | .value) as $v
+    | (if ($v|type)=="object" then ($v.name // empty) else $v end)' <<<"$DUMP" | head -1
+}
+DEFAULT_SINK=$(meta_val default default.audio.sink)
+DEFAULT_SOURCE=$(meta_val default default.audio.source)
+LOGLEVEL=$(meta_val settings log.level); : "${LOGLEVEL:=2}"
+
+resolve_sink_alias() {
+  case "$1" in
+    earbuds) printf '%s' 'bluez_output.AC_80_0A_27_65_6C.1';;
+    tv)      printf '%s' 'alsa_output.pci-0000_00_1f.3.hdmi-stereo';;
+    *)       printf '%s' "$1";;
+  esac
+}
+
+# node_id_by_name <name> — a node's pipewire id by node.name or application.name (sinks aliased).
+node_id_by_name() {
+  local name; name=$(resolve_sink_alias "$1")
+  jq -r --arg n "$name" '
+    [ .[] | select(.type=="PipeWire:Interface:Node")
+      | select((.info.props["node.name"]==$n) or (.info.props["application.name"]==$n))
+      | .id ] | first // empty' <<<"$DUMP"
+}
+
+## --- model builders -----------------------------------------------------------
+# endpoints_json <media.class> <default-node-name> — sinks and sources differ only in those two.
+endpoints_json() {
+  jq -c --arg cls "$1" --arg def "$2" '
+    def vol: ((.info.params.Props // [])[0].channelVolumes // [1] | max | pow(.;1/3) * 100 | round);
+    def mut: ((.info.params.Props // [])[0].mute // false);
+    [ .[] | select(.type=="PipeWire:Interface:Node" and .info.props["media.class"]==$cls)
+      | {id, name: .info.props["node.name"], description: .info.props["node.description"],
+         device_id: .info.props["device.id"], volume_pct: vol, mute: mut,
+         state: .info.state, default: (.info.props["node.name"]==$def)} ]' <<<"$DUMP"
+}
+sinks_json()   { endpoints_json Audio/Sink   "$DEFAULT_SINK"; }
+sources_json() { endpoints_json Audio/Source "$DEFAULT_SOURCE"; }
+streams_json() {
+  jq -c '
+    def vol: ((.info.params.Props // [])[0].channelVolumes // [1] | max | pow(.;1/3) * 100 | round);
+    def mut: ((.info.params.Props // [])[0].mute // false);
+    ([ .[] | select(.type=="PipeWire:Interface:Link") ]) as $links
+    | [ .[] | select(.type=="PipeWire:Interface:Node"
+                      and ((.info.props["media.class"]//"")|test("^Stream/(Output|Input)/Audio$")))
+      | . as $n
+      | { id, name: .info.props["node.name"],
+          app: (.info.props["application.name"] // .info.props["node.name"]),
+          direction: (if .info.props["media.class"]=="Stream/Output/Audio" then "output" else "input" end),
+          volume_pct: vol, mute: mut, state: .info.state,
+          peer_node: (if .info.props["media.class"]=="Stream/Output/Audio"
+                      then ($links | map(select(.info["output-node-id"]==$n.id)) | first | .info["input-node-id"])
+                      else ($links | map(select(.info["input-node-id"]==$n.id)) | first | .info["output-node-id"]) end) } ]' <<<"$DUMP"
+}
+links_json() {
+  jq -c '[ .[] | select(.type=="PipeWire:Interface:Link")
+    | {id, output_node: .info["output-node-id"], output_port: .info["output-port-id"],
+       input_node: .info["input-node-id"], input_port: .info["input-port-id"], state: .info.state} ]' <<<"$DUMP"
+}
+devices_json() {
+  jq -c '[ .[] | select(.type=="PipeWire:Interface:Device")
+    | {id, name: .info.props["device.name"], api: .info.props["device.api"],
+       description: .info.props["device.description"],
+       active_profile: ((.info.params.Profile // [])[0].name // null)} ]' <<<"$DUMP"
+}
+
+## --- xruns (pw-top's ERR column is a running total — one -b sample is enough) --
+xruns_rows() {
+  local n=1
+  [ "${SECONDS_:-0}" != 0 ] && n=${SECONDS_%.*}; [ "${n:-0}" -ge 1 ] || n=1
+  pc_cmd pw-top -b -n "$n" 2>/dev/null | awk '
+    /ID[ ]+QUANT/{hdr=NR; delete rows; nrows=0}
+    hdr && NR>hdr {rows[++nrows]=$0}
+    END{for(i=1;i<=nrows;i++) print rows[i]}' \
+    | awk '$2 ~ /^[0-9]+$/ {print $2, $9, $NF}'
+}
+xruns_json() {
+  xruns_rows | jq -R -s -c 'split("\n") | map(select(length>0) | split(" "))
+    | map({id: (.[0]|tonumber), xruns: (.[1]|tonumber), name: .[2]})'
+}
+
+## --- graph --------------------------------------------------------------------
+graph_json() {
+  pc_json '{sinks:$si, sources:$so, streams:$st, links:$li, devices:$de,
+            default:{sink:$ds, source:$dso}, log_level:$ll, xruns:$xr,
+            xruns_total:($xr|map(.xruns)|add // 0)}' \
+    --argjson si "$(sinks_json)" --argjson so "$(sources_json)" --argjson st "$(streams_json)" \
+    --argjson li "$(links_json)" --argjson de "$(devices_json)" --arg ds "$DEFAULT_SINK" \
+    --arg dso "$DEFAULT_SOURCE" --argjson ll "$LOGLEVEL" --argjson xr "$(xruns_json)"
+}
+graph_text() {
+  local j; j=$(graph_json)
+  printf 'log.level %s   xruns %s\n' "$LOGLEVEL" "$(jq '.xruns_total' <<<"$j")"
+  jq -r '.sinks[]   | "sink    \(if .default then "*" else " " end) \(.name)  vol \(.volume_pct)%\(if .mute then " MUTE" else "" end)"' <<<"$j"
+  jq -r '.sources[] | "source  \(if .default then "*" else " " end) \(.name)  vol \(.volume_pct)%\(if .mute then " MUTE" else "" end)"' <<<"$j"
+  jq -r --argjson sinks "$(sinks_json)" --argjson sources "$(sources_json)" '
+    .streams[] | . as $s
+    | ($sinks + $sources | map(select(.id == $s.peer_node)) | first | .name // "?") as $peer
+    | "stream  \($s.direction)  \($s.app) -> \($peer)  vol \($s.volume_pct)%\(if $s.mute then " MUTE" else "" end)"' <<<"$j"
+  jq -r '.devices[] | select(.active_profile != null) | "device  \(.name)  profile \(.active_profile)"' <<<"$j"
+}
+
+## --- hidden read-back helpers (used as PC_READ_CMD, invoked via `pc audio …`) --
+case "$sub" in
+  _vol-of)
+    id=$a1; out=$(pc_cmd wpctl get-volume "$id" 2>/dev/null)
+    awk '{printf "%d%%\n", $2*100}' <<<"$out"; exit 0;;
+  _mute-of)
+    id=$a1; out=$(pc_cmd wpctl get-volume "$id" 2>/dev/null)
+    case "$out" in *MUTED*) echo on;; *) echo off;; esac; exit 0;;
+  _sink-of)
+    idx=$a1
+    serial=$(pc_cmd pactl -f json list sink-inputs | jq -r --argjson i "$idx" '.[] | select(.index==$i) | .sink // empty')
+    [ -n "$serial" ] || exit 0
+    pc_cmd pw-dump | jq -r --argjson s "$serial" \
+      '.[] | select(.type=="PipeWire:Interface:Node" and (.info.props["object.serial"]|tostring)==($s|tostring)) | .info.props["node.name"] // empty'
+    exit 0;;
+  _loglevel-of)
+    pc_cmd pw-metadata -n settings 0 log.level 2>/dev/null | sed -n "s/.*value:'\\([0-9]*\\)'.*/\\1/p" | tail -1
+    exit 0;;
+esac
+
+## --- mutating verbs -------------------------------------------------------------
+need_arg() { [ -n "${1:-}" ] || { printf 'pc audio: %s needs a value (see -h)\n' "$2" >&2; exit 2; }; }
+
+do_default() {
+  local kind=$1 name=$2
+  if [ -z "$kind" ]; then
+    [ "$JSON" = 1 ] && pc_json '{sink:$s,source:$so}' --arg s "$DEFAULT_SINK" --arg so "$DEFAULT_SOURCE" \
+      || printf 'default sink   %s\ndefault source %s\n' "$DEFAULT_SINK" "$DEFAULT_SOURCE"
+    return 0
+  fi
+  case "$kind" in sink|source) ;; *) echo 'pc audio: default takes sink or source' >&2; exit 2;; esac
+  need_arg "$name" "default $kind"
+  local before id
+  [ "$kind" = sink ] && before=$DEFAULT_SINK || before=$DEFAULT_SOURCE
+  id=$(node_id_by_name "$name")
+  [ -n "$id" ] || { printf 'pc audio: no %s named %s\n' "$kind" "$name" >&2; exit 1; }
+  PC_READ_CMD="pactl get-default-$kind" pc_apply "default.$kind" "$before" "$name" \
+    "$SELF default $kind $before --apply" wpctl set-default "$id"
+}
+
+do_move() {
+  local target=$1 sink=$2
+  need_arg "$target" move; need_arg "$sink" move
+  local sink_name idx before
+  sink_name=$(resolve_sink_alias "$sink")
+  idx=$(pc_cmd pactl -f json list sink-inputs | jq -r --arg t "$target" '
+    .[] | select((.properties["node.name"]==$t) or (.properties["application.name"]==$t)
+                  or (.properties["object.id"]==$t) or ((.index|tostring)==$t)) | .index' | head -1)
+  [ -n "$idx" ] || { printf 'pc audio: no stream matching %s\n' "$target" >&2; exit 1; }
+  before=$("$SELF" _sink-of "$idx")
+  [ "$before" = "$sink_name" ] && { printf 'already: stream.%s %s\n' "$target" "$sink_name"; return 0; }
+  PC_READ_CMD="$SELF _sink-of $idx" pc_apply "stream.$target" "$before" "$sink_name" \
+    "$SELF move $target $before --apply" pactl move-sink-input "$idx" "$sink_name"
+}
+
+do_vol() {
+  local name=$1 val=$2 id cur cur_pct after_pct
+  need_arg "$name" vol; need_arg "$val" vol
+  id=$(node_id_by_name "$name")
+  [ -n "$id" ] || { printf 'pc audio: no node named %s\n' "$name" >&2; exit 1; }
+  cur=$("$SELF" _vol-of "$id"); cur_pct=${cur%\%}
+  case "$val" in
+    +[0-9]*) after_pct=$((cur_pct + ${val#+}));;
+    -[0-9]*) after_pct=$((cur_pct - ${val#-}));;
+    *%) after_pct=${val%\%};;
+    [0-9]*) after_pct=$val;;
+    *) echo 'pc audio: vol takes 0-150%, +N or -N' >&2; exit 2;;
+  esac
+  [ "$after_pct" -lt 0 ] && after_pct=0
+  [ "$after_pct" -gt 150 ] && after_pct=150
+  [ "$cur_pct" = "$after_pct" ] && { printf 'already: vol.%s %s%%\n' "$name" "$after_pct"; return 0; }
+  PC_READ_CMD="$SELF _vol-of $id" pc_apply "vol.$name" "${cur_pct}%" "${after_pct}%" \
+    "$SELF vol $name ${cur_pct}% --apply" wpctl set-volume "$id" "${after_pct}%"
+}
+
+do_mute() {
+  local name=$1 want=$2 id cur after
+  need_arg "$name" mute; need_arg "$want" mute
+  case "$want" in on|off|toggle) ;; *) echo 'pc audio: mute takes on, off or toggle' >&2; exit 2;; esac
+  id=$(node_id_by_name "$name")
+  [ -n "$id" ] || { printf 'pc audio: no node named %s\n' "$name" >&2; exit 1; }
+  cur=$("$SELF" _mute-of "$id")
+  case "$want" in
+    on) after=on;; off) after=off;;
+    toggle) [ "$cur" = on ] && after=off || after=on;;
+  esac
+  [ "$cur" = "$after" ] && { printf 'already: mute.%s %s\n' "$name" "$after"; return 0; }
+  local wire; [ "$after" = on ] && wire=1 || wire=0
+  PC_READ_CMD="$SELF _mute-of $id" pc_apply "mute.$name" "$cur" "$after" \
+    "$SELF mute $name $cur --apply" wpctl set-mute "$id" "$wire"
+}
+
+do_loglevel() {
+  local val=$1 cur
+  cur=$("$SELF" _loglevel-of); : "${cur:=2}"
+  if [ -z "$val" ]; then
+    [ "$JSON" = 1 ] && pc_json '{log_level:$l}' --argjson l "$cur" || printf 'log.level %s\n' "$cur"
+    return 0
+  fi
+  case "$val" in [0-5]) ;; *) echo 'pc audio: loglevel takes 0-5' >&2; exit 2;; esac
+  [ "$cur" = "$val" ] && { printf 'already: log.level %s\n' "$val"; return 0; }
+  PC_READ_CMD="$SELF _loglevel-of" pc_apply log.level "$cur" "$val" \
+    "$SELF loglevel $cur --apply" pw-metadata -n settings 0 log.level "$val"
+}
+
+do_residue() {
+  local nulls pwcat dead
+  nulls=$(pc_cmd pactl list modules short | grep -c 'module-null-sink' || true)
+  pwcat=$(jq '[.[] | select(.type=="PipeWire:Interface:Node"
+    and ((.info.props["node.name"]//"")|test("pw-cat|pw_cat")))] | length' <<<"$DUMP")
+  dead=$(jq '[.[] | select(.type=="PipeWire:Interface:Link" and .info.state=="error")] | length' <<<"$DUMP")
+  if [ "$JSON" = 1 ]; then
+    pc_json '{null_sinks:$n, pwcat_streams:$p, dead_links:$d, clean: (($n+$p+$d)==0)}' \
+      --argjson n "$nulls" --argjson p "$pwcat" --argjson d "$dead"
+  else
+    printf 'null sinks %s   pw-cat streams %s   dead links %s   %s\n' "$nulls" "$pwcat" "$dead" \
+      "$([ $((nulls + pwcat + dead)) -eq 0 ] && echo clean || echo RESIDUE)"
+  fi
+}
+
+## --- dispatch -------------------------------------------------------------------
+case "$sub" in
+  graph|'')
+    [ "$JSON" = 1 ] && graph_json || graph_text;;
+  sinks)   [ "$JSON" = 1 ] && sinks_json   || sinks_json   | jq -r '.[] | [.name,(.volume_pct|tostring)+"%",.mute,.default] | @tsv' | column -t;;
+  sources) [ "$JSON" = 1 ] && sources_json || sources_json | jq -r '.[] | [.name,(.volume_pct|tostring)+"%",.mute,.default] | @tsv' | column -t;;
+  streams) [ "$JSON" = 1 ] && streams_json || streams_json | jq -r '.[] | [.app,.direction,(.volume_pct|tostring)+"%",.mute] | @tsv' | column -t;;
+  links)   [ "$JSON" = 1 ] && links_json   || links_json   | jq -r '.[] | [.output_node,.input_node,.state] | @tsv' | column -t;;
+  devices) [ "$JSON" = 1 ] && devices_json || devices_json | jq -r '.[] | [.name,.api,(.active_profile//"-")] | @tsv' | column -t;;
+  xruns)   [ "$JSON" = 1 ] && pc_json '{xruns:$x, total:($x|map(.xruns)|add // 0)}' --argjson x "$(xruns_json)" \
+             || xruns_json | jq -r '.[] | [.name,(.xruns|tostring)] | @tsv' | column -t;;
+  default) do_default "$a1" "$a2";;
+  move)    do_move "$a1" "$a2";;
+  vol)     do_vol "$a1" "$a2";;
+  mute)    do_mute "$a1" "$a2";;
+  loglevel) do_loglevel "$a1";;
+  residue) do_residue;;
+  *) printf 'pc audio: unknown verb %s (try -h)\n' "$sub" >&2; exit 2;;
+esac

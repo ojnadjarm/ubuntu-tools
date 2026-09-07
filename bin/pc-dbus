@@ -1,0 +1,261 @@
+#!/usr/bin/env bash
+# pc dbus list|tree|introspect|get|set|call|monitor|find|owner — the session, system and a11y buses as JSON.
+#
+# JSON shapes (stable — PT09 `pc mutter` and PT12 `pc bt` build on them; do not rename keys):
+#   list       {"bus":B,"names":[{name,pid,process,user,connection,unit,session,description,activatable}]}
+#   tree       {"bus":B,"name":N,"paths":[P,…]}
+#   introspect {"bus":B,"name":N,"path":P,"interfaces":[{"name":I,
+#                 "methods":[{name,in,out}],"properties":[{name,type,access,value}],"signals":[{name,type}]}]}
+#   get        {"bus":B,"name":N,"path":P,"interface":I,"property":M,"type":SIG,"data":VALUE}
+#   call       {"bus":B,"name":N,"path":P,"interface":I,"member":M,"signature":SIG,"type":SIG,"data":[…]}
+#   find       {"query":Q,"matches":[{bus,name,path,interface,member,kind}]}
+#   owner      {"bus":B,"name":N,"unique":U,"pid":N|null,"comm":S,"cmdline":S,"unit":S,"cgroup":S}
+#   monitor    NDJSON, one busctl message object per line ({type,sender,destination,path,interface,member,payload})
+#   set        `would: <target> <before> → <after>` / ledgered via pc_apply (`pc undo <id>` rolls it back)
+# `type`/`data` come from `busctl --json=short` verbatim, so a caller can always read `.data`.
+set -uo pipefail
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+
+pc_usage 'usage: pc dbus list [--user|--system|--a11y] [--activatable] [--json]
+       pc dbus tree <name> [--json]
+       pc dbus introspect <name> [<path>] [--json]
+       pc dbus get <name> [<path>] <iface.prop> [--json]
+       pc dbus set <name> [<path>] <iface.prop> <value> [--apply]
+       pc dbus call <name> [<path>] [<iface>.]<member> [args…] [--sig S] [--json] [--apply]
+       pc dbus monitor [<name>] [--match <rule>] [--seconds N] [--json]
+       pc dbus find <substr> [--user|--system|--a11y|--all] [--json] [--fresh]
+       pc dbus owner <name> [--json]
+
+Bus: --user (default), --system, --a11y (the at-spi bus). The object path and the interface are
+resolved from introspection when they are unique; --sig gives the argument signature explicitly.
+A call whose member does not start with Get/List/Introspect/Ping/Describe/Query/Read/Can/Is/Has
+is a mutation: without --apply it prints `would:`. Monitors are bounded (default 5 s, max 120).
+Args are plain tokens, one JSON array ('"'"'[1,"x",true]'"'"'), or a variant as <v:TYPE:VALUE>.' "$@"
+
+RAW=("$@")
+BUS=user; MATCH=""; SIG=""; SCOPE=""; ACTIVATABLE=0; SECS=5; ARGS=()
+while [ $# -gt 0 ]; do
+  case $1 in
+    --json) JSON=1;; --apply) APPLY=1;; --fresh) FRESH=1;;
+    --user|--session) BUS=user;; --system) BUS=system;; --a11y) BUS=a11y;; --all) SCOPE=all;;
+    --activatable) ACTIVATABLE=1;;
+    --match) MATCH=$2; shift;; --match=*) MATCH=${1#*=};;
+    --sig) SIG=$2; shift;; --sig=*) SIG=${1#*=};;
+    --seconds) SECS=$2; shift;; --seconds=*) SECS=${1#*=};;
+    -h|--help) printf '%s\n' "$PC_USAGE"; exit 0;;
+    --) shift; ARGS+=("$@"); break;;
+    -?*) echo "pc dbus: unknown option $1" >&2; exit 2;;
+    *) ARGS+=("$1");;
+  esac
+  shift
+done
+sub="${ARGS[0]:-list}"; ARGS=("${ARGS[@]:1}")
+die() { printf 'pc dbus: %s\n' "$1" >&2; exit "${2:-1}"; }
+
+## --- the D-Bus deny-list (PLAN-PCTOOLS §1 rule 6) --------------------------------------------
+# The cases live in pclib's pc_guard (PT15) so every script shares them; checked on the raw argv,
+# before anything connects to a bus.
+dbus_guard() { pc_guard "$@"; }
+
+## --- bus plumbing -----------------------------------------------------------
+A11Y_ADDR=""
+bus_flag() {
+  case $BUS in
+    user) printf -- '--user';;
+    system) printf -- '--system';;
+    a11y)
+      [ -n "$A11Y_ADDR" ] || A11Y_ADDR=$(busctl --user --json=short call org.a11y.Bus /org/a11y/bus \
+        org.a11y.Bus GetAddress 2>/dev/null | jq -r '.data[0] // empty')
+      [ -n "$A11Y_ADDR" ] || die 'the a11y bus is not running (at-spi-dbus-bus.service)'
+      printf -- '--address=%s' "$A11Y_ADDR";;
+  esac
+}
+bc() { pc_cmd busctl "$(bus_flag)" "$@"; }
+
+## --- introspection ----------------------------------------------------------
+# One TSV row per member: iface \t kind \t name \t signature \t result-or-value \t flags.
+members() {
+  bc introspect --no-pager "$1" "$2" 2>/dev/null | awk '
+    NR == 1 { next }
+    { flags = ""; n = NF
+      if ($2 == "interface") { iface = $1; next }
+      if ($1 !~ /^\./) next
+      while (n > 4 && $n ~ /^(emits-change|writable|const|invalidates|hidden|unprivileged|deprecated)$/) {
+        flags = (flags == "" ? $n : $n " " flags); n--
+      }
+      if (flags == "" && n > 4 && $n == "-") n--
+      val = ""; for (i = 4; i <= n; i++) val = (val == "" ? $i : val " " $i)
+      printf "%s\t%s\t%s\t%s\t%s\t%s\n", iface, $2, substr($1, 2), $3, val, flags }'
+}
+# resolve_path <name> — the single object path that carries a non-standard interface.
+resolve_path() {
+  local p n=0 hit=""
+  while read -r p; do
+    members "$1" "$p" | grep -qv '^org.freedesktop.DBus' || continue
+    hit=$p; n=$((n + 1)); [ $n -gt 1 ] && break
+  done < <(paths "$1")
+  [ "$n" = 1 ] || die "several object paths under $1 — give one (pc dbus tree $1)" 2
+  printf '%s\n' "$hit"
+}
+paths() { bc tree --no-pager --list "$1" 2>/dev/null | sed 's/^ *//' | grep '^/'; }
+# resolve_member <name> <path> <spec> <kind> — prints "iface\tname\tsignature\tresult".
+resolve_member() {
+  local name=$1 path=$2 spec=$3 kind=$4 tbl m i hits
+  tbl=$(members "$name" "$path")
+  [ -n "$tbl" ] || die "cannot introspect $name $path"
+  case $spec in
+    *.*) i=${spec%.*}; m=${spec##*.}
+         hits=$(awk -F'\t' -v i="$i" -v m="$m" -v k="$kind" '$1==i && $3==m && $2==k' <<<"$tbl")
+         [ -n "$hits" ] || { m=$spec; i=""; };;
+    *)   m=$spec; i="";;
+  esac
+  [ -n "$i" ] || hits=$(awk -F'\t' -v m="$m" -v k="$kind" '$3==m && $2==k && $1 !~ /^org.freedesktop.DBus/' <<<"$tbl")
+  [ -n "$hits" ] || hits=$(awk -F'\t' -v m="$m" -v k="$kind" '$3==m && $2==k' <<<"$tbl")
+  [ -n "$hits" ] || die "no $kind '$spec' on $name $path"
+  [ "$(wc -l <<<"$hits")" = 1 ] || die "'$spec' is on several interfaces: $(cut -f1 <<<"$hits" | tr '\n' ' ')" 2
+  cut -f1,3,4,5 <<<"$hits"
+}
+# name/path/spec off the front of ARGS, leaving the rest.
+NAME=""; PATH_=""; SPEC=""
+take_target() {
+  NAME="${ARGS[0]:-}"; [ -n "$NAME" ] || die "need a bus name" 2
+  ARGS=("${ARGS[@]:1}")
+  case "${ARGS[0]:-}" in /*) PATH_="${ARGS[0]}"; ARGS=("${ARGS[@]:1}");; *) PATH_=$(resolve_path "$NAME") || exit $?;; esac
+  if [ "${1:-}" = member ]; then
+    SPEC="${ARGS[0]:-}"; [ -n "$SPEC" ] || die "need <iface.member>" 2; ARGS=("${ARGS[@]:1}")
+  fi
+}
+# busctl argument tokens: a JSON array expands, <v:TYPE:VALUE> becomes two tokens, else verbatim.
+BARGS=()
+build_args() {
+  local a t v
+  for a in "$@"; do
+    case $a in
+      '<v:'*'>') t=${a#<v:}; t=${t%>}; BARGS+=("${t%%:*}" "${t#*:}");;
+      '['*']')  while IFS= read -r v; do BARGS+=("$v"); done < <(jq -r '.[] | if type=="string" then . else tostring end' <<<"$a");;
+      *) BARGS+=("$a");;
+    esac
+  done
+}
+
+case "$sub" in
+list)
+  out=$(bc list --no-pager --json=short $( [ "$ACTIVATABLE" = 1 ] && echo --activatable || echo --acquired ) 2>/dev/null)
+  [ -n "$out" ] || die "cannot read the $BUS bus"
+  if [ "$JSON" = 1 ]; then
+    pc_json '{bus:$b,names:($n|map(.+{activatable:$a}))}' -c --arg b "$BUS" --argjson a "$([ "$ACTIVATABLE" = 1 ] && echo true || echo false)" --argjson n "$out"
+  else
+    jq -r '.[] | [.name, (.pid // "-"), (.process // "-"), (.unit // "-")] | @tsv' <<<"$out" | column -t -s $'\t'
+  fi;;
+
+tree)
+  NAME="${ARGS[0]:-}"; [ -n "$NAME" ] || die "need a bus name" 2
+  ps_=$(paths "$NAME"); [ -n "$ps_" ] || die "no objects under $NAME"
+  if [ "$JSON" = 1 ]; then
+    pc_json '{bus:$b,name:$n,paths:($p|split("\n"))}' -c --arg b "$BUS" --arg n "$NAME" --arg p "$ps_"
+  else printf '%s\n' "$ps_"; fi;;
+
+introspect)
+  take_target
+  tbl=$(members "$NAME" "$PATH_"); [ -n "$tbl" ] || die "cannot introspect $NAME $PATH_"
+  if [ "$JSON" = 1 ]; then
+    printf '%s\n' "$tbl" | jq -R -s --arg b "$BUS" --arg n "$NAME" --arg p "$PATH_" -c '
+      [ split("\n")[] | select(length > 0) | split("\t")
+        | {iface:.[0], kind:.[1], name:.[2], sig:.[3], val:.[4], flags:.[5]} ]
+      | group_by(.iface)
+      | {bus:$b, name:$n, path:$p, interfaces: map({
+          name: .[0].iface,
+          methods:    [ .[] | select(.kind=="method")   | {name:.name, in:.sig, out:.val} ],
+          properties: [ .[] | select(.kind=="property") | {name:.name, type:.sig,
+                          access: (if (.flags|test("writable")) then "readwrite" else "read" end),
+                          value: (.val | (try fromjson catch .)) } ],
+          signals:    [ .[] | select(.kind=="signal")   | {name:.name, type:.sig} ] })}'
+  else
+    printf '%s\n' "$tbl" | awk -F'\t' '{printf "%-38s %-9s %-10s %s %s\n", $1 "." $3, $2, $4, $5, $6}'
+  fi;;
+
+get)
+  take_target member
+  r=$(resolve_member "$NAME" "$PATH_" "$SPEC" property) || exit $?
+  IFS=$'\t' read -r i m sig _ <<<"$r"
+  out=$(bc get-property --json=short "$NAME" "$PATH_" "$i" "$m" 2>&1) || die "$out"
+  if [ "$JSON" = 1 ]; then
+    pc_json '$o + {bus:$b,name:$n,path:$p,interface:$i,property:$m}' -c --arg b "$BUS" --arg n "$NAME" \
+      --arg p "$PATH_" --arg i "$i" --arg m "$m" --argjson o "$out"
+  else jq -r '.data | if type=="string" then . else tostring end' <<<"$out"; fi;;
+
+set)
+  dbus_guard "${RAW[@]}"
+  take_target member
+  val="${ARGS[0]:-}"; [ -n "$val" ] || die "need a value" 2
+  r=$(resolve_member "$NAME" "$PATH_" "$SPEC" property) || exit $?
+  IFS=$'\t' read -r i m sig _ <<<"$r"
+  [ -n "$SIG" ] && sig=$SIG
+  target="$BUS:$NAME$PATH_ $i.$m"
+  rd="busctl $(bus_flag) get-property --json=short '$NAME' '$PATH_' '$i' '$m' | jq -r '.data|tostring'"
+  before=$(eval "$rd" 2>/dev/null)
+  PC_READ_CMD="$rd" pc_apply "$target" "$before" "$val" \
+    "pc dbus --$BUS set '$NAME' '$PATH_' '$i.$m' '$before' --apply" \
+    busctl "$(bus_flag)" set-property "$NAME" "$PATH_" "$i" "$m" "$sig" "$val";;
+
+call)
+  dbus_guard "${RAW[@]}"
+  take_target member
+  r=$(resolve_member "$NAME" "$PATH_" "$SPEC" method) || exit $?
+  IFS=$'\t' read -r i m sig _ <<<"$r"
+  [ -n "$SIG" ] && sig=$SIG
+  [ "$sig" = "-" ] && sig=""
+  build_args ${ARGS[@]+"${ARGS[@]}"}
+  mutating=1
+  case $m in Get*|List*|Introspect*|Ping*|Describe*|Query*|Read*|Can*|Is*|Has*) mutating=0;; esac
+  if [ "$mutating" = 1 ] && [ "$APPLY" != 1 ]; then
+    printf 'would: call %s:%s%s %s.%s(%s) — rerun with --apply\n' "$BUS" "$NAME" "$PATH_" "$i" "$m" "${BARGS[*]:-}"
+    exit 0
+  fi
+  out=$(bc call --json=short "$NAME" "$PATH_" "$i" "$m" ${sig:+"$sig"} ${BARGS[@]+"${BARGS[@]}"} 2>&1) || die "$out"
+  [ -n "$out" ] || out='{"type":"","data":[]}'
+  if [ "$JSON" = 1 ]; then
+    pc_json '$o + {bus:$b,name:$n,path:$p,interface:$i,member:$m,signature:$s}' -c --arg b "$BUS" \
+      --arg n "$NAME" --arg p "$PATH_" --arg i "$i" --arg m "$m" --arg s "$sig" --argjson o "$out"
+  else jq -r '.data[]? | if type=="string" then . else tostring end' <<<"$out"; fi;;
+
+monitor)
+  [ "$SECS" -ge 1 ] 2>/dev/null || die "--seconds must be a positive integer" 2
+  [ "$SECS" -le 120 ] || die "--seconds is capped at 120" 2
+  set -- ${ARGS[0]+"${ARGS[0]}"}
+  timeout -k 1 "$SECS" busctl "$(bus_flag)" monitor --json=short ${MATCH:+--match="$MATCH"} "$@" 2>/dev/null
+  rc=$?; [ $rc = 124 ] || [ $rc = 0 ] || exit $rc; exit 0;;
+
+find)
+  q="${ARGS[0]:-}"; [ -n "$q" ] || die "need a substring" 2
+  buses=$BUS; [ "$SCOPE" = all ] && buses="user system"
+  idx=""
+  for b in $buses; do
+    idx+=$(cached "dbus-index-$b" 900 python3 "$BIN/pc_dbus.py" index --bus "$b")$'\n'
+  done
+  hits=$(printf '%s\n' "$idx" | grep -i -- "$q" | grep -v '^$')
+  [ -n "$hits" ] || exit 1
+  if [ "$JSON" = 1 ]; then
+    printf '%s\n' "$hits" | jq -R -s --arg q "$q" -c '{query:$q, matches:
+      [ split("\n")[] | select(length>0) | split("\t")
+        | {bus:.[0], name:.[1], path:.[2], interface:.[3], member:.[4], kind:.[5]} ]}'
+  else
+    printf '%s\n' "$hits" | awk -F'\t' '{printf "%-7s %-42s %-46s %s%s %s\n", $1, $2, $3, $4, ($5=="" ? "" : "." $5), $6}'
+  fi;;
+
+owner)
+  NAME="${ARGS[0]:-}"; [ -n "$NAME" ] || die "need a bus name" 2
+  st=$(bc status --no-pager "$NAME" 2>/dev/null) || die "no such name $NAME"
+  [ -n "$st" ] || die "no such name $NAME"
+  uniq=$(bc call --json=short org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus \
+    GetNameOwner s "$NAME" 2>/dev/null | jq -r '.data[0] // ""')
+  fld() { sed -n "s/^$1=//p" <<<"$st" | head -1; }
+  if [ "$JSON" = 1 ]; then
+    pc_json '{bus:$b,name:$n,unique:$u,pid:($pid|tonumber?),comm:$c,cmdline:$cl,unit:$un,cgroup:$cg}' -c \
+      --arg b "$BUS" --arg n "$NAME" --arg u "$uniq" --arg pid "$(fld PID)" --arg c "$(fld Comm)" \
+      --arg cl "$(fld CommandLine)" --arg un "$(fld Unit)" --arg cg "$(fld CGroup)"
+  else printf '%s %s pid=%s %s\n  unit=%s\n  cgroup=%s\n' "$NAME" "$uniq" "$(fld PID)" "$(fld CommandLine)" "$(fld Unit)" "$(fld CGroup)"; fi;;
+
+*) die "unknown verb '$sub' (try: pc dbus -h)" 2;;
+esac

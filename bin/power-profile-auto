@@ -1,0 +1,8 @@
+#!/bin/sh
+# Set the power profile from the AC state: performance on AC, balanced on battery (T21).
+set -eu
+online=$(cat /sys/class/power_supply/A[CD]*/online 2>/dev/null | head -1 || echo 1)
+[ "${online:-1}" = 1 ] && profile=performance || profile=balanced
+current=$(powerprofilesctl get 2>/dev/null || echo unknown)
+[ "$current" = "$profile" ] || powerprofilesctl set "$profile"
+echo "power-profile-auto: online=${online:-?} profile=$profile (was $current)"

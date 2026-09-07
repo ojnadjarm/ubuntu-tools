@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Recorded stdout for `sensors -j`, so pc_cmd can be tested without lm-sensors.
+printf '{"coretemp-isa-0000":{"Package id 0":{"temp1_input":42.0}}}\n'

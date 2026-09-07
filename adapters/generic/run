@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Generic adapter for agent-exec: run $HARNESS_AGENT_CMD with the prompt in $PROMPT.
+# stdout = whatever the command prints · $RAW_OUT keeps the same text · no cost reporting.
+set -uo pipefail
+
+[ -n "${HARNESS_AGENT_CMD:-}" ] || { echo "generic adapter: HARNESS_AGENT_CMD is empty" >&2; exit 2; }
+PROMPT="$(cat "$PROMPT_FILE")"
+SYSTEM=""
+[ -n "${SYSTEM_FILE:-}" ] && [ -r "$SYSTEM_FILE" ] && SYSTEM="$(cat "$SYSTEM_FILE")"
+export PROMPT SYSTEM
+
+cmd=($HARNESS_AGENT_CMD)
+[ -n "${AGENT_TIMEOUT:-}" ] && cmd=(timeout "$AGENT_TIMEOUT" "${cmd[@]}")
+
+"${cmd[@]}" </dev/null | tee "$RAW_OUT"
+rc=${PIPESTATUS[0]}
+jq -n '{}' >"$META_OUT"
+exit "$rc"

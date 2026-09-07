@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Run one agent turn through adapters/$HARNESS_AGENT/run.
+# Result text on stdout, adapter diagnostics on stderr, {"exit","cost_usd","tokens"} in meta.json.
+set -uo pipefail
+. "$HOME/agents/bin/fleetlib.sh"
+fleet_path
+
+usage() {
+  echo 'usage: agent-exec --prompt-file F [--system-file F] [--model M] [--cwd D] [--name N]' >&2
+  echo '                  [--timeout S] [--budget-usd N] [--raw-out F] [--meta-out F] [--pid-file F]' >&2
+  exit 2
+}
+
+prompt=; system=; model=; cwd=.; name=; tmo=; budget=; raw=; meta=; pidfile=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --prompt-file) prompt="${2:-}"; shift 2 ;;
+    --system-file) system="${2:-}"; shift 2 ;;
+    --model)       model="${2:-}";  shift 2 ;;
+    --cwd)         cwd="${2:-}";    shift 2 ;;
+    --name)        name="${2:-}";   shift 2 ;;
+    --timeout)     tmo="${2:-}";    shift 2 ;;
+    --budget-usd)  budget="${2:-}"; shift 2 ;;
+    --raw-out)     raw="${2:-}";    shift 2 ;;
+    --meta-out)    meta="${2:-}";   shift 2 ;;
+    --pid-file)    pidfile="${2:-}";shift 2 ;;
+    -h|--help)     usage ;;
+    *) echo "agent-exec: unknown option $1" >&2; usage ;;
+  esac
+done
+[ -r "$prompt" ] || { echo "agent-exec: cannot read prompt file '$prompt'" >&2; exit 2; }
+[ -d "$cwd" ] || { echo "agent-exec: no such directory '$cwd'" >&2; exit 2; }
+
+adapter="$HARNESS_HOME/adapters/${HARNESS_AGENT:-generic}/run"
+[ -x "$adapter" ] || { echo "agent-exec: no adapter at $adapter" >&2; exit 2; }
+
+: "${raw:=$cwd/raw.json}"
+: "${meta:=$cwd/meta.json}"
+: >"$raw"; : >"$meta"
+
+export PROMPT_FILE="$prompt" SYSTEM_FILE="$system" MODEL="$model" AGENT_NAME="$name" \
+       AGENT_TIMEOUT="$tmo" BUDGET_USD="$budget" RAW_OUT="$raw" META_OUT="$meta"
+
+cd "$cwd" || exit 1
+"$adapter" </dev/null &
+child=$!
+[ -n "$pidfile" ] && printf '%s\n' "$child" >"$pidfile"
+trap 'kill "$child" 2>/dev/null' TERM INT
+wait "$child"; rc=$?
+[ -n "$pidfile" ] && rm -f "$pidfile"
+
+# The adapter owns cost/tokens; agent-exec owns the exit code.
+if [ -s "$meta" ] && jq -e . "$meta" >/dev/null 2>&1; then
+  jq --argjson e "$rc" '. + {exit:$e}' "$meta" >"$meta.tmp" && mv "$meta.tmp" "$meta"
+else
+  jq -n --argjson e "$rc" '{exit:$e}' >"$meta"
+fi
+exit "$rc"

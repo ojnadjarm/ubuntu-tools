@@ -1,0 +1,51 @@
+# Agent runner (technical reference)
+
+A persistent agent is a folder `~/agents/<name>/` run headless by `claude -p` from a systemd
+user timer. `~/agents/hello/` is the working template.
+
+## Layout
+
+| Path | What |
+|---|---|
+| `<name>/BRIEF.md` | the prompt (required — a folder without it is not an agent) |
+| `<name>/agent.env` | optional `MODEL`, `BUDGET_USD`, `TIMEOUT` (seconds), shell syntax |
+| `<name>/state/` | agent-owned scratch |
+| `<name>/logs/YYYY-MM-DD-HHMMSS-xxxx.log` / `.json` | stderr + result text, and the raw `--output-format json` |
+| `<name>/logs/index.tsv` | one row per run: start, end, exit, seconds, cost_usd, log |
+| `<name>/REPORT.md` | last run: metadata written by the runner + up to 5 lines written by the agent |
+| `~/agents/AGENT-PREAMBLE.md` | system prompt appended to every agent run |
+
+## Commands (`~/agents/bin`, on PATH via `~/.local/bin`)
+
+- `agent-run <name>` — one run, outside systemd (used by the unit; fine by hand).
+- `agent-enable <name> "<OnCalendar>"` — writes `~/.config/systemd/user/agent@<name>.timer.d/schedule.conf`
+  and enables the timer. The calendar expression is validated with `systemd-analyze calendar`.
+- `agent-disable <name>` / `agent-now <name>` — stop the timer / run once through systemd.
+- `agents-status` — name, enabled, schedule, next run, last run, last exit, last duration.
+- `agents-stop` — kill switch: stops every active `agent@*.service`, every `agent@*.timer` plus
+  `sentinel-check.timer` and `moodle-keep-weekly.timer` (stopped, not disabled), kills background
+  `claude agents` sessions (never interactive ones), sends one high-priority push.
+- `agents-start` / `agents-stop --resume` — re-enables exactly the units the roster in `~/CLAUDE.md`
+  lists and prints `list-timers`.
+
+## Units
+
+`agent@.service` (`Type=oneshot`, `TimeoutStartSec=3600`, `MemoryMax=8G`, `Nice=5`,
+`WorkingDirectory=%h/agents/%i`) and `agent@.timer` (`OnCalendar` only from the per-instance drop-in).
+systemd runs one instance of a service at a time, so an overrunning agent cannot stack.
+A non-zero exit sends `notify-owner -p high`.
+
+## Adding an agent
+
+1. `mkdir ~/agents/<name> && $EDITOR ~/agents/<name>/BRIEF.md`
+2. `agent-now <name>` — check `REPORT.md` and `logs/`.
+3. `agent-enable <name> "Mon..Fri 08:00"` and add the row to the roster in `~/CLAUDE.md`.
+
+## Notes
+
+- `agent-run` takes a `flock` on `<dir>/.lock`, runs with stdin closed, and traps TERM/INT so a
+  killed run still writes its `index.tsv` row, cost and `REPORT.md`. `REPORT.md` is truncated at
+  the start of every run and rebuilt from the runner metadata plus what the agent wrote.
+- The audit hook's ~20 ms per-call latency is a soft target, not a hard limit.
+- `sentinel-check` escalates one failure signature to Claude at most once per 6 h; bash fixes
+  still run every 15 min and the owner is pushed once when suppression starts.

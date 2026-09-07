@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Enable the timer for one agent: agent-enable <name> "<OnCalendar>".
+set -euo pipefail
+name="${1:-}"; cal="${2:-}"
+[ -n "$name" ] && [ -n "$cal" ] || { echo 'usage: agent-enable <name> "<OnCalendar>"' >&2; exit 2; }
+[ -r "$HOME/agents/$name/BRIEF.md" ] || { echo "agent-enable: no ~/agents/$name/BRIEF.md" >&2; exit 2; }
+systemd-analyze calendar "$cal" >/dev/null
+d="$HOME/.config/systemd/user/agent@$name.timer.d"
+mkdir -p "$d"
+printf '[Timer]\nOnCalendar=\nOnCalendar=%s\n' "$cal" > "$d/schedule.conf"
+systemctl --user daemon-reload
+systemctl --user enable --now "agent@$name.timer"
+echo "agent $name enabled: $cal"

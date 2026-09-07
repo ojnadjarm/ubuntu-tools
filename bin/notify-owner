@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Send a short push to the owner's phone via ntfy.
+set -euo pipefail
+
+. "$HOME/agents/bin/fleetlib.sh"
+
+ENV_FILE="${NTFY_ENV_FILE:-$HOME/agents/secrets/ntfy.env}"
+LOG_FILE="${NTFY_LOG_FILE:-$HOME/agents/log/notify.log}"
+
+usage() { echo 'usage: notify-owner [-p low|default|high|urgent] [-t title] [-g tags] "message"' >&2; exit 2; }
+
+prio=default
+title="${HARNESS_HOST:-$(hostname)}"
+tags=
+while getopts ':p:t:g:h' opt; do
+  case "$opt" in
+    p) prio=$OPTARG ;;
+    t) title=$OPTARG ;;
+    g) tags=$OPTARG ;;
+    *) usage ;;
+  esac
+done
+shift $((OPTIND - 1))
+[ $# -ge 1 ] || usage
+msg="$*"
+
+[ -r "$ENV_FILE" ] || { echo "notify-owner: cannot read $ENV_FILE" >&2; exit 1; }
+# shellcheck source=/dev/null
+. "$ENV_FILE"
+: "${NTFY_URL:?}" "${NTFY_TOPIC:?}"
+
+mkdir -p "$(dirname "$LOG_FILE")"
+args=(-fsS -m 15 -X POST -H "Title: $title" -H "Priority: $prio")
+if [ -n "$tags" ]; then args+=(-H "Tags: $tags"); fi
+if curl "${args[@]}" -d "$msg" "$NTFY_URL/$NTFY_TOPIC" >/dev/null; then
+  status=ok
+else
+  status=fail
+fi
+printf '%s\t%s\t%s\t%s\n' "$(date -Is)" "$status" "$prio" "$msg" >> "$LOG_FILE"
+[ "$status" = ok ]

@@ -1,0 +1,13 @@
+#!/bin/sh
+cat <<'EOF'
+{
+   "blockdevices": [
+      {"name": "loop0", "size": "4K", "type": "loop", "mountpoints": ["/snap/bare/5"], "model": null, "rota": false},
+      {"name": "nvme0n1", "size": "476.9G", "type": "disk", "mountpoints": [], "model": "INTEL SSDPEKNU512GZ", "rota": false,
+       "children": [
+          {"name": "nvme0n1p1", "size": "1G", "type": "part", "mountpoints": ["/boot/efi"], "model": null, "rota": false},
+          {"name": "nvme0n1p2", "size": "475.9G", "type": "part", "mountpoints": ["/"], "model": null, "rota": false}
+       ]}
+   ]
+}
+EOF

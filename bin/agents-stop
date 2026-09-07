@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Kill switch: stop every running agent unit, every fleet timer and every background claude run.
+# Timers are stopped, not disabled: `agents-start` (or `agents-stop --resume`) brings the roster back.
+set -uo pipefail
+. "$HOME/agents/bin/fleetlib.sh"
+fleet_path
+[ "${1:-}" = --resume ] && exec agents-start
+
+units() { systemctl --user list-units "$1" --all --no-legend --plain 2>/dev/null | awk '{print $1}'; }
+
+stopped=""
+stop_if_running() {
+  case "$(systemctl --user is-active "$1" 2>/dev/null)" in
+    active|activating|reloading|deactivating) ;;
+    *) return 0 ;;
+  esac
+  systemctl --user stop "$1" >/dev/null 2>&1
+  stopped="$stopped ${1%.*}"
+}
+
+for u in $(units 'agent@*.service') sentinel-check.service moodle-keep-weekly.service; do
+  stop_if_running "$u"
+done
+for u in $(units 'agent@*.timer') sentinel-check.timer moodle-keep-weekly.timer; do
+  stop_if_running "$u"
+done
+
+pids="$(claude agents --json 2>/dev/null | jq -r '.[] | select(.kind=="background") | .pid' 2>/dev/null)"
+for p in $pids; do kill "$p" 2>/dev/null && stopped="$stopped pid:$p"; done
+
+notify-owner -p high -t agents-stop "kill switch: stopped${stopped:- nothing}" || true
+echo "agents-stop:${stopped:- nothing}"

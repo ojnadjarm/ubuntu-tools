@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# OpenCode adapter installer — idempotent. Wires two things and nothing else:
+#   1. the portable skills, symlinked into ~/.config/opencode/skills/
+#   2. an `instructions` entry for AGENTS.md in ~/.config/opencode/opencode.json
+# The binary itself is not installed here (https://opencode.ai/install, no sudo, ~/.opencode/bin).
+set -uo pipefail
+BIN="$(cd "$(dirname "$(readlink -f "$0")")/../../bin" && pwd)"
+# shellcheck source=/dev/null
+. "$BIN/env.sh"
+CONF="${OPENCODE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/opencode}"
+changed=0
+
+## 1. skills
+for d in "$HARNESS_HOME"/skills/*/; do
+  [ -f "$d/SKILL.md" ] || continue
+  name="$(basename "$d")"
+  target="$CONF/skills/$name/SKILL.md"
+  [ "$(readlink -f "$target" 2>/dev/null)" = "$(readlink -f "${d%/}/SKILL.md")" ] && continue
+  mkdir -p "$CONF/skills/$name"
+  ln -sfn "${d%/}/SKILL.md" "$target"
+  echo "linked $target"
+  changed=1
+done
+
+## 2. the contract as an instructions file
+out="$(python3 - "$CONF/opencode.json" "$HARNESS_HOME/AGENTS.md" <<'PY'
+import json, os, sys
+path, agents = sys.argv[1], sys.argv[2]
+cfg = {}
+if os.path.exists(path):
+    try:
+        cfg = json.load(open(path))
+    except ValueError:
+        print("opencode.json is not valid JSON — left alone", file=sys.stderr)
+        raise SystemExit(1)
+ins = cfg.get("instructions") or []
+if agents in ins:
+    print("no changes")
+    raise SystemExit(0)
+cfg.setdefault("$schema", "https://opencode.ai/config.json")
+cfg["instructions"] = ins + [agents]
+os.makedirs(os.path.dirname(path), exist_ok=True)
+json.dump(cfg, open(path, "w"), indent=2)
+open(path, "a").write("\n")
+print("added %s to the instructions of %s" % (agents, path))
+PY
+)" || exit 1
+case "$out" in "no changes") ;; *) echo "$out"; changed=1;; esac
+
+command -v opencode >/dev/null || [ -x "$HOME/.opencode/bin/opencode" ] \
+  || echo "advisory: no opencode binary found — install it with: curl -fsSL https://opencode.ai/install | bash"
+
+[ "$changed" = 0 ] && echo "opencode adapter: no changes"
+exit 0

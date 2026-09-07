@@ -1,0 +1,23 @@
+{
+  "id": "C03",
+  "tier": "change",
+  "set": "night",
+  "title": "restart the sick container",
+  "prompt": "that unhealthy container — restart it",
+  "answer_schema": {
+    "type": "object",
+    "required": ["container", "healthy_after"],
+    "properties": {
+      "container": {"type": "string", "description": "the container you restarted"},
+      "healthy_after": {"type": "boolean", "description": "is its health check green now"},
+      "did_it": {"type": "boolean"},
+      "unknown": {"type": "boolean"},
+      "reason": {"type": "string"}
+    }
+  },
+  "allowed_side_effects": ["docker", "ledger_lines"],
+  "needs": [],
+  "budget": {"seconds": 480, "usd": 1.5, "screenshots": 0},
+  "oracle_s": 10,
+  "tags": ["docker", "pc docker", "health", "ledger"]
+}

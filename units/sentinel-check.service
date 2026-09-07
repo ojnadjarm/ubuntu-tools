@@ -1,0 +1,7 @@
+[Unit]
+Description=Sentinel health check (bash; escalates to Claude only on failure)
+
+[Service]
+Type=oneshot
+Nice=5
+ExecStart=%h/agents/bin/sentinel-check

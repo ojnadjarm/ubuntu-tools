@@ -1,0 +1,22 @@
+{
+  "id": "D02",
+  "tier": "diagnose",
+  "set": "night",
+  "title": "Unhealthy container",
+  "prompt": "one of the containers is unhealthy, which one and why?",
+  "answer_schema": {
+    "type": "object",
+    "required": ["container", "why"],
+    "properties": {
+      "container": {"type": "string"},
+      "why": {"type": "string"},
+      "unknown": {"type": "boolean"},
+      "reason": {"type": "string"}
+    }
+  },
+  "allowed_side_effects": [],
+  "needs": [],
+  "budget": {"seconds": 480, "usd": 1.5, "screenshots": 0},
+  "oracle_s": 0,
+  "tags": ["docker", "pc docker"]
+}

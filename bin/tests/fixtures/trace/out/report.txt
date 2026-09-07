@@ -1,0 +1,60 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/P'
+# Event count (approx.): 2004008
+#
+# Overhead  Command  Shared Object     Symbol                
+# ........  .......  ................  ......................
+#
+    50.00%  bash     bash              [.] run_pending_traps
+            |
+            ---run_pending_traps
+               execute_command_internal
+               execute_command
+               0x59f05e774340
+               execute_command_internal
+               parse_and_execute
+               0x59f05e75222b
+               main
+               __libc_start_call_main
+               call_init (inlined)
+               __libc_start_main_impl (inlined)
+               _start
+
+    50.00%  bash     bash              [.] 0x0000000000054722
+            |
+            ---0x59f05e76f729
+               execute_command_internal
+               execute_command
+               0x59f05e7743c5
+               execute_command_internal
+               parse_and_execute
+               0x59f05e75222b
+               main
+               __libc_start_call_main
+               call_init (inlined)
+               __libc_start_main_impl (inlined)
+               _start
+
+
+
+# Samples: 1K of event 'cpu_core/cycles/P'
+# Event count (approx.): 7686594574
+#
+# Overhead  Command  Shared Object      Symbol                          
+# ........  .......  .................  ................................
+#
+     8.97%  bash     bash               [.] builtin_address_internal
+            |          
+             --8.45%--builtin_address_internal
+                       |          
+                       |--3.44%--0x59f05e76fb8e
+                       |          execute_command_internal
+                       |          execute_command
+                       |          |          
+                       |          |--1.82%--0x59f05e774340
+                       |          |          execute_command_internal
+                       |          |          parse_and_execute

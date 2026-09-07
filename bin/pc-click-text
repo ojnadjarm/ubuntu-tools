@@ -1,0 +1,20 @@
+#!/bin/bash
+# pc click-text "text" [--index N] [--region X,Y,W,H] [left|right|middle] [--double] — OCR-find text and click it.
+d="$(dirname "$(readlink -f "$0")")"
+q=""; idx=0; region=""; clickargs=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) echo 'usage: pc click-text "text" [--index N] [--region X,Y,W,H] [left|right|middle] [--double]'; exit 0;;
+    --index) idx="$2"; shift 2;;
+    --region) region="$2"; shift 2;;
+    left|right|middle|--double) clickargs+=("$1"); shift;;
+    *) q="$1"; shift;;
+  esac
+done
+[ -n "$q" ] || { echo 'usage: pc click-text "text" [--index N]' >&2; exit 2; }
+if [ -n "$region" ]; then hits="$("$d/pc-find" "$q" --all --region "$region")"; else hits="$("$d/pc-find" "$q" --all)"; fi
+[ -n "$hits" ] || { echo "click-text: '$q' not found on screen" >&2; exit 1; }
+xy="$(echo "$hits" | sed -n "$((idx + 1))p")"
+[ -n "$xy" ] || { echo "click-text: no match at index $idx" >&2; exit 1; }
+"$d/pc-click" $xy "${clickargs[@]}" || exit 1
+echo "clicked '$q' at $xy"

@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# pc thermal zones|hwmon|fan|throttle|watch — every thermal zone, hwmon chip, the ASUS fan (read-only) and the throttle reasons.
+set -uo pipefail
+export LC_ALL=C
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+
+pc_usage 'usage: pc thermal [zones|hwmon|fan|throttle] [--json]
+       pc thermal watch --seconds N [--json]
+
+No verb prints all four sections. `zones` reads /sys/class/thermal (type, °C, trip points),
+`hwmon` takes the hottest sensor per chip from `sensors -j`, `fan` reports the ASUS fan rpm and
+the pwm1_enable mode **read-only** (writing it is refused, FLEET §5), `throttle` pairs the i915
+throttle reasons with x86_pkg_temp against the RAPL PL1. `watch` prints one line per second.' "$@"
+
+pc_opt "$@"
+rd() { [ -r "$1" ] && printf '%s' "$(<"$1")" || printf '%s' "${2-}"; }
+c_of() { printf '%d.%d' $(( ${1:-0} / 1000 )) $(( (${1:-0} % 1000) / 100 )); }
+
+## --- zones ------------------------------------------------------------------
+zones_json() {
+  # One TSV pass (no fork per zone) turned into JSON by a single jq -R.
+  local z t n tt ty trips
+  for z in "$PC_SYS"/class/thermal/thermal_zone*; do
+    [ -r "$z/temp" ] || continue
+    t=$(rd "$z/temp" 0); n=$(rd "$z/type" "${z##*/}"); trips=
+    for tt in "$z"/trip_point_*_temp; do
+      [ -r "$tt" ] || continue
+      ty=${tt%_temp}
+      trips="$trips,$(rd "${ty}_type" unknown):$(c_of "$(rd "$tt" 0)")"
+    done
+    printf '%s\t%s\t%s\t%s\n' "${z##*/}" "$n" "$(c_of "$t")" "${trips#,}"
+  done | jq -Rsc 'split("\n") | map(select(length>0) | split("\t") |
+    {zone:.[0], type:.[1], c:(.[2]|tonumber),
+     trips: (if .[3]=="" then [] else (.[3]|split(",")|map(split(":")|{type:.[0],c:(.[1]|tonumber)})) end)})'
+}
+
+## --- hwmon (hottest sensor per chip, from sensors -j) ------------------------
+hwmon_json() {
+  pc_cmd sensors -j 2>/dev/null | jq -c '
+    to_entries | map({
+      chip: .key,
+      c: ([.value | ..|objects | to_entries[] | select(.key|test("^temp[0-9]+_input$")) | .value] | max | if . then (.*10|round)/10 else null end),
+      fan_rpm: ([.value | ..|objects | to_entries[] | select(.key|test("^fan[0-9]+_input$")) | .value] | max | if . then round else null end)
+    })' 2>/dev/null || echo '[]'
+}
+
+## --- fan (read-only) ---------------------------------------------------------
+FANH=
+for h in "$PC_SYS"/class/hwmon/hwmon*; do
+  [ -r "$h/fan1_input" ] || continue
+  FANH=$h; break
+done
+fan_json() {
+  pc_json '{chip:$c,label:$l,rpm:$r,pwm1_enable:$p,pwm1_writable:false,asus_throttle_policy:$a,
+            note:"fan control is read-only (FLEET §5)"}' -c \
+    --arg c "$(rd "$FANH/name" none)" --arg l "$(rd "$FANH/fan1_label" fan1)" \
+    --argjson r "$(rd "$FANH/fan1_input" 0)" --argjson p "$(rd "$FANH/pwm1_enable" 0)" \
+    --argjson a "$(rd "$PC_SYS/devices/platform/asus-nb-wmi/throttle_thermal_policy" 0)"
+}
+
+## --- throttle ----------------------------------------------------------------
+GT="$PC_SYS/class/drm/card1/gt/gt0"
+pkg_temp() {
+  local z
+  for z in "$PC_SYS"/class/thermal/thermal_zone*; do
+    [ "$(rd "$z/type")" = x86_pkg_temp ] && { rd "$z/temp" 0; return; }
+  done
+  printf 0
+}
+throttle_json() {
+  local f n on=() all=()
+  for f in "$GT"/throttle_reason_*; do
+    n=${f##*/throttle_reason_}; [ "$n" = status ] && continue
+    all+=("$n"); [ "$(rd "$f" 0)" = 1 ] && on+=("$n")
+  done
+  pc_json '{gpu_status:$st,gpu_reasons:($on|split(" ")|map(select(.!=""))),
+            gpu_reasons_known:($all|split(" ")|map(select(.!=""))),
+            pkg_c:$pc,pl1_w:$pl,throttled:($st!=0 or ($on|length)>0)}' -c \
+    --argjson st "$(rd "$GT/throttle_reason_status" 0)" --arg on "${on[*]-}" --arg all "${all[*]-}" \
+    --argjson pc "$(c_of "$(pkg_temp)")" \
+    --argjson pl "$(( $(rd "$PC_SYS/class/powercap/intel-rapl:0/constraint_0_power_limit_uw" 0) / 1000000 ))"
+}
+
+## --- text --------------------------------------------------------------------
+t_zones()   { zones_json | jq -r '.[] | "zone    \(.type) \(.c) °C" + (if (.trips|length)>0 then "  trips: " + ([.trips[]|"\(.type) \(.c)"]|join(", ")) else "" end)'; }
+t_hwmon()   { hwmon_json | jq -r '.[] | "hwmon   \(.chip)" + (if .c then " \(.c) °C" else "" end) + (if .fan_rpm then " \(.fan_rpm) rpm" else "" end)'; }
+t_fan()     { fan_json | jq -r '"fan     \(.label) \(.rpm) rpm  pwm1_enable \(.pwm1_enable) (read-only)  asus policy \(.asus_throttle_policy)"'; }
+t_thr()     { throttle_json | jq -r '"throttle pkg \(.pkg_c) °C vs PL1 \(.pl1_w) W  gpu status \(.gpu_status)  reasons \(if (.gpu_reasons|length)>0 then (.gpu_reasons|join(",")) else "none" end)"'; }
+
+sub="${PC_ARGS[0]:-all}"
+case "$sub" in
+  zones)    [ "$JSON" = 1 ] && zones_json || t_zones;;
+  hwmon)    [ "$JSON" = 1 ] && hwmon_json || t_hwmon;;
+  fan)      [ "$JSON" = 1 ] && fan_json || t_fan;;
+  throttle) [ "$JSON" = 1 ] && throttle_json || t_thr;;
+  watch)
+    n=$SECONDS_; [ "$n" = 0 ] && n=5
+    i=0
+    while [ "$i" -lt "$n" ]; do
+      [ "$i" = 0 ] || sleep 1
+      if [ "$JSON" = 1 ]; then
+        pc_json '{t:$t,pkg_c:$p,max_c:$m,fan_rpm:$f}' -c --argjson t "$i" \
+          --argjson p "$(c_of "$(pkg_temp)")" \
+          --argjson m "$(zones_json | jq '[.[].c]|max')" --argjson f "$(rd "$FANH/fan1_input" 0)"
+      else
+        printf '%3ds  pkg %s °C  max %s °C  fan %s rpm\n' "$i" "$(c_of "$(pkg_temp)")" \
+          "$(zones_json | jq -r '[.[].c]|max')" "$(rd "$FANH/fan1_input" 0)"
+      fi
+      i=$((i + 1))
+    done;;
+  all)
+    if [ "$JSON" = 1 ]; then
+      pc_json '{zones:$z,hwmon:$h,fan:$f,throttle:$t}' \
+        --argjson z "$(zones_json)" --argjson h "$(hwmon_json)" \
+        --argjson f "$(fan_json)" --argjson t "$(throttle_json)"
+    else
+      t_zones; t_hwmon; t_fan; t_thr
+    fi;;
+  *) printf 'pc thermal: unknown verb %s (try -h)\n' "$sub" >&2; exit 2;;
+esac
+exit 0

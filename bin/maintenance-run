@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# Weekly maintenance: apt full-upgrade, autoremove, needrestart, docker prune, reboot gate.
+# Exit 0 ok · 3 reboot required but refused (deferred) · 4 reboot scheduled · 1 error.
+set -uo pipefail
+export LC_ALL=C DEBIAN_FRONTEND=noninteractive
+export PATH="$HOME/.local/bin:$HOME/agents/bin:$PATH"
+. "$HOME/agents/bin/fleetlib.sh"
+
+WINDOW_START=4                                 # inclusive hour, Europe/Madrid — not overridable
+WINDOW_END=5                                   # exclusive hour — not overridable
+REBOOT_DELAY=${MAINT_REBOOT_DELAY:-5}          # minutes announced and passed to shutdown
+DOCKER_PKGS="docker.io docker-buildx docker-compose-v2 containerd"
+
+dry=0; with_docker=0; assume_reboot=0; ignore_window=0
+for a in "$@"; do case "$a" in
+  --dry-run) dry=1 ;;
+  --with-docker) with_docker=1 ;;
+  --assume-reboot) assume_reboot=1; dry=1 ;;   # test only: pretend a reboot is required; implies --dry-run
+  --dry-run-ignore-window) ignore_window=1 ;;  # test only: skip the hour gate, refused outside a dry run
+  -h|--help) echo "usage: maintenance-run [--dry-run] [--with-docker] [--assume-reboot] [--dry-run-ignore-window]"; exit 0 ;;
+  *) echo "maintenance-run: unknown option $a" >&2; exit 2 ;;
+esac; done
+if [ "$ignore_window" = 1 ] && [ "$dry" = 0 ]; then
+  echo "maintenance-run: --dry-run-ignore-window requires --dry-run" >&2; exit 2
+fi
+
+STATE="$HOME/agents/maintenance/state"
+mkdir -p "$STATE"
+SUMMARY="$STATE/last-summary.txt"
+fleet_lock "$STATE/.lock" 9 || { echo "maintenance-run: already running"; exit 1; }
+
+out() { printf '%s\n' "$*" | tee -a "$SUMMARY"; }
+run() { if [ "$dry" = 1 ]; then out "would run: $*"; else "$@" >>"$STATE/last-apt.log" 2>&1; fi; }
+
+: >"$SUMMARY"
+out "maintenance-run $(date -Is)$([ "$dry" = 1 ] && echo " (dry-run)")"
+
+# --- packages ---------------------------------------------------------------
+held=""
+if [ "$with_docker" = 0 ]; then
+  held=$(for p in $DOCKER_PKGS; do dpkg -s "$p" >/dev/null 2>&1 && printf '%s ' "$p"; done)
+  if [ -n "$held" ]; then
+    trap 'sudo apt-mark unhold $held >/dev/null 2>&1' EXIT INT TERM
+    run sudo apt-mark hold $held
+  fi
+  out "docker packages held back: ${held:-none}"
+fi
+run sudo apt-get update -qq
+if [ "$dry" = 1 ]; then
+  pend=$(apt-get -s full-upgrade 2>/dev/null | grep '^Inst ' \
+         | awk -v h=" $held " '{if (index(h, " " $2 " ") == 0) n++} END{print n+0}')
+  out "pending upgrades: $pend"
+else
+  run sudo apt-get -y full-upgrade
+  run sudo apt-get -y autoremove --purge
+  out "upgraded: $(grep -c '^Inst ' "$STATE/last-apt.log" 2>/dev/null || echo 0) package operations"
+fi
+[ -n "$held" ] && { run sudo apt-mark unhold $held; trap - EXIT INT TERM; }
+
+# --- services and docker ----------------------------------------------------
+svc=$(sudo needrestart -b 2>/dev/null | sed -n 's/^NEEDRESTART-SVC: //p' | tr '\n' ' ')
+out "services needing restart: ${svc:-none}"
+run docker image prune -af --filter until=168h
+
+# --- reboot decision --------------------------------------------------------
+reboot_required=0
+[ -e /var/run/reboot-required ] && reboot_required=1
+[ "$assume_reboot" = 1 ] && reboot_required=1
+out "reboot required: $([ "$reboot_required" = 1 ] && echo yes || echo no)"
+[ "$reboot_required" = 0 ] && exit 0
+out "reason: $(cat /var/run/reboot-required.pkgs 2>/dev/null | tr '\n' ' ' || echo 'simulated')"
+
+# Gates: all must pass or the reboot waits for the next window.
+refuse=""
+hour=$(TZ=Europe/Madrid date +%-H)
+[ "$ignore_window" = 1 ] || { [ "$hour" -ge "$WINDOW_START" ] && [ "$hour" -lt "$WINDOW_END" ]; } \
+  || refuse="$refuse time-window(now ${hour}h, allowed ${WINDOW_START}-${WINDOW_END}h Europe/Madrid);"
+pc status --check >/dev/null 2>&1 || refuse="$refuse pc-status-check;"
+"$HOME/agents/bin/boot-check.sh" >/dev/null 2>&1 || refuse="$refuse boot-check;"
+busy=$(systemctl --user list-units --state=active --no-legend 'agent@*.service' 2>/dev/null \
+       | awk '{print $1}' | grep -v "^agent@maintenance\.service$" | tr '\n' ' ')
+[ -z "$busy" ] || refuse="$refuse agents-active($busy);"
+
+if [ -n "$refuse" ]; then
+  refuse="${refuse# }"; refuse="${refuse%;}"
+  out "REBOOT REFUSED: $refuse"
+  [ "$dry" = 1 ] || notify-owner -t maintenance "reboot pending, window missed: $refuse" || true
+  exit 3
+fi
+
+out "REBOOT ALLOWED: all gates passed"
+if [ "$dry" = 1 ]; then
+  out "would run: notify-owner -p high -t reboot \"rebooting ${HARNESS_HOST:-this machine} in ${REBOOT_DELAY} min (kernel update)\""
+  out "would run: sudo shutdown -r +${REBOOT_DELAY}"
+  exit 4
+fi
+notify-owner -p high -t reboot "rebooting ${HARNESS_HOST:-this machine} in ${REBOOT_DELAY} min (kernel update)" || true
+sudo shutdown -r "+${REBOOT_DELAY}"
+out "reboot scheduled: $(date -Is)"
+exit 4

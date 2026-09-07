@@ -1,0 +1,4 @@
+name: moodle52
+services:
+  app:
+    image: moodlehq/moodle-php-apache:8.4

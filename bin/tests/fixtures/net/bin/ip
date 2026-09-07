@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+cat <<'JSON'
+[
+  {"ifname":"lo","operstate":"UNKNOWN","mtu":65536,"addr_info":[{"family":"inet","local":"127.0.0.1"}]},
+  {"ifname":"tailscale0","operstate":"UNKNOWN","mtu":1280,"addr_info":[{"family":"inet","local":"100.101.102.103"}]},
+  {"ifname":"wlo1","operstate":"UP","mtu":1500,"addr_info":[{"family":"inet","local":"192.168.1.50"}]}
+]
+JSON

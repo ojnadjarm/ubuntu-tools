@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Table of persistent agents: enabled, schedule, next/last run, exit, duration.
+set -uo pipefail
+printf '%-14s %-8s %-18s %-17s %-17s %5s %6s\n' NAME ENABLED SCHEDULE NEXT LAST EXIT SECS
+for d in "$HOME"/agents/*/; do
+  name="$(basename "$d")"
+  [ -r "$d/BRIEF.md" ] || continue
+  en="$(systemctl --user is-enabled "agent@$name.timer" 2>/dev/null)"; [ -n "$en" ] || en=no
+  sched="$(sed -n 's/^OnCalendar=\(..*\)/\1/p' "$HOME/.config/systemd/user/agent@$name.timer.d/schedule.conf" 2>/dev/null | tail -1)"
+  next="$(systemctl --user show -p NextElapseUSecRealtime --value "agent@$name.timer" 2>/dev/null)"
+  case "$next" in ''|0|n/a) next=- ;; *) next="$(date -d "$next" '+%m-%d %H:%M' 2>/dev/null || echo -)" ;; esac
+  last="$(tail -1 "$d/logs/index.tsv" 2>/dev/null | grep -v '^start' || true)"
+  IFS=$'\t' read -r _ lrun lexit lsecs _ <<<"$last"   # one read, not three cut forks per agent
+  [ -n "$lrun" ] && lrun="$(date -d "$lrun" '+%m-%d %H:%M' 2>/dev/null || echo "$lrun")"
+  printf '%-14s %-8s %-18s %-17s %-17s %5s %6s\n' \
+    "$name" "$en" "${sched:--}" "$next" "${lrun:--}" "${lexit:--}" "${lsecs:--}"
+done

@@ -1,0 +1,6 @@
+#!/bin/bash
+# pc tree [app-substring] [--depth N] [--json] [--max N] [--find "name" [--role R]] — AT-SPI UI tree.
+. "$(dirname "$(readlink -f "$0")")/env.sh"
+[ "${1:-}" = -h ] || [ "${1:-}" = --help ] && {
+  echo 'usage: pc tree [app-substring] [--depth N] [--json] [--max N] [--interactive] [--find "name"] [--role R]'; exit 0; }
+exec python3 "$PC_BIN/a11y_tree.py" "$@"

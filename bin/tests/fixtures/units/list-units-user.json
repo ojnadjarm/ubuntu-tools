@@ -1,0 +1,5 @@
+[
+  {"unit":"dark-eye.service","load":"loaded","active":"active","sub":"running","description":"The Dark Eye"},
+  {"unit":"sentinel-check.timer","load":"loaded","active":"active","sub":"waiting","description":"Sentinel check timer"},
+  {"unit":"pt13-fixture.service","load":"loaded","active":"failed","sub":"failed","description":"A failed fixture unit"}
+]

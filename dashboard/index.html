@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e1116">
+<title>machine status</title>
+<style>
+:root{
+  --bg:#0e1116; --card:#171c24; --line:#252c38; --fg:#eef2f7; --dim:#8c98a8;
+  --ok:#3ddc97; --warn:#ffc247; --bad:#ff5f6d; --accent:#7aa2ff;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);
+  font:400 17px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  -webkit-text-size-adjust:100%}
+body{padding:14px 14px calc(28px + env(safe-area-inset-bottom))}
+main{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 16px}
+h2{font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);
+  margin:0 0 10px;font-weight:600}
+.verdict{padding:18px 16px;border-radius:20px;border:1px solid var(--line)}
+.verdict .big{font-size:34px;font-weight:700;letter-spacing:-.01em;display:flex;
+  align-items:center;gap:12px}
+.verdict.ok{background:linear-gradient(160deg,#12271f,#141a20)}
+.verdict.ok .big{color:var(--ok)}
+.verdict.bad{background:linear-gradient(160deg,#2b1418,#141a20)}
+.verdict.bad .big{color:var(--bad)}
+.dot{width:14px;height:14px;border-radius:50%;background:currentColor;flex:none;
+  box-shadow:0 0 0 5px color-mix(in srgb,currentColor 22%,transparent)}
+.sub{color:var(--dim);font-size:15px;margin-top:8px}
+.sub b{color:var(--fg);font-weight:600}
+.row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+  padding:9px 0;border-top:1px solid var(--line)}
+.row:first-of-type{border-top:0}
+.k{color:var(--dim);font-size:15px;flex:none}
+.v{text-align:right;font-weight:600;font-variant-numeric:tabular-nums;
+  overflow-wrap:anywhere}
+.v.ok{color:var(--ok)} .v.bad{color:var(--bad)} .v.warn{color:var(--warn)}
+.bar{height:8px;border-radius:5px;background:#232a35;overflow:hidden;margin-top:8px}
+.bar>i{display:block;height:100%;border-radius:5px;background:var(--ok)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.spark{background:#141922;border:1px solid var(--line);border-radius:12px;padding:10px}
+.spark .lbl{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+.spark .num{font-size:21px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:1px}
+.spark svg{display:block;width:100%;height:36px;margin-top:4px}
+a{color:var(--accent);text-decoration:none}
+a.env{display:flex;justify-content:space-between;gap:10px;padding:11px 0;
+  border-top:1px solid var(--line);align-items:baseline}
+.pill{font-size:12px;font-weight:700;padding:3px 9px;border-radius:999px;
+  background:#232a35;color:var(--dim);letter-spacing:.04em;flex:none}
+.pill.ok{background:rgba(61,220,151,.16);color:var(--ok)}
+.pill.bad{background:rgba(255,95,109,.16);color:var(--bad)}
+.ag{padding:11px 0;border-top:1px solid var(--line)}
+.ag:first-child{border-top:0}
+.ag .top{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.ag .name{font-weight:600}
+.ag .meta{color:var(--dim);font-size:14px;margin-top:3px;font-variant-numeric:tabular-nums}
+.ev{padding:10px 0;border-top:1px solid var(--line);font-size:15px}
+.ev:first-child{border-top:0}
+.ev .t{color:var(--dim);font-size:13px;font-variant-numeric:tabular-nums}
+.ev.incident{border-left:3px solid var(--bad);padding-left:10px;margin-left:-13px}
+.foot{display:flex;justify-content:space-between;align-items:center;color:var(--dim);
+  font-size:14px;padding:2px 4px}
+.foot a{font-weight:600}
+</style>
+</head>
+<body>
+<main id="app"><div class="card">Loading…</div></main>
+<script>
+const $ = (h) => { const t=document.createElement('template'); t.innerHTML=h.trim(); return t.content; };
+const esc = (s) => String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const cls = (st) => st==='OK'?'ok':st==='FAIL'?'bad':'';
+
+function ago(iso){
+  if(!iso) return '—';
+  const d=(Date.now()-new Date(iso))/1000;
+  if(isNaN(d)) return iso;
+  if(d<90) return Math.round(d)+'s ago';
+  if(d<5400) return Math.round(d/60)+'m ago';
+  if(d<172800) return Math.round(d/3600)+'h ago';
+  return Math.round(d/86400)+'d ago';
+}
+function when(iso){
+  if(!iso||iso==='0'||iso==='n/a') return '—';
+  const d=new Date(iso); if(isNaN(d)) return iso;
+  return d.toLocaleString([], {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+}
+function sec(s, name){ return ((s.sections||{})[name])||{}; }
+function val(o,k){ return (o[k]||{}).value; }
+function row(k,o,key){
+  const it=o[key]; if(!it) return '';
+  return `<div class="row"><span class="k">${esc(k)}</span><span class="v ${cls(it.state)}">${esc(it.value)}</span></div>`;
+}
+
+function sparkSvg(vals, color){
+  if(!vals || vals.length<2) return '<svg viewBox="0 0 100 36"></svg>';
+  const max=Math.max(...vals, 0.0001), min=Math.min(...vals, 0);
+  const span=(max-min)||1, n=vals.length;
+  const pts=vals.map((v,i)=>[i*100/(n-1), 34-((v-min)/span)*30]);
+  const line=pts.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
+  const area=`0,36 ${line} 100,36`;
+  return `<svg viewBox="0 0 100 36" preserveAspectRatio="none">
+    <polygon points="${area}" fill="${color}" opacity=".16"/>
+    <polyline points="${line}" fill="none" stroke="${color}" stroke-width="2"
+      stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`;
+}
+function sparkCard(label, s, color, fmt){
+  const v=(s&&s.values&&s.values.length)?s.values[s.values.length-1]:null;
+  return `<div class="spark"><div class="lbl">${label}</div>
+    <div class="num">${v==null?'—':fmt(v)}</div>${sparkSvg(s&&s.values, color)}</div>`;
+}
+const fmtRate=(u)=>(v)=> v>1024 ? (v/1024).toFixed(1)+' M'+u : Math.round(v)+' '+u;
+
+function render(d){
+  if(d.host) document.title=d.host;
+  const s=d.status||{}, host=sec(s,'host'), pw=sec(s,'power'), res=sec(s,'resources'),
+        disk=sec(s,'disk'), net=sec(s,'network'), svc=sec(s,'services'),
+        dk=sec(s,'docker'), ag=sec(s,'agents');
+  const v=d.verdict||{ok:true,problems:[]};
+  const parts=[];
+
+  parts.push(`<div class="card verdict ${v.ok?'ok':'bad'}">
+    <div class="big"><span class="dot"></span>${v.ok?'All good':'Attention'}</div>
+    <div class="sub">${v.ok
+      ? `<b>${esc(d.host||'')}</b> up ${esc(val(host,'uptime')||'—')} · load ${esc(val(host,'load')||'—')} · ${esc(val(res,'temp_max')||'')}`
+      : v.problems.map(esc).join(' · ')}</div>
+    <div class="sub">sentinel last OK ${esc(ago(d.sentinel_last_ok))} · ${d.events.length} events in 24 h</div>
+  </div>`);
+
+  const sp=d.sparks||{};
+  parts.push(`<div class="card"><h2>Live · 30 min</h2><div class="grid">
+    ${sparkCard('CPU', sp.cpu, '#7aa2ff', v=>Math.round(v)+' %')}
+    ${sparkCard('RAM', sp.ram, '#3ddc97', v=>Math.round(v)+' %')}
+    ${sparkCard('Disk IO', sp.io, '#ffc247', fmtRate('iB/s'))}
+    ${sparkCard('Network', sp.net, '#c58cff', fmtRate('bps'))}
+  </div></div>`);
+
+  const ram=val(res,'ram_available')||'', m=ram.match(/(\d+) MB of (\d+) MB/);
+  const rampct = m ? Math.round(100*(1-m[1]/m[2])) : null;
+  parts.push(`<div class="card"><h2>Resources</h2>
+    ${row('RAM free', res, 'ram_available')}
+    ${rampct!=null?`<div class="bar"><i style="width:${rampct}%;background:${rampct>85?'var(--bad)':'var(--ok)'}"></i></div>`:''}
+    ${row('Disk /', res, 'disk_root')}
+    ${row('Swap', res, 'swap_used')}
+    ${row('Temp', res, 'temp_max')}
+    ${row('SMART', disk, 'smart')}
+    ${row('SSD wear', disk, 'percent_used')}
+    ${row('Spare blocks', disk, 'available_spare')}</div>`);
+
+  parts.push(`<div class="card"><h2>Power</h2>
+    ${row('Source', pw, 'source')}
+    ${row('Battery', pw, 'battery')}
+    ${row('Health', pw, 'battery_health')}
+    ${row('Charge limit', pw, 'battery_limit')}
+    ${row('Profile', pw, 'profile')}
+    ${row('Lid', pw, 'lid')}</div>`);
+
+  const envs=(d.envs||[]).map(e=>`<a class="env" href="${esc(e.url)}" target="_blank" rel="noopener">
+      <span>Moodle ${esc(e.version)} <span style="color:var(--dim);font-weight:400">${esc(e.release||'')}</span></span>
+      <span class="pill ${e.state==='up'?'ok':'bad'}">${esc(e.state)} ${esc(e.containers_up)}</span></a>`).join('');
+  const stacks=Object.keys(dk).map(k=>{
+    const it=dk[k], v=String(it.value||'').replace(/, ports .*/, '');
+    const ports=(String(it.value||'').match(/ports (.*)/)||[])[1];
+    return `<div class="row"><span class="k">${esc(k)}</span><span class="v ${cls(it.state)}">${esc(v)}</span></div>`
+      + (ports?`<div class="row" style="border:0;padding-top:0"><span class="k"></span><span class="v" style="font-weight:400;color:var(--dim);font-size:14px">:${esc(ports.replace(/,/g,' :'))}</span></div>`:'');
+  }).join('');
+  parts.push(`<div class="card"><h2>Docker &amp; Moodle</h2>${stacks}${envs}</div>`);
+
+  parts.push(`<div class="card"><h2>Network</h2>
+    ${row('Tailscale', net, 'tailscale')}
+    ${row('Tailnet IP', net, 'tailscale_ip')}
+    ${row('WiFi', net, 'wifi_ssid')}
+    ${row('LAN IP', net, 'lan_ip')}
+    ${row('Internet', net, 'internet')}
+    ${row('SSH', svc, 'ssh')}
+    ${row('Docker', svc, 'docker')}
+    ${row('Netdata', svc, 'netdata')}</div>`);
+
+  const agents=(d.agents||[]).map(a=>{
+    const l=a.last||{}, bad=l.exit&&l.exit!=='0';
+    const cost=l.cost?'$'+Number(l.cost).toFixed(2):'—';
+    return `<div class="ag"><div class="top"><span class="name">${esc(a.name)}</span>
+        <span class="pill ${a.enabled==='enabled'?'ok':''}">${esc(a.enabled)}</span></div>
+      <div class="meta">last ${when(l.end)} · exit <span style="color:${bad?'var(--bad)':'var(--ok)'}">${esc(l.exit||'—')}</span>
+        · ${esc(l.seconds||'—')}s · ${cost}</div>
+      <div class="meta">next ${when(a.next)} ${a.schedule?'· '+esc(a.schedule):''}</div></div>`;
+  }).join('');
+  parts.push(`<div class="card"><h2>Agents</h2>
+    ${row('tmux claude', ag, 'tmux_claude')}
+    ${row('Live sessions', ag, 'claude_sessions')}
+    <div style="margin-top:6px">${agents||'<div class="meta">no agents</div>'}</div></div>`);
+
+  const shown=(d.events||[]).slice(0,8);
+  const more=(d.events||[]).length-shown.length;
+  const evs=shown.map(e=>`<div class="ev ${e.kind==='incident'?'incident':''}">
+      <div class="t">${esc(when(e.t))} · ${esc(e.kind)}${e.prio&&e.prio!=='default'?' · '+esc(e.prio):''}</div>
+      <div>${esc(e.text)}</div></div>`).join('');
+  parts.push(`<div class="card"><h2>Last 24 hours</h2>${evs||'<div class="ev">Nothing happened. Good.</div>'}
+    ${more>0?`<div class="ev t" style="color:var(--dim)">+${more} older — see <code>agents-log</code></div>`:''}</div>`);
+
+  parts.push(`<div class="foot"><span>updated ${esc(when(d.now))}</span>
+    <a href="${esc(d.netdata)}" target="_blank" rel="noopener">Full netdata →</a></div>`);
+
+  document.getElementById('app').innerHTML = parts.join('');
+}
+
+async function tick(){
+  try{ render(await (await fetch('/api/status',{cache:'no-store'})).json()); }
+  catch(e){ document.getElementById('app').innerHTML =
+    '<div class="card verdict bad"><div class="big"><span class="dot"></span>No data</div>'+
+    '<div class="sub">'+esc(e.message)+'</div></div>'; }
+}
+tick(); setInterval(tick, 30000);
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) tick(); });
+</script>
+</body>
+</html>

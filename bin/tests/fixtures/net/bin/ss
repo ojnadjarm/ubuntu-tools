@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+case "$*" in
+  *"state established"*)
+    cat <<'SOCKS'
+ESTAB      0      0             192.168.1.50:22          192.0.2.20:51512  users:(("sshd",pid=1004,fd=4))
+SOCKS
+    ;;
+  *)
+    cat <<'LISTEN'
+tcp   LISTEN 0      128        127.0.0.1:8642        0.0.0.0:*     users:(("dark-eye",pid=1001,fd=10))
+tcp   LISTEN 0      4096       0.0.0.0:8052           0.0.0.0:*     users:(("docker-proxy",pid=1002,fd=7))
+tcp   LISTEN 0      128        0.0.0.0:19998          0.0.0.0:*     users:(("node",pid=1003,fd=20))
+tcp   LISTEN 0      128        0.0.0.0:22             0.0.0.0:*     users:(("sshd",pid=1004,fd=3))
+LISTEN
+    ;;
+esac

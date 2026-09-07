@@ -1,0 +1,11 @@
+module	lines	dupes	shellcheck	ccn>15
+pclib	201	0	4	0
+desktop	1848	2	1	7
+kernel	1876	1	12	0
+session	1234	1	5	0
+services	593	1	2	0
+status	581	0	4	0
+sentinel	326	0	2	0
+pcbench	892	0	0	0
+fleet	696	0	1	0
+all	9790	5	37	7

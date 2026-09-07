@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""pc wait-for — block until one UI condition holds, polling cheap text every 250 ms."""
+import argparse, os, subprocess, sys, time
+
+BIN = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, BIN)
+import a11y_tree as A
+
+USAGE = ('usage: pc wait-for (--window SUB | --focus SUB | --text NAME [--app SUB] | --gone SUB) '
+         '[--timeout S] [--see]')
+
+
+def match(wins, sub):
+    """Windows whose title or class contains sub."""
+    s = sub.lower()
+    return [w for w in wins if s in w.get("title", "").lower() or s in w.get("wm_class", "").lower()]
+
+
+def holds(a):
+    """True when the requested condition is satisfied right now."""
+    if a.text:
+        app = a.app or A.app_for_window(next((w for w in A.windows() if w.get("focus")), None))
+        if not app:
+            return False
+        return any(n["name"].lower() == a.text.lower() or a.text.lower() in n["name"].lower()
+                   for n in A.interactive([n for n in A.collect(app) if n["depth"]]))
+    wins = A.windows()
+    if a.window:
+        return bool(match(wins, a.window))
+    if a.gone:
+        return not match(wins, a.gone)
+    return any(w.get("focus") for w in match(wins, a.focus))
+
+
+def main():
+    p = argparse.ArgumentParser(add_help=False)
+    p.add_argument("--window"); p.add_argument("--focus"); p.add_argument("--text")
+    p.add_argument("--gone"); p.add_argument("--app", default="")
+    p.add_argument("--timeout", type=float, default=15.0)
+    p.add_argument("--see", action="store_true")
+    p.add_argument("-h", "--help", action="store_true")
+    a = p.parse_args()
+    if a.help:
+        print(USAGE)
+        return 0
+    if sum(bool(x) for x in (a.window, a.focus, a.text, a.gone)) != 1:
+        print(USAGE, file=sys.stderr)
+        return 2
+    A.Atspi.set_timeout(800, 3000)
+    start = time.time()
+    while True:
+        if holds(a):
+            print("ok after %.1f s" % (time.time() - start))
+            if a.see:
+                print(A.see("", 4000, False)[0])
+            return 0
+        if time.time() - start >= a.timeout:
+            print("timeout after %.1f s" % (time.time() - start))
+            return 1
+        time.sleep(0.25)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

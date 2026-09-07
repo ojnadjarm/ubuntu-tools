@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Recorded pc-dbus for the pc-mutter tests: replays ../resp/*.json, never touches a bus.
+d="$(cd "$(dirname "$(readlink -f "$0")")/../resp" && pwd)"
+f=
+case "$*" in
+  *GetCurrentState*) f="state-${PC_MUTTER_STATE:-mirrored}.json";;
+  *GetIdletime*)     f=idle.json;;
+  *introspect*/org/gnome/Shell\ *|*introspect*/org/gnome/Shell) f=shell.json;;
+  *ListExtensions*)  f=exts.json;;
+  *GetAddress*)      f=a11y.json;;
+  *introspect*/org/gnome/Mutter/*) exit 0;;
+esac
+[ -n "$f" ] && [ -r "$d/$f" ] || { printf 'fixture pc-dbus: nothing recorded for: %s\n' "$*" >&2; exit 70; }
+cat "$d/$f"

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+case "$*" in
+  *"status --json"*)
+    cat <<'JSON'
+{"BackendState":"Running","Self":{"HostName":"example-host","TailscaleIPs":["100.101.102.103"],"OS":"linux","Online":true},
+ "Peer":{"nodekey:abc":{"HostName":"phone","TailscaleIPs":["100.101.102.104"],"OS":"android","Online":true}}}
+JSON
+    ;;
+  *"serve status"*)
+    cat <<'TXT'
+https://example-host.tail1234.ts.net:8452/
+|-- proxy http://127.0.0.1:8052
+
+https://example-host.tail1234.ts.net:8499/
+|-- proxy http://127.0.0.1:19999
+TXT
+    ;;
+  *"ip -4"*) echo 100.101.102.103;;
+esac

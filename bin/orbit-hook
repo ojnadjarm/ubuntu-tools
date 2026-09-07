@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""Subagent hooks → orbiters: SubagentStart lights one, SubagentStop puts it out.
+
+usage: orbit-hook start|stop   (the hook JSON arrives on stdin)
+Never blocks and never fails: a dead Eye is a silent no-op.
+"""
+import json
+import os
+import sys
+import urllib.request
+
+TIMEOUT = 1.5
+LABEL_MAX = 24
+
+
+def config():
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    cfg = json.load(open(os.path.join(base, "dark-eye", "config.json")))
+    return cfg["secret"], cfg.get("port", 8642)
+
+
+def claim_index(key, agent_id, path):
+    """Which Agent call of that message is mine — its order among the message's agents."""
+    try:
+        claims = json.load(open(path))
+    except Exception:
+        claims = {}
+    ids = claims.get(key, [])
+    if agent_id not in ids:
+        ids.append(agent_id)
+        try:
+            os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+            with open(path, "w") as f:
+                json.dump({key: ids}, f)  # only the message in flight is worth keeping
+        except Exception:
+            pass
+    return ids.index(agent_id)
+
+
+def spawning_call(transcript):
+    """The last assistant message that spawned agents: its uuid and its descriptions."""
+    key, found = "", []
+    with open(transcript) as f:
+        for line in f:
+            if '"Agent"' not in line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            content = (rec.get("message") or {}).get("content")
+            calls = [b for b in (content if isinstance(content, list) else [])
+                     if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") == "Agent"]
+            if calls:
+                key, found = str(rec.get("uuid") or ""), [str((c.get("input") or {}).get("description") or "") for c in calls]
+    return key, found
+
+
+def label_for(hook, agent_id):
+    """The agent's description, or its type when the transcript does not say."""
+    try:
+        key, found = spawning_call(hook["transcript_path"])
+        claims = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "dark-eye", "orbit-claims.json")
+        i = claim_index(key, agent_id, claims)
+        if i < len(found) and found[i]:
+            return found[i]
+    except Exception:
+        pass
+    return str(hook.get("agent_type") or "agent")
+
+
+def main():
+    state = "working" if (sys.argv[1:2] or ["start"])[0] == "start" else "done"
+    hook = json.load(sys.stdin)
+    agent_id = str(hook.get("agent_id") or "")
+    if not agent_id:
+        return
+    label = label_for(hook, agent_id)[:LABEL_MAX] if state == "working" else ""
+    secret, port = config()
+    body = json.dumps({"id": agent_id[:6], "state": state, "label": label}).encode()
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/bridge/status", data=body,
+        headers={"Content-Type": "application/json", "x-dark-eye-key": secret})
+    urllib.request.urlopen(req, timeout=TIMEOUT).read()
+
+
+try:
+    main()
+except Exception:
+    pass  # the Eye being down must never touch the session

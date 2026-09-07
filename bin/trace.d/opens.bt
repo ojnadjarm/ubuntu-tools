@@ -1,0 +1,9 @@
+/*
+ * opens.bt — openat() by comm, pid and filename. $1 = pid filter (0 = all), $2 = seconds.
+ */
+tracepoint:syscalls:sys_enter_openat /$1 == 0 || pid == (uint32)$1/
+{
+	@opens[comm, pid, str(args->filename, 96)] = count();
+}
+
+interval:s:$2 { exit(); }

@@ -1,0 +1,226 @@
+#!/usr/bin/env python3
+"""pc win — list/focus/move/resize/close/minimize/maximize windows via the Window Calls extension."""
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+from gi.repository import Gio, GLib
+
+DEST = "org.gnome.Shell"
+PATH = "/org/gnome/Shell/Extensions/Windows"
+IFACE = "org.gnome.Shell.Extensions.Windows"
+BIN = os.path.dirname(os.path.realpath(__file__))
+FOCUS_FILE = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "pc-focus-window")
+
+USAGE = """usage: pc win <command> [args]
+  list [--json] [--all]      windows with id, class, title, geometry, focus, workspace
+                             (--all also shows tooltips and popups: no wm_class or title)
+  focused                    print the focused window id (exit 1 if none)
+  focus <sel> [--no-click]   raise and focus a window (clicks in it to take keyboard focus)
+  move <sel> X Y             move to X,Y
+  resize <sel> W H           resize to WxH
+  close|minimize|maximize <sel>
+  wait <title-substring> [timeout] [--no-click]   wait until a matching window is focused
+  verify                     exit 1 unless the window last focused by `pc win focus` still has focus
+<sel> is a window id, or a case-insensitive substring of the title or wm_class."""
+
+
+def call(method, args=None):
+    """Call one method on the Window Calls D-Bus interface."""
+    bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    try:
+        r = bus.call_sync(DEST, PATH, IFACE, method, args, None,
+                          Gio.DBusCallFlags.NONE, 5000, None)
+    except GLib.Error as e:
+        sys.exit("pc win: %s" % e.message)
+    return r.unpack()[0] if r.n_children() else None
+
+
+def windows():
+    """Every window with its geometry merged in."""
+    out = []
+    for w in json.loads(call("List")):
+        d = json.loads(call("Details", GLib.Variant("(u)", (w["id"],))))
+        w.update({k: d.get(k) for k in ("x", "y", "width", "height", "minimized")})
+        out.append(w)
+    return out
+
+
+def resolve(sel):
+    """Window id for an id or a title/class substring."""
+    wins = windows()
+    if sel.isdigit():
+        m = [w for w in wins if w["id"] == int(sel)]
+    else:
+        s = sel.lower()
+        m = [w for w in wins if s in (w["title"] or "").lower()
+             or s in (w["wm_class"] or "").lower()]
+    if not m:
+        sys.exit("pc win: no window matching '%s'" % sel)
+    return m[0]["id"]
+
+
+def act(method, sel, extra=(), sig="(u)"):
+    """Run a window method on the resolved selector."""
+    call(method, GLib.Variant(sig, (resolve(sel),) + extra))
+
+
+def cmd_list(args):
+    """Print the window table, or JSON with --json; transient surfaces need --all."""
+    wins = windows()
+    if "--all" not in args:
+        wins = [w for w in wins if w.get("wm_class") and w.get("title")]
+    if "--json" in args:
+        print(json.dumps(wins, indent=1))
+        return
+    print("%-12s %-24s %-5s %-19s %s" % ("ID", "CLASS", "WS", "GEOMETRY", "TITLE"))
+    for w in wins:
+        print("%-12d %-24.24s %-5d %-19s %s%s" % (
+            w["id"], w["wm_class"], w["workspace"],
+            "%dx%d+%d+%d" % (w["width"], w["height"], w["x"], w["y"]),
+            "* " if w["focus"] else "", w["title"]))
+
+
+def focused_id():
+    """Id of the focused window, or None."""
+    f = [w["id"] for w in json.loads(call("List")) if w["focus"]]
+    return f[0] if f else None
+
+
+def record(wid):
+    """Remember the window the caller focused, so pc type / pc key can check it."""
+    try:
+        with open(FOCUS_FILE, "w") as f:
+            f.write(str(wid))
+    except OSError:
+        pass
+
+
+def screen():
+    """Current screen size, or None."""
+    try:
+        out = subprocess.run(["xrandr"], capture_output=True, text=True).stdout
+        m = re.search(r"current (\d+) x (\d+)", out)
+        return int(m.group(1)), int(m.group(2))
+    except Exception:
+        return None
+
+
+def focus_click(wid):
+    """Click just inside the window's bottom edge: Activate raises a window and sets the
+    shell's focus flag, but a window that does not take keyboard focus on map stays
+    input-dead until it is clicked, and then every keystroke is silently dropped."""
+    d = json.loads(call("Details", GLib.Variant("(u)", (wid,))))
+    x, y = d["x"] + d["width"] // 2, d["y"] + d["height"] - 8
+    s = screen()
+    if s:
+        x, y = min(max(x, 0), s[0] - 1), min(max(y, 0), s[1] - 1)
+    subprocess.run([os.path.join(BIN, "pc-click"), str(x), str(y)],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(0.3)
+
+
+def cmd_focus(sel, click=True):
+    """Activate a window and make sure it really holds keyboard focus."""
+    wid = resolve(sel)
+    call("Activate", GLib.Variant("(u)", (wid,)))
+    time.sleep(0.4)
+    if click:
+        focus_click(wid)
+    if focused_id() != wid:
+        sys.exit("pc win: '%s' did not take focus" % sel)
+    record(wid)
+
+
+def cmd_verify():
+    """Exit 1 unless the window `pc win focus` left focused is still the focused one."""
+    wins = json.loads(call("List"))
+    foc = [w["id"] for w in wins if w["focus"]]
+    try:
+        with open(FOCUS_FILE) as f:
+            rec = int(f.read().strip())
+    except (OSError, ValueError):
+        rec = None
+    if rec is not None and any(w["id"] == rec for w in wins):
+        if not foc or foc[0] != rec:
+            sys.exit("window %d was focused by 'pc win focus' but %s has focus now"
+                     % (rec, foc[0] if foc else "no window"))
+    elif rec is not None:
+        try:
+            os.unlink(FOCUS_FILE)
+        except OSError:
+            pass
+    if not foc:
+        sys.exit("no focused window")
+
+
+def cmd_wait(args):
+    """Poll until a window whose title matches is focused."""
+    click = "--no-click" not in args
+    args = [a for a in args if a != "--no-click"]
+    sub = args[0].lower()
+    timeout = float(args[1]) if len(args) > 1 else 10.0
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for w in windows():
+            if sub in (w["title"] or "").lower():
+                if not w["focus"]:
+                    call("Activate", GLib.Variant("(u)", (w["id"],)))
+                    time.sleep(0.4)
+                    continue
+                if click:
+                    focus_click(w["id"])
+                record(w["id"])
+                print(w["id"])
+                return
+        time.sleep(0.3)
+    sys.exit("pc win: timed out waiting for '%s'" % args[0])
+
+
+def main():
+    args = sys.argv[1:]
+    if args[0:1] and args[0] in ("-h", "--help", "help"):
+        print(USAGE)
+        return
+    if not args:
+        print(USAGE, file=sys.stderr)
+        sys.exit(2)
+    cmd, rest = args[0], args[1:]
+    if cmd == "focused":
+        f = [w for w in json.loads(call("List")) if w["focus"]]
+        if not f:
+            sys.exit(1)
+        print(f[0]["id"])
+        return
+    if cmd == "list":
+        return cmd_list(rest)
+    if cmd == "verify":
+        return cmd_verify()
+    if cmd == "wait":
+        if not rest:
+            print(USAGE, file=sys.stderr)
+            sys.exit(2)
+        return cmd_wait(rest)
+    if cmd == "focus":
+        if not rest:
+            print(USAGE, file=sys.stderr)
+            sys.exit(2)
+        return cmd_focus(rest[0], "--no-click" not in rest)
+    simple = {"close": "Close", "minimize": "Minimize", "maximize": "Maximize"}
+    if cmd in simple:
+        if not rest:
+            print(USAGE, file=sys.stderr)
+            sys.exit(2)
+        return act(simple[cmd], rest[0])
+    if cmd == "move" and len(rest) == 3:
+        return act("Move", rest[0], (int(rest[1]), int(rest[2])), "(uii)")
+    if cmd == "resize" and len(rest) == 3:
+        return act("Resize", rest[0], (int(rest[1]), int(rest[2])), "(uuu)")
+    print(USAGE, file=sys.stderr)
+    sys.exit(2)
+
+
+main()

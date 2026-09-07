@@ -1,0 +1,5 @@
+#!/bin/bash
+# pc notify "msg" [title] — desktop notification on this screen.
+. "$(dirname "$(readlink -f "$0")")/env.sh"
+[ "${1:-}" = -h ] || [ $# -eq 0 ] && { echo 'usage: pc notify "msg" [title]'; exit 0; }
+exec notify-send "${2:-Claude}" "$1"

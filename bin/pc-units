@@ -1,0 +1,224 @@
+#!/usr/bin/env bash
+# pc units — systemd units/timers (user+system), per-unit cost, journal tail, guarded restart.
+# shellcheck disable=SC2034
+set -uo pipefail
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+
+pc_usage 'usage: pc units [list|timers|fleet|show|cost|log|deps|start|stop|restart] [args]
+       pc units list [--user|--system|--all] [--failed] [--json]
+       pc units timers [--user|--system|--all] [--json]
+       pc units fleet [--json]
+       pc units show <u> [--user|--system] [--json]
+       pc units cost <u> [--user|--system] [--json]
+       pc units log <u> [--user|--system] [-n 30] [--since 1h] [--json]
+       pc units deps <u> [--user|--system] [--json]
+       pc units start|stop|restart <u> [--user|--system] [--apply]
+       (no args) = failed + fleet + top 5 by cpu
+
+Manager is auto-detected (checked in --user first, then --system) unless --user/--system forces
+it. `start`/`stop`/`restart` are guarded (never ssh*/ufw/tailscaled, never dark-eye.service
+without PC_ORCHESTRATOR=1, never the orchestrator unit) and ledgered — without --apply they print
+the change they would make and exit 0.
+
+Roster (~/CLAUDE.md): sentinel-check.timer, agent@moodle-keeper, agent@sentinel-digest,
+agent@maintenance, moodle-keep-weekly.timer, dark-eye(.service/-ptt/-failed), agents-dashboard,
+the orchestrator unit, ydotoold (system). `fleet` = just those, with next/last run from timers.' "$@"
+
+# Roster units (~/CLAUDE.md persistent-agent table + always-on services).
+ROSTER_USER=(sentinel-check.timer agent@moodle-keeper.service agent@sentinel-digest.service
+  agent@maintenance.service moodle-keep-weekly.timer dark-eye.service dark-eye-ptt.service
+  dark-eye-failed.service agents-dashboard.service "$ORCHESTRATOR_UNIT")
+ROSTER_SYSTEM=(ydotoold.service)
+
+PC_SUB='pc units'; PC_EXTRA_FLAGS=(--user --system --all --failed -n: --since:)
+pc_opt "$@"; ARGS=("${PC_ARGS[@]}")
+N=${PC_OPT[-n]-30}; SINCE=${PC_OPT[--since]-}; FAILED=${PC_OPT[--failed]-0}
+SCOPE=""; for f in ${PC_EXTRA[@]+"${PC_EXTRA[@]}"}; do case $f in --user|--system|--all) SCOPE=${f#--};; esac; done
+
+# scope_flag <scope> — the systemctl/journalctl flag for a resolved scope ("" for system).
+scope_flag() { [ "$1" = user ] && echo --user || echo ""; }
+
+# resolve_scope <unit> — SCOPE if forced, else ask both managers' LoadState (so a unit named
+# without its .service/.timer suffix still resolves — list-units' glob needs it exact) and pick
+# the one where it's loaded; if both, prefer user for units under ~/.config/systemd/user, else
+# error out as ambiguous; error out too when neither manager has it loaded.
+resolve_scope() {
+  [ -n "$SCOPE" ] && [ "$SCOPE" != all ] && { echo "$SCOPE"; return; }
+  local uls sls
+  uls=$(pc_cmd systemctl --user show "$1" -p LoadState --value 2>/dev/null)
+  sls=$(pc_cmd systemctl show "$1" -p LoadState --value 2>/dev/null)
+  if [ "$uls" = loaded ] && [ "$sls" != loaded ]; then echo user; return; fi
+  if [ "$sls" = loaded ] && [ "$uls" != loaded ]; then echo system; return; fi
+  if [ "$uls" = loaded ] && [ "$sls" = loaded ]; then
+    local frag; frag=$(pc_cmd systemctl --user show "$1" -p FragmentPath --value 2>/dev/null)
+    case "$frag" in "$HOME"/.config/systemd/user/*) echo user; return;; esac
+    echo "pc units: '$1' is ambiguous (loaded in both user and system managers) — pass --user or --system" >&2
+    exit 2
+  fi
+  echo "pc units: '$1' not found in user or system scope" >&2
+  exit 2
+}
+
+# units_json <scope> — list-units --all --output=json for one manager, tagged with .scope.
+units_json() {
+  local s=$1 flag; flag=$(scope_flag "$s")
+  pc_cmd systemctl $flag list-units --all --output=json 2>/dev/null | jq --arg s "$s" 'map(.+{scope:$s})'
+}
+# timers_json <scope> — list-timers --all --output=json for one manager, tagged with .scope.
+timers_json() {
+  local s=$1 flag; flag=$(scope_flag "$s")
+  pc_cmd systemctl $flag list-timers --all --output=json 2>/dev/null | jq --arg s "$s" 'map(.+{scope:$s})'
+}
+# both <fn> — the two managers' output, concatenated (or just one when SCOPE forces it).
+both() {
+  case "$SCOPE" in
+    user) "$1" user;;
+    system) "$1" system;;
+    *) jq -s add <(("$1" user)) <(("$1" system));;
+  esac
+}
+
+# guard_unit <unit> — the bare-name check now lives in pclib (pc_guard_unit); kept as the
+# local name the verbs already call.
+guard_unit() { pc_guard_unit "$1"; }
+
+case "${ARGS[0]:-}" in
+  list)
+    out=$(both units_json)
+    [ "$FAILED" = 1 ] && out=$(jq '[.[]|select(.active=="failed")]' <<<"$out")
+    if [ "$JSON" = 1 ]; then printf '%s\n' "$out"; else
+      jq -r '.[] | [.scope,.unit,.load,.active,.sub] | @tsv' <<<"$out" | column -t
+    fi
+    ;;
+
+  timers)
+    out=$(both timers_json)
+    if [ "$JSON" = 1 ]; then printf '%s\n' "$out"; else
+      jq -r '.[] | [.scope,.unit,(.next/1000000|todate),.activates] | @tsv' <<<"$out" | column -t
+    fi
+    ;;
+
+  fleet)
+    roster_rows() {
+      local u
+      for u in "${ROSTER_USER[@]}"; do jq -n --arg u "$u" --arg s user '{unit:$u,scope:$s}'; done
+      for u in "${ROSTER_SYSTEM[@]}"; do jq -n --arg u "$u" --arg s system '{unit:$u,scope:$s}'; done
+    }
+    out=$(roster_rows | jq -s '.')
+    all_timers=$(both timers_json)
+    # ActiveState/SubState for the whole roster in two calls (one per scope, explicit unit
+    # names — not a glob, which silently drops some inactive units on this systemd when
+    # ActiveState/SubState are requested together; explicit names do not have that bug).
+    states=$(
+      { systemctl --user show "${ROSTER_USER[@]}" -p Id,ActiveState,SubState 2>/dev/null
+        [ ${#ROSTER_SYSTEM[@]} -gt 0 ] && systemctl show "${ROSTER_SYSTEM[@]}" -p Id,ActiveState,SubState 2>/dev/null
+      } | awk '/^Id=/{if(id)print id"\t"a"\t"b; id=substr($0,4); a="";b=""}
+                /^ActiveState=/{a=substr($0,13)} /^SubState=/{b=substr($0,10)}
+                END{if(id)print id"\t"a"\t"b}')
+    out=$(jq -c '.[]' <<<"$out" | while IFS= read -r row; do
+      u=$(jq -r .unit <<<"$row")
+      st=$(awk -F'\t' -v u="$u" '$1==u{print $2"\t"$3; found=1} END{if(!found) print "unknown\tunknown"}' <<<"$states")
+      as=${st%%$'\t'*}; ss=${st#*$'\t'}
+      tm=$(jq -c --arg u "$u" '[.[] | select(.activates==$u)][0] // null' <<<"$all_timers")
+      jq -c --arg as "$as" --arg ss "$ss" --argjson tm "${tm:-null}" \
+        '. + {active:$as, sub:$ss, next:($tm.next // null), last:($tm.last // null)}' <<<"$row"
+    done | jq -s '.')
+    if [ "$JSON" = 1 ]; then printf '%s\n' "$out"; else
+      jq -r '.[] | [.scope,.unit,.active,.sub] | @tsv' <<<"$out" | column -t
+    fi
+    ;;
+
+  show)
+    u=${ARGS[1]:-}; [ -n "$u" ] || { echo "pc units show: need a unit" >&2; exit 2; }
+    s=$(resolve_scope "$u"); flag=$(scope_flag "$s")
+    out=$(systemctl $flag show "$u" -p ActiveState,SubState,NRestarts,MainPID,ExecMainStartTimestamp,Result,ControlGroup,Description 2>/dev/null)
+    if [ "$JSON" = 1 ]; then
+      jq -Rn --arg s "$s" --arg u "$u" '
+        ([inputs | select(length>0) | split("=") | {(.[0]): (.[1:] | join("="))}] | add // {}) + {scope:$s, unit:$u}' <<<"$out"
+    else
+      printf 'scope=%s unit=%s\n%s\n' "$s" "$u" "$out"
+    fi
+    ;;
+
+  cost)
+    u=${ARGS[1]:-}; [ -n "$u" ] || { echo "pc units cost: need a unit" >&2; exit 2; }
+    s=$(resolve_scope "$u"); flag=$(scope_flag "$s")
+    props=$(systemctl $flag show "$u" -p CPUUsageNSec,MemoryCurrent,MemoryPeak,TasksCurrent,ControlGroup 2>/dev/null)
+    cpu_ns=$(sed -n 's/^CPUUsageNSec=//p' <<<"$props")
+    mem_cur=$(sed -n 's/^MemoryCurrent=//p' <<<"$props")
+    tasks=$(sed -n 's/^TasksCurrent=//p' <<<"$props")
+    cgroup=$(sed -n 's/^ControlGroup=//p' <<<"$props")
+    cpu_s=$(awk -v n="${cpu_ns:-0}" 'BEGIN{if(n=="" || n=="[not set]") n=0; printf "%.3f", n/1000000000}')
+    mem_mb=$(awk -v m="${mem_cur:-0}" 'BEGIN{if(m=="" || m=="[not set]") m=0; printf "%.1f", m/1024/1024}')
+    tasks=${tasks:-0}; [ "$tasks" = "[not set]" ] && tasks=0
+    some=0; full=0
+    if [ -n "${cgroup:-}" ] && [ "$cgroup" != "[not set]" ]; then
+      cp="$PC_SYS/fs/cgroup${cgroup}/cpu.pressure"
+      [ -r "$cp" ] && { some=$(awk -F'avg10=| ' '/^some/{print $2}' "$cp"); full=$(awk -F'avg10=| ' '/^full/{print $2}' "$cp"); }
+    fi
+    : "${some:=0}"; : "${full:=0}"
+    if [ "$JSON" = 1 ]; then
+      pc_json '{unit:$u,scope:$s,cpu_s:($c|tonumber),mem_mb:($m|tonumber),tasks:($t|tonumber),psi:{some:($so|tonumber),full:($f|tonumber)}}' \
+        --arg u "$u" --arg s "$s" --arg c "$cpu_s" --arg m "$mem_mb" --arg t "$tasks" --arg so "$some" --arg f "$full"
+    else
+      printf 'unit=%s scope=%s cpu_s=%s mem_mb=%s tasks=%s psi_some=%s psi_full=%s\n' "$u" "$s" "$cpu_s" "$mem_mb" "$tasks" "$some" "$full"
+    fi
+    ;;
+
+  log)
+    u=${ARGS[1]:-}; [ -n "$u" ] || { echo "pc units log: need a unit" >&2; exit 2; }
+    s=$(resolve_scope "$u"); flag=$(scope_flag "$s")
+    since=(); [ -n "$SINCE" ] && since=(--since "$SINCE")
+    if [ "$JSON" = 1 ]; then
+      journalctl $flag -u "$u" -n "$N" "${since[@]}" -o json 2>/dev/null | jq -c '{MESSAGE,PRIORITY,__REALTIME_TIMESTAMP}' | jq -s '.'
+    else
+      journalctl $flag -u "$u" -n "$N" "${since[@]}" --no-pager 2>/dev/null
+    fi
+    ;;
+
+  deps)
+    u=${ARGS[1]:-}; [ -n "$u" ] || { echo "pc units deps: need a unit" >&2; exit 2; }
+    s=$(resolve_scope "$u"); flag=$(scope_flag "$s")
+    out=$(systemctl $flag show "$u" -p Requires,Wants,After,Before,BoundBy,PartOf 2>/dev/null)
+    if [ "$JSON" = 1 ]; then
+      jq -Rn '[inputs | select(length>0) | split("=") | {(.[0]): (.[1] // "" | split(" ") | map(select(length>0)))}] | add // {}' <<<"$out"
+    else
+      printf '%s\n' "$out"
+    fi
+    ;;
+
+  start|stop|restart)
+    verb=${ARGS[0]}; u=${ARGS[1]:-}; [ -n "$u" ] || { echo "pc units $verb: need a unit" >&2; exit 2; }
+    guard_unit "$u"
+    s=$(resolve_scope "$u"); flag=$(scope_flag "$s")
+    before=$(systemctl $flag show "$u" -p ActiveState --value 2>/dev/null); : "${before:=unknown}"
+    case "$verb" in start|restart) after=active;; stop) after=inactive;; esac
+    case "$verb" in
+      start) rollback="pc units stop $(printf '%q' "$u")${flag:+ $flag} --apply";;
+      stop) rollback="pc units start $(printf '%q' "$u")${flag:+ $flag} --apply";;
+      restart) rollback="pc units restart $(printf '%q' "$u")${flag:+ $flag} --apply  # noted as such: restart's rollback is restart";;
+    esac
+    export PC_READ_CMD="systemctl $flag show $(printf '%q' "$u") -p ActiveState --value 2>/dev/null"
+    pc_apply "$u" "$before" "$after" "$rollback" \
+      systemctl $flag "$verb" -- "$u"
+    ;;
+
+  ""|default)
+    all=$(both units_json)
+    echo "== failed =="
+    jq -r '[.[]|select(.active=="failed")] | .[] | [.scope,.unit,.active,.sub] | @tsv' <<<"$all" | column -t
+    echo; echo "== fleet =="
+    "$0" fleet
+    echo; echo "== top 5 by cpu (user scope; \`pc units cost <u> --system\` for a system unit) =="
+    # one batched `show` per unit type, user scope only — a system-wide glob `show` over 230
+    # units costs ~0.13 s on its own (budget is 0.4 s for the whole default view).
+    { systemctl --user show '*.service' -p Id,CPUUsageNSec 2>/dev/null | awk -v s=user '/^Id=/{id=substr($0,4)} /^CPUUsageNSec=/{print substr($0,14)"\t"s"\t"id}'
+      systemctl --user show '*.timer' -p Id,CPUUsageNSec 2>/dev/null | awk -v s=user '/^Id=/{id=substr($0,4)} /^CPUUsageNSec=/{print substr($0,14)"\t"s"\t"id}'
+    } | awk -F'\t' '$1+0>0' | sort -t $'\t' -rn -k1,1 | head -5 \
+      | awk -F'\t' '{printf "%s\t%s\t%.3fs\n", $2,$3,$1/1000000000}' | column -t
+    ;;
+
+  *)
+    echo "pc units: unknown verb '${ARGS[0]}' (try: pc units -h)" >&2; exit 2;;
+esac

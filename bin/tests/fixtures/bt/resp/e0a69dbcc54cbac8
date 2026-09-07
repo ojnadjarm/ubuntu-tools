@@ -1,0 +1,7 @@
+NAME                                TYPE      SIGNATURE  RESULT/VALUE  FLAGS
+org.freedesktop.DBus.Introspectable interface -          -             -
+.Introspect                         method    -          s             -
+org.freedesktop.DBus.ObjectManager  interface -          -             -
+.GetManagedObjects                  method    -          a{oa{sa{sv}}} -
+.InterfacesAdded                    signal    oa{sa{sv}} -             -
+.InterfacesRemoved                  signal    oas        -             -

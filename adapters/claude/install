@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Claude Code adapter installer — idempotent. Wires three things and nothing else:
+#   1. the portable skills, symlinked into ~/.claude/skills/
+#   2. this harness's hooks, merged into ~/.claude/settings.json
+#   3. an @AGENTS.md include in ~/CLAUDE.md, so the contract is in every session in $HOME
+# ~/.claude/CLAUDE.md (the global instruction file) is never touched.
+set -uo pipefail
+HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+BIN="$(cd "$HERE/../../bin" && pwd)"
+# shellcheck source=/dev/null
+. "$BIN/env.sh"
+CTX="$HARNESS_CONTEXT_DIR"
+# Store the harness path as a literal $HOME/... so settings.json stays portable
+# across machines (Claude expands it) and matches the entries already written.
+HH="$HARNESS_HOME"; case "$HH" in "$HOME"/*) HH="\$HOME/${HH#"$HOME"/}";; esac
+TILDE="$HARNESS_HOME"; case "$TILDE" in "$HOME"/*) TILDE="~/${TILDE#"$HOME"/}";; esac
+changed=0
+
+## 1. skills
+for d in "$HARNESS_HOME"/skills/*/; do
+  [ -f "$d/SKILL.md" ] || continue
+  name="$(basename "$d")"
+  target="$CTX/skills/$name/SKILL.md"
+  [ "$(readlink -f "$target" 2>/dev/null)" = "$(readlink -f "${d%/}/SKILL.md")" ] && continue
+  mkdir -p "$CTX/skills/$name"
+  ln -sfn "${d%/}/SKILL.md" "$target"
+  echo "linked $target"
+  changed=1
+done
+
+## 2. hooks in settings.json
+out="$(python3 "$HERE/merge-settings.py" install \
+        "$CTX/settings.json" "$HERE/settings.fragment.json" "$HH")" || exit 1
+case "$out" in "no changes") ;; *) echo "$out"; changed=1;; esac
+# The GH09 compatibility symlink is superseded by the fragment's direct path.
+[ -L "$CTX/hooks/audit-log.sh" ] && rm -f "$CTX/hooks/audit-log.sh" && { echo "removed stale $CTX/hooks/audit-log.sh"; changed=1; }
+
+## 3. @AGENTS.md include in ~/CLAUDE.md
+inc="$HOME/CLAUDE.md"
+marker="<!-- pc-harness: the fleet contract, added by adapters/claude/install -->"
+if [ -f "$inc" ] && ! grep -qF "$marker" "$inc"; then
+  printf '\n%s\n@%s/AGENTS.md\n' "$marker" "$TILDE" >>"$inc"
+  echo "added the @AGENTS.md include to $inc"
+  changed=1
+fi
+
+[ "$changed" = 0 ] && echo "claude adapter: no changes"
+exit 0

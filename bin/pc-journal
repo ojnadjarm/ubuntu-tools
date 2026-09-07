@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# pc journal — structured journalctl queries: errors, per-unit digest, unit tail, grep, boots, size.
+# shellcheck disable=SC2034
+set -uo pipefail
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+
+pc_usage 'usage: pc journal [errors|digest|unit|grep|boots|size] [args]
+       pc journal errors [--since 1h] [-n 50] [--json]
+       pc journal digest [--since 24h] [--json]
+       pc journal unit <u> [-n 50] [--since] [-f [--seconds N]] [--json]
+       pc journal grep <re> [--since 1h] [--json]
+       pc journal boots [--json]
+       pc journal size [--json]
+       (no args) = digest --since 1h + size
+
+Reads `journalctl -o json` (systemd 259) and shapes it with jq — an agent never pages through
+raw logs. `digest` groups by unit/identifier and, within a unit, by a digit/hex-masked message
+so a burst of the same warning collapses to one row: unit · count · first · last · sample.' "$@"
+
+PC_SUB='pc journal'; PC_EXTRA_FLAGS=(-f -n: --since:); SECONDS_=5
+pc_opt "$@"; ARGS=("${PC_ARGS[@]}")
+N=${PC_OPT[-n]-50}; SINCE=${PC_OPT[--since]-}; FOLLOW=${PC_OPT[-f]-0}
+
+# ident_expr — the jq expression naming the source of a journal entry.
+IDENT_EXPR='(._SYSTEMD_USER_UNIT // ._SYSTEMD_UNIT // .SYSLOG_IDENTIFIER // "unknown")'
+# shape — raw journalctl json objects (stdin) reduced to {ident,ts,pri,MESSAGE} (stdout).
+shape() { jq -c '{ident:'"$IDENT_EXPR"',ts:((.__REALTIME_TIMESTAMP|tonumber)/1000000),pri:(.PRIORITY//"6"|tonumber),MESSAGE:(.MESSAGE//"" | if type=="array" then "(binary)" else . end)}'; }
+# digest_rows <since> — errors-and-above rows grouped into unit·count·first·last·sample.
+digest_rows() {
+  journalctl -o json --since "-$1" -p warning 2>/dev/null | shape | jq -s '
+    map(. + {masked: (.MESSAGE | gsub("[0-9a-fA-F]{8,}";"#") | gsub("[0-9]+";"#"))})
+    | group_by(.ident) | map({
+        unit: .[0].ident,
+        count: length,
+        first: (map(.ts) | min | (.|todate)),
+        last: (map(.ts) | max | (.|todate)),
+        sample: ((group_by(.masked) | max_by(length))[0].MESSAGE)
+      })
+    | sort_by(-.count)'
+}
+size_line() {
+  local line human bytes
+  line=$(journalctl --disk-usage 2>/dev/null)
+  human=$(sed -n 's/.*take up \([0-9.]*[KMGT]\) in.*/\1/p' <<<"$line"); : "${human:=0}"
+  bytes=$(numfmt --from=iec "$human" 2>/dev/null); : "${bytes:=0}"
+  if [ "$JSON" = 1 ]; then
+    pc_json '{human:$h,bytes:($b|tonumber)}' --arg h "$human" --arg b "$bytes"
+  else
+    printf '%s (%s bytes)\n' "$human" "$bytes"
+  fi
+}
+
+verb=${ARGS[0]:-}
+default_run=0; [ -z "$verb" ] && { verb=digest; default_run=1; }
+case "$verb" in
+  errors)
+    rows=$(journalctl -o json --since "-${SINCE:-1h}" -p warning -n "$N" 2>/dev/null | shape | jq -s 'sort_by(-.ts)')
+    if [ "$JSON" = 1 ]; then printf '%s\n' "$rows"; else
+      jq -r '.[] | [(.ts|todate),.ident,.MESSAGE] | @tsv' <<<"$rows"
+    fi
+    ;;
+
+  digest)
+    default_since=24h; [ "$default_run" = 1 ] && default_since=1h
+    out=$(digest_rows "${SINCE:-$default_since}")
+    if [ "$JSON" = 1 ]; then printf '%s\n' "$out"; else
+      jq -r '.[] | [.unit,.count,.first,.last,.sample] | @tsv' <<<"$out" | column -t -s $'\t'
+    fi
+    [ "$default_run" = 1 ] && { echo; size_line; }
+    :   # a trailing `[ … ]` that is false would otherwise be the script's exit status
+    ;;
+
+  unit)
+    u=${ARGS[1]:-}; [ -n "$u" ] || { echo "pc journal unit: need a unit" >&2; exit 2; }
+    # --unit and --user-unit together, since a bare -u only matches the system-manager field.
+    args=(--unit="$u" --user-unit="$u" -n "$N" --no-pager)
+    [ -n "$SINCE" ] && args+=(--since "-$SINCE")
+    if [ "$FOLLOW" = 1 ]; then
+      if [ "$JSON" = 1 ]; then
+        timeout "$SECONDS_" journalctl "${args[@]}" -f -o json 2>/dev/null | shape | jq -s '.'
+      else
+        timeout "$SECONDS_" journalctl "${args[@]}" -f 2>/dev/null
+      fi
+      exit 0
+    fi
+    if [ "$JSON" = 1 ]; then
+      journalctl "${args[@]}" -o json 2>/dev/null | shape | jq -s '.'
+    else
+      journalctl "${args[@]}" 2>/dev/null
+    fi
+    ;;
+
+  grep)
+    re=${ARGS[1]:-}; [ -n "$re" ] || { echo "pc journal grep: need a pattern" >&2; exit 2; }
+    rows=$(journalctl -o json --since "-${SINCE:-1h}" 2>/dev/null | shape | jq -s --arg re "$re" '[.[] | select(.MESSAGE | test($re))]')
+    if [ "$JSON" = 1 ]; then printf '%s\n' "$rows"; else
+      jq -r '.[] | [(.ts|todate),.ident,.MESSAGE] | @tsv' <<<"$rows"
+    fi
+    ;;
+
+  boots)
+    out=$(journalctl --list-boots -o json 2>/dev/null)
+    if [ "$JSON" = 1 ]; then printf '%s\n' "$out"; else
+      jq -r '.[] | [.index,(.first_entry/1000000|todate),(.last_entry/1000000|todate),.boot_id] | @tsv' <<<"$out" | column -t
+    fi
+    ;;
+
+  size) size_line;;
+
+  *)
+    echo "pc journal: unknown verb '$verb' (try: pc journal -h)" >&2; exit 2;;
+esac

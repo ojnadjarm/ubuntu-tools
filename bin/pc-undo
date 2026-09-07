@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# pc undo list|show <id>|undo [<id>|--last] [--apply] [--force] — the change ledger and its rollbacks.
+# shellcheck disable=SC2034
+set -uo pipefail
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+
+pc_usage 'usage: pc undo list [-n N] [--json]
+       pc undo show <id> [--json]
+       pc undo <id>|--last [--apply] [--force]
+       pc undo ack <id> --why "<reason>"
+
+The ledger is ~/agents/log/changes.jsonl (override with PC_LEDGER): one line per applied
+mutation with its inverse, one verification line per id. An undo is itself a ledgered change.
+`ack` appends a note that an unverified id is a known, resolved non-issue (never rewrites the
+original lines) so `pc doctor` stops failing on it.' "$@"
+
+PC_SUB='pc undo'; PC_EXTRA_FLAGS=(--last --force --why: -n:)
+pc_opt "$@"; ARGS=("${PC_ARGS[@]}")
+N=${PC_OPT[-n]-20}; WHY=${PC_OPT[--why]-}; LAST=${PC_OPT[--last]-0}; FORCE=${PC_OPT[--force]-0}
+
+# entries [limit] — the ledger as one JSON array, newest first, each apply line merged with its verification.
+entries() {
+  [ -r "$PC_LEDGER" ] || { echo '[]'; return 0; }
+  jq -s --argjson n "${1:-0}" '
+    (map(select(has("verified"))) | INDEX(.id)) as $v
+    | map(select(has("target")))
+    | map(. + ($v[.id] // {verified:null, observed:null}))
+    | reverse | if $n > 0 then .[0:$n] else . end' "$PC_LEDGER" 2>/dev/null || echo '[]'
+}
+
+sub="${ARGS[0]:-}"
+case "$sub" in
+  list|show|undo|ack) ARGS=("${ARGS[@]:1}");;
+  "") [ "$LAST" = 1 ] && sub=undo || sub=list;;
+  *) sub=undo;;   # a bare id
+esac
+
+case "$sub" in
+  ack)
+    id="${ARGS[0]:-}"; [ -n "$id" ] || { echo "pc undo ack: need an id" >&2; exit 2; }
+    [ -n "$WHY" ] || { echo "pc undo ack: need --why \"<reason>\"" >&2; exit 2; }
+    [ -d "${PC_LEDGER%/*}" ] || mkdir -p "${PC_LEDGER%/*}" 2>/dev/null
+    ts=""; printf -v ts '%(%Y-%m-%dT%H:%M:%S%z)T' -1
+    pc_json '{ts:$ts,id:$id,ack:true,why:$w,session:$se}' -c \
+      --arg ts "$ts" --arg id "$id" --arg w "$WHY" --arg se "${CLAUDE_SESSION_ID:-}" >>"$PC_LEDGER"
+    exit 0;;
+  list)
+    if [ "$JSON" = 1 ]; then entries "$N"; exit 0; fi
+    entries "$N" | jq -r '.[] | [.id, .ts, .target, (.before + " → " + .after), (if .verified == true then "ok" else "UNVERIFIED" end)] | @tsv' \
+      | column -t -s $'\t'
+    exit 0;;
+  show)
+    id="${ARGS[0]:-}"; [ -n "$id" ] || { echo "pc undo show: need an id" >&2; exit 2; }
+    out=$(entries | jq --arg id "$id" 'map(select(.id == $id)) | .[0] // empty')
+    [ -n "$out" ] || { echo "pc undo: no ledger entry $id" >&2; exit 1; }
+    [ "$JSON" = 1 ] && printf '%s\n' "$out" || printf '%s\n' "$out" | jq -r 'to_entries[] | "\(.key): \(.value)"'
+    exit 0;;
+esac
+
+id=""
+[ "$LAST" = 1 ] || id="${ARGS[0]:-}"
+[ -n "$id" ] || [ "$LAST" = 1 ] || { echo "pc undo: need an id or --last" >&2; exit 2; }
+e=$(entries | jq --arg id "$id" 'if $id == "" then .[0] else (map(select(.id == $id)) | .[0]) end // empty')
+[ -n "$e" ] || { echo "pc undo: nothing to undo" >&2; exit 1; }
+
+target=$(jq -r '.target' <<<"$e"); before=$(jq -r '.before' <<<"$e"); after=$(jq -r '.after' <<<"$e")
+rollback=$(jq -r '.rollback' <<<"$e"); cmd=$(jq -r '.cmd' <<<"$e"); readcmd=$(jq -r '.read // ""' <<<"$e")
+
+if [ -n "$readcmd" ] && [ "$FORCE" != 1 ]; then
+  now=$(eval "$readcmd" 2>/dev/null)
+  [ "$now" = "$after" ] || {
+    echo "pc undo: $target is now '$now', not the ledger's '$after' — use --force to roll back anyway" >&2
+    exit 4
+  }
+fi
+
+# The undo is a ledgered change of its own, whose inverse is the command it is undoing.
+PC_READ_CMD="$readcmd" pc_apply "$target" "$after" "$before" "$cmd" bash -c "$rollback"

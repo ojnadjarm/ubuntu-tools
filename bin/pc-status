@@ -1,0 +1,378 @@
+#!/usr/bin/env bash
+# pc status — live health snapshot of this machine (text, --json, --check, --brief, --facts, --fresh).
+set -uo pipefail
+export LC_ALL=C
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+
+MODE=text
+FRESH=0
+for a in "$@"; do case "$a" in
+  --json) MODE=json;; --check) MODE=check;; --brief) MODE=brief;; --facts) MODE=facts;;
+  --fresh) FRESH=1;;
+  -h|--help) echo "usage: pc status [--json|--check|--brief|--facts] [--fresh]"; exit 0;;
+  *) echo "pc status: unknown option $a" >&2; exit 2;;
+esac; done
+
+REC="$(mktemp)"; trap 'rm -f "$REC"' EXIT
+fails=0
+# add <section> <key> <value> [OK|FAIL|-]; counts failures.
+add() {
+  [ "${4:--}" = FAIL ] && fails=$((fails+1))
+  printf '%s\t%s\t%s\t%s\n' "$1" "$2" "${3:-n/a}" "${4:--}" >>"$REC"
+}
+# ok_if <condition-exit-code-cmd...> -> prints OK or FAIL
+ok_if() { if "$@" >/dev/null 2>&1; then echo OK; else echo FAIL; fi; }
+# first <file...> — first line of the first readable file (no fork).
+first() {
+  local f l
+  for f in "$@"; do
+    [ -r "$f" ] || continue
+    while IFS= read -r l || [ -n "$l" ]; do printf '%s\n' "$l"; return 0; done <"$f"
+  done
+}
+
+## --- probe cache ------------------------------------------------------------
+# `cached()` and its cache dir live in pclib.sh now (same TTL policy, EF04/EF09).
+. "$BIN/pclib.sh"
+
+## --- cheap probes (also used by --brief) ------------------------------------
+p_ac=$(first /sys/class/power_supply/A[CD]*/online)
+[ "${p_ac:-1}" = 1 ] && p_src=AC || p_src=battery
+p_pct=$(first /sys/class/power_supply/BAT*/capacity); : "${p_pct:=100}"
+p_lid=$(first /proc/acpi/button/lid/*/state)
+case "$p_lid" in state:*) p_lid="${p_lid#state:}"; p_lid="${p_lid#"${p_lid%%[![:space:]]*}"}";; *) p_lid="";; esac
+: "${p_lid:=n/a}"
+
+IFS=$'\t' read -r r_disk r_dfree < <(df -Ph / | awk 'NR==2{gsub("%","",$5); printf "%s\t%s\n", $5, $4}')
+IFS=$'\t' read -r r_ramav r_ramtot r_swap < <(awk '/^MemAvailable:/{a=$2} /^MemTotal:/{t=$2}
+     /^SwapTotal:/{s=$2} /^SwapFree:/{f=$2}
+     END{printf "%d\t%d\t%d MB / %d MB\n", a/1024, t/1024, (s-f)/1024, s/1024}' /proc/meminfo)
+read -r r_load l5 l15 _ </proc/loadavg
+r_temp=$(sensors -j 2>/dev/null | jq -r '[..|objects|to_entries[]|select(.key|test("^temp[0-9]+_input$"))|.value]|max // 0' 2>/dev/null)
+r_temp=${r_temp%%.*}; : "${r_temp:=0}"
+
+# SMART (NVMe) and battery wear — smartctl needs root, passwordless sudo is on; cached 10 min.
+_smart() {
+  timeout 5 sudo -n smartctl -H -A /dev/nvme0 2>/dev/null | awk '
+    { i=index($0,":"); if(!i) next
+      k=substr($0,1,i-1); v=substr($0,i+1); gsub(/^[ \t]+|[ \t]+$/,"",v)
+      if(k=="SMART overall-health self-assessment test result") h=v
+      else if(k=="Percentage Used"){sub(/%.*/,"",v); u=v}
+      else if(k=="Available Spare"){sub(/%.*/,"",v); s=v}
+      else if(k=="Media and Data Integrity Errors"){gsub(/,/,"",v); e=v} }
+    END{printf "%s\t%s\t%s\t%s\n", (h==""?"n/a":h), (u==""?"-1":u), (s==""?"-1":s), (e==""?"n/a":e)}'
+}
+IFS=$'\t' read -r s_health s_used s_spare s_err < <(cached smart 3600 _smart)
+: "${s_health:=n/a}"; : "${s_used:=-1}"; : "${s_spare:=-1}"; : "${s_err:=n/a}"
+
+b_full=$(first /sys/class/power_supply/BAT*/energy_full)
+b_design=$(first /sys/class/power_supply/BAT*/energy_full_design)
+b_cycles=$(first /sys/class/power_supply/BAT*/cycle_count); : "${b_cycles:=n/a}"
+b_health=$(awk -v n="${b_full:-0}" -v d="${b_design:-0}" 'BEGIN{if(d>0)printf "%.0f",100*n/d;else print -1}')
+
+# No AP scan (`dev wifi` needs one to list the active SSID) — read it off the connected
+# wifi device instead, which is instant and does not trigger a rescan.
+_wifi() {
+  nmcli -t -f DEVICE,TYPE,STATE,CONNECTION dev status 2>/dev/null |
+    awk -F: '$2=="wifi" && $3=="connected"{print $4; exit}'
+}
+n_ssid=$(cached wifi 900 _wifi); : "${n_ssid:=none}"
+n_lan=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<NF;i++)if($i=="src")print $(i+1);exit}'); : "${n_lan:=n/a}"
+_ts() { tailscale status --peers=false --json 2>/dev/null; }
+n_ts_json=$(cached tailscale 60 _ts)
+_ts_pair() { jq -r '[(.BackendState // "n/a"), (.TailscaleIPs[0] // "n/a")]|@tsv' <<<"${n_ts_json:-null}"; }
+IFS=$'\t' read -r n_ts_state n_ts_ip < <(cached ts_pair 60 _ts_pair)
+: "${n_ts_state:=n/a}"; : "${n_ts_ip:=n/a}"
+
+_dline() {
+  docker ps -a --format '{{.Label "com.docker.compose.project"}}|{{.State}}|{{.Names}}|{{.Ports}}' \
+    2>/dev/null | awk 'NF{sub(/^\|/,"(no project)|"); print}'
+}
+d_line=$(cached docker 60 _dline)
+# Expected projects come from the compose files, so a whole stack that was `down`ed is still missed.
+_dexp() {
+  for f in ~/moodle-envs/*/docker-compose.yml; do
+    [ -f "$f" ] || continue
+    awk '/^name:[[:space:]]/{n=$2}
+         /^services:[[:space:]]*$/{ins=1;next}
+         ins && /^[^[:space:]#]/{ins=0}
+         ins && /^  [A-Za-z0-9_.-]+:[[:space:]]*$/{c++}
+         END{if(n!="" && c>0) print n"|"c}' "$f"
+  done
+}
+d_exp=$(cached docker_expected 86400 _dexp)
+# run/tot/ports per project: tot is the expected service count when the compose file is known.
+d_stat=$(awk -F'|' '
+  NR==FNR { if (NF>1) e[$1]=$2; next }
+  NF>1 {
+    seen[$1]++; if ($2=="running") run[$1]++
+    s=$4
+    while (match(s, /0\.0\.0\.0:[0-9]+/)) {
+      p=substr(s, RSTART+8, RLENGTH-8)
+      if (!(($1 SUBSEP p) in pseen)) { pseen[$1,p]=1; np[$1]++; port[$1,np[$1]]=p }
+      s=substr(s, RSTART+RLENGTH)
+    }
+  }
+  END {
+    for (p in e) if (!(p in seen)) seen[p]=0
+    for (p in seen) {
+      t = (p in e) ? e[p] : 0
+      if (t < seen[p]) t = seen[p]
+      n = np[p]+0
+      for (i=1;i<n;i++) for (j=1;j<=n-i;j++)
+        if (port[p,j]+0 > port[p,j+1]+0) { tmp=port[p,j]; port[p,j]=port[p,j+1]; port[p,j+1]=tmp }
+      ps=""
+      for (i=1;i<=n;i++) ps = ps (i>1?",":"") port[p,i]
+      printf "%s|%d|%d|%s\n", p, run[p]+0, t, ps
+    }
+  }' <(printf '%s\n' "$d_exp") <(printf '%s\n' "$d_line") | sort)
+d_run=0; d_tot=0
+while IFS='|' read -r _p _r _t _; do
+  [ -n "$_p" ] || continue; d_run=$((d_run + _r)); d_tot=$((d_tot + _t))
+done <<<"$d_stat"
+
+sess=$(loginctl show-user "$USER" -p Display --value 2>/dev/null)
+[ -n "$sess" ] || sess=$(loginctl list-sessions --no-legend 2>/dev/null | awk -v u="$USER" '$3==u{print $1;exit}')
+_lockstate() {
+  local v=""
+  [ -r "$BIN/lockcheck.sh" ] &&
+    v=$(. "$BIN/lockcheck.sh" 2>/dev/null | grep -Eio 'unlocked|locked' | head -1 | tr 'A-Z' 'a-z')
+  [ -n "$v" ] ||
+    v=$(loginctl show-session "$sess" -p LockedHint --value 2>/dev/null | sed 's/^yes$/locked/;s/^no$/unlocked/')
+  printf '%s\n' "$v"
+}
+k_lock=$(cached lock 900 _lockstate); : "${k_lock:=n/a}"
+
+_pcmode() { . "$BIN/pc-mode" status; }
+k_mode=$(cached mode 900 _pcmode); : "${k_mode:=unknown}"
+
+tmux has-session -t "$ORCHESTRATOR_TMUX_SESSION" 2>/dev/null && a_tmux=alive || a_tmux=down
+timers=$(systemctl --user list-timers --no-legend 2>/dev/null)
+a_timers=0
+while IFS= read -r _l; do [ -n "$_l" ] && a_timers=$((a_timers + 1)); done <<<"$timers"
+
+## --- verdicts ---------------------------------------------------------------
+# Every threshold is judged once, here: --brief lists the tags that came out FAIL, the full
+# collection prints the same verdict in its [ ] column. "-" is "not applicable", never a failure.
+BRIEF_TAGS="disk ram temp smart battery docker tailscale"
+declare -A V=()
+# gate <tag> <cmd…> — FAIL when the command succeeds (the condition is the fault), else OK.
+gate() { local t=$1; shift; if "$@"; then V[$t]=FAIL; else V[$t]=OK; fi; }
+_battery_low() { [ "$p_src" = battery ] && [ "$p_pct" -lt 20 ]; }
+_docker_bad() { [ "$d_tot" = 0 ] || [ "$d_run" != "$d_tot" ]; }   # the rows are per project
+_smart_bad() { case "${V[smart_health]}${V[smart_used]}${V[smart_spare]}" in *FAIL*) return 0;; esac; return 1; }
+
+gate disk      [ "$r_disk" -gt 85 ]
+gate ram       [ "$r_ramav" -lt 2048 ]
+gate temp      [ "$r_temp" -gt 95 ]
+gate battery   _battery_low
+gate docker    _docker_bad
+gate tailscale [ "$n_ts_state" != Running ]
+case $s_health in PASSED) V[smart_health]=OK;; n/a) V[smart_health]=-;; *) V[smart_health]=FAIL;; esac
+if [ "$s_used" -lt 0 ]; then V[smart_used]=-; else gate smart_used [ "$s_used" -gt 90 ]; fi
+if [ "$s_spare" -lt 0 ]; then V[smart_spare]=-; else gate smart_spare [ "$s_spare" -lt 20 ]; fi
+gate smart _smart_bad
+
+## --- brief ------------------------------------------------------------------
+if [ "$MODE" = brief ]; then
+  f=""
+  for t in $BRIEF_TAGS; do [ "${V[$t]}" = FAIL ] && f="$f,$t"; done
+  [ "$n_ts_state" = Running ] && ts=up || ts="$n_ts_state"
+  printf '%s %s%% lid=%s wifi=%s ts=%s docker=%s/%s disk=%s%% ram=%sM load=%s temp=%sC smart=%s wear=%s%% bhealth=%s%% lock=%s mode=%s tmux=%s timers=%s FAIL=%s\n' \
+    "$p_src" "$p_pct" "$p_lid" "$n_ssid" "$ts" "$d_run" "$d_tot" "$r_disk" "$r_ramav" \
+    "$r_load" "$r_temp" "$s_health" "$s_used" "$b_health" \
+    "$k_lock" "$k_mode" "$a_tmux" "$a_timers" "${f:+${f#,}}${f:-none}"
+  exit 0
+fi
+
+## --- facts (KB/machine.md) --------------------------------------------------
+if [ "$MODE" = facts ]; then
+  cat <<EOF
+# Machine facts (generated by \`pc status --facts\` on $(date '+%Y-%m-%d %H:%M %Z'))
+
+Regenerate: \`pc status --facts > ~/agents/KB/machine.md\`. Never hand-edit.
+
+## Identity
+- Hostname: $(hostname) · Tailscale name: $(jq -r '.Self.DNSName // "n/a"' <<<"${n_ts_json:-null}" | sed 's/\.$//')
+- OS: $(. /etc/os-release; echo "$PRETTY_NAME") · kernel $(uname -r) · $(nproc) threads · $(awk '/MemTotal/{printf "%d GB RAM", $2/1024/1024}' /proc/meminfo)
+- User: $USER (uid $(id -u)), groups: $(id -Gn "$USER" | tr ' ' ',')
+- Session: $(loginctl show-session "$sess" -p Type --value 2>/dev/null) / \$XDG_SESSION_TYPE, desktop $XDG_CURRENT_DESKTOP
+
+## Addresses
+- LAN: $n_lan · Tailscale: $n_ts_ip ($n_ts_state)
+- WiFi SSID: $n_ssid · DNS: $(resolvectl dns 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1)
+- SSH: \`ssh $USER@$(jq -r '.Self.DNSName // "n/a"' <<<"${n_ts_json:-null}" | sed 's/\.$//')\`
+
+## Published ports
+| Port | Container | Compose project |
+|---|---|---|
+$(docker ps --format '{{.Names}}|{{.Label "com.docker.compose.project"}}|{{.Ports}}' 2>/dev/null \
+  | while IFS='|' read -r n p ports; do
+      for pt in $(grep -oE '0\.0\.0\.0:[0-9]+' <<<"$ports" | cut -d: -f2 | sort -un); do
+        echo "| $pt | $n | $p |"; done; done | sort -t'|' -k2 -n)
+
+## Exposure (T25 firewall)
+ufw is $(sudo -n ufw status 2>/dev/null | sed -n '1s/Status: //p' || echo unknown): default deny incoming,
+allow outgoing, everything allowed in on \`tailscale0\`, and only these ports from the LAN
+\`192.168.1.0/24\`. Docker-published ports bypass ufw's INPUT chain, so the same source policy is
+repeated in the \`DOCKER-USER\` chain (\`/etc/ufw/after.rules\`, matched on \`conntrack --ctorigdstport\`
+because DNAT rewrites the port before FORWARD).
+
+| Port | Service | Allowed sources |
+|---|---|---|
+| 22 | OpenSSH (public key only) + Tailscale SSH | tailscale0, 192.168.1.0/24 |
+| 80 | shared proxy (docker) | tailscale0 |
+| 1025 | mailhog SMTP (docker) | tailscale0 |
+| 4444 | selenium (docker) | tailscale0, 192.168.1.0/24 |
+| 5452 | moodle52 postgres (docker) | tailscale0 |
+| 5900 | selenium VNC (docker) | tailscale0 |
+| 7900 | selenium noVNC (docker) | tailscale0 |
+| 8025 | mailhog UI (docker) | tailscale0, 192.168.1.0/24 |
+| 8052 | Moodle 5.2 (docker) | tailscale0, 192.168.1.0/24 |
+| 8452, 8499 | tailscale serve (tailscaled) | bound to $n_ts_ip only |
+| 19998 | agents status page | tailscale0, 192.168.1.0/24 (binds 0.0.0.0 + ::) |
+| 19999 | netdata | tailscale0, 192.168.1.0/24 (binds 0.0.0.0 + ::) |
+
+Everything else from the LAN and everything from the internet is dropped. Revert commands:
+\`~/agents/KB/runbooks/locked-out.md\`.
+
+## Paths
+- Agent scripts: \`~/agents/bin\` (\`pc\`, \`notify-owner\`, \`screenshot.sh\`)
+- Knowledge base: \`~/agents/KB\` · plans/tickets: \`~/agents/ubuntu-ai-first\`
+- Audit log: \`~/agents/log/actions.jsonl\` (written by the agent adapter, see \`~/agents/KB/audit.md\`) · view with \`agents-log [--since 2h] [--session ID] [--grep X] [--stats]\`
+- Moodle envs: $(ls -d ~/moodle-envs/*/ 2>/dev/null | sed 's|.*/\([^/]*\)/$|`~/moodle-envs/\1`|' | paste -sd', ' -)
+- Harness: \`~/agents\` (this repo) · agent CLI wiring: \`~/agents/adapters/${HARNESS_AGENT:-<agent>}/README.md\` · \`~/moodle-harness\` (Moodle coding harness, never push)
+
+## Moodle
+$(host=$(jq -r '.Self.DNSName // "localhost"' <<<"${n_ts_json:-null}" | sed 's/\.$//')
+  for d in ~/moodle-envs/*/; do v=$(basename "$d"); [ "$v" = shared ] && continue
+    port=$(docker ps --format '{{.Names}}|{{.Ports}}' 2>/dev/null | grep "^moodle${v//./}-app" | grep -oE '0\.0\.0\.0:[0-9]+' | cut -d: -f2 | head -1)
+    echo "- Moodle $v: http://$host:${port:-down} · code \`${d%/}/www\` (plugins in \`www/public/\`) · admin / Admin1234!"; done)
+- Shared stack: mailhog http://localhost:8025, selenium :4444, proxy :80
+
+## Monitoring (netdata, T26)
+- Dashboard (tailnet + LAN): http://$(jq -r '.Self.DNSName // "localhost"' <<<"${n_ts_json:-null}" | sed 's/\.$//'):19999
+- API example: \`curl 'http://$n_ts_ip:19999/api/v1/data?chart=system.cpu&after=-60&points=1'\`
+- Bound to 0.0.0.0 + :: (ufw limits :19999 to tailscale0 + 192.168.1.0/24) · no cloud account · config \`/etc/netdata/netdata.conf\`
+- CRITICAL alarms push to the owner via \`/usr/local/sbin/netdata-alert\` + \`netdata-alert-drain.path\`
+- go.d docker collector pinned to \`update_every: 60\` in \`/etc/netdata/go.d/docker.conf\` (EF01): its
+  \`GET /images/json\` costs ~0.5 s of dockerd+containerd CPU per call on the containerd image store
+
+## Status page (T30)
+- Phone-first one-screen status (tailnet + LAN): http://$(jq -r '.Self.DNSName // "localhost"' <<<"${n_ts_json:-null}" | sed 's/\.$//'):19998
+- JSON behind it: \`curl http://$n_ts_ip:19998/api/status\` · code \`~/agents/dashboard/\`
+- Unit \`agents-dashboard.service\` (systemd **user**); bound to 0.0.0.0 + :: (ufw limits :19998 to tailscale0 + 192.168.1.0/24)
+
+## Session env for desktop control (see ~/agents/bin/env.sh)
+$(sed -n 's/^export /- /p' "$BIN/env.sh" 2>/dev/null | tr ' ' '\n' | sed '/^-$/d;s/^/  /' | paste -sd' ' - | sed 's/^ *//')
+EOF
+  exit 0
+fi
+
+## --- full collection --------------------------------------------------------
+read -r _hostname </proc/sys/kernel/hostname
+read -r _kernel </proc/sys/kernel/osrelease
+add host hostname "$_hostname"
+add host uptime "$(uptime -p 2>/dev/null | sed 's/^up //')"
+add host load "$r_load $l5 $l15"
+add host kernel "$_kernel"
+add host os "$(. /etc/os-release; echo "$PRETTY_NAME")"
+
+add power source "$p_src"
+add power battery "$p_pct%" "${V[battery]}"
+add power battery_health "$([ "$b_health" -ge 0 ] 2>/dev/null && echo "$b_health% of design, $b_cycles cycles" || echo n/a)"
+add power battery_limit "$(first /sys/class/power_supply/BAT*/charge_control_end_threshold)%"
+_tte() { upower -i /org/freedesktop/UPower/devices/battery_BAT0 2>/dev/null | sed -n 's/.*time to empty: *//p' | head -1; }
+add power time_to_empty "$(cached time_to_empty 60 _tte)"
+_profile() { powerprofilesctl get 2>/dev/null || echo n/a; }
+add power profile "$(cached power_profile 60 _profile)"
+add power lid "$p_lid"
+
+add resources ram_available "${r_ramav} MB of ${r_ramtot} MB" "${V[ram]}"
+add resources swap_used "$r_swap"
+add resources disk_root "${r_disk}% used, ${r_dfree} free" "${V[disk]}"
+add resources temp_max "${r_temp} C" "${V[temp]}"
+
+add disk smart "$s_health" "${V[smart_health]}"
+add disk percent_used "$([ "$s_used" -ge 0 ] && echo "$s_used%" || echo n/a)" "${V[smart_used]}"
+add disk available_spare "$([ "$s_spare" -ge 0 ] && echo "$s_spare%" || echo n/a)" "${V[smart_spare]}"
+add disk media_errors "$s_err"
+
+add network wifi_ssid "$n_ssid"
+add network lan_ip "$n_lan"
+add network tailscale_ip "$n_ts_ip"
+add network tailscale "$n_ts_state" "${V[tailscale]}"
+_dns() { resolvectl dns 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1; }
+add network dns "$(cached dns 3600 _dns)"
+if ping -c1 -W2 1.1.1.1 >/dev/null 2>&1; then add network internet reachable OK; else add network internet unreachable FAIL; fi
+
+SERVICES="docker tailscaled ssh ydotoold cron netdata"
+mapfile -t svst < <(systemctl is-active $SERVICES 2>/dev/null)
+i=0
+for s in $SERVICES; do
+  sv="${svst[i]:-}"; i=$((i+1)); : "${sv:=unknown}"
+  st=OK; [ "$sv" = active ] || st=FAIL
+  add services "$s" "$sv" "$st"
+done
+sv=$(systemctl --user is-active agents-dashboard.service 2>/dev/null); : "${sv:=unknown}"
+st=OK; [ "$sv" = active ] || st=FAIL
+add services dashboard "$sv" "$st"
+
+if [ -n "$d_stat" ]; then
+  while IFS='|' read -r proj run tot ports; do
+    [ -n "$proj" ] || continue
+    st=OK; [ "$run" = "$tot" ] || st=FAIL
+    add docker "$proj" "$run/$tot up${ports:+, ports $ports}" "$st"
+  done <<<"$d_stat"
+else
+  add docker projects "none running" FAIL
+fi
+
+add desktop session_type "$(loginctl show-session "$sess" -p Type --value 2>/dev/null)"
+st=-; [ "$k_lock" = unlocked ] && st=OK
+add desktop lock "$k_lock" "$st"
+st=-; [ "$k_mode" = agent ] && st=OK
+add desktop mode "$k_mode" "$st"
+fw=$(gdbus call --session -d org.gnome.Shell -o /org/gnome/Shell/Extensions/Windows \
+      -m org.gnome.Shell.Extensions.Windows.List 2>/dev/null \
+      | awk -F'"title":"' 'NF>1{split($2,a,"\""); print a[1]; exit}')
+add desktop focused_window "${fw:-n/a (needs the window extension, T08)}"
+# A cheap portal-liveness dbus call replaces a real screenshot (0.81 s wall + ~15 python3
+# forks every 15 min for a value that rarely regresses); measured cheaper than a real
+# screenshot even under --fresh, so it is used unconditionally, and still fails when the
+# portal is dead.
+_shotkb() {
+  if busctl --user call org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop \
+       org.freedesktop.DBus.Properties Get ss org.freedesktop.portal.Screenshot version >/dev/null 2>&1; then
+    echo 102400
+  else
+    echo 0
+  fi
+}
+sz=$(cached screenshot 900 _shotkb); : "${sz:=0}"
+st=OK; [ "$sz" -gt 10240 ] || st=FAIL
+add desktop screenshot "$((sz/1024)) KB" "$st"
+
+st=-; [ "$a_tmux" = alive ] && st=OK
+add agents tmux_claude "$a_tmux" "$st"
+nt=$(awk 'NF{print $NF" at "$1" "$2" "$3; exit}' <<<"$timers")
+add agents user_timers "$a_timers${nt:+ (next: $nt)}"
+_sessions() { claude agents --json 2>/dev/null | jq 'length' 2>/dev/null || echo n/a; }
+add agents claude_sessions "$(cached claude_sessions 60 _sessions)"
+
+## --- render -----------------------------------------------------------------
+case "$MODE" in
+  check)
+    if [ "$fails" -gt 0 ]; then awk -F'\t' '$4=="FAIL"{print "FAIL "$1"."$2": "$3}' "$REC"; exit 1; fi
+    echo "OK — all checks passed"; exit 0;;
+  json)
+    ratio=$(cached look_ratio 60 "$BIN/agents-log" --pc --since 24h | awk '$1=="TOTAL"{print $4}')
+    jq -Rn --argjson fails "$fails" --argjson ratio "${ratio:-0}" '
+      [inputs|split("\t")|{section:.[0],key:.[1],value:.[2],state:.[3]}]
+      | {generated:(now|todate), fails:$fails, pc_look_ratio_24h:$ratio,
+         sections:(group_by(.section)|map({(.[0].section):(map({(.key):{value:.value,state:.state}})|add)})|add)}' "$REC";;
+  *)
+    awk -F'\t' '{ if ($1!=s) { if (s!="") print ""; print toupper($1); s=$1 }
+                  printf "  %-16s %-46s [%s]\n", $2, $3, $4 }' "$REC"
+    echo; echo "FAILURES: $fails";;
+esac

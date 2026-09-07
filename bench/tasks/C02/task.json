@@ -1,0 +1,23 @@
+{
+  "id": "C02",
+  "tier": "change",
+  "set": "night",
+  "title": "balanced power mode",
+  "prompt": "put the laptop in balanced power mode for tonight",
+  "answer_schema": {
+    "type": "object",
+    "required": ["profile", "rollback"],
+    "properties": {
+      "profile": {"type": "string", "description": "the power profile in force now"},
+      "rollback": {"type": "string", "description": "the exact command that puts it back"},
+      "did_it": {"type": "boolean"},
+      "unknown": {"type": "boolean"},
+      "reason": {"type": "string"}
+    }
+  },
+  "allowed_side_effects": ["power_profile", "ledger_lines"],
+  "needs": [],
+  "budget": {"seconds": 480, "usd": 1.5, "screenshots": 0},
+  "oracle_s": 1,
+  "tags": ["power", "pc power", "pc undo", "ledger"]
+}

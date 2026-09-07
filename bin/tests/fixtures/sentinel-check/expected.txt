@@ -1,0 +1,64 @@
+== healthy rc=0
+sentinel-runaway 
+pw-metadata -n settings 0 log.level
+== pipewire-loud rc=0
+pipewire log.level was 4, reset to 2
+sentinel-runaway 
+pw-metadata -n settings 0 log.level
+pw-metadata -n settings 0 log.level 2
+== docker-stack rc=0
+FAIL: docker.moodle-shared	3/4 up;
+fixed by bash
+sentinel-runaway 
+pw-metadata -n settings 0 log.level
+docker compose -f $WORK/moodle-envs/shared/docker-compose.yml up -d
+== ydotoold rc=0
+FAIL: services.ydotoold	inactive;
+fixed by bash
+sentinel-runaway 
+pw-metadata -n settings 0 log.level
+sudo systemctl restart ydotoold
+== docker-daemon rc=0
+FAIL: services.docker	inactive;
+fixed by bash
+sentinel-runaway 
+pw-metadata -n settings 0 log.level
+sudo systemctl start docker
+== screenshot rc=0
+FAIL: desktop.screenshot	0 KB;
+unresolved, escalating to Claude: desktop.screenshot	0 KB;
+sentinel-runaway 
+pw-metadata -n settings 0 log.level
+agent-run sentinel
+state: incident.json written
+== tailscale rc=0
+FAIL: network.tailscale	Stopped;
+unresolved, escalating to Claude: network.tailscale	Stopped;
+sentinel-runaway 
+pw-metadata -n settings 0 log.level
+sudo tailscale up --timeout 30s
+agent-run sentinel
+state: incident.json written
+== tailscale-repeat rc=0
+FAIL: network.tailscale	Stopped;
+escalation suppressed (same signature network.tailscale, escalated 0 min ago)
+sentinel-runaway 
+pw-metadata -n settings 0 log.level
+sudo tailscale up --timeout 30s
+notify-owner -p high -t sentinel sentinel: network.tailscale, still failing after a Claude repair; escalation paused 6h, bash fixes keep running
+state: suppressing
+== tailscale-repeat2 rc=0
+FAIL: network.tailscale	Stopped;
+escalation suppressed (same signature network.tailscale, escalated 0 min ago)
+sentinel-runaway 
+pw-metadata -n settings 0 log.level
+sudo tailscale up --timeout 30s
+state: suppressing
+== two-faults rc=0
+FAIL: network.tailscale	Stopped;services.docker	inactive;
+escalation suppressed (same signature network.tailscale, escalated 0 min ago)
+sentinel-runaway 
+pw-metadata -n settings 0 log.level
+sudo tailscale up --timeout 30s
+sudo systemctl start docker
+state: suppressing

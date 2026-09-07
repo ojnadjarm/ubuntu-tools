@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Recorded xrandr for the pc-mutter tests; PC_MUTTER_XRANDR picks which screen size it reports.
+d="$(cd "$(dirname "$(readlink -f "$0")")/../resp" && pwd)"
+cat "$d/xrandr-${PC_MUTTER_XRANDR:-mirrored}.txt"

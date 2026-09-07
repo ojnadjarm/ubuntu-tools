@@ -1,0 +1,9 @@
+/*
+ * execs.bt — programs exec'd, by filename and the new process comm. $1 = pid filter (0 = all), $2 = seconds.
+ */
+tracepoint:sched:sched_process_exec /$1 == 0 || args->pid == (int32)$1/
+{
+	@execs[comm, str(args->filename)] = count();
+}
+
+interval:s:$2 { exit(); }

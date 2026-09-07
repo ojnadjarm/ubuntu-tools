@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Stub journalctl for the pc-bt tests: one recorded bluetoothd error line, stamped 120 s ago.
+jq -c --argjson t "$(( $(date +%s) - 120 ))" '.__REALTIME_TIMESTAMP = ($t * 1000000 | tostring)' \
+  "$(cd "$(dirname "$(readlink -f "$0")")/../resp" && pwd)/journal.json"

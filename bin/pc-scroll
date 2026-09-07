@@ -1,0 +1,17 @@
+#!/bin/bash
+# pc scroll up|down [N] [--at X Y] — wheel scroll, optionally after moving the pointer.
+. "$(dirname "$(readlink -f "$0")")/env.sh"
+u="usage: pc scroll up|down [N] [--at X Y]"
+dir=""; n=3; ax=""; ay=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) echo "$u"; exit 0;;
+    --at) ax="$2"; ay="$3"; shift 3;;
+    up|down) dir="$1"; shift;;
+    *) n="$1"; shift;;
+  esac
+done
+[ -n "$dir" ] || { echo "$u" >&2; exit 2; }
+[ -n "$ax" ] && pc_moveto "$ax" "$ay"
+[ "$dir" = down ] && n="-$n"
+exec ydotool mousemove -w -x 0 -y "$n"

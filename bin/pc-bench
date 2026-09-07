@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+# pc bench [--cold] [--runs 3] [--save] [--compare] [--only <sub>…] — wall, CPU and exec count for every read-only pc subcommand, warm and cold.
+set -uo pipefail
+export LC_ALL=C
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+. "$BIN/env.sh"
+BASELINE="$BIN/tests/BASELINE-PCTOOLS.md"
+
+pc_usage 'usage: pc bench [--cold] [--runs 3] [--save] [--compare] [--only <sub>…] [--json]
+
+Measures every `pc-*` whose default verb is read-only: median wall over --runs warm runs
+(/usr/bin/time -f "%e %U %S"), one cold run (`--fresh` after clearing only the pc-status cache
+dir), CPU = user+sys of the median warm run, execs = successful execve calls from
+`strace -f -c -e trace=execve` on one warm run. No hyperfine dependency — a 3-run loop is enough.
+
+  --cold      also report the cold column (on by default; --cold forces a cache clear first)
+  --runs N    warm runs per command (default 3)
+  --only S…   only these subcommands (as named in the table: status, win, journal …)
+  --save      rewrite the measured table in tests/BASELINE-PCTOOLS.md (per-ticket notes kept)
+  --compare   print Δ vs the saved table and flag anything more than +20 % slower
+  --json      the rows as an array instead of a table
+
+Nothing here mutates: no --apply verb is ever run, no window opens, no sound is made.' "$@"
+
+RUNS=3; COLD=0; SAVE=0; COMPARE=0; ONLY=()
+PC_EXTRA_FLAGS=(--cold --save --compare --runs: --only:)
+pc_opt "$@"
+i=0; set -- ${PC_EXTRA[@]+"${PC_EXTRA[@]}"}
+while [ $# -gt 0 ]; do
+  case $1 in
+    --cold) COLD=1;; --save) SAVE=1;; --compare) COMPARE=1;;
+    --runs) RUNS=$2; shift;; --runs=*) RUNS=${1#*=};;
+    --only) ONLY+=("$2"); shift;; --only=*) ONLY+=("${1#*=}");;
+  esac
+  shift
+done
+# `--only a b c`: the extra names land in PC_ARGS as bare words.
+ONLY+=(${PC_ARGS[@]+"${PC_ARGS[@]}"})
+
+## --- the bench list ---------------------------------------------------------
+# name | argv — every subcommand whose default verb reads and never needs --apply.
+# `pc bt` is PT12 and still being written by another agent; `selftest`/`shot`/`find`/`click`/
+# `type`/`key`/`open`/`notify` are excluded by the ticket (they open windows or move the pointer).
+SPECS=(
+  'status|status'                'top|top'                  'io|io'
+  'power|power'                  'thermal|thermal'          'kernel|kernel'
+  'trace|trace wakeups --seconds 1'
+  'net|net'                      'hw|hw all'                'dbus|dbus list'
+  'mutter|mutter'                'units|units list'         'journal|journal digest --since 1h'
+  'docker|docker stacks'         'audio|audio'              'input|input devices'
+  'undo|undo list'               'win|win list'             'mode|mode status'
+  'doctor|doctor --quick'
+)
+
+WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
+# median <n…> — the middle value of the sorted list (integer milliseconds).
+median() { printf '%s\n' "$@" | sort -n | awk '{v[NR]=$1} END{print v[int((NR+1)/2)]}'; }
+# cold_cache — clears the pc caches only. Never the dark-eye or sandbox dirs.
+cold_cache() { rm -f "$CACHE"/* 2>/dev/null; }
+# secs <ms> — "0.42 s".
+secs() { printf '%d.%02d s' $(( $1 / 1000 )) $(( ($1 % 1000) / 10 )); }
+
+# one_run <argv…> — "<wall-ms> <cpu-ms> <rc>" from /usr/bin/time. A non-zero rc means the
+# measurement is of a failure, not of the command, so the row is marked instead of trusted.
+one_run() {
+  local t rc
+  t=$(/usr/bin/time -f '%e %U %S' "$BIN/pc" "$@" 2>&1 >/dev/null | tail -1); rc=${PIPESTATUS[0]}
+  awk -v rc="$rc" '{printf "%d %d %s", $1*1000, ($2+$3)*1000, rc}' <<<"$t"
+}
+
+rows=()
+for spec in "${SPECS[@]}"; do
+  name=${spec%%|*}; read -ra argv <<<"${spec#*|}"
+  if [ ${#ONLY[@]} -gt 0 ]; then
+    hit=0; for o in "${ONLY[@]}"; do [ "$o" = "$name" ] && hit=1; done
+    [ $hit = 1 ] || continue
+  fi
+
+  # cold: empty the pc cache dir (never the dark-eye or sandbox dirs), then one plain run.
+  # `--fresh` is only added for the commands that accept it — elsewhere it exits 2 and would
+  # have been recorded as a 0.01 s "cold" run.
+  cold_cache
+  fresh=()
+  "$BIN/pc" "${argv[0]}" -h 2>/dev/null | grep -q -- --fresh && fresh=(--fresh)
+  read -r cold_ms _ rc < <(one_run "${argv[@]}" ${fresh[@]+"${fresh[@]}"})
+  [ "$rc" = 0 ] || bad="cold rc=$rc"
+
+  walls=() cpus=() bad=${bad:-}
+  for _ in $(seq 1 "$RUNS"); do
+    read -r w c rc < <(one_run "${argv[@]}")
+    [ "$rc" = 0 ] || bad="warm rc=$rc"
+    walls+=("$w"); cpus+=("$c")
+  done
+  warm_ms=$(median "${walls[@]}"); cpu_ms=$(median "${cpus[@]}")
+  [ -n "$bad" ] && { printf 'pc bench: %s failed (%s)\n' "$name" "$bad" >&2; bad=; }
+
+  # execs: successful execve calls (strace counts the failed PATH probes as errors).
+  strace -f -c -e trace=execve -o "$WORK/st" "$BIN/pc" "${argv[@]}" >/dev/null 2>&1
+  execs=$(awk '$NF=="execve"{print $(NF-2) - ($(NF-1) ~ /^[0-9]+$/ ? $(NF-1) : 0)}' "$WORK/st" | head -1)
+  : "${execs:=0}"
+
+  rows+=("$name|$warm_ms|$cold_ms|$cpu_ms|$execs|${argv[*]}")
+  [ "$JSON" = 0 ] && [ "$SAVE" = 0 ] && [ "$COMPARE" = 0 ] &&
+    printf '%-9s %9s %9s %9s %7s  pc %s\n' "$name" "$(secs "$warm_ms")" "$(secs "$cold_ms")" "$(secs "$cpu_ms")" "$execs" "${argv[*]}"
+done
+
+## --- output -----------------------------------------------------------------
+today=$(printf '%(%Y-%m-%d)T' -1)
+table_rows() {
+  local r n w c p e a
+  for r in "${rows[@]}"; do
+    IFS='|' read -r n w c p e a <<<"$r"
+    printf '| %s | `pc %s` | %s | %s | %s | %s |\n' "$today" "$a" "$(secs "$w")" "$(secs "$c")" "$(secs "$p")" "$e"
+  done
+}
+
+if [ "$JSON" = 1 ]; then
+  printf '%s\n' "${rows[@]}" | jq -R -s -c 'split("\n")|map(select(length>0)|split("|")|
+    {name:.[0],wall_warm_ms:(.[1]|tonumber),wall_cold_ms:(.[2]|tonumber),cpu_ms:(.[3]|tonumber),execs:(.[4]|tonumber),argv:("pc "+.[5])})'
+  exit 0
+fi
+
+if [ "$COMPARE" = 1 ]; then
+  # Previous warm value per command, read out of the saved table.
+  printf '%-9s %9s %9s %8s\n' command warm saved delta
+  worse=0
+  for r in "${rows[@]}"; do
+    IFS='|' read -r n w c p e a <<<"$r"
+    # Only the saved bench table counts — the per-ticket notes below it hold older numbers.
+    prev=$(awk -F'|' -v cmd="\`pc $a\`" '
+      /^<!-- pc-bench:begin -->/{r=1; next} /^<!-- pc-bench:end -->/{r=0}
+      r && $3 ~ /^ *`pc / {gsub(/^ +| +$/,"",$3); if ($3==cmd) {gsub(/[^0-9.]/,"",$4); v=$4}}
+      END{print v}' "$BASELINE" 2>/dev/null)
+    if [ -z "$prev" ]; then printf '%-9s %9s %9s %8s\n' "$n" "$(secs "$w")" "—" "new"; continue; fi
+    prev_ms=$(awk -v p="$prev" 'BEGIN{printf "%d", p*1000}')
+    d=$(( prev_ms > 0 ? (w - prev_ms) * 100 / prev_ms : 0 ))
+    flag=""; [ "$d" -gt 20 ] && { flag=" +SLOWER"; worse=$((worse + 1)); }
+    printf '%-9s %9s %9s %+7d%%%s\n' "$n" "$(secs "$w")" "$(secs "$prev_ms")" "$d" "$flag"
+  done
+  printf -- '---\n%d command(s) more than 20%% slower than the saved table\n' "$worse"
+  exit 0
+fi
+
+if [ "$SAVE" = 1 ]; then
+  [ ${#ONLY[@]} -gt 0 ] && { echo "pc bench: --save needs the full sweep (drop --only)" >&2; exit 2; }
+  tmp=$WORK/baseline.md
+  {
+    awk '/^<!-- pc-bench:begin -->/{exit} {print}' "$BASELINE"
+    echo '<!-- pc-bench:begin -->'
+    echo "Rewritten by \`pc bench --save\` on $today. Warm = median of $RUNS runs, cold = \`--fresh\`"
+    echo 'after clearing only `$XDG_RUNTIME_DIR/pc-status`, CPU = user+sys of the median warm run,'
+    echo 'execs = successful `execve` from `strace -f -c -e trace=execve`. Wall resolution is 10 ms,'
+    echo 'so `--compare` deltas on the sub-0.1 s rows are quantization, not regression.'
+    echo
+    echo '| date | command | wall warm | wall cold | CPU | execs |'
+    echo '|---|---|---|---|---|---|'
+    table_rows
+    echo '<!-- pc-bench:end -->'
+    awk 'f{print} /^<!-- pc-bench:end -->/{f=1}' "$BASELINE"
+  } >"$tmp"
+  cp "$tmp" "$BASELINE"
+  printf 'wrote %d rows to %s\n' "${#rows[@]}" "$BASELINE"
+fi

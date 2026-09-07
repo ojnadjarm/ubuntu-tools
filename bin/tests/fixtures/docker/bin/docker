@@ -1,0 +1,9 @@
+#!/bin/sh
+# Recorded `docker ps -a --format '<project>\t<service>\t<name>\t<state>\t<status>\t<ports>\t<id>'`
+# for the PT14 fixture: two projects, 5 services, one restarting/unhealthy container to
+# exercise `pc docker health`.
+printf 'moodle-shared\tproxy\tmoodle-shared-proxy-1\trunning\tUp 2 days\t0.0.0.0:80->80/tcp\taaa111\n'
+printf 'moodle-shared\tmailhog\tmoodle-shared-mailhog-1\trunning\tUp 2 days\t0.0.0.0:8025->8025/tcp\tbbb222\n'
+printf 'moodle-shared\tselenium\tmoodle-shared-selenium-1\trestarting\tRestarting (1) 5 seconds ago\t\tccc333\n'
+printf 'moodle52\tapp\tmoodle52-app-1\trunning\tUp 2 days (unhealthy)\t0.0.0.0:8052->80/tcp\tddd444\n'
+printf 'moodle52\tdb\tmoodle52-db-1\texited\tExited (0) 3 minutes ago\t\teee555\n'

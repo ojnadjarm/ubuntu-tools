@@ -1,0 +1,47 @@
+{
+  "_doc": "pcbench trajectory classifier. Edit freely; pcbench parse reads this file. Regexes are Python re, applied case-sensitively to the Bash tool's `command` input (and to Read file paths where noted).",
+
+  "screenshot_cmd": "(?:^|[|;&(]\\s*|\\bsudo\\s+|\\btimeout \\S+\\s+)pc +(?:shot|wait +[0-9]|find|click-text)\\b",
+  "screenshot_read_suffixes": [".png", ".jpg", ".jpeg", ".webp"],
+
+  "pc_verb": "(?:^|[|;&(`$]\\s*|\\bsudo\\s+|\\benv\\s+\\S+=\\S+\\s+|\\btimeout \\S+\\s+)pc\\s+([a-z0-9-]+)",
+
+  "kb_whole_files": ["toolbox.md", "quirks.md", "RUNBOOK.md", "README-pc-control.md", "machine.md"],
+  "kb_whole_cmd": "\\b(?:cat|less|more|head|tail|bat)\\b[^|;&]*\\b(?:toolbox\\.md|quirks\\.md|RUNBOOK\\.md|README-pc-control\\.md|machine\\.md)",
+
+  "guard_marker": "FLEET §5",
+  "apply_cmd": "(?<![-\\w])--apply\\b",
+  "ledger_marker": "rollback: pc undo",
+
+  "disturb": [
+    "\\beye +speak\\b",
+    "\\beye +tv +on\\b",
+    "(?:^|[|;&(]\\s*|\\bsudo\\s+|\\btimeout \\S+\\s+)pc +(?:open|notify|type|key|click|click-text|a11y-click|drag|scroll)\\b",
+    "\\bwpctl +set-volume\\b",
+    "\\bpactl +set-sink-volume\\b",
+    "\\bnotify-send\\b",
+    "\\bnotify-owner\\b"
+  ],
+
+  "_raw_recipes_doc": "SPIKE finding 6: the key metric is a raw recipe used WHERE THE ARM HAD A pc VERB. Each entry names the pc verb that replaces it; the count only rises when that verb exists in the arm being scored, so the old arm is never penalised for lacking it.",
+  "raw_recipes": [
+    {"name": "top",         "pc_verb": "top",     "re": "\\btop +-b|\\bhtop\\b|\\bps +(?:aux|-e|-A|--sort)|\\bps +-eo|\\b(?:pidstat|mpstat|vmstat|iostat)\\b|/proc/(?:stat|loadavg)\\b|\\buptime\\b"},
+    {"name": "trace",       "pc_verb": "trace",   "re": "\\b(?:strace|ltrace|bpftrace|perf +(?:top|record|stat))\\b|/proc/[0-9]+/(?:stack|wchan|status|cgroup|cmdline|exe|fd)"},
+    {"name": "journal",     "pc_verb": "journal", "re": "\\bjournalctl\\b"},
+    {"name": "kernel",      "pc_verb": "kernel",  "re": "\\bdmesg\\b|/var/log/kern\\.log"},
+    {"name": "units",       "pc_verb": "units",   "re": "\\bsystemctl\\b(?![^|;&]*\\b(?:start|stop|restart|reload|enable|disable|kill|reset-failed)\\b)|\\bsystemd-analyze\\b"},
+    {"name": "docker",      "pc_verb": "docker",  "re": "\\bdocker +(?:ps|inspect|stats|logs|images|compose +ps)\\b"},
+    {"name": "audio",       "pc_verb": "audio",   "re": "\\b(?:pactl|pw-dump|pw-cli|pacmd)\\b|\\bwpctl +(?:status|get-volume|inspect|set-default)\\b"},
+    {"name": "bt",          "pc_verb": "bt",      "re": "\\bbluetoothctl\\b|\\bbusctl\\b[^|;&]*org\\.bluez|\\brfkill\\b"},
+    {"name": "net",         "pc_verb": "net",     "re": "\\bss +-|\\bnetstat\\b|\\blsof +-i\\b|\\bip +(?:a|addr|r|route|link)\\b|\\btailscale +status\\b|\\bnmcli\\b"},
+    {"name": "power",       "pc_verb": "power",   "re": "\\bpowerprofilesctl\\b|\\bupower\\b|/sys/class/power_supply"},
+    {"name": "thermal",     "pc_verb": "thermal", "re": "\\bsensors\\b|/sys/class/(?:thermal|hwmon)"},
+    {"name": "io",          "pc_verb": "io",      "re": "\\b(?:iotop|iostat)\\b|/proc/[0-9]+/io\\b|\\bdf +-|\\bdu +-"},
+    {"name": "hw",          "pc_verb": "hw",      "re": "\\b(?:lsblk|lspci|lsusb|dmidecode|free +-|nvidia-smi)\\b|/proc/meminfo|/proc/cpuinfo"},
+    {"name": "dbus",        "pc_verb": "dbus",    "re": "\\b(?:busctl|gdbus|dbus-send|qdbus)\\b"},
+    {"name": "mutter",      "pc_verb": "mutter",  "re": "\\bgdctl\\b|\\bxrandr\\b|\\bwlr-randr\\b|\\bgnome-monitor-config\\b"},
+    {"name": "win",         "pc_verb": "win",     "re": "\\b(?:wmctrl|xdotool|xprop|xwininfo)\\b"},
+    {"name": "explain",     "pc_verb": "explain", "re": "\\b(?:cat|less|head|tail|grep|rg)\\b[^|;&]*\\b(?:toolbox\\.md|quirks\\.md|RUNBOOK\\.md)"},
+    {"name": "doctor",      "pc_verb": "doctor",  "re": "\\bpc +selftest\\b"}
+  ]
+}

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Recorded bpftrace: replays out/<program>.json for the .bt in the argument list; -e echoes a marker.
+out="$(cd "$(dirname "$0")/.." && pwd)/out"
+for a in "$@"; do
+  case "$a" in
+    *.bt) b=$(basename "$a" .bt); [ -r "$out/$b.json" ] && { cat "$out/$b.json"; exit 0; }; exit 1;;
+  esac
+done
+printf '{"type": "attached_probes", "count": 1, "data": {"probes": 1}}\n{"type": "map", "data": {"@raw": 1}}\n'

@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# OpenCode adapter for agent-exec (GH16). Verified against opencode 1.18.29 on this machine.
+# stdout = the run's result text · $RAW_OUT = opencode's JSON event stream (one object per line)
+# · $META_OUT = cost/tokens · every tool call is audited through audit-from-stream.
+set -uo pipefail
+HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+
+OC="${OPENCODE_BIN:-$(command -v opencode || echo "$HOME/.opencode/bin/opencode")}"
+[ -x "$OC" ] || { echo "opencode adapter: no opencode binary (set OPENCODE_BIN)" >&2; exit 2; }
+
+# opencode has no --append-system-prompt: the system text is prepended to the message.
+prompt="$(cat "$PROMPT_FILE")"
+if [ -n "${SYSTEM_FILE:-}" ] && [ -r "$SYSTEM_FILE" ]; then
+  prompt="$(cat "$SYSTEM_FILE")
+
+--- 8< --- your task ---
+
+$prompt"
+fi
+
+cmd=("$OC" run --format json --auto)
+# MODEL is provider/model here; an adapter-neutral name (agent.env says `opus`) is ignored so
+# opencode picks its configured default. OPENCODE_MODEL overrides both.
+model="${OPENCODE_MODEL:-}"
+case "${MODEL:-}" in */*) [ -n "$model" ] || model="$MODEL";; esac
+[ -n "$model" ] && cmd+=(--model "$model")
+[ -n "${AGENT_NAME:-}" ] && cmd+=(--title "agent-$AGENT_NAME")
+[ -n "${AGENT_TIMEOUT:-}" ] && cmd=(timeout "$AGENT_TIMEOUT" "${cmd[@]}")
+cmd+=(-- "$prompt")
+
+"${cmd[@]}" </dev/null | tee "$RAW_OUT" | "$HERE/audit-from-stream" >/dev/null
+rc=${PIPESTATUS[0]}
+
+python3 - "$RAW_OUT" "$META_OUT" <<'PY'
+import json, sys
+raw, meta = sys.argv[1], sys.argv[2]
+text, cost, tok = [], None, None
+for line in open(raw, errors="replace"):
+    line = line.strip()
+    if not line.startswith("{"):
+        continue
+    try:
+        ev = json.loads(line)
+    except ValueError:
+        continue
+    part = ev.get("part") or {}
+    if part.get("type") == "text" and part.get("text"):
+        text.append(part["text"])
+    if part.get("type") == "step-finish":
+        if part.get("cost") is not None:
+            cost = (cost or 0) + part["cost"]
+        if part.get("tokens"):
+            tok = part["tokens"]
+json.dump({"cost_usd": cost, "tokens": tok}, open(meta, "w"))
+sys.stdout.write("\n".join(text))
+if text:
+    sys.stdout.write("\n")
+PY
+exit "$rc"

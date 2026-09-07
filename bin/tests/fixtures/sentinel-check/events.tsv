@@ -1,0 +1,16 @@
+# Replay corpus for sentinel-check: every fault signature the sentinel actually recorded in
+# ~/agents/sentinel/state/sentinel.log over the 7 days to 2026-09-07, plus the healthy tick,
+# the escalation-cooldown repeat and the pipewire log.level reset.
+# Columns, "|"-separated (not tab: tab is IFS whitespace, so empty columns would collapse):
+#   label | fails_before | fails_after | pipewire log.level
+# fails_* are comma-separated "<section>.<key>=<value>"; empty means nothing failing.
+healthy|||2
+pipewire-loud|||4
+docker-stack|docker.moodle-shared=3/4 up||2
+ydotoold|services.ydotoold=inactive||2
+docker-daemon|services.docker=inactive||2
+screenshot|desktop.screenshot=0 KB|desktop.screenshot=0 KB|2
+tailscale|network.tailscale=Stopped|network.tailscale=Stopped|2
+tailscale-repeat|network.tailscale=Stopped|network.tailscale=Stopped|2
+tailscale-repeat2|network.tailscale=Stopped|network.tailscale=Stopped|2
+two-faults|services.docker=inactive,network.tailscale=Stopped|network.tailscale=Stopped|2

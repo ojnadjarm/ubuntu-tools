@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Stub pactl for the pc-bt tests: the card listing is ../resp/cards.json; set-card-profile is a no-op.
+d="$(cd "$(dirname "$(readlink -f "$0")")/../resp" && pwd)"
+case "$*" in
+  *"list cards"*) cat "$d/cards.json";;
+  "set-card-profile "*) exit 0;;
+  *) exit 1;;
+esac

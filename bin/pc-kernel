@@ -1,0 +1,350 @@
+#!/usr/bin/env bash
+# pc kernel [dmesg|modules|sysctl|cgroups|cmdline|taint] — ring buffer with a severity digest, modules, ledgered sysctl, cgroup cost and PSI.
+# shellcheck disable=SC2034
+set -uo pipefail
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+
+pc_usage 'usage: pc kernel [--json]                                   overview: release, boot, taint, lockdown, dmesg digest
+       pc kernel dmesg [--level err,warn] [--since -1h] [-n 30] [--digest] [--json]
+       pc kernel modules [<name>] [--json]
+       pc kernel sysctl get <key|prefix> [--json]
+       pc kernel sysctl set <key> <value> [--apply] [--force --why "<text>"]
+       pc kernel cgroups [<unit>] [--user] [--json]
+       pc kernel cmdline [--json]
+       pc kernel taint [--json]
+
+Read-only except `sysctl set`, which is runtime only (never /etc/sysctl.d), ledgered through
+pc_apply and undone with `pc undo`. Keys under kernel.sysrq/kernel.yama and
+kernel.perf_event_paranoid, kernel.unprivileged_bpf_disabled,
+kernel.apparmor_restrict_unprivileged_userns, net.ipv4.ip_forward are refused (exit 3) unless
+both --force and --why are given.' "$@"
+
+PC_SUB='pc kernel'; PC_EXTRA_FLAGS=(--digest --user --force --level: --since: --why: -n:)
+pc_opt "$@"; ARGS=("${PC_ARGS[@]}")
+LEVEL=${PC_OPT[--level]-err,warn}; SINCE=${PC_OPT[--since]-}; N=${PC_OPT[-n]-30}; WHY=${PC_OPT[--why]-}
+DIGEST=${PC_OPT[--digest]-0}; USERMODE=${PC_OPT[--user]-0}; FORCE=${PC_OPT[--force]-0}
+
+CGROOT="$PC_SYS/fs/cgroup"; LVJSON='[3,4]' 
+LEVELS='["emerg","alert","crit","err","warn","notice","info","debug"]'
+BTIME=0; while read -r k v _; do [ "$k" = btime ] && { BTIME=$v; break; }; done <"$PC_PROC/stat"
+
+# since_epoch <-Nsmhd|date-string> — the cutoff as an epoch, empty for an empty argument.
+since_epoch() {
+  local s=$1 n u m
+  [ -n "$s" ] || return 0
+  case $s in
+    -[0-9]*[smhd]) n=${s:1}; u=${n: -1}; n=${n%?}
+      case $u in s) m=1;; m) m=60;; h) m=3600;; d) m=86400;; esac
+      printf '%s\n' $((NOW - n * m));;
+    *) date -d "$s" +%s 2>/dev/null;;
+  esac
+}
+
+# levels_json <names> — the requested severities as a JSON array of numbers ([] = all).
+levels_json() {
+  local out=() name n
+  [ -n "$1" ] || { echo '[]'; return; }
+  for name in ${1//,/ }; do
+    case $name in
+      emerg) n=0;; alert) n=1;; crit) n=2;; err) n=3;; warn) n=4;;
+      notice) n=5;; info) n=6;; debug) n=7;; all) echo '[]'; return;;
+      *) echo "pc kernel: unknown level $name" >&2; exit 2;;
+    esac
+    out+=("$n")
+  done
+  printf '[%s]\n' "$(IFS=,; echo "${out[*]}")"
+}
+
+# kmsg — the ring buffer as dmesg's JSON, through sudo when kernel.dmesg_restrict hides it.
+kmsg() {
+  local out
+  out=$(pc_cmd dmesg -J 2>/dev/null)
+  [ -n "$out" ] || out=$(pc_root dmesg -J 2>/dev/null)
+  [ -n "$out" ] || { echo 'pc kernel: cannot read the ring buffer (kernel.dmesg_restrict=1 and sudo -n failed)' >&2; return 1; }
+  printf '%s' "$out"
+}
+
+# dmesg_model <cut> <digest-cut> — {since,level,lines,digest}: filtered lines plus the masked digest.
+dmesg_model() {
+  kmsg | jq -c --argjson bt "$BTIME" --argjson lv "$LVJSON" --argjson n "$N" \
+    --argjson cut "$1" --argjson dcut "$2" --argjson names "$LEVELS" '
+    [ .dmesg[] | (.pri % 8) as $l
+      | select(($lv | length) == 0 or ($lv | index($l)))
+      | {t: .time, epoch: ($bt + (.time | floor)), level: $names[$l], pri: $l, msg: (.msg | rtrimstr(" "))} ]
+    | map(. + {time: (.epoch | strftime("%Y-%m-%dT%H:%M:%S"))}) as $all
+    | { since: ($dcut | strftime("%Y-%m-%dT%H:%M:%S")),
+        level: $lv,
+        lines: [ $all[] | select(.epoch >= $cut) ] | (if $n > 0 then .[-$n:] else . end),
+        digest: [ $all[] | select(.epoch >= $dcut) ]
+          | group_by(.msg | gsub("[0-9a-f:.]{4,}"; "#"))
+          | map({count: length, level: .[0].level,
+                 first: (map(.epoch) | min | strftime("%Y-%m-%dT%H:%M:%S")),
+                 last:  (map(.epoch) | max | strftime("%Y-%m-%dT%H:%M:%S")),
+                 sample: (.[0].msg | gsub("[0-9a-f:.]{4,}"; "#"))})
+          | sort_by(-.count) }'
+}
+
+do_dmesg() {
+  local cut dcut model
+  LVJSON=$(levels_json "$LEVEL") || exit 2
+  cut=$(since_epoch "$SINCE"); : "${cut:=0}"
+  if [ -n "$SINCE" ]; then dcut=$cut; else dcut=$((NOW - 3600)); fi
+  model=$(dmesg_model "$cut" "$dcut") || exit 1
+  [ "$JSON" = 1 ] && { printf '%s\n' "$model"; return 0; }
+  if [ "$DIGEST" = 0 ]; then
+    printf '%s' "$model" | jq -r '.lines[] | [.time, .level, .msg] | @tsv' | column -t -s $'\t'
+    printf '\ndigest since %s:\n' "$(printf '%s' "$model" | jq -r .since)"
+  fi
+  printf '%s' "$model" | jq -r '.digest[] | ["  " + (.count|tostring), .level, (.first[11:19] + "→" + .last[11:19]), .sample] | @tsv' \
+    | column -t -s $'\t'
+}
+
+## --- modules ----------------------------------------------------------------
+mods_json() {
+  jq -R -s -c 'split("\n") | map(select(length > 0) | split(" ")
+    | {name: .[0], size: (.[1] | tonumber), refcount: (.[2] | tonumber),
+       users: (if .[3] == "-" then [] else (.[3] | rtrimstr(",") | split(",")) end),
+       state: .[4]}) | sort_by(.name)' <"$PC_PROC/modules"
+}
+
+# params_tsv <module> — "<name>\t<value>" per parameter, one sudo pass when they are root-only.
+params_tsv() {
+  local d="$PC_SYS/module/$1/parameters" f
+  [ -d "$d" ] || return 0
+  for f in "$d"/*; do
+    [ -f "$f" ] || continue
+    if [ -r "$f" ]; then printf '%s\t%s\n' "${f##*/}" "$(<"$f")"
+    else
+      pc_root sh -c 'for f in "$1"/*; do [ -f "$f" ] || continue; printf "%s\t" "${f##*/}"; head -c 120 "$f" 2>/dev/null | tr "\n" " " | sed "s/ *$//"; printf "\n"; done' _ "$d"
+      return 0
+    fi
+  done
+}
+
+do_modules() {
+  local name=${1:-} row desc
+  if [ -z "$name" ]; then
+    if [ "$JSON" = 1 ]; then mods_json; else
+      mods_json | jq -r '.[] | [.name, (.size|tostring), (.refcount|tostring), (.users|join(",") // "-")] | @tsv' \
+        | column -t -s $'\t' -N NAME,SIZE,REFS,USERS
+    fi
+    return 0
+  fi
+  row=$(mods_json | jq -c --arg n "$name" 'map(select(.name == $n)) | .[0] // empty')
+  [ -n "$row" ] || { echo "pc kernel: module $name is not loaded" >&2; exit 1; }
+  desc=$(pc_cmd modinfo -F description "$name" 2>/dev/null | head -1)
+  # /proc/modules prints "-" for the user list on this kernel; /sys/module/<m>/holders still has it.
+  local holders=() h
+  for h in "$PC_SYS/module/$name/holders"/*; do [ -e "$h" ] && holders+=("${h##*/}"); done
+  row=$(printf '%s' "$row" | jq -c --arg u "${holders[*]}" 'if (.users|length) == 0 then .users = ($u|split(" ")|map(select(length>0))) else . end')
+  row=$(printf '%s' "$row" | jq -c --arg d "$desc" --rawfile p <(params_tsv "$name") '
+    . + {description: $d,
+         parameters: ($p | split("\n") | map(select(length > 0) | split("\t")) | map({key: .[0], value: (.[1] // "")}) | from_entries)}')
+  [ "$JSON" = 1 ] && { printf '%s\n' "$row"; return 0; }
+  printf '%s' "$row" | jq -r '"\(.name)  \(.size) bytes  refs=\(.refcount)  \(.state)\n\(.description)\nusers: \(if (.users|length) == 0 then "-" else (.users|join(", ")) end)\nparameters:"'
+  printf '%s' "$row" | jq -r '.parameters | to_entries[] | ["  " + .key, .value] | @tsv' | column -t -s $'\t'
+}
+
+## --- sysctl -----------------------------------------------------------------
+SYSCTL_GUARD='kernel.perf_event_paranoid kernel.unprivileged_bpf_disabled kernel.apparmor_restrict_unprivileged_userns net.ipv4.ip_forward'
+
+# guarded <key> — true for the keys that keep this machine reachable and confined.
+guarded() {
+  case $1 in kernel.sysrq*|kernel.yama*) return 0;; esac
+  local k; for k in $SYSCTL_GUARD; do [ "$1" = "$k" ] && return 0; done
+  return 1
+}
+
+sysctl_read() {
+  local out
+  out=$(pc_cmd sysctl -n "$1" 2>/dev/null) || out=$(pc_root sysctl -n "$1" 2>/dev/null)
+  printf '%s' "$out"
+}
+
+do_sysctl_get() {
+  local key=$1 out
+  out=$(pc_cmd sysctl -e "$key" 2>/dev/null)
+  [ -n "$out" ] || out=$(pc_cmd sysctl -ae -r "^${key//./\\.}" 2>/dev/null)
+  [ -n "$out" ] || out=$(pc_root sysctl -ae -r "^${key//./\\.}" 2>/dev/null)
+  [ -n "$out" ] || { echo "pc kernel: no sysctl key matching $key" >&2; exit 1; }
+  if [ "$JSON" = 1 ]; then
+    printf '%s\n' "$out" | jq -R -s -c 'split("\n") | map(select(test(" = ")) | split(" = ")
+      | {key: .[0], value: (.[1:] | join(" "))}) | from_entries'
+  else
+    printf '%s\n' "$out"
+  fi
+}
+
+do_sysctl_set() {
+  local key=$1 val=$2 before out id
+  if guarded "$key" && { [ "$FORCE" != 1 ] || [ -z "$WHY" ]; }; then
+    printf 'pc kernel: refused (%s is on the sysctl guard list) — pass --force and --why "<reason>" to override.\n' "$key" >&2
+    exit 3
+  fi
+  before=$(sysctl_read "$key")
+  [ -n "$before" ] || { echo "pc kernel: cannot read $key" >&2; exit 1; }
+  out=$(PC_READ_CMD="sysctl -n $key" pc_apply "$key" "$before" "$val" \
+        "timeout $PC_ROOT_TIMEOUT sudo -n sysctl -qw $key=$before" \
+        timeout "$PC_ROOT_TIMEOUT" sudo -n sysctl -qw "$key=$val") || { printf '%s\n' "$out"; exit 1; }
+  printf '%s\n' "$out"
+  # The reason for overriding the guard belongs in the ledger next to the change.
+  id=$(printf '%s\n' "$out" | tail -1 | sed -n 's/^rollback: pc undo //p')
+  [ -n "$id" ] && [ -n "$WHY" ] && pc_json '{id:$id,why:$w}' -c --arg id "$id" --arg w "$WHY" >>"$PC_LEDGER"
+  return 0
+}
+
+## --- cgroups ----------------------------------------------------------------
+# psi_json <cgroup-dir> — {cpu,memory,io} × {some10,full10,total_s} from the pressure files.
+psi_json() {
+  local d=$1 out=() r line kind
+  for r in cpu memory io; do
+    [ -r "$d/$r.pressure" ] || continue
+    local some10=0 full10=0 total=0
+    while read -r kind line; do
+      case $kind in
+        some) some10=${line#avg10=}; some10=${some10%% *};;
+        full) full10=${line#avg10=}; full10=${full10%% *};;
+      esac
+      case $kind in some|full) total=${line##*total=};; esac
+    done <"$d/$r.pressure"
+    out+=("\"$r\":{\"some10\":$some10,\"full10\":$full10,\"total_s\":$(awk -v t="$total" 'BEGIN{printf "%.3f", t/1000000}')}")
+  done
+  printf '{%s}\n' "$(IFS=,; echo "${out[*]}")"
+}
+
+do_cgroups_unit() {
+  local unit=$1 scope=() line k v cg d
+  case $unit in *.*) :;; *) unit="$unit.service";; esac
+  [ "$USERMODE" = 1 ] && scope=(--user)
+  declare -A P=()
+  while IFS='=' read -r k v; do P[$k]=$v; done < <(pc_cmd systemctl "${scope[@]}" show "$unit" \
+    -p CPUUsageNSec,MemoryCurrent,MemoryPeak,TasksCurrent,IOReadBytes,IOWriteBytes,ControlGroup 2>/dev/null)
+  cg=${P[ControlGroup]:-}
+  [ -n "$cg" ] || { echo "pc kernel: no cgroup for $unit (is it running?)" >&2; exit 1; }
+  d="$CGROOT$cg"
+  local num='def n($x): if ($x|type) == "string" and ($x|test("^[0-9]+$")) then ($x|tonumber) else null end;'
+  local out
+  out=$(pc_json "$num"'{unit:$u, cgroup:$cg,
+      cpu_usage_s: ((n($cpu) // 0) / 1000000000),
+      memory_bytes: n($mem), memory_peak_bytes: n($peak), tasks: n($tasks),
+      io_read_bytes: n($ior), io_write_bytes: n($iow), psi: $psi}' -c \
+    --arg u "$unit" --arg cg "$cg" --arg cpu "${P[CPUUsageNSec]:-}" --arg mem "${P[MemoryCurrent]:-}" \
+    --arg peak "${P[MemoryPeak]:-}" --arg tasks "${P[TasksCurrent]:-}" \
+    --arg ior "${P[IOReadBytes]:-}" --arg iow "${P[IOWriteBytes]:-}" --argjson psi "$(psi_json "$d")")
+  [ "$JSON" = 1 ] && { printf '%s\n' "$out"; return 0; }
+  printf '%s' "$out" | jq -r '
+    def h($b): if $b == null then "n/a" else (($b/1048576*10|round)/10|tostring) + "M" end;
+    "unit      \(.unit)",
+    "cgroup    \(.cgroup)",
+    "cpu       \((.cpu_usage_s*100|round)/100) s",
+    "memory    \(h(.memory_bytes))  peak \(h(.memory_peak_bytes))",
+    "tasks     \(.tasks // "n/a")",
+    "io        read \(h(.io_read_bytes)) write \(h(.io_write_bytes))",
+    (.psi | to_entries[] | "psi \((.key + "   ")[0:3])   some10=\(.value.some10) full10=\(.value.full10) total=\(.value.total_s)s")'
+}
+
+do_cgroups_all() {
+  local d rel usage mem pids rows=() k v
+  while IFS= read -r d; do
+    rel=${d#"$CGROOT"}; rel=${rel#/}; [ -n "$rel" ] || rel=/
+    usage=0; [ -r "$d/cpu.stat" ] && { read -r k v <"$d/cpu.stat"; [ "$k" = usage_usec ] && usage=$v; }
+    mem=0; [ -r "$d/memory.current" ] && mem=$(<"$d/memory.current")
+    pids=0; [ -r "$d/pids.current" ] && pids=$(<"$d/pids.current")
+    rows+=("$(printf '%s\t%s\t%s\t%s' "$rel" "$usage" "$mem" "$pids")")
+  done < <(find -H "$CGROOT" -maxdepth 3 -type d 2>/dev/null | sort)
+  [ ${#rows[@]} -gt 0 ] || { [ "$JSON" = 1 ] && echo '[]'; return 0; }
+  local tsv; tsv=$(printf '%s\n' "${rows[@]}")
+  if [ "$JSON" = 1 ]; then
+    printf '%s\n' "$tsv" | jq -R -s -c 'split("\n") | map(select(length>0) | split("\t")
+      | {cgroup: .[0], cpu_usage_s: ((.[1]|tonumber)/1000000), memory_bytes: (.[2]|tonumber), tasks: (.[3]|tonumber)})
+      | sort_by(-.cpu_usage_s)'
+  else
+    printf '%s\n' "$tsv" | jq -R -s -r 'split("\n") | map(select(length>0) | split("\t"))
+      | sort_by(-(.[1]|tonumber)) | .[0:25][]
+      | [.[0], (((.[1]|tonumber)/1000000|round)|tostring) + "s", (((.[2]|tonumber)/1048576|round)|tostring) + "M", .[3]] | @tsv' \
+      | column -t -s $'\t' -N CGROUP,CPU,MEM,TASKS
+  fi
+}
+
+## --- cmdline / taint --------------------------------------------------------
+do_cmdline() {
+  local line; line=$(<"$PC_PROC/cmdline")
+  if [ "$JSON" = 1 ]; then
+    printf '%s' "$line" | jq -R -c 'rtrimstr("\n") | {raw: ., params: (split(" ") | map(select(length>0)
+      | (index("=") // -1) as $i | if $i < 0 then {key: ., value: null} else {key: .[0:$i], value: .[$i+1:]} end))}'
+  else
+    printf '%s\n' "${line% }" | tr ' ' '\n' | sed '/^$/d'
+  fi
+}
+
+TAINT_BITS='P F S R M B U D A W C I O E L K X T N'
+TAINT_NAMES=(
+ 'proprietary module loaded' 'module force loaded' 'out-of-spec system' 'module force unloaded'
+ 'machine check exception' 'bad page referenced' 'taint requested by userspace' 'kernel oops or BUG'
+ 'ACPI table overridden' 'kernel issued a warning' 'staging driver loaded' 'firmware workaround applied'
+ 'out-of-tree module loaded' 'unsigned module loaded' 'soft lockup occurred' 'kernel live patched'
+ 'auxiliary taint' 'struct randomization' 'in-kernel test')
+
+# taint_json — the tainted mask decoded plus release, boot time, lockdown.
+taint_json() {
+  local v i flags=() names=() lock=none up
+  v=$(<"$PC_PROC/sys/kernel/tainted")
+  local -a letters=($TAINT_BITS)
+  for i in "${!letters[@]}"; do
+    (( (v >> i) & 1 )) && { flags+=("${letters[i]}"); names+=("${TAINT_NAMES[i]}"); }
+  done
+  [ -r "$PC_SYS/kernel/security/lockdown" ] && { lock=$(<"$PC_SYS/kernel/security/lockdown"); lock=${lock#*[}; lock=${lock%%]*}; }
+  up=$((NOW - BTIME))
+  pc_json '{release:$r, booted:($bt|tonumber|strftime("%Y-%m-%dT%H:%M:%S")), uptime_s:($up|tonumber),
+            tainted:($v|tonumber), flags:($f|split(" ")|map(select(length>0))),
+            reasons:($n|split("\n")|map(select(length>0))), lockdown:$l}' -c \
+    --arg r "$(<"$PC_PROC/sys/kernel/osrelease")" --arg bt "$BTIME" --arg up "$up" --arg v "$v" \
+    --arg f "${flags[*]}" --arg n "$(printf '%s\n' "${names[@]:-}")" --arg l "$lock"
+}
+
+do_taint() {
+  local t; t=$(taint_json)
+  [ "$JSON" = 1 ] && { printf '%s\n' "$t"; return 0; }
+  printf '%s' "$t" | jq -r '"release   \(.release)",
+    "booted    \(.booted)  (up \((.uptime_s/3600*10|round)/10) h)",
+    "tainted   \(.tainted) \(if (.flags|length) == 0 then "(clean)" else "[" + (.flags|join(",")) + "]" end)",
+    (.reasons[] | "          - \(.)"),
+    "lockdown  \(.lockdown)"'
+}
+
+## --- overview ---------------------------------------------------------------
+do_overview() {
+  local t model mods
+  t=$(taint_json)
+  model=$(N=0 DIGEST=1 dmesg_model "$((NOW - 3600))" "$((NOW - 3600))" 2>/dev/null) || model='{"digest":[]}'
+  mods=$(wc -l <"$PC_PROC/modules")
+  if [ "$JSON" = 1 ]; then
+    pc_json '$t + {modules:($m|tonumber), dmesg_last_hour:($d.digest|map(.count)|add // 0), digest:($d.digest[0:3])}' -c \
+      --argjson t "$t" --argjson d "$model" --arg m "$mods"
+    return 0
+  fi
+  JSON=0 do_taint
+  printf 'modules   %s loaded\n' "$mods"
+  printf 'dmesg     %s err+warn in the last hour\n' "$(printf '%s' "$model" | jq -r '.digest|map(.count)|add // 0')"
+  printf '%s' "$model" | jq -r '.digest[0:3][] | ["  " + (.count|tostring), .level, .sample[0:100]] | @tsv' | column -t -s $'\t'
+}
+
+## --- dispatch ---------------------------------------------------------------
+case "${ARGS[0]:-}" in
+  '')       do_overview;;
+  dmesg)    do_dmesg;;
+  modules)  do_modules "${ARGS[1]:-}";;
+  cgroups)  if [ -n "${ARGS[1]:-}" ]; then do_cgroups_unit "${ARGS[1]}"; else do_cgroups_all; fi;;
+  cmdline)  do_cmdline;;
+  taint)    do_taint;;
+  sysctl)
+    case "${ARGS[1]:-}" in
+      get) [ -n "${ARGS[2]:-}" ] || { echo 'pc kernel: sysctl get needs a key' >&2; exit 2; }
+           do_sysctl_get "${ARGS[2]}";;
+      set) [ -n "${ARGS[3]:-}" ] || { echo 'pc kernel: sysctl set needs a key and a value' >&2; exit 2; }
+           do_sysctl_set "${ARGS[2]}" "${ARGS[3]}";;
+      *)   echo 'pc kernel: sysctl needs get or set' >&2; exit 2;;
+    esac;;
+  *) echo "pc kernel: unknown verb '${ARGS[0]}' (try: pc kernel -h)" >&2; exit 2;;
+esac

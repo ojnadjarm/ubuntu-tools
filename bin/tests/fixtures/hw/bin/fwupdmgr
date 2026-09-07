@@ -1,0 +1,9 @@
+#!/bin/sh
+cat <<'EOF'
+{
+  "Devices": [
+    {"Name": "System Firmware", "Version": "769", "Plugin": "uefi_capsule"},
+    {"Name": "Internal SPI Controller (BIOS)", "Version": "X1503ZA.301", "Plugin": "flashrom"}
+  ]
+}
+EOF

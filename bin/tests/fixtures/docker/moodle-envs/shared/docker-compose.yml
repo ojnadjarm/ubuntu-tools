@@ -1,0 +1,4 @@
+name: moodle-shared
+services:
+  proxy:
+    image: nginx:alpine

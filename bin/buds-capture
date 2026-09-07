@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+# Capture the full Bluetooth/audio/input state of the Sony XM5 buds while the
+# double tap is failing. Run it the moment the owner reports the failure,
+# BEFORE any disconnect, profile switch or case power-cycle.
+set -uo pipefail
+
+MAC="${BUDS_MAC:-AC:80:0A:27:65:6C}"
+SECONDS_WINDOW=60
+QUIET=0
+
+usage() {
+    cat <<'USAGE'
+buds-capture [seconds] [--quiet]
+
+Captures the failing earbud state into ~/agents/log/buds-capture/<timestamp>/:
+  cap.btsnoop / cap.txt   HCI trace (btmon) over the window, decoded
+  state.txt               bluez, pulse/wireplumber, journal and sysfs snapshot
+  evdev.txt               dark-eye-ptt journal + libinput events during the window
+
+  seconds   capture window, default 60
+  --quiet   do not push the owner (test runs)
+USAGE
+}
+
+for arg in "$@"; do
+    case "$arg" in
+        --quiet|-q) QUIET=1 ;;
+        -h|--help) usage; exit 0 ;;
+        ''|*[!0-9]*) echo "buds-capture: bad argument '$arg'" >&2; usage >&2; exit 2 ;;
+        *) SECONDS_WINDOW="$arg" ;;
+    esac
+done
+
+DIR="$HOME/agents/log/buds-capture/$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$DIR"
+
+PIDS=()
+# sudo does not relay signals to its grandchild, so each root sniffer writes its
+# own pid into $DIR and is killed by that pid (never pkill -f: it matches this
+# script's own command line and kills the caller).
+root_pids() { cat "$DIR"/*.pid 2>/dev/null; }
+cleanup() {
+    local pid sig
+    for sig in INT KILL; do
+        for pid in "${PIDS[@]:-}" $(root_pids); do
+            [ -n "$pid" ] || continue
+            sudo -n pkill -"$sig" -P "$pid" 2>/dev/null
+            kill -"$sig" "$pid" 2>/dev/null
+            sudo -n kill -"$sig" "$pid" 2>/dev/null
+        done
+        [ "$sig" = INT ] && sleep 0.5
+    done
+    rm -f "$DIR"/*.pid
+}
+trap 'cleanup; exit 130' INT TERM
+
+# --- 1. sniffers first, so the setup snapshot happens inside the window -------
+sudo -n sh -c 'echo $$ >"$1/btmon.pid"; exec btmon -w "$1/cap.btsnoop"' _ "$DIR" >/dev/null 2>&1 &
+PIDS+=($!); disown $! 2>/dev/null
+
+: >"$DIR/evdev.txt"
+
+# The sidecar holds an exclusive grab on the AVRCP node, so evtest --grab is not
+# available: the only host views of a tap are the sidecar's own journal and the
+# uinput clone it re-injects to (visible to libinput).
+{
+    echo "=== journalctl --user -u dark-eye-ptt (follow) ==="
+    journalctl --user -u dark-eye-ptt -f -n 0 --no-pager 2>&1
+} >>"$DIR/evdev.txt" &
+PIDS+=($!); disown $! 2>/dev/null
+{
+    echo "=== libinput debug-events (uinput clone / passthrough) ==="
+    sudo -n sh -c 'echo $$ >"$1/libinput.pid"; exec libinput debug-events' _ "$DIR" 2>&1
+} >>"$DIR/evdev.txt" &
+PIDS+=($!); disown $! 2>/dev/null
+
+if [ "$QUIET" -eq 0 ]; then
+    notify-owner -t "Earbud capture" \
+        "Earbud capture running ${SECONDS_WINDOW}s: do two double taps now, then wait." \
+        >/dev/null 2>&1
+fi
+
+# --- 2. state snapshot --------------------------------------------------------
+{
+    echo "### buds-capture $(date -Is)  mac=$MAC  window=${SECONDS_WINDOW}s"
+    echo
+    echo "=== hcitool con ==="; hcitool con 2>&1
+    echo; echo "=== bluetoothctl info $MAC ==="; bluetoothctl info "$MAC" 2>&1
+    echo; echo "=== bluetoothctl show ==="; bluetoothctl show 2>&1
+    echo; echo "=== pactl list cards (bluez) ==="
+    pactl list cards 2>&1 | awk '/^Card #/{p=0} /bluez/{p=1} p'
+    echo; echo "=== pactl list short sinks ==="; pactl list short sinks 2>&1
+    echo; echo "=== pactl list short sources ==="; pactl list short sources 2>&1
+    echo; echo "=== pactl list short sink-inputs ==="; pactl list short sink-inputs 2>&1
+    echo; echo "=== pactl list short source-outputs ==="; pactl list short source-outputs 2>&1
+    echo; echo "=== pactl info (defaults) ==="; pactl info 2>&1 | grep -i default
+    echo; echo "=== wpctl status (audio) ==="
+    wpctl status 2>&1 | sed -n '/Audio/,/Video/p'
+    echo; echo "=== /proc/bus/input/devices (AVRCP) ==="
+    grep -B2 -A6 -i avrcp /proc/bus/input/devices 2>&1
+    echo; echo "=== /sys/class/bluetooth/hci0 ==="
+    for f in /sys/class/bluetooth/hci0/{address,name,type}; do
+        [ -r "$f" ] && printf '%s: %s\n' "${f##*/}" "$(cat "$f" 2>/dev/null)"
+    done
+    echo; echo "=== systemctl --user status dark-eye-ptt ==="
+    systemctl --user status dark-eye-ptt --no-pager 2>&1 | head -20
+    echo; echo "=== journalctl -k --since -5min (bluetooth) ==="
+    journalctl -k --since -5min --no-pager 2>&1 | tail -80
+    echo; echo "=== journalctl --user -u dark-eye-ptt --since -10min ==="
+    journalctl --user -u dark-eye-ptt --since -10min --no-pager 2>&1 | tail -120
+    echo; echo "=== journalctl -u bluetooth --since -10min ==="
+    journalctl -u bluetooth --since -10min --no-pager 2>&1 | tail -120
+} >"$DIR/state.txt" 2>&1
+
+# --- 3. wait out the window ---------------------------------------------------
+end=$(( $(date +%s) + SECONDS_WINDOW ))
+while [ "$(date +%s)" -lt "$end" ]; do sleep 1; done
+
+cleanup
+trap - INT TERM
+sudo -n chown "$(id -u):$(id -g)" "$DIR/cap.btsnoop" 2>/dev/null
+
+# --- 4. decode and summarise --------------------------------------------------
+btmon -T -r "$DIR/cap.btsnoop" >"$DIR/cap.txt" 2>&1
+
+# btmon started mid-connection does not know the L2CAP PSMs, so AVCTP/AVRCP and
+# RFCOMM arrive as raw hex on "PSM 0" channels. Decode the AV/C passthrough
+# frames by hand: <avctp> 11 0e <avc> 48 7c <operand> — 48 = panel subunit,
+# 7c = PASSTHROUGH; operand 4b = FORWARD (the double tap), 44/46 = play/pause.
+grep -oE '[0-9a-f]{2} 11 0e [0-9a-f]{2} 48 7c [0-9a-f]{2}' "$DIR/cap.txt" \
+    | awk '{op=$7; name=(op=="44"||op=="c4")?"PLAY":(op=="46"||op=="c6")?"PAUSE": \
+        (op=="4b"||op=="cb")?"FORWARD":(op=="4c"||op=="cc")?"BACKWARD":"op_"op; \
+        print name, (substr(op,1,1)=="c" ? "release" : "press")}' >"$DIR/passthrough.txt"
+
+n_pass=$(grep -c . "$DIR/passthrough.txt"); n_pass=${n_pass:-0}
+n_fwd=$(grep -c '^FORWARD press' "$DIR/passthrough.txt"); n_fwd=${n_fwd:-0}
+n_at=$(grep -cE 'AT\+|\+BIEV|\+CIEV|\+BVRA|\+BRSF|CHUP' "$DIR/cap.txt"); n_at=${n_at:-0}
+n_sco=$(grep -cE 'Synchronous Connection Complete|Setup Synchronous Connection' "$DIR/cap.txt"); n_sco=${n_sco:-0}
+n_scodata=$(grep -c 'SCO Data' "$DIR/cap.txt"); n_scodata=${n_scodata:-0}
+n_rfc=$(grep -cE 'RFCOMM|PSM 3 ' "$DIR/cap.txt"); n_rfc=${n_rfc:-0}
+n_evt=$(grep -cE 'KEYBOARD_KEY|\[ptt\]' "$DIR/evdev.txt"); n_evt=${n_evt:-0}
+profile=$(pactl list cards 2>/dev/null | awk '/bluez/{c=1} c&&/Active Profile/{print $3; exit}')
+links=$(hcitool con 2>/dev/null | grep "$MAC" | tr -s ' ' | paste -sd'; ' -)
+
+echo "---- buds-capture summary (${SECONDS_WINDOW}s) ----"
+echo "1 dir                 $DIR"
+echo "2 AVRCP passthrough   $n_pass frames ($(sort "$DIR/passthrough.txt" | uniq -c | tr '\n' ';' | tr -s ' '))"
+echo "3   of which FORWARD  $n_fwd  <- the right-bud double tap; 0 means it never reached the host"
+echo "4 HFP AT commands     $n_at"
+echo "5 SCO setup           $n_sco setups, $n_scodata voice packets"
+echo "6 RFCOMM (decoded)    $n_rfc  (0 is normal: btmon joined after the channels were open)"
+echo "7 evdev/sidecar lines $n_evt"
+echo "8 card profile        ${profile:-none}"
+echo "9 links               ${links:-none}"
+echo "10 btsnoop            $(stat -c %s "$DIR/cap.btsnoop" 2>/dev/null || echo 0) bytes, cap.txt $(wc -l <"$DIR/cap.txt") lines"
+echo "-------------------------------------------"

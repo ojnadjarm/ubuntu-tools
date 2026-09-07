@@ -1,0 +1,28 @@
+/*
+ * sleep.bt — who parks on a short timeout: nanosleep, clock_nanosleep, poll, epoll_pwait.
+ * $1 = pid filter (0 = all), $2 = seconds. @min_ms holds the smallest timeout seen per caller,
+ * which is what exposes a polling loop (a 100 ms timeout at 10 calls/s is the PLAN-EFFICIENCY §1 case).
+ */
+tracepoint:syscalls:sys_enter_nanosleep /$1 == 0 || pid == (uint32)$1/
+{
+	@sleep[comm, pid, "nanosleep"] = count();
+}
+
+tracepoint:syscalls:sys_enter_clock_nanosleep /$1 == 0 || pid == (uint32)$1/
+{
+	@sleep[comm, pid, "clock_nanosleep"] = count();
+}
+
+tracepoint:syscalls:sys_enter_poll /$1 == 0 || pid == (uint32)$1/
+{
+	@sleep[comm, pid, "poll"] = count();
+	@min_ms[comm, pid, "poll"] = min((uint64)args->timeout_msecs);
+}
+
+tracepoint:syscalls:sys_enter_epoll_pwait /$1 == 0 || pid == (uint32)$1/
+{
+	@sleep[comm, pid, "epoll_pwait"] = count();
+	@min_ms[comm, pid, "epoll_pwait"] = min((uint64)args->timeout);
+}
+
+interval:s:$2 { exit(); }

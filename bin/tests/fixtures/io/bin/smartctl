@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+cat <<'JSON'
+{
+  "smart_status": {"passed": true},
+  "nvme_smart_health_information_log": {
+    "temperature": 35, "percentage_used": 3, "available_spare": 100,
+    "media_errors": 0, "power_on_hours": 1234
+  }
+}
+JSON

@@ -1,0 +1,22 @@
+{
+  "id": "O01",
+  "tier": "observe",
+  "set": "night",
+  "title": "Is the TV on?",
+  "prompt": "is the TV on?",
+  "answer_schema": {
+    "type": "object",
+    "required": ["tv_on", "evidence"],
+    "properties": {
+      "tv_on": {"type": "string", "enum": ["true", "false", "unknown"]},
+      "evidence": {"type": "string"},
+      "unknown": {"type": "boolean"},
+      "reason": {"type": "string"}
+    }
+  },
+  "allowed_side_effects": [],
+  "needs": [],
+  "budget": {"seconds": 240, "usd": 1.0, "screenshots": 0},
+  "oracle_s": 0,
+  "tags": ["tv", "eye tv", "night-safe"]
+}

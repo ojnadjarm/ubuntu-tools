@@ -1,0 +1,21 @@
+#!/bin/bash
+# pc find "text" [--all] [--region X,Y,W,H] [--json] — OCR the screen and print the centre X Y of the text.
+. "$(dirname "$(readlink -f "$0")")/env.sh"
+q=""; all=0; region=""; json=0; shot=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) echo 'usage: pc find "text" [--all] [--region X,Y,W,H] [--json] [--shot FILE]'; exit 0;;
+    --all) all=1; shift;;
+    --json) json=1; shift;;
+    --region) region="$2"; shift 2;;
+    --shot) shot="$2"; shift 2;;
+    *) q="$1"; shift;;
+  esac
+done
+[ -n "$q" ] || { echo 'usage: pc find "text" [--all] [--region X,Y,W,H] [--json]' >&2; exit 2; }
+if [ -z "$shot" ]; then
+  shot="$(mktemp --suffix=.png)"; trap 'rm -f "$shot"' EXIT
+  if [ -n "$region" ]; then "$PC_BIN/pc-shot" "$shot" --region "$region" >/dev/null || exit 1
+  else "$PC_BIN/pc-shot" "$shot" >/dev/null || exit 1; fi
+fi
+python3 "$PC_BIN/ocr_find.py" "$shot" "$q" "$all" "$json" "$region"

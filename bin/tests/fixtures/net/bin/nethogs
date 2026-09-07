@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+cat <<'TXT'
+Refreshing:
+firefox/1000/1234       0.123   0.045
+sshd/0/1004             0.001   0.001
+TXT

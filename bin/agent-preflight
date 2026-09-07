@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# agent-preflight — the first command of every Dark-Eye agent: the six things every
+# one of them re-derived by hand, the three rules and the three commands. < 0.5 s.
+# Exit 1 when the tree is dirty or a hand-run body is live ("do not restart").
+set -uo pipefail
+
+EYE=${DARK_EYE_DIR:-$HOME/the-dark-eye}
+BRIEF=""
+[ "${1:-}" = --brief ] && BRIEF=1
+
+# --- the probes, all at once ------------------------------------------------
+{
+  systemctl --user show dark-eye -p ActiveState,SubState,NRestarts,MainPID > /tmp/.pf.unit 2>/dev/null
+} &
+{ journalctl --user -u dark-eye -n 400 --no-pager -o cat 2>/dev/null |
+    grep -E 'eye up at|\[eye-render\] backend ' | tail -3 > /tmp/.pf.journal; } &
+{ eye health 2>/dev/null > /tmp/.pf.health; eye status 2>/dev/null > /tmp/.pf.orbit; } &
+{ git -C "$EYE" status --porcelain 2>/dev/null > /tmp/.pf.git; } &
+{ pactl get-default-sink 2>/dev/null > /tmp/.pf.sink
+  pactl list sinks short 2>/dev/null | grep -c bluez > /tmp/.pf.buds
+  pw-metadata -n settings 2>/dev/null | sed -n "s/.*'log.level' value:'\\([0-9]*\\)'.*/log.level \\1/p" | head -1 > /tmp/.pf.pwlog; } &
+wait
+
+. /tmp/.pf.unit 2>/dev/null || true
+BACKEND=$(grep -o 'backend [a-z]*' /tmp/.pf.journal | tail -1)
+LASTUP=$(grep 'eye up at' /tmp/.pf.journal | tail -1)
+DIRTY=$(wc -l < /tmp/.pf.git)
+SINK=$(cat /tmp/.pf.sink)
+BUDS=$(cat /tmp/.pf.buds)
+PWLOG=$(cat /tmp/.pf.pwlog)
+HOUR=$(date +%H)
+
+# a hand-run body / eye-render is any such pid outside the unit's cgroup; a sandbox
+# one carries DARK_EYE_SANDBOX and is not a hijack (EF03 rule 3 reaps it after 2 h)
+HAND="" SAND=""
+# `pgrep -f` would match this script's own command line (quirks), so: -x, then /proc
+for p in $(pgrep -x eye-render 2>/dev/null; pgrep -x node 2>/dev/null); do
+  grep -q 'dark-eye.service' "/proc/$p/cgroup" 2>/dev/null && continue
+  tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q 'the-dark-eye/body' || continue
+  if tr '\0' '\n' < "/proc/$p/environ" 2>/dev/null | grep -q '^DARK_EYE_SANDBOX='; then
+    SAND="$SAND $p"
+  else
+    HAND="$HAND $p"
+  fi
+done
+rm -f /tmp/.pf.unit /tmp/.pf.journal /tmp/.pf.git /tmp/.pf.sink /tmp/.pf.buds /tmp/.pf.pwlog
+
+# --- the screen -------------------------------------------------------------
+echo "UNIT      ${ActiveState:-?}/${SubState:-?} pid ${MainPID:-?} NRestarts=${NRestarts:-?} ${BACKEND:-backend ?}"
+echo "          ${LASTUP:-no 'eye up at' in the last 400 lines}"
+echo "BRIDGE    $(cat /tmp/.pf.health 2>/dev/null || echo 'no answer')"
+echo "TREE      $DIRTY dirty file(s) in $EYE$([ "$DIRTY" -gt 0 ] && echo ' — DO NOT RESTART: a restart ships a half-applied build')"
+echo "HAND-RUN  ${HAND:-none}${HAND:+ — outside the unit cgroup, DO NOT RESTART}${SAND:+   sandbox:$SAND}"
+echo "ORBITERS  $(cat /tmp/.pf.orbit 2>/dev/null || echo '-')"
+echo "CHANNEL   ${HOUR}h · sink $SINK · bluez sinks $BUDS · pipewire ${PWLOG:-log.level ?}"
+rm -f /tmp/.pf.health /tmp/.pf.orbit
+
+if [ -z "$BRIEF" ]; then
+  cat <<'EOF'
+
+RULES     kill by PID (never killall / pkill -f) · never restart dark-eye without the
+          orchestrator · the live render.sock, orbiters.json and remote sessions are off limits
+COMMANDS  eval "$(body-sandbox up --eye offscreen --stats --audio null)"   # isolated body
+          body-sandbox eye --dump /tmp/f.png --scene idle                  # offscreen frame
+          MEASURE_PIDS=$MEASURE_PIDS bash ~/the-dark-eye/body/scripts/measure.sh --state idle
+          body-sandbox down                                                # no residue
+EOF
+fi
+
+{ [ "$DIRTY" -gt 0 ] || [ -n "$HAND" ]; } && exit 1
+exit 0

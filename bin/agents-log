@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+"""Pretty-print the agent audit log (~/agents/log/actions.jsonl)."""
+import argparse, json, os, re, sys, time
+from collections import Counter
+
+ap = argparse.ArgumentParser()
+ap.add_argument('--since', help='age window, e.g. 30m, 2h, 3d')
+ap.add_argument('--session', help='match session id prefix')
+ap.add_argument('--grep', help='regex over tool/op/summary')
+ap.add_argument('--stats', action='store_true',
+                help='count commands (op basename) per session instead of lines')
+ap.add_argument('--pc', action='store_true', help='pixel-vs-text look counts per session')
+a = ap.parse_args()
+
+cut = 0.0
+if a.since:
+    m = re.fullmatch(r'(\d+)([smhd])', a.since)
+    if not m:
+        sys.exit('bad --since (use 30m, 2h, 3d)')
+    cut = time.time() - int(m[1]) * {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}[m[2]]
+
+path = os.path.expanduser('~/agents/log/actions.jsonl')
+rows = []
+for line in open(path) if os.path.exists(path) else []:
+    try:
+        r = json.loads(line)
+    except ValueError:
+        continue
+    if cut:
+        t = time.mktime(time.strptime(r['ts'][:19], '%Y-%m-%dT%H:%M:%S'))
+        if t < cut:
+            continue
+    if a.session and not r.get('session', '').startswith(a.session):
+        continue
+    blob = f"{r.get('tool')} {r.get('op')} {r.get('summary')}"
+    if a.grep and not re.search(a.grep, blob):
+        continue
+    rows.append(r)
+
+PIXEL = re.compile(r'\bpc (?:shot|find|click-text)\b|\bpc wait [0-9]')
+TEXT = re.compile(r'\bpc (?:see|wait-for|tree|a11y-click)\b|\bpc win (?:list|focused)\b')
+
+if a.pc:
+    tot = [0, 0]
+    print(f"{'session':10} {'pixel':>6} {'text':>6} {'ratio':>6}")
+    for sess in sorted({r.get('session', '') for r in rows}):
+        cmds = [r.get('summary', '') for r in rows
+                if r.get('session') == sess and r.get('tool') == 'Bash']
+        px = sum(len(PIXEL.findall(c)) for c in cmds)
+        tx = sum(len(TEXT.findall(c)) for c in cmds)
+        if not px and not tx:
+            continue
+        tot[0] += px
+        tot[1] += tx
+        print(f'{sess:10} {px:6} {tx:6} {px / (px + tx):6.2f}')
+    n = tot[0] + tot[1]
+    print(f"{'TOTAL':10} {tot[0]:6} {tot[1]:6} {(tot[0] / n if n else 0):6.2f}")
+elif a.stats:
+    for sess in sorted({r.get('session', '') for r in rows}):
+        c = Counter((r.get('op') or '').split(' ')[0]
+                    for r in rows if r.get('session') == sess)
+        print(sess, ' '.join(f'{k}={v}' for k, v in c.most_common()))
+else:
+    for r in rows:
+        print(f"{r['ts'][11:19]}  {r.get('session',''):8}  {r.get('tool',''):12} "
+              f"{r.get('op',''):18} {r.get('summary','')[:120]}")

@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Recover the Sony XM5 right-bud double tap after "the digital assistant is not
+# connected". Run buds-capture FIRST — this destroys the failing state.
+set -uo pipefail
+
+MAC="${BUDS_MAC:-AC:80:0A:27:65:6C}"
+
+case "${1:-}" in
+    -h|--help) echo "buds-recover — reconnect the buds, then tell the owner what is left to try"; exit 0 ;;
+esac
+
+echo "step 1: bluetoothctl disconnect/connect $MAC"
+bluetoothctl disconnect "$MAC" >/dev/null 2>&1
+sleep 5
+bluetoothctl connect "$MAC" >/dev/null 2>&1
+
+ok=0
+for _ in $(seq 1 20); do
+    if bluetoothctl info "$MAC" 2>/dev/null | grep -q "Connected: yes"; then ok=1; break; fi
+    sleep 1
+done
+
+if [ "$ok" -ne 1 ]; then
+    echo "step 1 FAILED: the buds did not come back connected."
+else
+    echo "step 1 done: connected."
+    for _ in $(seq 1 20); do
+        grep -qi avrcp /proc/bus/input/devices && break
+        sleep 1
+    done
+    echo "  AVRCP node:   $(grep -i -A4 avrcp /proc/bus/input/devices | grep -o 'event[0-9]*' | head -1 || echo 'not back yet')"
+    echo "  card profile: $(pactl list cards 2>/dev/null | awk '/bluez/{c=1} c&&/Active Profile/{print $3; exit}')"
+    echo "  sidecar:      $(journalctl --user -u dark-eye-ptt --since -1min --no-pager 2>/dev/null | tail -1)"
+fi
+
+cat <<'EOF'
+
+Ask the owner to try two double taps now.
+
+step 2 (only if the taps still fail): the case power-cycle — put both buds in the
+case, close the lid, wait 5 s, open it and take them out. That always clears it.
+The sidecar re-grabs the AVRCP node on its own within ~10 s of the reconnect.
+EOF

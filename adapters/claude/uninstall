@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Claude Code adapter uninstaller — reverses `install` and nothing more.
+# Leaves permissions, model, effortLevel, the Moodle hooks and ~/.claude/CLAUDE.md alone.
+set -uo pipefail
+HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+BIN="$(cd "$HERE/../../bin" && pwd)"
+# shellcheck source=/dev/null
+. "$BIN/env.sh"
+CTX="$HARNESS_CONTEXT_DIR"
+# Store the harness path as a literal $HOME/... so settings.json stays portable
+# across machines (Claude expands it) and matches the entries already written.
+HH="$HARNESS_HOME"; case "$HH" in "$HOME"/*) HH="\$HOME/${HH#"$HOME"/}";; esac
+
+python3 "$HERE/merge-settings.py" uninstall \
+  "$CTX/settings.json" "$HERE/settings.fragment.json" "$HH"
+
+for d in "$HARNESS_HOME"/skills/*/; do
+  name="$(basename "$d")"
+  t="$CTX/skills/$name/SKILL.md"
+  [ -L "$t" ] && [ "$(readlink -f "$t")" = "$(readlink -f "${d%/}/SKILL.md")" ] || continue
+  rm -f "$t"; rmdir "$CTX/skills/$name" 2>/dev/null
+  echo "unlinked $t"
+done
+
+inc="$HOME/CLAUDE.md"
+marker="<!-- pc-harness: the fleet contract, added by adapters/claude/install -->"
+if [ -f "$inc" ] && grep -qF "$marker" "$inc"; then
+  python3 - "$inc" "$marker" <<'PY'
+import sys
+path, marker = sys.argv[1], sys.argv[2]
+lines = open(path).read().splitlines(keepends=True)
+out, i = [], 0
+while i < len(lines):
+    if lines[i].rstrip("\n") == marker:
+        i += 1
+        while i < len(lines) and lines[i].startswith("@"):
+            i += 1
+        while out and out[-1].strip() == "":
+            out.pop()
+        out.append("\n")
+        continue
+    out.append(lines[i]); i += 1
+open(path, "w").write("".join(out))
+PY
+  echo "removed the @AGENTS.md include from $inc"
+fi
+exit 0

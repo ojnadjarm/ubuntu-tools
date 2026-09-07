@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# fixture `dmesg -J`: the recorded buffer, re-timed so every entry lands in the hour before the run.
+d="$(cd "$(dirname "$0")/.." && pwd)"
+bt=$(sed -n 's/^btime //p' "$d/proc/stat")
+printf -v now '%(%s)T' -1
+jq --argjson up "$((now - bt))" '(.dmesg | map(.time) | max) as $m | .dmesg |= map(.time = (.time - $m + $up - 10))' "$d/dmesg.json"

@@ -1,0 +1,8 @@
+#!/bin/sh
+cat <<'EOF'
+Bus 001 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub
+Bus 001 Device 002: ID 13d3:5463 IMC Networks USB2.0 HD UVC WebCam
+Bus 001 Device 003: ID 13d3:3563 IMC Networks Wireless_Device
+Bus 001 Device 005: ID 1532:0084 Razer USA, Ltd RZ01-0321 Gaming Mouse [DeathAdder V2]
+Bus 002 Device 001: ID 1d6b:0003 Linux Foundation 3.0 root hub
+EOF

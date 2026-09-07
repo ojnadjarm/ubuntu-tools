@@ -1,0 +1,4 @@
+[
+ {"wm_class":"gnome-terminal-server","wm_class_instance":"gnome-terminal-server","pid":4242,"id":812,"frame_type":0,"window_type":0,"focus":true,"in_current_workspace":true,"workspace":0,"title":"claude — tmux","x":0,"y":36,"width":1366,"height":732,"minimized":false},
+ {"wm_class":"firefox","wm_class_instance":"firefox","pid":4243,"id":815,"frame_type":0,"window_type":0,"focus":false,"in_current_workspace":true,"workspace":0,"title":"The Dark Eye","x":40,"y":80,"width":1200,"height":600,"minimized":false}
+]

@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Claude Code adapter for agent-exec: the flags agent-run used before GH07.
+# stdout = the run's result text · $RAW_OUT = claude's own JSON · $META_OUT = cost/tokens.
+set -uo pipefail
+
+cmd=(claude -p "$(cat "$PROMPT_FILE")" --model "$MODEL" --permission-mode bypassPermissions)
+[ -n "${AGENT_NAME:-}" ] && cmd+=(--name "agent-$AGENT_NAME")
+[ -n "${SYSTEM_FILE:-}" ] && [ -r "$SYSTEM_FILE" ] && cmd+=(--append-system-prompt "$(cat "$SYSTEM_FILE")")
+cmd+=(--output-format json)
+[ -n "${BUDGET_USD:-}" ] && cmd+=(--max-budget-usd "$BUDGET_USD")
+[ -n "${AGENT_TIMEOUT:-}" ] && cmd=(timeout "$AGENT_TIMEOUT" "${cmd[@]}")
+
+"${cmd[@]}" >"$RAW_OUT" </dev/null
+rc=$?
+
+jq -n --slurpfile r "$RAW_OUT" \
+  '{cost_usd: ($r[0].total_cost_usd? // null), tokens: ($r[0].usage? // null)}' \
+  >"$META_OUT" 2>/dev/null || jq -n '{}' >"$META_OUT"
+jq -r '.result // empty' "$RAW_OUT" 2>/dev/null
+exit "$rc"

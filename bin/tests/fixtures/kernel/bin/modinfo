@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# fixture `modinfo -F description <mod>`
+case "${3:-}" in i915) echo 'Intel Graphics';; snd_intel_dspcfg) echo 'Intel DSP config driver';; *) echo '';; esac

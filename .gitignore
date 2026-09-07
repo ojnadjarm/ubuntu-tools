@@ -1,0 +1,30 @@
+# pc-harness — what never leaves this machine.
+# Everything here is either a credential, a run artefact, or a generated machine fact.
+
+# Credentials and machine-local config.
+/secrets/
+/config.env
+
+# Run artefacts and owner data.
+/log/
+/backups/
+/browser/
+/state/
+
+# Generated machine facts: `pc status --facts > KB/machine.md`.
+/KB/machine.md
+
+# Per-agent runtime (BRIEF.md and agent.env are tracked, the rest is not).
+*/logs/
+*/state/
+*/REPORT.md
+*/.lock
+
+# Benchmark data: 12 MB of run output and the two frozen arm copies.
+/bench/runs/
+/bench/arms/old/
+/bench/arms/new/
+
+# Python bytecode.
+__pycache__/
+*.pyc

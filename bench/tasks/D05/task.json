@@ -1,0 +1,21 @@
+{
+  "id": "D05",
+  "tier": "diagnose",
+  "set": "night",
+  "title": "Failed user service",
+  "prompt": "a user service failed tonight, which one?",
+  "answer_schema": {
+    "type": "object",
+    "required": ["unit", "reason"],
+    "properties": {
+      "unit": {"type": "string"},
+      "reason": {"type": "string"},
+      "unknown": {"type": "boolean"}
+    }
+  },
+  "allowed_side_effects": [],
+  "needs": [],
+  "budget": {"seconds": 480, "usd": 1.5, "screenshots": 0},
+  "oracle_s": 0,
+  "tags": ["units", "pc units", "journal"]
+}

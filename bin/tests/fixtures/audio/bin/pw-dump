@@ -1,0 +1,2 @@
+#!/bin/sh
+cat "$(dirname "$(readlink -f "$0")")/../pw-dump.json"

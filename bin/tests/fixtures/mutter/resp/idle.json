@@ -1,0 +1,1 @@
+{"type":"t","data":[2804833],"bus":"user","name":"org.gnome.Mutter.IdleMonitor","path":"/org/gnome/Mutter/IdleMonitor/Core","interface":"org.gnome.Mutter.IdleMonitor","member":"GetIdletime","signature":""}

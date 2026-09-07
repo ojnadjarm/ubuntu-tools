@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# moodle-keep — daily care of the Moodle dev envs: stacks up, verified DB dumps, disk clean.
+# --weekly also fast-forwards clean core checkouts and runs upgrade + purge_caches.
+set -uo pipefail
+export LC_ALL=C
+
+ROOT="$HOME/moodle-envs"
+BACKUPS="$HOME/agents/backups/moodle"
+KEEP=14
+WEEKLY=0
+[ "${1:-}" = --weekly ] && WEEKLY=1
+[ "${1:-}" = -h ] || [ "${1:-}" = --help ] && { echo "usage: moodle-keep [--weekly]"; exit 0; }
+
+rc=0
+say() { printf '%s\n' "$*"; }
+fail() { rc=1; printf 'FAIL %s\n' "$*"; }
+
+cid() { docker ps -q --filter "label=com.docker.compose.project=$1" --filter "label=com.docker.compose.service=$2" | head -1; }
+
+for d in "$ROOT"/*/; do
+  ver="$(basename "$d")"
+  [ "$ver" = shared ] || [ ! -f "$d/docker-compose.yml" ] && continue
+  say "== $ver"
+
+  proj="$(sed -n 's/^name:[[:space:]]*//p' "$d/docker-compose.yml" | head -1)"; : "${proj:=$ver}"
+  ( cd "$d" && docker compose up -d ) >/dev/null 2>&1 || fail "$ver: compose up"
+
+  url="$(sed -n "s/.*\$CFG->wwwroot[[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" "$d/www/config.php" 2>/dev/null | head -1)"
+  code=000
+  for _ in $(seq 1 30); do
+    code="$(curl -sS -o /dev/null -w '%{http_code}' -m 10 "$url/login/index.php" 2>/dev/null)"
+    case "$code" in 200|303) break;; esac
+    sleep 3
+  done
+  case "$code" in 200|303) say "  http $code $url";; *) fail "$ver: unreachable ($code $url)"; continue;; esac
+
+  db="$(cid "$proj" db)"; app="$(cid "$proj" app)"
+  [ -n "$db" ] || { fail "$ver: no db container"; continue; }
+  user="$(sed -n "s/.*\$CFG->dbuser[[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" "$d/www/config.php" | head -1)"
+  name="$(sed -n "s/.*\$CFG->dbname[[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" "$d/www/config.php" | head -1)"
+
+  out="$BACKUPS/$ver/$(date +%F).sql.gz"
+  mkdir -p "$BACKUPS/$ver"
+  if docker exec "$db" pg_dump -U "$user" -d "$name" 2>/dev/null | gzip -c > "$out.tmp" && gzip -t "$out.tmp"; then
+    mv "$out.tmp" "$out"
+    say "  dump $(du -h "$out" | cut -f1) $out"
+  else
+    rm -f "$out.tmp"; fail "$ver: pg_dump"; continue
+  fi
+
+  # Prove the dump restores: load it into a scratch database, count tables, drop it.
+  scratch="keepcheck_$(date +%s)"
+  if docker exec "$db" createdb -U "$user" "$scratch" 2>/dev/null &&
+     gzip -dc "$out" | docker exec -i "$db" psql -q -U "$user" -d "$scratch" -v ON_ERROR_STOP=1 >/dev/null 2>&1; then
+    n="$(docker exec "$db" psql -tAU "$user" -d "$scratch" -c \
+      "select count(*) from information_schema.tables where table_schema='public'" 2>/dev/null)"
+    [ "${n:-0}" -gt 100 ] && say "  restore ok ($n tables)" || fail "$ver: restore only ${n:-0} tables"
+  else
+    fail "$ver: restore"
+  fi
+  docker exec "$db" dropdb -U "$user" --if-exists "$scratch" >/dev/null 2>&1
+
+  # Retention: last $KEEP dailies, monthly dumps (day 01) kept forever.
+  find "$BACKUPS/$ver" -maxdepth 1 -name '*.sql.gz' 2>/dev/null | grep -v -- '-01\.sql\.gz$' | sort -r | tail -n +$((KEEP+1)) | xargs -r rm -f
+
+  clidir=/var/www/html/admin/cli
+  docker exec "$app" test -f "$clidir/cron.php" 2>/dev/null || clidir=/var/www/html/public/admin/cli
+
+  KEEP_CRON=0
+  # shellcheck source=/dev/null
+  [ -r "$d/agent.env" ] && . "$d/agent.env"
+  if [ "$KEEP_CRON" = 1 ] && [ -n "$app" ]; then
+    docker exec "$app" php "$clidir/cron.php" >/dev/null 2>&1 && say "  cron ok" || fail "$ver: cron"
+  fi
+
+  if [ "$WEEKLY" = 1 ]; then
+    # Untracked files (plugin checkouts under www/public/) are the normal state and do not block.
+    if [ -n "$(git -C "$d/www" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+      say "  pull skipped (tracked files modified)"
+    elif ! git -C "$d/www" rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1; then
+      say "  pull skipped (no upstream)"
+    else
+      if git -C "$d/www" pull --ff-only >/dev/null 2>&1; then
+        say "  pull ff -> $(git -C "$d/www" rev-parse --short HEAD)"
+        docker exec "$app" php "$clidir/upgrade.php" --non-interactive >/dev/null 2>&1 && say "  upgrade ok" || fail "$ver: upgrade"
+        docker exec "$app" php "$clidir/purge_caches.php" >/dev/null 2>&1 && say "  caches purged" || fail "$ver: purge_caches"
+      else
+        say "  pull skipped (not fast-forward)"
+      fi
+    fi
+  fi
+done
+
+# Disk hygiene: dangling images and build cache only; never volumes, never images of running envs.
+say "== prune"
+say "  images  $(docker image prune -f 2>/dev/null | tail -1)"
+say "  builder $(docker builder prune -f 2>/dev/null | tail -1)"
+logrotate -s "$HOME/agents/log/.logrotate.state" "$HOME/agents/log/logrotate.conf" 2>/dev/null && say "  logrotate ok"
+say "  disk    $(df -h / | awk 'NR==2{print $5" used, "$4" free"}')"
+
+say "== done rc=$rc"
+exit "$rc"

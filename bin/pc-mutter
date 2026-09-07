@@ -1,0 +1,245 @@
+#!/usr/bin/env bash
+# pc mutter [outputs|workspaces|windows|idle|shell|extensions] — the compositor's state as JSON: monitors, workspaces, windows, idle, shell, extensions. Read-only.
+#
+# Everything here is a read: `DisplayConfig.GetCurrentState`, `IdleMonitor.GetIdletime`,
+# `org.gnome.Shell` properties, `Shell.Extensions.ListExtensions`, `pc win list --json`,
+# two gsettings keys and `xrandr` (only to compare screen sizes). No verb writes a monitor
+# configuration — that is an owner action forever (FLEET §5) — and none is built here.
+# shellcheck disable=SC2034
+set -uo pipefail
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+
+pc_usage 'usage: pc mutter [summary] [--json]      one line per section (default)
+       pc mutter outputs [--json]         connectors: mode, scale, logical position, primary, mirroring
+       pc mutter workspaces [--json]      count, dynamic or static, active index, windows per workspace
+       pc mutter windows [--json]         pc win list --json
+       pc mutter idle [--json]            milliseconds since the last input, and in words
+       pc mutter shell [--all] [--json]   version, mode, overview, a11y bus (--all: the Mutter interfaces)
+       pc mutter extensions [--json]      uuid, state, version
+
+Read-only, no pixels: nothing is opened, moved, focused or screenshotted. `summary` adds the
+consistency line `screen: WxH (xrandr) vs WxH (DisplayConfig)`, MISMATCH when they differ —
+`pc click` takes its bounds from xrandr.' "$@"
+
+PC_SUB='pc mutter'; PC_EXTRA_FLAGS=(--all)
+pc_opt "$@"; ARGS=("${PC_ARGS[@]}"); ALL=${PC_OPT[--all]:-0}
+sub="${ARGS[0]:-summary}"
+
+# The two sibling tools this builds on; a fixture may shadow either (PLAN-PCTOOLS §1 rule 7).
+tool() { [ -n "$PC_FIXTURE" ] && [ -x "$PC_FIXTURE/bin/$1" ] && { printf '%s\n' "$PC_FIXTURE/bin/$1"; return; }; printf '%s\n' "$BIN/$1"; }
+DBUS=$(tool pc-dbus); WIN=$(tool pc-win)
+DC=(org.gnome.Mutter.DisplayConfig /org/gnome/Mutter/DisplayConfig)
+W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
+
+## --- probes -----------------------------------------------------------------
+# Each probe writes one file in $W; a verb starts only the ones it needs and they run in
+# parallel, so the whole summary costs one round trip rather than seven (as in pc io).
+p_state()   { "$DBUS" call "${DC[@]}" GetCurrentState --json >"$W/state" 2>/dev/null; }
+p_idle()    { "$DBUS" call org.gnome.Mutter.IdleMonitor /org/gnome/Mutter/IdleMonitor/Core \
+                GetIdletime --json >"$W/idle" 2>/dev/null; }
+p_shell()   { "$DBUS" introspect org.gnome.Shell /org/gnome/Shell --json >"$W/shell" 2>/dev/null; }
+p_exts()    { "$DBUS" call org.gnome.Shell /org/gnome/Shell ListExtensions --json >"$W/exts" 2>/dev/null; }
+p_a11y()    { "$DBUS" call org.a11y.Bus /org/a11y/bus GetAddress --json >"$W/a11y" 2>/dev/null; }
+p_windows() { "$WIN" list --json >"$W/windows" 2>/dev/null || echo '[]' >"$W/windows"; }
+p_ws()      { { pc_cmd gsettings get org.gnome.desktop.wm.preferences num-workspaces
+                pc_cmd gsettings get org.gnome.mutter dynamic-workspaces; } >"$W/ws" 2>/dev/null; }
+p_xrandr()  { pc_cmd xrandr >"$W/xrandr" 2>/dev/null; }
+run() { local p; for p in "$@"; do "$p" & done; wait; }
+
+need_state() { [ -s "$W/state" ] || { echo 'pc mutter: DisplayConfig.GetCurrentState returned nothing' >&2; exit 1; }; }
+
+## --- outputs ----------------------------------------------------------------
+# GetCurrentState → (serial, monitors, logical_monitors, props); a monitor is enabled when a
+# logical monitor lists it, and mirrored when that logical monitor lists more than one.
+outputs_json() {
+  need_state
+  jq -c '
+    .data as $d
+    | ($d[2] | map({x:.[0], y:.[1], scale:.[2], transform:.[3], primary:.[4],
+                    members:(.[5] | map(.[0]))})) as $log
+    | $d[1] | map(
+        .[0] as $id | .[1] as $modes | (.[2] // {}) as $props
+        | ($id[0]) as $c
+        | ([$log[] | select(.members | index($c))] | first) as $l
+        | ([$modes[] | select((.[6]["is-current"].data // false) == true)] | first) as $m
+        | { connector: $c,
+            vendor: $id[1], product: $id[2], serial: $id[3],
+            display_name: ($props["display-name"].data // null),
+            builtin: ($props["is-builtin"].data // false),
+            enabled: ($l != null),
+            mode: (if $m then $m[0] else null end),
+            width: (if $m then $m[1] else null end),
+            height: (if $m then $m[2] else null end),
+            refresh: (if $m then ($m[3] * 100 | round) / 100 else null end),
+            scale: (if $l then ($l.scale * 100 | round) / 100 else null end),
+            x: (if $l then $l.x else null end),
+            y: (if $l then $l.y else null end),
+            transform: (if $l then $l.transform else null end),
+            primary: (($l.primary // false) == true),
+            mirrored_with: (if $l then [$l.members[] | select(. != $c)] else [] end),
+            modes: ($modes | length) } )' "$W/state"
+}
+outputs_text() {
+  outputs_json | jq -r '.[] |
+    [ .connector,
+      (if .enabled then "enabled" else "off" end),
+      (.mode // "-"),
+      (if .scale then (.scale | tostring) else "-" end),
+      (if .enabled then "+\(.x)+\(.y)" else "-" end),
+      (if .primary then "yes" else "no" end),
+      ((.display_name // "-") + (if (.mirrored_with | length) > 0 then "  [mirrors \(.mirrored_with | join(","))]" else "" end)) ]
+    | @tsv' |
+  { printf 'CONNECTOR\tSTATE\tMODE\tSCALE\tPOS\tPRIMARY\tDISPLAY\n'; cat; } | column -t -s $'\t'
+}
+
+# screen_json — the logical desktop size DisplayConfig reports vs the one xrandr reports.
+screen_json() {
+  need_state
+  local xr
+  xr=$(sed -n 's/^Screen 0:.*current \([0-9]*\) x \([0-9]*\).*/[\1,\2]/p' "$W/xrandr" 2>/dev/null | head -1)
+  jq -c --argjson xr "${xr:-null}" '
+    .data as $d
+    | [ $d[2][] | . as $l
+        | ([ $d[1][] | select(.[0][0] == $l[5][0][0]) | .[1][] | select((.[6]["is-current"].data // false) == true) ] | first) as $m
+        | if $m then { w: (($m[1] / $l[2]) | round + $l[0]), h: (($m[2] / $l[2]) | round + $l[1]) } else empty end ]
+    | { displayconfig: (if length > 0 then [ (map(.w) | max), (map(.h) | max) ] else null end),
+        xrandr: $xr }
+    | . + { match: (.xrandr != null and .displayconfig != null and .xrandr == .displayconfig) }' "$W/state"
+}
+
+## --- workspaces -------------------------------------------------------------
+# num-workspaces/dynamic-workspaces are the settings; the live active index comes from the
+# focused window (window-calls `workspace`; `in_current_workspace` is flaky — KB/quirks.md).
+workspaces_json() {
+  local n dyn
+  { read -r n; read -r dyn; } <"$W/ws"
+  jq -c --argjson n "${n:-1}" --arg dyn "${dyn:-false}" '
+    . as $w
+    | { count: (if $dyn == "true" then ([$w[].workspace] | max // 0) + 1 else $n end),
+        dynamic: ($dyn == "true"),
+        active: (([$w[] | select(.focus) | .workspace] | first)
+                 // (if ($w | length) == 0 and $n == 1 then 0 else null end)),
+        windows: ([$w[].workspace] | group_by(.) | map({workspace: .[0], windows: length})) }' "$W/windows"
+}
+
+## --- idle -------------------------------------------------------------------
+idle_json() {
+  jq -c '.data[0] as $ms | { idle_ms: $ms, idle_s: (($ms / 100 | round) / 10),
+    human: (($ms / 1000) as $s
+      | if $s < 60 then "\(($s * 10 | round) / 10) s"
+        elif $s < 3600 then "\($s / 60 | floor) m \(($s % 60) | floor) s"
+        else "\($s / 3600 | floor) h \((($s % 3600) / 60) | floor) m" end) }' "$W/idle"
+}
+
+## --- shell ------------------------------------------------------------------
+# The three org.gnome.Shell properties come back with their values on one introspect.
+shell_json() {
+  local a11y=false
+  [ -s "$W/a11y" ] && a11y=true
+  jq -c --argjson a11y "$a11y" --arg st "${XDG_SESSION_TYPE:-}" '
+    ([.interfaces[] | select(.name == "org.gnome.Shell") | .properties[]] | map({(.name): .value}) | add // {}) as $p
+    | { version: ($p.ShellVersion // null), mode: ($p.Mode // null),
+        overview: (if ($p | has("OverviewActive")) then $p.OverviewActive else null end), session_type: (if $st == "" then null else $st end),
+        a11y_bus: $a11y }' "$W/shell"
+}
+# shell_interfaces — the other Mutter interfaces with their method names only (--all, no calls).
+shell_interfaces() {
+  local p
+  for p in /org/gnome/Mutter/DisplayConfig /org/gnome/Mutter/IdleMonitor /org/gnome/Mutter/InputMapping \
+           /org/gnome/Mutter/ServiceChannel /org/gnome/Mutter/ScreenCast /org/gnome/Mutter/RemoteDesktop \
+           /org/gnome/Mutter/InputCapture; do
+    "$DBUS" introspect org.gnome.Shell "$p" --json 2>/dev/null |
+      jq -c --arg p "$p" '{path: $p, interfaces: [.interfaces[] | select(.name | startswith("org.freedesktop.DBus") | not)
+        | {name: .name, methods: [.methods[].name], properties: [.properties[].name]}]}' &
+  done
+  wait
+}
+
+## --- extensions -------------------------------------------------------------
+EXT_STATES='{"1":"active","2":"inactive","3":"error","4":"out-of-date","5":"downloading","6":"initialized","7":"disabling","8":"enabling"}'
+extensions_json() {
+  local enabled=null
+  [ -s "$W/shell" ] && enabled=$(jq -c '[.interfaces[] | select(.name == "org.gnome.Shell.Extensions")
+    | .properties[] | select(.name == "UserExtensionsEnabled") | .value] | first // null' "$W/shell")
+  jq -c --argjson names "$EXT_STATES" --argjson en "${enabled:-null}" '
+    .data[0] | to_entries | map(
+      (.value.state.data // 0 | floor) as $s
+      | { uuid: .key,
+          name: (.value.name.data // null),
+          state: ($names[$s | tostring] // "unknown"),
+          state_code: $s,
+          version: (if .value.version then (.value.version.data | floor) else null end),
+          version_name: (.value["version-name"].data // null),
+          type: (if .value.type then (.value.type.data | floor) else null end),
+          user_extensions_enabled: $en } )
+    | sort_by(.uuid)' "$W/exts"
+}
+
+## --- summary ----------------------------------------------------------------
+summary_json() {
+  jq -c -n --slurpfile o <(outputs_json) --slurpfile s <(screen_json) --slurpfile w <(workspaces_json) \
+     --slurpfile i <(idle_json) --slurpfile h <(shell_json) --slurpfile e <(extensions_json) \
+     --slurpfile n "$W/windows" \
+     '{outputs: $o[0], screen: $s[0], workspaces: $w[0], windows: $n[0], idle: $i[0],
+       shell: $h[0], extensions: $e[0]}'
+}
+summary_text() {
+  summary_json | jq -r '
+    def pad(s): (s + "            ")[0:12];
+    [ pad("outputs:") + ([.outputs[] | select(.enabled) | "\(.connector) \(.mode) @\(.scale) +\(.x)+\(.y)"
+        + (if .primary then " primary" else "" end)
+        + (if (.mirrored_with | length) > 0 then " mirroring \(.mirrored_with | join(","))" else "" end)] | join("; ")
+        | if . == "" then "none enabled" else . end)
+      + ([.outputs[] | select(.enabled | not) | .connector] | if length > 0 then " | off: " + join(",") else "" end),
+      pad("screen:") + ((.screen.xrandr | if . then "\(.[0])x\(.[1])" else "?" end) + " (xrandr) vs "
+        + (.screen.displayconfig | if . then "\(.[0])x\(.[1])" else "?" end) + " (DisplayConfig)"
+        + (if .screen.match then "" else "  MISMATCH" end)),
+      pad("workspaces:") + "\(.workspaces.count) \(if .workspaces.dynamic then "(dynamic)" else "(static)" end), active \(.workspaces.active // "?")",
+      pad("windows:") + "\(.windows | length)"
+        + (if (.windows | length) > 0 then " — " + ([.windows[] | .wm_class] | unique | join(", ")) else "" end),
+      pad("idle:") + .idle.human,
+      pad("shell:") + "GNOME \(.shell.version), mode \(.shell.mode), overview \(if .shell.overview then "on" else "off" end), a11y bus \(if .shell.a11y_bus then "up" else "down" end)",
+      pad("extensions:") + ([.extensions | group_by(.state)[] | "\(length) \(.[0].state)"] | join(", "))
+        + ([.extensions[] | select(.state != "active") | .uuid] | if length > 0 then " (" + join(", ") + ")" else "" end)
+    ] | .[]'
+}
+
+## --- dispatch ---------------------------------------------------------------
+case $sub in
+  outputs)
+    run p_state; if [ "$JSON" = 1 ]; then outputs_json; else outputs_text; fi;;
+  workspaces)
+    run p_ws p_windows
+    if [ "$JSON" = 1 ]; then workspaces_json
+    else workspaces_json | jq -r '"workspaces: \(.count) \(if .dynamic then "(dynamic)" else "(static)" end), active \(.active // "?")",
+      (.windows[] | "  ws \(.workspace): \(.windows) window(s)")'; fi;;
+  windows)
+    run p_windows
+    if [ "$JSON" = 1 ]; then cat "$W/windows"; else "$WIN" list; fi;;
+  idle)
+    run p_idle
+    [ -s "$W/idle" ] || { echo 'pc mutter: IdleMonitor.GetIdletime returned nothing' >&2; exit 1; }
+    if [ "$JSON" = 1 ]; then idle_json; else idle_json | jq -r '"idle: \(.human) (\(.idle_ms) ms)"'; fi;;
+  shell)
+    run p_shell p_a11y
+    [ -s "$W/shell" ] || { echo 'pc mutter: cannot introspect org.gnome.Shell' >&2; exit 1; }
+    if [ "$ALL" = 1 ]; then
+      if [ "$JSON" = 1 ]; then jq -c -n --slurpfile s <(shell_json) --slurpfile i <(shell_interfaces) \
+        '$s[0] + {interfaces: ($i | sort_by(.path))}'
+      else shell_json | jq -r '"GNOME \(.version), mode \(.mode), overview \(if .overview then "on" else "off" end), a11y bus \(if .a11y_bus then "up" else "down" end)"'
+        shell_interfaces | sort | jq -r '.path as $p | .interfaces[] | "\($p)  \(.name)\n    methods: \(.methods | join(" "))"'
+      fi
+    elif [ "$JSON" = 1 ]; then shell_json
+    else shell_json | jq -r '"GNOME \(.version), mode \(.mode), overview \(if .overview then "on" else "off" end), a11y bus \(if .a11y_bus then "up" else "down" end)"'; fi;;
+  extensions)
+    run p_shell p_exts
+    [ -s "$W/exts" ] || { echo 'pc mutter: Shell.Extensions.ListExtensions returned nothing' >&2; exit 1; }
+    if [ "$JSON" = 1 ]; then extensions_json
+    else extensions_json | jq -r '.[] | [.uuid, .state, (.version_name // .version // "-" | tostring), (.name // "-")] | @tsv' |
+      { printf 'UUID\tSTATE\tVERSION\tNAME\n'; cat; } | column -t -s $'\t'; fi;;
+  summary)
+    run p_state p_idle p_shell p_exts p_a11y p_windows p_ws p_xrandr
+    if [ "$JSON" = 1 ]; then summary_json; else summary_text; fi;;
+  *) echo "pc mutter: unknown verb '$sub' (try: pc mutter -h)" >&2; exit 2;;
+esac

@@ -1,0 +1,76 @@
+#!/bin/bash
+# pc shot [out.png] [--scale F] [--region X,Y,W,H] [--diff [PREV]] [--ignore X,Y,W,H] [--changed-only] [--quiet] — screenshot the screen or a region; --diff reports what changed since the previous shot.
+# Screenshot via xdg portal; prints "path WxH NKB" and, with --diff, "changed bbox=X,Y,W,H" or "unchanged".
+. "$(dirname "$(readlink -f "$0")")/env.sh"
+out=""; scale=""; region=""; diff=""; prev=""; ignore="0,0,1366,32"; conly=""; quiet=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) echo "usage: pc shot [out.png] [--scale F] [--region X,Y,W,H] [--diff [PREV]] [--ignore X,Y,W,H] [--changed-only] [--quiet]"; exit 0;;
+    --scale) scale="$2"; shift 2;;
+    --region) region="$2"; shift 2;;
+    --ignore) ignore="$2"; shift 2;;
+    --changed-only) conly=1; shift;;
+    --quiet) quiet=1; shift;;
+    --diff) diff=1; shift
+            case "${1:-}" in ""|--*) ;; *) prev="$1"; shift;; esac;;
+    *) out="$1"; shift;;
+  esac
+done
+: "${out:=/tmp/shot-$(date +%s).png}"
+if [ -n "$diff" ] && [ -z "$prev" ]; then
+  prev="$out.prev.png"
+  [ -f "$out" ] && cp -f "$out" "$prev"
+fi
+tmp="$(mktemp --suffix=.png)"
+timeout 30 python3 "$PC_BIN/portal_shot.py" "$tmp" >/dev/null || { rm -f "$tmp"; exit 1; }
+python3 - "$tmp" "$out" "$region" "$scale" "$prev" "$ignore" "$conly" "$quiet" <<'PY'
+import os, sys
+from PIL import Image, ImageChops
+src, out, region, scale, prev, ignore, conly, quiet = sys.argv[1:9]
+im = Image.open(src)
+if region:
+    x, y, w, h = (int(v) for v in region.split(','))
+    im = im.crop((x, y, x + w, y + h))
+if scale:
+    f = float(scale)
+    im = im.resize((max(1, round(im.width * f)), max(1, round(im.height * f))), Image.LANCZOS)
+
+verdict = None
+if prev:
+    if os.path.exists(prev):
+        old = Image.open(prev).convert('RGB')
+        new = im.convert('RGB')
+        if old.size != new.size:
+            box = (0, 0, new.width, new.height)
+        else:
+            a, b = old.copy(), new.copy()
+            if ignore:
+                x, y, w, h = (int(v) for v in ignore.split(','))
+                for img in (a, b):
+                    img.paste((0, 0, 0), (x, y, x + w, y + h))
+            box = ImageChops.difference(a, b).getbbox()
+    else:
+        box = (0, 0, im.width, im.height)
+    if box:
+        verdict = 'changed bbox=%d,%d,%d,%d' % (box[0], box[1], box[2] - box[0], box[3] - box[1])
+    else:
+        verdict = 'unchanged'
+
+# The full frame is always what lands on <out>, so the next --diff compares like with like.
+im.save(out)
+crop = None
+if conly and verdict and verdict != 'unchanged':
+    crop = out + '.crop.png'
+    im.crop(box).save(crop)
+    verdict += ' crop=%s' % crop
+if not quiet:
+    print('%s %dx%d %dKB' % (out, im.width, im.height, (os.path.getsize(out) + 1023) // 1024))
+    if crop:
+        c = Image.open(crop)
+        print('%s %dx%d %dKB' % (crop, c.width, c.height, (os.path.getsize(crop) + 1023) // 1024))
+if verdict:
+    print(verdict)
+PY
+rc=$?
+rm -f "$tmp"
+exit $rc

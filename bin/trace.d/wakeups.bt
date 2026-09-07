@@ -1,0 +1,15 @@
+/*
+ * wakeups.bt — tasks woken and switched-to per second. $1 = pid filter (0 = all), $2 = seconds.
+ * Keys are the woken task's comm and pid, so post-processing can group by comm, pid or cgroup.
+ */
+tracepoint:sched:sched_wakeup /$1 == 0 || args->pid == (int32)$1/
+{
+	@wake[args->comm, args->pid] = count();
+}
+
+tracepoint:sched:sched_switch /$1 == 0 || args->next_pid == (int32)$1/
+{
+	@switch[args->next_comm, args->next_pid] = count();
+}
+
+interval:s:$2 { exit(); }

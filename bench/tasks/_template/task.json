@@ -1,0 +1,21 @@
+{
+  "id": "T00",
+  "tier": "observe",
+  "set": "night",
+  "title": "template task",
+  "prompt": "one sentence in the owner's words, no tool names",
+  "answer_schema": {
+    "type": "object",
+    "required": ["answer"],
+    "properties": {
+      "answer": {"type": "string"},
+      "unknown": {"type": "boolean"},
+      "reason": {"type": "string"}
+    }
+  },
+  "allowed_side_effects": [],
+  "needs": [],
+  "budget": {"seconds": 480, "usd": 1.5, "screenshots": 0},
+  "oracle_s": 0,
+  "tags": []
+}

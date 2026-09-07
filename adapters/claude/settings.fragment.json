@@ -1,0 +1,39 @@
+{
+  "_comment": "Hooks this harness owns in ~/.claude/settings.json. @HARNESS_HOME@ is replaced by adapters/claude/install. Every other settings.json key — permissions, model, effortLevel, the Moodle Stop hook — is left untouched.",
+  "_supersedes": [
+    "$HOME/.claude/hooks/machine-status.sh",
+    "$HOME/.claude/hooks/moodle-session-start.sh",
+    "$HOME/.claude/hooks/audit-log.sh"
+  ],
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "@HARNESS_HOME@/adapters/claude/hooks/session-start.sh" }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit|mcp__.*",
+        "hooks": [
+          { "type": "command", "command": "@HARNESS_HOME@/adapters/claude/hooks/audit-log.py" }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "@HARNESS_HOME@/bin/orbit-hook start", "timeout": 5 }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "@HARNESS_HOME@/bin/orbit-hook stop", "timeout": 5 }
+        ]
+      }
+    ]
+  }
+}

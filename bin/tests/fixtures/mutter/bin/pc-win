@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Recorded pc-win for the pc-mutter tests: two windows on workspace 0, one focused.
+d="$(cd "$(dirname "$(readlink -f "$0")")/../resp" && pwd)"
+cat "$d/windows.json"

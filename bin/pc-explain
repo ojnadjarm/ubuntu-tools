@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# pc explain <thing…> [-n 3] [--json] [--files] — ranked KB lookup: heading > bold lead > exact quoted token > partial quote/backtick > word > substring.
+# shellcheck disable=SC2034
+set -uo pipefail
+export LC_ALL=C
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+
+pc_usage 'usage: pc explain <thing…> [-n 3] [--json] [--files]
+
+Ranked lookup over the KB corpus (toolbox.md, quirks.md, audit.md, machine.md, KB/runbooks/*.md,
+README-pc-control.md, FLEET.md, RUNNER.md, the-dark-eye/{RUNBOOK,RUNBOOK-earbuds,PLAN-*}.md,
+KB/pc-cli.md) so an agent gets the heading and the paragraph instead of opening the whole
+file. A match on a line scores, highest first: an atx heading (`# ...`) > a `- **Bold
+lead:**` bullet (this KBs own mini-heading convention) whose bold span holds the query >
+an exact quoted/backticked token (`` `x` `` or "x" equal to the query) > a partial
+quote/backtick match > a bare word > a plain substring. Ties break by file priority: toolbox,
+quirks, README-pc-control, RUNBOOK*, machine, everything else.
+
+  -n N       number of results (default 3)
+  --json     array of {file,line,heading,text}
+  --files    one "file:line" per result, nothing else
+
+Exit 1 and the closest three headings (stderr) when nothing matches.' "$@"
+
+PC_SUB='pc explain'; PC_EXTRA_FLAGS=(--files -n:)
+pc_opt "$@"; ARGS=("${PC_ARGS[@]}")
+N=${PC_OPT[-n]-3}; FILES_ONLY=${PC_OPT[--files]-0}
+QUERY="${ARGS[*]:-}"
+[ -n "$QUERY" ] || { echo "usage: pc explain <thing…> [-n 3] [--json] [--files]" >&2; exit 2; }
+
+CORPUS=(
+  "$HOME/agents/KB/toolbox.md"
+  "$HOME/agents/KB/quirks.md"
+  "$HOME/agents/KB/audit.md"
+  "$HOME/agents/README-pc-control.md"
+  "$HOME/the-dark-eye/RUNBOOK.md"
+  "$HOME/the-dark-eye/RUNBOOK-earbuds.md"
+  "$HOME/agents/KB/machine.md"
+  "$HOME/agents/KB/runbooks"/*.md
+  "$HOME/agents/FLEET.md"
+  "$HOME/agents/RUNNER.md"
+  "$HOME/the-dark-eye/PLAN-"*.md
+  "$HOME/agents/KB/pc-cli.md"
+)
+
+priority() {
+  case "$1" in
+    */toolbox.md) echo 1;; */quirks.md) echo 2;; */README-pc-control.md) echo 3;;
+    */RUNBOOK*.md) echo 4;; */machine.md) echo 5;; *) echo 6;;
+  esac
+}
+
+# score <line> — 5 heading, 4 bold-lead, 3 exact quoted/backticked token, 2 partial, 1 word, 0 substring.
+score() {
+  local c=$1
+  if [[ "$c" =~ ^#+[[:space:]] ]]; then echo 5; return; fi
+  if [[ "$c" =~ ^[[:space:]]*[-*][[:space:]]+\*\*([^*]+)\*\* ]]; then
+    shopt -s nocasematch
+    [[ "${BASH_REMATCH[1]}" == *"$QUERY"* ]] && { shopt -u nocasematch; echo 4; return; }
+    shopt -u nocasematch
+  fi
+  local tok
+  for tok in $(grep -oE '`[^`]+`|"[^"]+"' <<<"$c"); do
+    tok=${tok#[\`\"]}; tok=${tok%[\`\"]}
+    shopt -s nocasematch
+    if [[ "$tok" == "$QUERY" ]]; then shopt -u nocasematch; echo 3; return; fi
+    shopt -u nocasematch
+  done
+  shopt -s nocasematch
+  if [[ "$c" == *'`'*"$QUERY"*'`'* || "$c" == *\"*"$QUERY"*\"* ]]; then shopt -u nocasematch; echo 2; return; fi
+  shopt -u nocasematch
+  if grep -qiw -F -- "$QUERY" <<<"$c" 2>/dev/null; then echo 1; return; fi
+  echo 0
+}
+
+WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
+CAND="$WORK/cand"; : >"$CAND"
+for f in "${CORPUS[@]}"; do
+  [ -f "$f" ] || continue
+  while IFS=: read -r ln content; do
+    printf '%s\t%s\t%s\t%s\n' "$(score "$content")" "$(priority "$f")" "$f" "$ln" >>"$CAND"
+  done < <(grep -inF -- "$QUERY" "$f" 2>/dev/null)
+done
+
+# A multi-word query with no line carrying the exact phrase falls back to "every word present
+# on the line, any order" — always the lowest tier (0), since it is a weaker signal.
+read -ra QWORDS <<<"$QUERY"
+if [ ! -s "$CAND" ] && [ "${#QWORDS[@]}" -gt 1 ]; then
+  for f in "${CORPUS[@]}"; do
+    [ -f "$f" ] || continue
+    while IFS=: read -r ln content; do
+      ok=1
+      shopt -s nocasematch
+      for w in "${QWORDS[@]:1}"; do [[ "$content" == *"$w"* ]] || { ok=0; break; }; done
+      shopt -u nocasematch
+      [ "$ok" = 1 ] && printf '0\t%s\t%s\t%s\n' "$(priority "$f")" "$f" "$ln" >>"$CAND"
+    done < <(grep -inF -- "${QWORDS[0]}" "$f" 2>/dev/null)
+  done
+fi
+
+if [ ! -s "$CAND" ]; then
+  printf 'pc explain: no match for "%s" — closest headings:\n' "$QUERY" >&2
+  n=0
+  for f in "${CORPUS[@]}"; do
+    [ -f "$f" ] || continue
+    while IFS=: read -r hl _; do
+      printf '%s:%s\n' "$f" "$hl" >&2
+      n=$((n + 1)); [ "$n" -ge 3 ] && break 2
+    done < <(grep -nE '^#+ ' "$f" | head -3)
+  done
+  exit 1
+fi
+
+# Dedupe to one candidate per paragraph (blank-line-delimited block), keeping the best score.
+declare -A BEST_SCORE BEST_LINE
+while IFS=$'\t' read -r sc pr f ln; do
+  mapfile -t L < "$f"
+  i=$((ln - 1))
+  s=$i
+  while [ "$s" -gt 0 ] && [[ -n "${L[$((s - 1))]//[[:space:]]/}" ]]; do s=$((s - 1)); done
+  key="$f"$'\x1f'"$s"
+  cur=${BEST_SCORE[$key]:--1}
+  if [ "$sc" -gt "$cur" ]; then BEST_SCORE[$key]=$sc; BEST_LINE[$key]=$ln; fi
+done <"$CAND"
+
+: >"$WORK/ranked"
+for key in "${!BEST_SCORE[@]}"; do
+  f=${key%%$'\x1f'*}; s0=${key#*$'\x1f'}
+  printf '%s\t%s\t%s\t%s\t%s\n' "${BEST_SCORE[$key]}" "$(priority "$f")" "$f" "$s0" "${BEST_LINE[$key]}" >>"$WORK/ranked"
+done
+sort -t $'\t' -k1,1nr -k2,2n -k4,4n "$WORK/ranked" | head -n "$N" >"$WORK/top"
+
+emit() {
+  local f=$1 s0=$2 ln=$3
+  mapfile -t L < "$f"
+  local n=${#L[@]} e=$s0
+  while [ "$e" -lt $((n - 1)) ] && [[ -n "${L[$((e + 1))]//[[:space:]]/}" ]]; do e=$((e + 1)); done
+  [ $((e - s0 + 1)) -gt 25 ] && e=$((s0 + 24))
+  local h="" i=$s0
+  while [ "$i" -ge 0 ]; do
+    [[ "${L[$i]}" =~ ^#+[[:space:]] ]] && { h="${L[$i]}"; break; }
+    i=$((i - 1))
+  done
+  if [ "$JSON" = 1 ]; then
+    local text="" j
+    for ((j = s0; j <= e; j++)); do text+="${L[$j]}"$'\n'; done
+    jq -n --arg file "$f" --argjson line "$ln" --arg heading "$h" --arg text "$text" \
+      '{file:$file, line:$line, heading:$heading, text:$text}'
+  else
+    printf '%s:%d\n' "$f" "$ln"
+    [ -n "$h" ] && printf '%s\n' "$h"
+    local j; for ((j = s0; j <= e; j++)); do printf '%s\n' "${L[$j]}"; done
+    printf '\n'
+  fi
+}
+
+if [ "$FILES_ONLY" = 1 ]; then
+  while IFS=$'\t' read -r _ _ f s0 ln; do printf '%s:%s\n' "$f" "$ln"; done <"$WORK/top"
+  exit 0
+fi
+
+if [ "$JSON" = 1 ]; then
+  { while IFS=$'\t' read -r _ _ f s0 ln; do emit "$f" "$s0" "$ln"; done <"$WORK/top"; } | jq -s .
+else
+  while IFS=$'\t' read -r _ _ f s0 ln; do emit "$f" "$s0" "$ln"; done <"$WORK/top"
+fi

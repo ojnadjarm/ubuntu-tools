@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# pc fake <value> [--apply] — test-only verb: writes <value> into $FAKE_FILE through pc_apply.
+set -uo pipefail
+. "${PCLIB:-$HOME/agents/bin/pclib.sh}"
+pc_usage 'usage: pc fake <value> [--apply]' "$@"
+pc_opt "$@"
+val="${PC_ARGS[0]:-}"
+before=$(cat "$FAKE_FILE" 2>/dev/null)
+export PC_READ_CMD="cat $FAKE_FILE 2>/dev/null"
+pc_apply "$FAKE_FILE" "$before" "$val" \
+  "$(printf '%q %q --apply' "$(readlink -f "$0")" "$before")" \
+  bash -c 'printf "%s" "$1" >"$FAKE_FILE"' _ "$val"

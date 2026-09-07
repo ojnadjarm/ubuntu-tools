@@ -1,0 +1,231 @@
+#!/usr/bin/env bash
+# pc docker stacks|ps|health|stats|logs|events|disk|restart|stop|start — compose stacks, health, stats, logs, events, disk use; ledgered restarts.
+set -uo pipefail
+export LC_ALL=C
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+: "${PC_ENVS:=$HOME/moodle-envs}"
+
+pc_usage 'usage: pc docker [stacks] [--json]                    compose project -> services (state/health/ports/uptime)
+       pc docker ps [--json]                             every container, flat
+       pc docker health [--json]                         unhealthy/restarting containers + HTTP check of 8052/8025
+       pc docker stats [--json]                           one-shot `docker stats --no-stream`
+       pc docker logs <container> [-n 100] [--since D] [--json]
+       pc docker events [--since 1h] [--json]             `docker events` since the cutoff
+       pc docker disk [--json]                            `docker system df`, cached 300 s (EF01: images cost 0.5 s)
+       pc docker restart|stop|start <container|stack> [--force] [--apply]
+
+A stack is a compose project (its dir under ~/moodle-envs, or the project name itself, e.g.
+"shared" or "moodle-shared"). `stop`/`restart` on the shared stack is refused while any other
+env is up, unless --force. No `prune` verb (moodle-keeper/maintenance own that); the daemon is
+never restarted. Mutating verbs print `would: …` and change nothing without --apply; with it
+the change is ledgered and undoable with `pc undo`.' "$@"
+
+FORCE=0; N=100; SINCE=; ARGV=()
+while [ $# -gt 0 ]; do
+  case $1 in
+    --force) FORCE=1;;
+    -n) N=$2; shift;; -n=*) N=${1#-n=};;
+    --since) SINCE=$2; shift;; --since=*) SINCE=${1#*=};;
+    *) ARGV+=("$1");;
+  esac
+  shift
+done
+pc_opt ${ARGV[@]+"${ARGV[@]}"}
+sub="${PC_ARGS[0]:-stacks}"; arg="${PC_ARGS[1]:-}"
+
+## --- one `docker ps -a` call, shared by stacks/ps/health --------------------
+# The listing and the filter that shapes it are named once: stacks_json extends the same filter
+# in the same jq, so grouping by project still costs one docker call and one jq call.
+_ps_raw() {
+  pc_cmd docker ps -a --format '{{.Label "com.docker.compose.project"}}	{{.Label "com.docker.compose.service"}}	{{.Names}}	{{.State}}	{{.Status}}	{{.Ports}}	{{.ID}}' 2>/dev/null
+}
+PS_FILTER='
+      split("\n") | map(select(length > 0) | split("\t")) | map({
+        project: (if .[0] == "" then null else .[0] end),
+        service: (if .[1] == "" then null else .[1] end),
+        name: .[2], state: .[3], status: .[4], ports: .[5], id: .[6],
+        health: (.[4] as $s
+          | if ($s | test("\\(healthy\\)")) then "healthy"
+            elif ($s | test("\\(unhealthy\\)")) then "unhealthy"
+            elif ($s | test("\\(health: starting\\)")) then "starting"
+            else "none" end)
+      })'
+ps_json() { _ps_raw | jq -R -s -c "$PS_FILTER"; }
+
+## --- ~/moodle-envs project -> dir map, built without forking (no dirname/sed/jq) --------
+_json_esc() { local s=${1//\\/\\\\}; printf '%s' "${s//\"/\\\"}"; }
+dirmap_json() {
+  local out='{' first=1 f dir proj line
+  for f in "$PC_ENVS"/*/docker-compose.yml; do
+    [ -f "$f" ] || continue
+    dir=${f%/docker-compose.yml}
+    proj=
+    while IFS= read -r line; do
+      case $line in name:*) proj=${line#name:}; proj=${proj# }; break;; esac
+    done <"$f"
+    : "${proj:=${dir##*/}}"
+    [ "$first" = 1 ] || out+=','; first=0
+    out+="\"$(_json_esc "$proj")\":\"$(_json_esc "$dir")\""
+  done
+  out+='}'; printf '%s' "$out"
+}
+
+# stacks_json — the same container list, grouped by compose project.
+stacks_json() {
+  local dm; dm=$(dirmap_json)
+  _ps_raw | jq -R -s -c --argjson dm "$dm" "$PS_FILTER"'
+      | group_by(.project) | map(select(.[0].project != null)) | map({
+          project: .[0].project,
+          dir: ($dm[.[0].project] // null),
+          state: (if all(.[]; .state == "running") then "up"
+                  elif any(.[]; .state == "running") then "partial"
+                  else "down" end),
+          services: map({name: .name, service: .service, state: .state,
+                          health: .health, ports: .ports, uptime: .status})
+        }) | sort_by(if .project == "moodle-shared" then 0 else 1 end)'
+}
+
+# t_stacks — one jq call to emit TSV, then a builtin read loop (no `column` fork).
+t_stacks() {
+  printf '%-16s %-10s %-10s %-10s %-14s %s\n' PROJECT SERVICE STATE HEALTH UPTIME PORTS
+  local p s st h u po
+  while IFS=$'\t' read -r p s st h u po; do
+    printf '%-16s %-10s %-10s %-10s %-14s %s\n' "$p" "$s" "$st" "$h" "$u" "$po"
+  done < <(jq -r '.[] | .project as $p | .services[] |
+    [$p, .service, .state, .health, .uptime, .ports] | @tsv' <<<"$1")
+}
+
+## --- health: unhealthy/restarting containers + the two HTTP checks --------
+health_json() {
+  local ps m
+  ps=$(ps_json)
+  m=$(jq -c '[.[] | select(.state == "restarting" or .health == "unhealthy")]' <<<"$ps")
+  http_ok() { curl -sf -o /dev/null --max-time 2 "$1"; }
+  local moodle_ok=true mailhog_ok=true
+  http_ok http://localhost:8052/login/index.php || moodle_ok=false
+  http_ok http://localhost:8025/ || mailhog_ok=false
+  jq -n -c --argjson bad "$m" --argjson mo "$moodle_ok" --argjson mh "$mailhog_ok" \
+    '{problems: $bad, http: {moodle_8052: $mo, mailhog_8025: $mh}}'
+}
+
+## --- disk: cached 300 s, the only verb allowed near /images/json ----------
+_disk() { pc_cmd docker system df --format '{{json .}}' 2>/dev/null | jq -s -c '.'; }
+disk_json() { cached docker_disk 300 _disk; }
+
+## --- stack resolution -------------------------------------------------------
+# resolve_stack <name> — echoes "<project>\t<dir>" if <name> is a known stack, else nothing.
+resolve_stack() {
+  local name=$1 dm f dir proj
+  dm=$(dirmap_json)
+  # match by project name, or by the env's directory basename (e.g. "shared", "5.2").
+  proj=$(jq -r --arg n "$name" 'to_entries[] | select(.key == $n) | .key' <<<"$dm" | head -1)
+  if [ -z "$proj" ]; then
+    proj=$(jq -r --arg n "$name" 'to_entries[] | select((.value | split("/") | last) == $n) | .key' <<<"$dm" | head -1)
+  fi
+  [ -n "$proj" ] || return 1
+  dir=$(jq -r --arg p "$proj" '.[$p]' <<<"$dm")
+  printf '%s\t%s\n' "$proj" "$dir"
+}
+
+## --- mutations ---------------------------------------------------------------
+container_state() { docker inspect -f '{{.State.Status}}' "$1" 2>/dev/null || echo unknown; }
+stack_state_str() {
+  local proj=$1 up tot
+  read -r up tot < <(docker ps -a --filter "label=com.docker.compose.project=$proj" --format '{{.State}}' \
+    | awk '{t++; if($0=="running")u++} END{print u+0, t+0}')
+  printf 'up=%s/%s' "$up" "$tot"
+}
+
+do_mutation() {
+  local verb=$1 target=$2
+  local SELF; SELF=$(readlink -f "$0")
+  local proj dir line
+  if line=$(resolve_stack "$target" 2>/dev/null) && [ -n "$line" ]; then
+    IFS=$'\t' read -r proj dir <<<"$line"
+    if [ "$proj" = moodle-shared ] && { [ "$verb" = stop ] || [ "$verb" = restart ]; }; then
+      local others; others=$(docker ps --format '{{.Label "com.docker.compose.project"}}' \
+        | grep -v '^$' | grep -vFx "$proj" | sort -u)
+      if [ -n "$others" ] && [ "$FORCE" != 1 ]; then
+        printf 'pc docker: refused — %s up, stopping the shared stack would take it down too (use --force)\n' \
+          "$(printf '%s' "$others" | paste -sd, -)" >&2
+        exit 3
+      fi
+    fi
+    local before after composecmd
+    before=$(stack_state_str "$proj")
+    case "$verb" in
+      start) after='up'; composecmd=(docker compose -f "$dir/docker-compose.yml" up -d);;
+      stop) after='down'; composecmd=(docker compose -f "$dir/docker-compose.yml" stop);;
+      restart) after='up'; composecmd=(docker compose -f "$dir/docker-compose.yml" restart);;
+    esac
+    PC_READ_CMD="stack_state_str $proj | grep -q '${after}=' && echo $after || stack_state_str $proj" \
+      pc_apply "stack:$proj" "$before" "$after" \
+      "$(printf '%q %q %q --apply' "$SELF" "$verb" "$target")" \
+      "${composecmd[@]}"
+    exit $?
+  fi
+  # container
+  docker inspect "$target" >/dev/null 2>&1 || { printf 'pc docker: no such container or stack: %s\n' "$target" >&2; exit 2; }
+  local before after
+  before=$(container_state "$target")
+  case "$verb" in
+    start) after=running;; stop) after=exited;; restart) after=running;;
+  esac
+  PC_READ_CMD="docker inspect -f '{{.State.Status}}' $target" \
+    pc_apply "container:$target" "$before" "$after" \
+    "$(printf '%q %q %q --apply' "$SELF" "$verb" "$target")" \
+    docker "$verb" "$target"
+  exit $?
+}
+
+## --- dispatch ----------------------------------------------------------------
+case "$sub" in
+  stacks)
+    out=$(stacks_json)
+    if [ "$JSON" = 1 ]; then printf '%s\n' "$out"; else t_stacks "$out"; fi;;
+  ps)
+    out=$(ps_json)
+    if [ "$JSON" = 1 ]; then printf '%s\n' "$out"; else
+      printf '%-14s %-10s %-24s %-10s %-10s %-14s %s\n' PROJECT SERVICE NAME STATE HEALTH STATUS PORTS
+      while IFS=$'\t' read -r p s n st h stat po; do
+        printf '%-14s %-10s %-24s %-10s %-10s %-14s %s\n' "$p" "$s" "$n" "$st" "$h" "$stat" "$po"
+      done < <(jq -r '.[] | [(.project // "-"), .service // "-", .name, .state, .health, .status, .ports] | @tsv' <<<"$out")
+    fi;;
+  health)
+    out=$(health_json)
+    if [ "$JSON" = 1 ]; then printf '%s\n' "$out"; else
+      jq -r '.problems[] | "unhealthy: \(.name) (\(.state)/\(.health))"' <<<"$out"
+      jq -r '.http | to_entries[] | "\(.key): \(if .value then "ok" else "FAIL" end)"' <<<"$out"
+    fi
+    problems=$(jq '.problems | length' <<<"$out")
+    http_bad=$(jq '[.http[] | select(. == false)] | length' <<<"$out")
+    [ "$problems" = 0 ] && [ "$http_bad" = 0 ];;
+  stats)
+    out=$(pc_cmd docker stats --no-stream --format '{{json .}}' 2>/dev/null | jq -s -c '.')
+    if [ "$JSON" = 1 ]; then printf '%s\n' "$out"; else
+      jq -r '.[] | [.Name, .CPUPerc, .MemUsage, .MemPerc, .NetIO, .BlockIO, .PIDs] | @tsv' <<<"$out" \
+        | column -t -s $'\t' -N NAME,CPU%,MEM,MEM%,NETIO,BLOCKIO,PIDS
+    fi;;
+  logs)
+    [ -n "$arg" ] || { printf 'pc docker logs: needs a container name (see -h)\n' >&2; exit 2; }
+    docker logs --tail "${N:-100}" ${SINCE:+--since "$SINCE"} "$arg" 2>&1;;
+  events)
+    since=${SINCE:-1h}
+    out=$(pc_cmd docker events --since "$since" --until now --format '{{json .}}' 2>/dev/null | jq -s -c '.')
+    if [ "$JSON" = 1 ]; then printf '%s\n' "$out"; else
+      jq -r '.[] | [.time // "", .Type, .Action, (.Actor.Attributes.name // .Actor.ID // "")] | @tsv' <<<"$out" \
+        | column -t -s $'\t'
+    fi;;
+  disk)
+    out=$(disk_json)
+    if [ "$JSON" = 1 ]; then printf '%s\n' "$out"; else
+      jq -r '.[] | [.Type, .TotalCount, .Active, .Size, .Reclaimable] | @tsv' <<<"$out" \
+        | column -t -s $'\t' -N TYPE,TOTAL,ACTIVE,SIZE,RECLAIMABLE
+    fi;;
+  restart|stop|start)
+    [ -n "$arg" ] || { printf 'pc docker %s: needs a container or stack name (see -h)\n' "$sub" >&2; exit 2; }
+    do_mutation "$sub" "$arg";;
+  *) printf 'pc docker: unknown verb %s (try -h)\n' "$sub" >&2; exit 2;;
+esac
+exit $?

@@ -1,0 +1,7 @@
+#!/bin/bash
+# pc type [--force] "text" — type text via mutter RemoteDesktop keysyms ("\n" = Enter, "\t" = Tab).
+. "$(dirname "$(readlink -f "$0")")/env.sh"
+force=0; [ "${1:-}" = --force ] && { force=1; shift; }
+[ "${1:-}" = -h ] || [ $# -eq 0 ] && { echo 'usage: pc type [--force] "text"'; exit 0; }
+[ $force -eq 0 ] && pc_focus_guard type
+exec python3 "$PC_BIN/rd_type.py" "$(printf '%b' "$*")"

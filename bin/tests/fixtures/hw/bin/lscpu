@@ -1,0 +1,20 @@
+#!/bin/sh
+cat <<'EOF'
+{
+   "lscpu": [
+      {"field": "Architecture:", "data": "x86_64"},
+      {"field": "CPU(s):", "data": "16"},
+      {"field": "Vendor ID:", "data": "GenuineIntel"},
+      {"field": "Model name:", "data": "12th Gen Intel(R) Core(TM) i5-12500H"},
+      {"field": "Thread(s) per core:", "data": "2"},
+      {"field": "Core(s) per socket:", "data": "12"},
+      {"field": "Socket(s):", "data": "1"},
+      {"field": "CPU max MHz:", "data": "4500.0000"},
+      {"field": "CPU min MHz:", "data": "400.0000"},
+      {"field": "L1d cache:", "data": "448 KiB (12 instances)"},
+      {"field": "L1i cache:", "data": "640 KiB (12 instances)"},
+      {"field": "L2 cache:", "data": "9 MiB (6 instances)"},
+      {"field": "L3 cache:", "data": "18 MiB (1 instance)"}
+   ]
+}
+EOF

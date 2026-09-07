@@ -1,0 +1,30 @@
+
+ -------------------------------------------------------------------------------------------------------------------------------------------
+  Task                  |   Runtime ms  |  Count   | Avg delay ms    | Max delay ms    | Max delay start           | Max delay end          |
+ -------------------------------------------------------------------------------------------------------------------------------------------
+  systemd:1             |      0.733 ms |        1 | avg:   2.378 ms | max:   2.378 ms | max start: 111656.381879 s | max end: 111656.384257 s
+  kworker/1:0-mm_:2695793 |      0.049 ms |        3 | avg:   0.211 ms | max:   0.562 ms | max start: 111656.117086 s | max end: 111656.117647 s
+  kworker/1:1H-kb:1546  |      0.051 ms |        1 | avg:   0.153 ms | max:   0.153 ms | max start: 111656.794053 s | max end: 111656.794206 s
+  UV_WORKER[79]:3676034 |      0.441 ms |        5 | avg:   0.148 ms | max:   0.164 ms | max start: 111656.792426 s | max end: 111656.792591 s
+  head:3805995          |      2.744 ms |        2 | avg:   0.119 ms | max:   0.119 ms | max start: 111656.467739 s | max end: 111656.467858 s
+  ls:3805996            |      2.696 ms |        1 | avg:   0.112 ms | max:   0.112 ms | max start: 111656.486740 s | max end: 111656.486852 s
+  JSCWarmUp:3689593     |      0.284 ms |        2 | avg:   0.110 ms | max:   0.119 ms | max start: 111656.207086 s | max end: 111656.207204 s
+  mt76-tx phy0:1402     |      2.178 ms |       57 | avg:   0.106 ms | max:   0.145 ms | max start: 111655.438320 s | max end: 111655.438465 s
+  jbd2/nvme0n1p2-:449   |      0.362 ms |        4 | avg:   0.102 ms | max:   0.170 ms | max start: 111656.794738 s | max end: 111656.794908 s
+  mi-scavenger:41608    |     15.405 ms |      197 | avg:   0.099 ms | max:   0.160 ms | max start: 111655.175805 s | max end: 111655.175965 s
+  JITWorker:3700269     |      2.040 ms |        4 | avg:   0.097 ms | max:   0.137 ms | max start: 111655.647046 s | max end: 111655.647183 s
+  rcu_preempt:15        |      3.406 ms |       99 | avg:   0.096 ms | max:   0.215 ms | max start: 111656.614246 s | max end: 111656.614461 s
+  napi/phy0-0:(2)       |      9.422 ms |      112 | avg:   0.094 ms | max:   0.235 ms | max start: 111656.365404 s | max end: 111656.365639 s
+  Bun Pool 4:41638      |      0.462 ms |        7 | avg:   0.094 ms | max:   0.140 ms | max start: 111656.045706 s | max end: 111656.045846 s
+  kworker/u64:5-m:3681457 |      1.974 ms |       67 | avg:   0.090 ms | max:   0.220 ms | max start: 111655.178246 s | max end: 111655.178466 s
+  Bun Pool 7:159326     |      0.351 ms |        8 | avg:   0.090 ms | max:   0.127 ms | max start: 111655.566017 s | max end: 111655.566144 s
+  MainThread:3684625    |      0.300 ms |        2 | avg:   0.090 ms | max:   0.100 ms | max start: 111656.161020 s | max end: 111656.161120 s
+  Bun Pool 1:41611      |      0.290 ms |        7 | avg:   0.089 ms | max:   0.141 ms | max start: 111656.045159 s | max end: 111656.045299 s
+  bash:(2)              |      1.816 ms |        8 | avg:   0.086 ms | max:   0.151 ms | max start: 111656.486017 s | max end: 111656.486167 s
+  kcompactd0:122        |      0.088 ms |        4 | avg:   0.085 ms | max:   0.141 ms | max start: 111656.634116 s | max end: 111656.634257 s
+  gvfs-afc-volume:2673  |      0.181 ms |        2 | avg:   0.083 ms | max:   0.086 ms | max start: 111655.081732 s | max end: 111655.081818 s
+  supervisord:58039     |      0.322 ms |        2 | avg:   0.083 ms | max:   0.094 ms | max start: 111655.020872 s | max end: 111655.020967 s
+  Bun Pool 2:41613      |      0.557 ms |        9 | avg:   0.079 ms | max:   0.163 ms | max start: 111655.175797 s | max end: 111655.175961 s
+  PULSE:3676055         |      0.317 ms |        2 | avg:   0.078 ms | max:   0.079 ms | max start: 111655.380715 s | max end: 111655.380794 s
+  Bun Pool 6:110446     |      0.380 ms |        8 | avg:   0.078 ms | max:   0.136 ms | max start: 111656.045448 s | max end: 111656.045584 s
+  go.d.plugin:(16)      |     17.587 ms |       92 | avg:   0.078 ms | max:   2.294 ms | max start: 111656.381791 s | max end: 111656.384085 s

@@ -1,0 +1,1 @@
+{"type":"s","data":["unix:path=/run/user/1000/at-spi/bus,guid=40851d337c623ff391edc1a76a9c2433"],"bus":"user","name":"org.a11y.Bus","path":"/org/a11y/bus","interface":"org.a11y.Bus","member":"GetAddress","signature":""}

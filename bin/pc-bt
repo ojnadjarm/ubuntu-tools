@@ -1,0 +1,244 @@
+#!/usr/bin/env bash
+# pc bt status|devices|info|battery|profile|connect|disconnect|scan|power — bluez adapter, devices, battery and the sidecar-guarded mutations.
+#
+# JSON shapes (stable):
+#   status  {"adapter":{address,name,powered,discoverable,pairable,discovering,class,path},
+#            "counts":{total,paired,connected},"connected":[{mac,name,battery}],
+#            "sidecar":{"unit":U,"active":bool},"error":{message,age_seconds}|null}
+#   devices [{mac,name,alias,paired,bonded,trusted,blocked,connected,rssi,battery,icon,path,uuids}]
+#   info    one devices[] entry + {"card":C|null,"profile":P|null,"profiles":[…]}
+#   battery [{mac,name,percentage}]
+#   profile {"device":MAC,"card":C,"active":P,"profiles":[…]}
+#   scan    devices[] as seen after the window
+# Mutations (connect|disconnect|profile|power) print `would: <before> → <after>` without --apply
+# and are ledgered with it (`pc undo <id>`). Anything touching the buds while the push-to-talk
+# sidecar is active is refused (exit 3) unless --force --why '<reason>'.
+set -uo pipefail
+export LC_ALL=C
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+SELF="$(readlink -f "$0")"
+
+pc_usage 'usage: pc bt [status] [--json]
+       pc bt devices|battery [--json]
+       pc bt info <dev> [--json]
+       pc bt profile <dev> [a2dp|hfp|<profile>] [--apply] [--json]
+       pc bt connect|disconnect <dev> [--apply]
+       pc bt scan [--seconds 5] [--json]
+       pc bt power on|off [--apply]
+
+<dev> is a MAC, a name substring, or `buds` (the Sony WF-1000XM5, $BUDS_MAC).
+Reads go through `pc dbus --system` (org.bluez GetManagedObjects, one round trip); the audio
+profile is the PipeWire bluez5 card profile (`pactl set-card-profile`).
+dark-eye-ptt owns the buds: while it is active, connect/disconnect/profile on them exit 3 —
+stop the sidecar or pass --force --why "<reason>". `power off` is refused while a device is
+connected. Scan windows are bounded (1..60 s) and always send StopDiscovery.' "$@"
+
+BUDS_MAC="${BUDS_MAC:-AC:80:0A:27:65:6C}"
+SIDECAR_UNIT=dark-eye-ptt
+FORCE=0; WHY=""; ARGV=()
+while [ $# -gt 0 ]; do
+  case $1 in
+    --force) FORCE=1;;
+    --why) WHY=$2; shift;; --why=*) WHY=${1#*=};;
+    *) ARGV+=("$1");;
+  esac
+  shift
+done
+pc_opt ${ARGV[@]+"${ARGV[@]}"}
+die() { printf 'pc bt: %s\n' "$1" >&2; exit "${2:-1}"; }
+refuse() { printf 'pc bt: refused (%s)\n' "$1" >&2; exit 3; }
+
+## --- bluez ------------------------------------------------------------------
+TREE=""
+tree() {
+  [ -n "$TREE" ] && { printf '%s' "$TREE"; return; }
+  TREE=$("$BIN/pc-dbus" call org.bluez / org.freedesktop.DBus.ObjectManager.GetManagedObjects \
+    --system --json 2>/dev/null | jq -c '.data[0] // empty')
+  # busctl's JSON dumper rejects a{qv} — ManufacturerData on a device just discovered makes the
+  # whole dump fail with "Invalid argument". One Gio round trip over the same call is the
+  # fallback (~30 ms), and only that path pays for it. Same shape: every value under `.data`.
+  [ -n "$TREE" ] || [ -n "$PC_FIXTURE" ] || TREE=$(python3 -c '
+import json, gi
+gi.require_version("Gio", "2.0")
+from gi.repository import Gio
+c = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
+t = c.call_sync("org.bluez", "/", "org.freedesktop.DBus.ObjectManager",
+                "GetManagedObjects", None, None, 0, 2000, None).unpack()[0]
+print(json.dumps({p: {i: {k: {"data": v} for k, v in ps.items()} for i, ps in ifs.items()}
+                  for p, ifs in t.items()}, default=str))' 2>/dev/null)
+  [ -n "$TREE" ] || die 'cannot read org.bluez on the system bus (is bluetooth.service up?)'
+  printf '%s' "$TREE"
+}
+# One busctl call on the system bus; --timeout=15 because Device1.Connect blocks for ~10 s.
+bt_call() { local p=$1 i=$2 m=$3; shift 3; pc_cmd busctl --system --timeout=15 call org.bluez "$p" "$i" "$m" "$@" >/dev/null; }
+
+ADAPTER='(to_entries[] | select(.value["org.bluez.Adapter1"]) | .key as $p | .value["org.bluez.Adapter1"] as $a
+  | {address:$a.Address.data, name:$a.Name.data, powered:$a.Powered.data,
+     discoverable:$a.Discoverable.data, pairable:$a.Pairable.data,
+     discovering:$a.Discovering.data, class:$a.Class.data, path:$p})'
+DEVICES='[ to_entries[] | select(.value["org.bluez.Device1"]) | .key as $p | .value as $v | $v["org.bluez.Device1"] as $d
+  | {mac:$d.Address.data, name:($d.Name.data // $d.Alias.data // ""), alias:($d.Alias.data // ""),
+     paired:$d.Paired.data, bonded:($d.Bonded.data // false), trusted:$d.Trusted.data,
+     blocked:($d.Blocked.data // false), connected:$d.Connected.data,
+     rssi:($d.RSSI.data // null), battery:($v["org.bluez.Battery1"].Percentage.data // null),
+     icon:($d.Icon.data // null), path:$p, uuids:($d.UUIDs.data // [])} ] | sort_by(.name)'
+adapter() { tree | jq -c "first$ADAPTER"; }
+devices() { tree | jq -c "$DEVICES"; }
+
+# resolve_dev <selector> — prints "mac\tpath\tname"; exits 1/2 on no match / an ambiguous one.
+resolve_dev() {
+  local sel=$1 out
+  [ -n "$sel" ] || die 'need a device (MAC, name substring or `buds`)' 2
+  [ "$sel" = buds ] && sel=$BUDS_MAC
+  out=$(devices | jq -r --arg s "${sel,,}" '
+    map(select((.mac|ascii_downcase) == $s or (.name|ascii_downcase|contains($s)) or (.alias|ascii_downcase|contains($s))))
+    | if length == 0 then "" elif length > 1 then "!\([.[].name]|join(", "))" else [.[0].mac,.[0].path,.[0].name]|@tsv end')
+  [ -n "$out" ] || die "no bluetooth device matches '$1'"
+  case $out in '!'*) die "'$1' matches several devices: ${out#!}" 2;; esac
+  printf '%s\n' "$out"
+}
+
+## --- the sidecar guard ------------------------------------------------------
+sidecar_active() { [ "$(pc_cmd systemctl --user is-active "$SIDECAR_UNIT" 2>/dev/null)" = active ]; }
+# The push-to-talk sidecar flips the buds between A2DP and HFP on every tap; a second writer
+# there leaves the card without a source and the mic silently dead (quirks E20/E24).
+guard_sidecar() {
+  local mac=$1 verb=$2
+  [ "${mac,,}" = "${BUDS_MAC,,}" ] || return 0
+  sidecar_active || return 0
+  [ "$FORCE" = 1 ] && [ -n "$WHY" ] && { printf 'forced: %s (%s owns the buds)\n' "$WHY" "$SIDECAR_UNIT"; return 0; }
+  [ "$FORCE" = 1 ] && die '--force needs --why "<reason>"' 2
+  # A dry run changes nothing: it still prints `would:`, with the refusal it would hit on stderr.
+  [ "$APPLY" = 1 ] || { printf 'note: %s owns the buds — this needs --force --why "<reason>" to apply.\n' "$SIDECAR_UNIT" >&2; return 0; }
+  printf 'pc bt: refused (%s is active and owns the buds — it flips A2DP/HFP on every tap).\n' "$SIDECAR_UNIT" >&2
+  printf '       stop it (systemctl --user stop %s) or rerun: pc bt %s ... --force --why "<reason>"\n' "$SIDECAR_UNIT" "$verb" >&2
+  exit 3
+}
+
+## --- the bluez5 card profile ------------------------------------------------
+card_of() { printf 'bluez_card.%s' "${1//:/_}"; }
+cards() { pc_cmd pactl --format=json list cards 2>/dev/null; }
+card_json() { cards | jq -c --arg c "$1" 'map(select(.name==$c)) | first // empty'; }
+active_profile() { card_json "$1" | jq -r '.active_profile // empty'; }
+# a2dp/hfp are the two the sidecar names; anything else is passed to pactl verbatim.
+profile_name() { case $1 in a2dp) printf a2dp-sink;; hfp) printf headset-head-unit;; *) printf '%s' "$1";; esac; }
+
+## --- journal ----------------------------------------------------------------
+bt_error() {
+  cached bt-error 60 pc_cmd journalctl -u bluetooth -p err -n 1 -o json --no-pager \
+    | jq -c 'select(.MESSAGE) | {message:.MESSAGE, age_seconds:((now - (.__REALTIME_TIMESTAMP|tonumber/1000000))|floor)}'
+}
+
+## --- verbs ------------------------------------------------------------------
+sub="${PC_ARGS[0]:-status}"; arg="${PC_ARGS[1]:-}"
+
+case "$sub" in
+status)
+  a=$(adapter); d=$(devices); e=$(bt_error)
+  s=$(sidecar_active && echo true || echo false)
+  out=$(pc_json '{adapter:$a, counts:{total:($d|length), paired:($d|map(select(.paired))|length),
+                   connected:($d|map(select(.connected))|length)},
+                  connected:($d|map(select(.connected))|map({mac,name,battery})),
+                  sidecar:{unit:$u,active:$s}, error:$e}' -c \
+    --argjson a "$a" --argjson d "$d" --arg u "$SIDECAR_UNIT" --argjson s "$s" --argjson e "${e:-null}")
+  if [ "$JSON" = 1 ]; then printf '%s\n' "$out"; else
+    jq -r '"adapter   \(.adapter.name) [\(.adapter.address)] powered=\(.adapter.powered) discoverable=\(.adapter.discoverable) pairable=\(.adapter.pairable) discovering=\(.adapter.discovering)",
+           "devices   \(.counts.total) known, \(.counts.paired) paired, \(.counts.connected) connected",
+           (.connected[] | "  \(.name) [\(.mac)]\(if .battery then " battery \(.battery)%" else "" end)"),
+           "sidecar   \(.sidecar.unit) \(if .sidecar.active then "active (owns the buds)" else "inactive" end)",
+           (if .error then "last err  \(.error.message) (\(.error.age_seconds)s ago)" else "last err  none" end)' <<<"$out"
+  fi;;
+
+devices)
+  d=$(devices)
+  if [ "$JSON" = 1 ]; then printf '%s\n' "$d"; else
+    jq -r '.[] | [.name, .mac, (if .connected then "connected" else "-" end), (if .paired then "paired" else "-" end),
+                  (if .trusted then "trusted" else "-" end), (if .battery then "\(.battery)%" else "-" end),
+                  (if .rssi then "\(.rssi)dBm" else "-" end)] | @tsv' <<<"$d" | column -t -s $'\t'
+  fi;;
+
+info)
+  IFS=$'\t' read -r mac path name < <(resolve_dev "$arg") || exit $?
+  card=$(card_of "$mac"); cj=$(card_json "$card")
+  dev=$(devices | jq -c --arg m "$mac" '.[]|select(.mac==$m)')
+  if [ -n "$cj" ]; then
+    out=$(pc_json '$d + {card:$c, profile:$cj.active_profile, profiles:($cj.profiles|keys)}' -c \
+      --argjson d "$dev" --arg c "$card" --argjson cj "$cj")
+  else
+    out=$(pc_json '$d + {card:null, profile:null, profiles:[]}' -c --argjson d "$dev")
+  fi
+  if [ "$JSON" = 1 ]; then printf '%s\n' "$out"; else
+    jq -r 'to_entries[] | "\(.key)\t\(.value|if type=="array" then join(", ") elif .==null then "-" else tostring end)"' <<<"$out" | column -t -s $'\t'
+  fi;;
+
+battery)
+  b=$(devices | jq -c 'map(select(.battery != null)) | map({mac,name,percentage:.battery})')
+  if [ "$JSON" = 1 ]; then printf '%s\n' "$b"; else
+    if [ "$b" = '[]' ]; then echo 'no connected device reports a battery'
+    else jq -r '.[] | "\(.name) [\(.mac)] \(.percentage)%"' <<<"$b"; fi
+  fi;;
+
+profile)
+  IFS=$'\t' read -r mac path name < <(resolve_dev "$arg") || exit $?
+  want="${PC_ARGS[2]:-}"
+  [ -n "$want" ] && guard_sidecar "$mac" profile
+  card=$(card_of "$mac"); cj=$(card_json "$card")
+  [ -n "$cj" ] || die "no PipeWire card $card (the device is not connected)"
+  cur=$(jq -r '.active_profile' <<<"$cj")
+  if [ -z "$want" ]; then
+    if [ "$JSON" = 1 ]; then
+      pc_json '{device:$m,card:$c,active:$a,profiles:($cj.profiles|keys)}' -c \
+        --arg m "$mac" --arg c "$card" --arg a "$cur" --argjson cj "$cj"
+    else printf '%s %s\n' "$card" "$cur"; fi
+    exit 0
+  fi
+  p=$(profile_name "$want")
+  jq -e --arg p "$p" '.profiles|has($p)' <<<"$cj" >/dev/null \
+    || die "$card has no profile '$p' (have: $(jq -r '.profiles|keys|join(", ")' <<<"$cj"))" 2
+  [ "$cur" = "$p" ] && { printf 'already: %s %s\n' "$card" "$p"; exit 0; }
+  PC_READ_CMD="pc_cmd pactl --format=json list cards | jq -r --arg c '$card' '.[]|select(.name==\$c)|.active_profile'" \
+    pc_apply "$card" "$cur" "$p" "$(printf '%q profile %q %q --apply' "$SELF" "$mac" "$cur")" \
+    pactl set-card-profile "$card" "$p";;
+
+connect|disconnect)
+  IFS=$'\t' read -r mac path name < <(resolve_dev "$arg") || exit $?
+  guard_sidecar "$mac" "$sub"
+  now=$(devices | jq -r --arg m "$mac" '.[]|select(.mac==$m)|if .connected then "connected" else "disconnected" end')
+  [ "$now" = "${sub}ed" ] && { printf 'already: %s %s\n' "$mac" "$now"; exit 0; }
+  inv=connect; [ "$sub" = connect ] && inv=disconnect
+  member=Connect; [ "$sub" = disconnect ] && member=Disconnect
+  PC_READ_CMD="pc_cmd busctl --system get-property --json=short org.bluez '$path' org.bluez.Device1 Connected | jq -r 'if .data then \"connected\" else \"disconnected\" end'" \
+    pc_apply "$mac" "$now" "${sub}ed" "$(printf '%q %s %q --apply' "$SELF" "$inv" "$mac")" \
+    bt_call "$path" org.bluez.Device1 "$member";;
+
+scan)
+  s=$SECONDS_; [ "$s" = 0 ] && s=5
+  case $s in ''|*[!0-9]*) die '--seconds takes 1..60' 2;; esac
+  { [ "$s" -ge 1 ] && [ "$s" -le 60 ]; } || die '--seconds takes 1..60' 2
+  # BlueZ ties discovery to the calling D-Bus client, so two one-shot `busctl` calls cannot hold
+  # it (StartDiscovery ends when busctl exits; StopDiscovery then says "No discovery started").
+  # `bluetoothctl --timeout N scan on` keeps one connection for the window and drops it on exit.
+  pc_cmd bluetoothctl --timeout "$s" scan on >/dev/null 2>&1
+  TREE=""; d=$(devices)
+  if [ "$JSON" = 1 ]; then printf '%s\n' "$d"; else
+    jq -r '.[] | [.name, .mac, (if .rssi then "\(.rssi)dBm" else "-" end), (if .paired then "paired" else "-" end)] | @tsv' <<<"$d" | column -t -s $'\t'
+  fi;;
+
+power)
+  case $arg in on|off) :;; *) die 'power takes on or off' 2;; esac
+  a=$(adapter); path=$(jq -r .path <<<"$a")
+  cur=$(jq -r 'if .powered then "on" else "off" end' <<<"$a")
+  [ "$cur" = "$arg" ] && { printf 'already: adapter %s\n' "$arg"; exit 0; }
+  if [ "$arg" = off ]; then
+    n=$(devices | jq -r 'map(select(.connected))|length')
+    [ "$n" = 0 ] || refuse "$n device(s) still connected — disconnect them first"
+  fi
+  v=false; [ "$arg" = on ] && v=true
+  inv=off; [ "$arg" = off ] && inv=on
+  PC_READ_CMD="pc_cmd busctl --system get-property --json=short org.bluez '$path' org.bluez.Adapter1 Powered | jq -r 'if .data then \"on\" else \"off\" end'" \
+    pc_apply adapter "$cur" "$arg" "$(printf '%q power %s --apply' "$SELF" "$inv")" \
+    pc_cmd busctl --system set-property org.bluez "$path" org.bluez.Adapter1 Powered b "$v";;
+
+*) die "unknown verb '$sub' (try: pc bt -h)" 2;;
+esac

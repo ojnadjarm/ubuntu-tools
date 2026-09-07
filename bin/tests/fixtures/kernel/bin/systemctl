@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# fixture `systemctl --user show dark-eye.service -p …`
+cat <<'OUT'
+ControlGroup=/app.slice/dark-eye.service
+MemoryCurrent=1469906944
+MemoryPeak=1470935040
+CPUUsageNSec=5352912000
+TasksCurrent=25
+IOReadBytes=[not set]
+IOWriteBytes=[not set]
+OUT

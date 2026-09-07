@@ -1,0 +1,289 @@
+#!/usr/bin/env bash
+# pc net ifaces|listeners|sockets|who|tailscale|fw|wifi|dns|top — interfaces, listeners, port owners, tailscale, firewall (read-only), wifi, DNS.
+set -uo pipefail
+export LC_ALL=C
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+
+pc_usage 'usage: pc net [ifaces|listeners|tailscale] [--json]        default: ifaces + listeners + tailscale one-liners
+       pc net ifaces [--json]                          addresses, state, mtu, rx/tx bytes per interface
+       pc net listeners [--json]                        listening sockets: proto, addr, port, pid, comm, scope, unit|container
+       pc net sockets [--pid P|--comm C] [--json]        established sockets, optionally filtered
+       pc net who <port>                                who owns a listening port: pid, comm, unit|container
+       pc net tailscale [--json]                         self, peers, serve mappings
+       pc net fw [--raw]                                 exposure summary (port -> allowed sources); --raw dumps `nft -j list ruleset`
+       pc net wifi [--json]                              SSID, signal, bitrate (no rescan — EF09)
+       pc net dns [--json]                               resolver DNS servers
+       pc net top [--seconds 3]                          per-process bandwidth (nethogs, needs root)
+
+Read-only: no wifi rescan, no nft/ufw/tailscale/nmcli mutation exists here. Bind scope is one of
+lo, lan, ts, all.' "$@"
+
+FILTER_PID=; FILTER_COMM=; RAW=0; ARGV=()
+for a in "$@"; do case $a in
+  --pid) NEXTPID=1;; --pid=*) FILTER_PID=${a#*=};;
+  --comm) NEXTCOMM=1;; --comm=*) FILTER_COMM=${a#*=};;
+  --raw) RAW=1;;
+  *) if [ "${NEXTPID:-0}" = 1 ]; then FILTER_PID=$a; NEXTPID=0
+     elif [ "${NEXTCOMM:-0}" = 1 ]; then FILTER_COMM=$a; NEXTCOMM=0
+     else ARGV+=("$a"); fi;;
+esac; done
+pc_opt ${ARGV[@]+"${ARGV[@]}"}
+sub="${PC_ARGS[0]:-}"
+arg="${PC_ARGS[1]:-}"
+secs=$SECONDS_; [ "$secs" = 0 ] && secs=3
+
+## --- helpers ------------------------------------------------------------
+_ts_status() { pc_cmd tailscale status --json 2>/dev/null; }
+_ts_serve()  { pc_cmd tailscale serve status 2>/dev/null; }
+_ts_ip4()    { pc_cmd tailscale ip -4 2>/dev/null; }
+_docker_ps() { pc_cmd docker ps --format json 2>/dev/null; }
+
+TS_IP="$(cached net_tsip 60 _ts_ip4)"
+
+# scope_for <addr> — lo, all, ts (tailscale range) or lan.
+scope_for() {
+  case "$1" in
+    127.0.0.1|::1) echo lo;;
+    0.0.0.0|'*'|::) echo all;;
+    100.*) echo ts;;
+    *) if [ -n "$TS_IP" ] && [ "$1" = "$TS_IP" ]; then echo ts; else echo lan; fi;;
+  esac
+}
+
+# build_docker_port_map — one docker ps + one jq call, filling DOCKER_PORT_MAP[port]=container (no per-port fork).
+declare -A DOCKER_PORT_MAP
+build_docker_port_map() {
+  local cname ports rest m
+  while IFS=$'\t' read -r cname ports; do
+    [ -n "$cname" ] || continue
+    rest=$ports
+    while [[ $rest =~ 0\.0\.0\.0:([0-9]+)-\> ]]; do
+      DOCKER_PORT_MAP[${BASH_REMATCH[1]}]=$cname
+      m=${BASH_REMATCH[0]}; rest=${rest/$m/}
+    done
+  done < <(cached net_docker_ports 60 _docker_ps | jq -r '[.Names, (.Ports // "")] | @tsv' 2>/dev/null)
+}
+
+# unit_for <pid> <comm> <port> — systemd unit owning pid, or the docker container for docker-proxy (no fork).
+unit_for() {
+  local pid=$1 comm=$2 port=$3 cg last
+  [ "$comm" = docker-proxy ] && { printf '%s' "${DOCKER_PORT_MAP[$port]:--}"; return; }
+  [ -n "$pid" ] && [ -r "$PC_PROC/$pid/cgroup" ] || { printf -- '-'; return; }
+  cg=$(<"$PC_PROC/$pid/cgroup")
+  last=${cg##*$'\n'}
+  if [[ $last =~ ([^/]+\.(service|scope))$ ]]; then printf '%s' "${BASH_REMATCH[1]}"; else printf -- '-'; fi
+}
+
+## --- ifaces ---------------------------------------------------------------
+ifaces_json() {
+  pc_cmd ip -j addr 2>/dev/null | jq -c '[.[] | {
+    name: .ifname, state: .operstate, mtu: .mtu,
+    addrs: [.addr_info[]? | select(.family=="inet" or .family=="inet6") | .local]}]'
+}
+do_ifaces() {
+  local j; j=$(ifaces_json)
+  if [ "$JSON" = 1 ]; then printf '%s\n' "$j"; return; fi
+  jq -r '.[] | "\(.name)\t\(.state)\tmtu \(.mtu)\t\(.addrs|join(","))"' <<<"$j" | column -t -s $'\t'
+}
+
+## --- listeners --------------------------------------------------------------
+# ss without root shows no process column (users:(...) needs CAP_SYS_PTRACE on someone else's
+# socket); fixtures already carry it, a live run falls back to `sudo -n` once.
+listeners_raw() {
+  local out
+  if [ -n "$PC_FIXTURE" ]; then out=$(pc_cmd ss -Hltnup 2>/dev/null)
+  else out=$(pc_root ss -Hltnup 2>/dev/null); [ -n "$out" ] || out=$(pc_cmd ss -Hltnup 2>/dev/null)
+  fi
+  printf '%s\n' "$out"
+}
+listeners_json() {
+  build_docker_port_map
+  local proto state rq sq loc peer rest addr port pid comm scope unit tsv=''
+  while read -r proto state rq sq loc peer rest; do
+    [ -n "${proto:-}" ] || continue
+    addr=${loc%:*}; port=${loc##*:}
+    if [[ $rest =~ pid=([0-9]+) ]]; then pid=${BASH_REMATCH[1]}; else pid=''; fi
+    if [[ $rest =~ \(\"([^\"]+)\" ]]; then comm=${BASH_REMATCH[1]}; else comm=''; fi
+    scope=$(scope_for "$addr")
+    unit=$(unit_for "$pid" "$comm" "$port")
+    tsv+="$proto"$'\t'"$addr"$'\t'"$port"$'\t'"$pid"$'\t'"$comm"$'\t'"$scope"$'\t'"$unit"$'\n'
+  done < <(listeners_raw)
+  printf '%s' "$tsv" | jq -R -s -c '
+    split("\n") | map(select(length>0) | split("\t")) | map({
+      proto: .[0], addr: .[1], port: (.[2] | tonumber),
+      pid: (if .[3] == "" then null else (.[3] | tonumber) end),
+      comm: .[4], scope: .[5], unit: .[6]})'
+}
+do_listeners() {
+  local j; j=$(listeners_json)
+  if [ "$JSON" = 1 ]; then printf '%s\n' "$j"; return; fi
+  jq -r '.[] | "\(.proto)\t\(.addr):\(.port)\t\(.scope)\t\(.pid)\t\(.comm)\t\(.unit)"' <<<"$j" \
+    | column -t -s $'\t' -N PROTO,LOCAL,SCOPE,PID,COMM,UNIT
+}
+
+## --- sockets ----------------------------------------------------------------
+sockets_raw() {
+  local out
+  if [ -n "$PC_FIXTURE" ]; then out=$(pc_cmd ss -Htnp state established 2>/dev/null)
+  else out=$(pc_root ss -Htnp state established 2>/dev/null); [ -n "$out" ] || out=$(pc_cmd ss -Htnp state established 2>/dev/null)
+  fi
+  printf '%s\n' "$out"
+}
+sockets_json() {
+  local state rq sq loc peer rest lp la pp pa pid comm tsv=''
+  while read -r state rq sq loc peer rest; do
+    [ -n "${state:-}" ] || continue
+    la=${loc%:*}; lp=${loc##*:}; pa=${peer%:*}; pp=${peer##*:}
+    if [[ $rest =~ pid=([0-9]+) ]]; then pid=${BASH_REMATCH[1]}; else pid=''; fi
+    if [[ $rest =~ \(\"([^\"]+)\" ]]; then comm=${BASH_REMATCH[1]}; else comm=''; fi
+    [ -n "$FILTER_PID" ] && [ "$pid" != "$FILTER_PID" ] && continue
+    [ -n "$FILTER_COMM" ] && [ "$comm" != "$FILTER_COMM" ] && continue
+    tsv+="$la"$'\t'"$lp"$'\t'"$pa"$'\t'"$pp"$'\t'"$pid"$'\t'"$comm"$'\n'
+  done < <(sockets_raw)
+  printf '%s' "$tsv" | jq -R -s -c '
+    split("\n") | map(select(length>0) | split("\t")) | map({
+      local_addr: .[0], local_port: (.[1] | tonumber),
+      peer_addr: .[2], peer_port: (.[3] | tonumber),
+      pid: (if .[4] == "" then null else (.[4] | tonumber) end), comm: .[5]})'
+}
+do_sockets() {
+  local j; j=$(sockets_json)
+  if [ "$JSON" = 1 ]; then printf '%s\n' "$j"; return; fi
+  jq -r '.[] | "\(.local_addr):\(.local_port)\t\(.peer_addr):\(.peer_port)\t\(.pid)\t\(.comm)"' <<<"$j" \
+    | column -t -s $'\t' -N LOCAL,PEER,PID,COMM
+}
+
+## --- who ----------------------------------------------------------------
+do_who() {
+  local port=$1 row
+  [ -n "$port" ] || { echo 'pc net who: needs a port (see -h)' >&2; exit 2; }
+  row=$(listeners_json | jq -c --argjson p "$port" 'map(select(.port==$p)) | .[0] // empty')
+  [ -n "$row" ] || { printf 'pc net who: nothing listens on %s\n' "$port" >&2; exit 1; }
+  jq -r '"\(.pid)\t\(.comm)\t\(.unit)\t\(.scope)"' <<<"$row" | column -t -s $'\t' -N PID,COMM,UNIT,SCOPE
+}
+
+## --- tailscale ----------------------------------------------------------
+serve_json() {
+  cached net_ts_serve 60 _ts_serve | awk '
+    /^https:\/\// { if (match($0, /:[0-9]+/)) cur = substr($0, RSTART+1, RLENGTH-1); next }
+    /proxy http/  { t=$0; sub(/^.*proxy /,"",t); if (cur!="") print cur"\t"t }
+  ' | jq -R -s -c 'split("\n") | map(select(length>0) | split("\t") | {port:(.[0]|tonumber), target:.[1]})'
+}
+do_tailscale() {
+  local st serve
+  st=$(cached net_ts_status 60 _ts_status)
+  serve=$(serve_json)
+  if [ "$JSON" = 1 ]; then
+    jq -c --argjson serve "${serve:-[]}" --arg ip "$TS_IP" '
+      {self: {hostname: .Self.HostName, ip: (.Self.TailscaleIPs[0] // $ip), os: .Self.OS, online: .Self.Online},
+       backend_state: .BackendState,
+       peers: [(.Peer // {})[] | {hostname: .HostName, ip: (.TailscaleIPs[0] // ""), online: .Online, os: .OS}],
+       serve: $serve}' <<<"${st:-null}"
+  else
+    local hn bs sv
+    hn=$(jq -r '.Self.HostName // "n/a"' <<<"${st:-null}")
+    bs=$(jq -r '.BackendState // "n/a"' <<<"${st:-null}")
+    sv=$(jq -r '[.[] | "\(.port)->\(.target)"] | join(", ")' <<<"${serve:-[]}")
+    printf 'tailscale %s  self=%s (%s)  serve: %s\n' "$bs" "$hn" "${TS_IP:-n/a}" "${sv:-none}"
+  fi
+}
+
+## --- fw (read-only: FLEET §5 forbids nft/ufw edits) --------------------------
+_nft_json()  { pc_cmd nft -j list ruleset 2>/dev/null; }
+_ufw_verbose() { pc_cmd ufw status verbose 2>/dev/null; }
+nft_json_cmd() {
+  local out; out=$(_nft_json); [ -n "$out" ] || out=$(pc_root nft -j list ruleset 2>/dev/null); printf '%s' "$out"
+}
+ufw_verbose_cmd() {
+  local out; out=$(_ufw_verbose); [ -n "$out" ] || out=$(pc_root ufw status verbose 2>/dev/null); printf '%s' "$out"
+}
+# ufw_rows — "<port>\t<source>" per allow-in rule. A "To" of "Anywhere on <iface>" is a
+# wildcard covering every port on that interface (what ufw shows for tailscale0); it is
+# fanned out across every per-port rule instead of printed as its own row.
+ufw_rows() {
+  local out line wilds=() w port src
+  out=$(ufw_verbose_cmd)
+  while IFS= read -r line; do
+    if [[ $line =~ ^Anywhere[[:space:]]*(\(v6\))?[[:space:]]+on[[:space:]]+([A-Za-z0-9_.-]+)[[:space:]]+ALLOW[[:space:]]+IN ]]; then
+      wilds+=("${BASH_REMATCH[2]}")
+    fi
+  done <<<"$out"
+  while IFS= read -r line; do
+    [[ $line =~ ^([0-9]+)(/[a-z]+)?[[:space:]]+ALLOW[[:space:]]+IN[[:space:]]+([^[:space:]]+) ]] || continue
+    port=${BASH_REMATCH[1]}; src=${BASH_REMATCH[3]}
+    printf '%s\t%s\n' "$port" "$src"
+    for w in "${wilds[@]:-}"; do [ -n "$w" ] && printf '%s\t%s\n' "$port" "$w"; done
+  done <<<"$out"
+}
+# nft_docker_rows — same shape, for DOCKER-USER chain rules (docker-published ports bypass ufw's INPUT).
+nft_docker_rows() {
+  nft_json_cmd | jq -r '
+    .nftables[]? | .rule? | select(.chain=="DOCKER-USER") | .expr as $e
+    | ([$e[]?.match | select(.left.meta.key=="iifname") | .right]) as $iif
+    | ([$e[]?.match | select(.left.payload.field=="saddr") | .right]) as $saddr
+    | ([$e[]?.match | select(.left.payload.field=="dport") | .right] | map(select(type=="number")))  as $dport
+    | select(($dport|length)>0)
+    | "\($dport[0])\t\(if ($iif|length)>0 then $iif[0] else ($saddr[0] // "Anywhere") end)"'
+}
+do_fw() {
+  [ "$RAW" = 1 ] && { nft_json_cmd; return; }
+  { ufw_rows; nft_docker_rows; } | awk -F'\t' '
+    { p=$1; s=$2
+      if (!(p in seen)) { order[++n]=p; seen[p]=1 }
+      k=p SUBSEP s
+      if (!(k in dedupe)) { dedupe[k]=1; if (p in list) list[p] = list[p]", "s; else list[p] = s }
+    }
+    END { for (i=1;i<=n;i++) printf "%4s|%s\n", order[i], list[order[i]] }' \
+    | sort -t'|' -k1,1n | awk -F'|' '{printf "%4s  %s\n", $1, $2}'
+}
+
+## --- wifi / dns ---------------------------------------------------------
+do_wifi() {
+  local dev link ssid sig rate
+  dev=$(pc_cmd nmcli -t -f DEVICE,TYPE,STATE,CONNECTION dev status 2>/dev/null | awk -F: '$2=="wifi" && $3=="connected"{print $1; exit}')
+  if [ -z "$dev" ]; then
+    [ "$JSON" = 1 ] && pc_json '{connected:false}' -c || echo 'wifi: no connected wifi device'
+    return 0
+  fi
+  ssid=$(pc_cmd nmcli -t -f DEVICE,TYPE,STATE,CONNECTION dev status 2>/dev/null | awk -F: -v d="$dev" '$1==d{print $4}')
+  link=$(pc_cmd iw dev "$dev" link 2>/dev/null)
+  sig=$(grep -oE 'signal: -?[0-9]+' <<<"$link" | awk '{print $2}')
+  rate=$(grep -oE 'tx bitrate: [0-9.]+' <<<"$link" | awk '{print $3}')
+  if [ "$JSON" = 1 ]; then
+    pc_json '{connected:true,device:$d,ssid:$s,signal_dbm:($g|tonumber?),bitrate_mbps:($r|tonumber?)}' -c \
+      --arg d "$dev" --arg s "${ssid:-}" --arg g "${sig:-}" --arg r "${rate:-}"
+  else
+    printf 'wifi %s  ssid=%s  signal=%s dBm  bitrate=%s Mbps\n' "$dev" "${ssid:-n/a}" "${sig:-n/a}" "${rate:-n/a}"
+  fi
+}
+do_dns() {
+  local out; out=$(pc_cmd resolvectl dns 2>/dev/null)
+  local servers; servers=$(grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}|[0-9a-fA-F:]+:[0-9a-fA-F:]+' <<<"$out" | sort -u)
+  if [ "$JSON" = 1 ]; then
+    jq -R -s -c 'split("\n") | map(select(length>0))' <<<"${servers:-}"
+  else
+    printf 'dns: %s\n' "$(paste -sd', ' - <<<"${servers:-n/a}")"
+  fi
+}
+
+## --- top (nethogs, needs root) ------------------------------------------
+do_top() {
+  local out; out=$(pc_cmd nethogs -t -c 3 -d 1 2>/dev/null)
+  [ -n "$out" ] || out=$(pc_root timeout $((secs + 5)) nethogs -t -c 3 -d 1 2>/dev/null)
+  printf '%s\n' "${out:-pc net top: nethogs produced no output (needs root)}"
+}
+
+case "$sub" in
+  ''|overview) do_ifaces; do_listeners; do_tailscale;;
+  ifaces) do_ifaces;;
+  listeners) do_listeners;;
+  sockets) do_sockets;;
+  who) do_who "$arg";;
+  tailscale) do_tailscale;;
+  fw) do_fw;;
+  wifi) do_wifi;;
+  dns) do_dns;;
+  top) do_top;;
+  *) printf 'pc net: unknown verb %s (try -h)\n' "$sub" >&2; exit 2;;
+esac

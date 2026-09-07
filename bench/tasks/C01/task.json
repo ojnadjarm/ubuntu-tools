@@ -1,0 +1,24 @@
+{
+  "id": "C01",
+  "tier": "change",
+  "set": "night",
+  "title": "sound to the buds",
+  "prompt": "move the sound to the buds",
+  "answer_schema": {
+    "type": "object",
+    "required": ["sink", "how", "rollback"],
+    "properties": {
+      "sink": {"type": "string", "description": "the sink the sound is going to now"},
+      "how": {"type": "string", "description": "the command that moved it"},
+      "rollback": {"type": "string", "description": "the exact command that puts it back"},
+      "did_it": {"type": "boolean"},
+      "unknown": {"type": "boolean"},
+      "reason": {"type": "string"}
+    }
+  },
+  "allowed_side_effects": ["default_sink", "null_modules", "ledger_lines"],
+  "needs": ["buds_absent"],
+  "budget": {"seconds": 480, "usd": 1.5, "screenshots": 0},
+  "oracle_s": 1,
+  "tags": ["audio", "pc audio", "pc undo", "ledger"]
+}

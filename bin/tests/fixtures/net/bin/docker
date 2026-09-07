@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+cat <<'NDJSON'
+{"Names":"moodle52-app-1","Ports":"0.0.0.0:8052->80/tcp"}
+{"Names":"moodle52-db-1","Ports":"0.0.0.0:5452->5432/tcp"}
+{"Names":"selenium-1","Ports":"0.0.0.0:4444->4444/tcp"}
+{"Names":"mailhog-1","Ports":"0.0.0.0:8025->8025/tcp"}
+NDJSON

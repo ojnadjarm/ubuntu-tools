@@ -1,0 +1,11 @@
+/*
+ * disk.bt — block IO issued per comm, split by rwbs. $1 = pid filter (0 = all), $2 = seconds.
+ * args->comm is the task the request is accounted to, which may differ from the issuing kworker.
+ */
+tracepoint:block:block_rq_issue /$1 == 0 || pid == (uint32)$1/
+{
+	@bytes[args->comm, str(args->rwbs)] = sum(args->bytes);
+	@ops[args->comm, str(args->rwbs)] = count();
+}
+
+interval:s:$2 { exit(); }

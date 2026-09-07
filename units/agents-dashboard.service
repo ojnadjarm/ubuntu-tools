@@ -1,0 +1,16 @@
+[Unit]
+Description=Agents status dashboard (tailnet + LAN, port 19998)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Binds 0.0.0.0 + ::; the Tailscale wait is best-effort so a LAN-only boot still starts the page.
+ExecStartPre=/bin/sh -c 'i=0; while [ $i -lt 60 ]; do ip -4 addr show tailscale0 2>/dev/null | grep -q "inet " && exit 0; i=$((i+1)); sleep 1; done; exit 0'
+ExecStart=/bin/bash -c '. %h/agents/bin/env.sh; exec /usr/bin/python3 %h/agents/dashboard/server.py'
+Restart=always
+RestartSec=5
+MemoryMax=300M
+
+[Install]
+WantedBy=default.target

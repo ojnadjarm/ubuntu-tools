@@ -1,0 +1,22 @@
+{
+  "id": "O03",
+  "tier": "observe",
+  "set": "night",
+  "title": "What's on :8052?",
+  "prompt": "what's listening on port 8052 and which container is it?",
+  "answer_schema": {
+    "type": "object",
+    "required": ["pid_or_unit", "container"],
+    "properties": {
+      "pid_or_unit": {"type": "string"},
+      "container": {"type": "string"},
+      "unknown": {"type": "boolean"},
+      "reason": {"type": "string"}
+    }
+  },
+  "allowed_side_effects": [],
+  "needs": [],
+  "budget": {"seconds": 240, "usd": 1.0, "screenshots": 0},
+  "oracle_s": 0,
+  "tags": ["net", "docker", "pc net", "night-safe"]
+}

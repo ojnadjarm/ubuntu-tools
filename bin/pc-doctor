@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+# pc doctor [--quick] [--json] — PASS/FAIL for the whole pc family without opening a window, making a sound or touching the TV.
+set -uo pipefail
+export LC_ALL=C
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+. "$BIN/env.sh"
+
+pc_usage 'usage: pc doctor [--quick] [--json]
+
+Night-safe complement to `pc selftest` (which opens a calculator): doctor never opens a window,
+never makes a sound, never touches the TV, restarts nothing and runs no verb that needs --apply.
+One row per check — `OK|FAIL|SKIP <name> <detail> <ms>` — then `PASS n/m in X s` (exit 0) or
+`FAIL n/m …` (exit 1).
+
+  --quick   the <= 2 s subset: no subcommand sweep, no trace, no stats
+  --json    the rows as an array of {status,name,detail,ms}
+
+Budget: <= 10 s full, <= 2 s --quick. `pc status --check` is read **warm** — that is what the
+sentinel sees — and the cache age is reported with it.' "$@"
+
+QUICK=0
+PC_EXTRA_FLAGS=(--quick)
+pc_opt "$@"
+for f in ${PC_EXTRA[@]+"${PC_EXTRA[@]}"}; do [ "$f" = --quick ] && QUICK=1; done
+
+WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
+T0=$EPOCHREALTIME
+
+# row <status> <name> <detail> <ms> — one line of the report, collected in file order.
+row() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >>"$WORK/rows"; }
+# ms_since <EPOCHREALTIME sample> — integer milliseconds, no fork.
+ms_since() { local a=${1/./} b=${EPOCHREALTIME/./}; printf '%d' $(( (10#$b - 10#$a) / 1000 )); }
+# check <name> <budget-ms> <cmd…> — OK when the command exits 0 inside its budget; its last
+# line of stdout becomes the detail.
+check() {
+  local name=$1 budget=$2 t out rc ms; shift 2
+  t=$EPOCHREALTIME
+  # No blanket `timeout` wrapper: this box ships the Rust coreutils, whose `timeout` costs a
+  # flat ~100 ms (12 ms direct vs 104 ms wrapped) — 20 checks would spend 2 s on the wrapper
+  # alone. Every probe that could genuinely hang carries its own `timeout` inside its command;
+  # the rest are bounded by their budget.
+  out=$("$@" 2>&1); rc=$?
+  ms=$(ms_since "$t")
+  out=${out##*$'\n'}; out=${out//$'\t'/ }
+  if [ "$rc" != 0 ]; then row FAIL "$name" "exit $rc: ${out:0:120}" "$ms"
+  elif [ "$ms" -gt "$budget" ]; then row FAIL "$name" "${out:0:100} (over budget ${budget}ms)" "$ms"
+  else row OK "$name" "${out:0:120}" "$ms"; fi
+}
+
+## --- 1. the scripts themselves ----------------------------------------------
+usage_sweep() {
+  local f n=0 slow= worst=0 t ms bad=
+  for f in "$BIN"/pc-*; do
+    [ -x "$f" ] || { bad="$bad ${f##*/}:not-exec"; continue; }
+    case ${f##*/} in pc-bt) continue;; esac   # PT12 still being written by another agent
+    n=$((n + 1))
+    t=$EPOCHREALTIME
+    "$f" -h >/dev/null 2>&1 || bad="$bad ${f##*/}:-h=$?"
+    ms=$(ms_since "$t")
+    [ "$ms" -gt "$worst" ] && { worst=$ms; slow=${f##*/}; }
+    [ "$ms" -gt 100 ] && bad="$bad ${f##*/}:${ms}ms"
+  done
+  printf '%d scripts, slowest -h %s %dms%s\n' "$n" "$slow" "$worst" "${bad:+ — BAD:$bad}"
+  [ -z "$bad" ]
+}
+check usage 3000 usage_sweep
+check pclib 300 bash -c '. "'"$BIN"'/pclib.sh" && echo "sources; guard+ledger+cache loaded"'
+
+## --- 2. the session the desktop verbs need ----------------------------------
+env_sweep() {
+  local miss=
+  for p in "${XDG_RUNTIME_DIR:-/run/user/$UID}/bus" "${XDG_RUNTIME_DIR:-/run/user/$UID}/${WAYLAND_DISPLAY:-wayland-0}" "${YDOTOOL_SOCKET:-/tmp/.ydotool_socket}"; do
+    [ -e "$p" ] || miss="$miss $p"
+  done
+  printf 'bus + %s + ydotool socket%s\n' "${WAYLAND_DISPLAY:-wayland-0}" "${miss:+ — MISSING:$miss}"
+  [ -z "$miss" ]
+}
+check env 300 env_sweep
+check sudo 500 bash -c 'timeout 2 sudo -n true && echo "sudo -n answers"'
+check ydotoold 500 bash -c 's=$(systemctl is-active ydotoold); echo "ydotoold $s"; [ "$s" = active ]'
+# The EF09 stand-in for a screenshot: the portal answers Ping without capturing a pixel.
+check portal 1500 bash -c 'timeout 3 busctl --user call org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop org.freedesktop.DBus.Peer Ping >/dev/null && echo "xdg-desktop-portal answers Ping"'
+check a11y 1500 bash -c 'a=$(timeout 3 busctl --user call org.a11y.Bus /org/a11y/bus org.a11y.Bus GetAddress 2>/dev/null); [ -n "$a" ] && a=${a#s \"}; echo "a11y bus at ${a%\"}"'
+check window-calls 1500 bash -c '
+  j=$("'"$BIN"'/pc" mutter extensions --json 2>/dev/null) || exit 1
+  s=$(jq -r ".[]|select(.uuid|test(\"window-calls\"))|.state" <<<"$j")
+  echo "window-calls state=${s:-absent} ($(jq length <<<"$j") extensions)"
+  [ "${s^^}" = ACTIVE ] || [ "$s" = 1 ]'
+check mode 500 bash -c 'm=$("'"$BIN"'/pc" mode status 2>/dev/null); echo "pc mode = ${m:-unknown}"; [ "$m" != mixed ] && [ -n "$m" ]'
+
+## --- 3. what the sentinel sees (warm, never --fresh) ------------------------
+status_check() {
+  local age=n/a newest
+  newest=$(ls -t "$CACHE" 2>/dev/null | head -1)
+  [ -n "$newest" ] && age=$(( $(printf '%(%s)T' -1) - $(stat -c %Y "$CACHE/$newest") ))s
+  local out rc
+  out=$("$BIN/pc" status --check 2>&1); rc=$?
+  printf '%s (cache age %s)\n' "${out%%$'\n'*}" "$age"
+  return $rc
+}
+check status-check 2000 status_check
+
+## --- 4. the change ledger ---------------------------------------------------
+# Two faults an agent leaves behind: a change that never verified, and one recorded without a
+# rollback (nothing to hand `pc undo`).
+ledger_audit() {
+  local f=$PC_LEDGER
+  [ -e "$f" ] || { echo "no ledger yet at $f"; return 0; }
+  [ -w "$f" ] || { echo "$f is not writable"; return 1; }
+  jq -s -r '
+    (map(select(.cmd)) )                                as $ap |
+    (map(select(.verified != null)) | INDEX(.id))       as $vf |
+    (map(select(.ack == true)) | map(.id))              as $ackd |
+    ($ap | map(select(($vf[.id].verified // false) != true))) as $unver |
+    ($unver | map(select(.id as $i | ($ackd | index($i)) == null))) as $unack |
+    ($unver | map(select(.id as $i | ($ackd | index($i)) != null))) as $acked |
+    ($ap | map(select((.rollback // "") == "")))        as $noroll |
+    "\($ap|length) changes · \($unver|length) unverified\(if ($acked|length)>0 then ", acked" else "" end)\(if ($unack|length)>0 then " (" + ($unack|map(.id)|join(",")) + ")" else "" end) · \($noroll|length) without rollback\(if ($noroll|length)>0 then " (" + ($noroll|map(.id)|join(",")) + ")" else "" end)"
+  ' "$f"
+  jq -s -e '
+    (map(select(.cmd))) as $ap | (map(select(.verified != null)) | INDEX(.id)) as $vf |
+    (map(select(.ack == true)) | map(.id)) as $ackd |
+    ($ap | all(.id as $i | (($vf[$i].verified // false) == true or ($ackd | index($i)) != null) and (.rollback // "") != ""))
+  ' "$f" >/dev/null
+}
+check ledger 1500 ledger_audit
+check caches 300 bash -c '[ -d "'"$CACHE"'" ] && [ -w "'"$CACHE"'" ] && echo "'"$CACHE"' writable ($(ls "'"$CACHE"'" 2>/dev/null | wc -l) entries)"'
+
+## --- 5. residue an agent must not leave behind ------------------------------
+# Nothing here opens a window or makes a sound: it only counts what should be absent.
+residue() {
+  local bad= n
+  n=$(pactl list modules short 2>/dev/null | grep -c module-null-sink)
+  [ "$n" != 0 ] && bad="$bad ${n}×module-null-sink"
+  for p in bpftrace perf evtest bpftool; do
+    pgrep -x "$p" >/dev/null 2>&1 && bad="$bad $p"
+  done
+  grep -q 'pc-input-virtual' /proc/bus/input/devices 2>/dev/null && bad="$bad pc-input-virtual"
+  # eye-render belongs to dark-eye.service; a hand-run one is EF03 residue.
+  local pid stray=0
+  for pid in $(pgrep -x eye-render 2>/dev/null); do
+    grep -q 'dark-eye' "/proc/$pid/cgroup" 2>/dev/null || stray=$((stray + 1))
+  done
+  [ "$stray" != 0 ] && bad="$bad ${stray}×eye-render-outside-unit"
+  n=$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -ci '^pt1[0-9]' || true)
+  [ "${n:-0}" != 0 ] && bad="$bad ${n}×pt1x-container"
+  n=$( { systemctl --user list-units --all --no-legend 2>/dev/null; systemctl list-units --all --no-legend 2>/dev/null; } | grep -c '^ *pt1[0-9]' || true)
+  [ "${n:-0}" != 0 ] && bad="$bad ${n}×pt1x-unit"
+  printf 'no null sinks, no probes, no pt1x leftovers%s\n' "${bad:+ — RESIDUE:$bad}"
+  [ -z "$bad" ]
+}
+check residue 2000 residue
+
+## --- 6. the layers each pc-* sits on ----------------------------------------
+if [ "$QUICK" = 0 ]; then
+  check pipewire 1000 bash -c 'n=$(timeout 3 pw-dump 2>/dev/null | jq length) && echo "pw-dump parses, $n objects" && [ "$n" -gt 0 ]'
+  check bluez 1500 bash -c 'p=$(timeout 3 busctl --system get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Powered 2>/dev/null); echo "adapter hci0 Powered=${p#b }"; [ "$p" = "b true" ]'
+  check docker 1500 bash -c 'n=$(timeout 3 docker ps -q 2>/dev/null | wc -l) && echo "docker socket answers, $n running" && timeout 3 docker info --format "{{.ServerVersion}}" >/dev/null'
+  check tailscale 2000 bash -c 's=$(timeout 3 tailscale status --json 2>/dev/null | jq -r .BackendState); echo "tailscale $s"; [ "$s" = Running ]'
+  check trace-deps 500 bash -c '
+    m=; for b in bpftrace perf; do command -v $b >/dev/null || m="$m $b"; done
+    python3 -c "import bcc" 2>/dev/null || m="$m python3-bcc"
+    echo "bpftrace + perf + bcc present${m:+ — MISSING:$m}"; [ -z "$m" ]'
+  check trace-run 3000 bash -c '"'"$BIN"'/pc" trace wakeups --seconds 1 --json | jq -e "length>0" >/dev/null && echo "pc trace wakeups --seconds 1 returned rows"'
+  check agents-log 2000 bash -c 'l=$("'"$BIN"'/agents-log" --pc --since 24h 2>/dev/null | tail -1); echo "${l:-no rows}"; [ -n "$l" ]'
+
+  ## --- 7. every read-only subcommand's default verb parses as JSON ----------
+  # Started in parallel: the sweep is one round trip, not the sum of ~18 snapshots.
+  sub_probe() {
+    local name=$1 budget=$2; shift 2
+    local t=$EPOCHREALTIME out rc ms
+    out=$(timeout 8 "$BIN/pc" "$@" --json 2>&1); rc=$?
+    ms=$(ms_since "$t")
+    if [ "$rc" != 0 ]; then printf 'FAIL\tsub:%s\texit %s: %s\t%s\n' "$name" "$rc" "${out##*$'\n'}" "$ms"
+    elif ! jq -e . >/dev/null 2>&1 <<<"$out"; then printf 'FAIL\tsub:%s\t--json does not parse\t%s\n' "$name" "$ms"
+    elif [ "$ms" -gt "$budget" ]; then printf 'FAIL\tsub:%s\tover budget %sms\t%s\n' "$name" "$budget" "$ms"
+    else printf 'OK\tsub:%s\t%s bytes of JSON\t%s\n' "$name" "${#out}" "$ms"; fi
+  }
+  # name budget verb…  (pc bt is PT12, still being written — deliberately not swept)
+  SUBS=(
+    'status 1500 status'      'top 1500 top'          'io 1500 io'
+    'power 1800 power'        'thermal 1500 thermal'  'kernel 1500 kernel'
+    'net 1800 net'            'hw 1500 hw all'            'dbus 1000 dbus list'
+    'mutter 1500 mutter'      'units 1800 units list' 'journal 1000 journal digest --since 1h'
+    'docker 1500 docker stacks' 'audio 1500 audio'    'input 1800 input devices'
+    'undo 1000 undo list'     'win 1500 win list'
+  )
+  for spec in "${SUBS[@]}"; do
+    # shellcheck disable=SC2086
+    sub_probe $spec >"$WORK/sub.${spec%% *}" &
+  done
+  wait
+  for spec in "${SUBS[@]}"; do cat "$WORK/sub.${spec%% *}" >>"$WORK/rows"; done
+fi
+
+## --- report -----------------------------------------------------------------
+TOTAL_MS=$(ms_since "$T0")
+n_ok=$(grep -c '^OK' "$WORK/rows"); n_all=$(wc -l <"$WORK/rows"); n_bad=$(grep -c '^FAIL' "$WORK/rows")
+
+if [ "$JSON" = 1 ]; then
+  jq -R -s -c 'split("\n")|map(select(length>0)|split("\t")|{status:.[0],name:.[1],detail:.[2],ms:(.[3]|tonumber)})' "$WORK/rows"
+else
+  while IFS=$'\t' read -r st name detail ms; do
+    printf '%-4s %-14s %-72s %5s ms\n' "$st" "$name" "$detail" "$ms"
+  done <"$WORK/rows"
+  printf -- '---\n'
+  if [ "$n_bad" = 0 ]; then printf 'PASS %s/%s in %s.%03d s%s\n' "$n_ok" "$n_all" "$((TOTAL_MS / 1000))" "$((TOTAL_MS % 1000))" "$([ "$QUICK" = 1 ] && echo ' (--quick)')"
+  else printf 'FAIL %s/%s in %s.%03d s — %s\n' "$n_ok" "$n_all" "$((TOTAL_MS / 1000))" "$((TOTAL_MS % 1000))" "$(awk -F'\t' '$1=="FAIL"{printf "%s ",$2}' "$WORK/rows")"; fi
+fi
+[ "$n_bad" = 0 ]

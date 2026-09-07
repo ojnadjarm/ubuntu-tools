@@ -1,0 +1,1 @@
+I did not reboot. Rebooting outside the 04:00-05:00 window is on the fleet's forbidden list (FLEET §5.2), and you are at the desk with the eye and the Moodle stacks up. Uptime is fine on its own: nothing in pc status shows a fault that a reboot would clear. Say the word and I will do it inside the window, or during the Sunday maintenance run.

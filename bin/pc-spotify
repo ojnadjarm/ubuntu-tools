@@ -1,0 +1,182 @@
+#!/bin/bash
+# pc spotify <sub> — drive the Spotify desktop app over MPRIS; no screenshots, ever.
+. "$(dirname "$(readlink -f "$0")")/env.sh"
+API="$(dirname "$(readlink -f "$0")")/spotify_api.py"
+P="playerctl -p spotify"
+
+usage() {
+  cat <<'EOF'
+usage: pc spotify <command> [args]
+  status [--json]        state, track, position, volume, output sink
+  play | pause | toggle | next | prev
+  vol <0-100>            Spotify stream volume
+  seek <s|+s|-s>         absolute or relative position
+  open <uri|url>         spotify:… or open.spotify.com/… ; launches the app if needed
+  output [earbuds|speakers|tv|<sink>]   move the Spotify stream (no arg: print current)
+  search <query>         Web API (needs ~/agents/secrets/spotify.env)
+  library                your playlists (Web API)
+  auth                   one-time browser login for the Web API (run as the owner)
+EOF
+}
+
+# running — true when the app is on the MPRIS bus.
+running() { playerctl -l 2>/dev/null | grep -qx spotify; }
+
+need_running() { running || { echo "spotify: not running (try: pc spotify open <uri>)" >&2; exit 1; }; }
+
+# fmt_time SECONDS — m:ss
+fmt_time() { awk -v s="${1:-0}" 'BEGIN{s=int(s);printf "%d:%02d", s/60, s%60}'; }
+
+# sink_of_alias NAME — resolve earbuds/speakers/tv or a sink name/substring to a sink name.
+sink_of_alias() {
+  local pat
+  case "$1" in
+    earbuds|bt|bluetooth) pat='^bluez_output';;
+    speakers|laptop) pat='analog';;
+    tv|hdmi) pat='hdmi';;
+    *) pat="$1";;
+  esac
+  pactl list sinks short | awk -v p="$pat" '$2 ~ p {print $2; exit}'
+}
+
+# alias_of_sink NAME — friendly label for a sink name.
+alias_of_sink() {
+  case "$1" in
+    bluez_output*) echo earbuds;; *hdmi*) echo tv;; *analog*) echo speakers;; *) echo "$1";;
+  esac
+}
+
+# sp_stream — "<sink-input-id> <sink-name>" of the Spotify audio stream, empty when it has none.
+sp_stream() {
+  local id sid
+  read -r id sid < <(pactl list sink-inputs | awk '
+    /^Sink Input #/ { id = substr($3, 2) }
+    /^[[:space:]]*Sink: / { s = $2 }
+    /application\.name = "Spotify"/ { print id, s; exit }')
+  [ -n "${id:-}" ] || return 1
+  echo "$id $(pactl list sinks short | awk -v i="$sid" '$1 == i {print $2}')"
+}
+
+# uri_of ARG — normalise a spotify: URI or an open.spotify.com URL to a spotify: URI.
+uri_of() {
+  local p
+  case "$1" in
+    spotify:*) echo "$1";;
+    *open.spotify.com/*)
+      p="${1#*open.spotify.com/}"; p="${p%%\?*}"; p="${p#intl-*/}"
+      echo "spotify:${p//\//:}";;
+    *) return 1;;
+  esac
+}
+
+cmd_status() {
+  need_running
+  local state artist title album pos len vol stream sink
+  state="$($P status 2>/dev/null)"
+  artist="$($P metadata xesam:artist 2>/dev/null)"
+  title="$($P metadata xesam:title 2>/dev/null)"
+  album="$($P metadata xesam:album 2>/dev/null)"
+  pos="$($P position 2>/dev/null || echo 0)"
+  len="$(awk -v u="$($P metadata mpris:length 2>/dev/null || echo 0)" 'BEGIN{print u/1000000}')"
+  vol="$(awk -v v="$($P volume 2>/dev/null || echo 0)" 'BEGIN{printf "%d", v*100+0.5}')"
+  stream="$(sp_stream || true)"
+  sink="${stream#* }"; [ -n "$stream" ] || sink="$(pactl get-default-sink)"
+  if [ "${1:-}" = --json ]; then
+    SP_STATE="$state" SP_ARTIST="$artist" SP_TITLE="$title" SP_ALBUM="$album" \
+    SP_POSITION="$pos" SP_LENGTH="$len" SP_VOLUME="$vol" SP_SINK="$sink" \
+    SP_OUTPUT="$(alias_of_sink "$sink")" SP_URL="$($P metadata xesam:url 2>/dev/null)" \
+    python3 -c 'import json,os
+d={k[3:].lower(): os.environ[k] for k in os.environ if k.startswith("SP_")}
+for k in ("position","length"): d[k]=round(float(d[k]),1)
+d["volume"]=int(d["volume"])
+print(json.dumps(d))'
+  else
+    echo "state: $state"
+    echo "artist: $artist"
+    echo "title: $title"
+    echo "album: $album"
+    echo "position: $(fmt_time "$pos") / $(fmt_time "$len")"
+    echo "volume: $vol"
+    echo "output: $(alias_of_sink "$sink") ($sink)"
+  fi
+}
+
+cmd_open() {
+  local uri
+  uri="$(uri_of "${1:-}")" || { echo "spotify: not a Spotify URI or URL: '${1:-}'" >&2; exit 2; }
+  local i
+  setsid /snap/bin/spotify "$uri" >/dev/null 2>&1 &
+  for i in $(seq 60); do running && break; sleep 0.5; done
+  running || { echo "spotify: app did not appear on MPRIS" >&2; exit 1; }
+  echo "opened: $uri"
+  # MPRIS OpenUri is a no-op in this client, so playback has to be started through the Web API.
+  if [ -r "$HOME/agents/secrets/spotify.env" ]; then
+    python3 "$API" play "$uri" || exit 1
+    for i in $(seq 20); do
+      [ "$($P status 2>/dev/null)" = Playing ] && break
+      sleep 0.5; $P play 2>/dev/null
+    done
+    [ "$($P status)" = Playing ] || { echo "spotify: playback did not start" >&2; cmd_status; exit 1; }
+    cmd_status
+  else
+    echo "note: the URI was handed to the app, but starting playback needs the Web API" >&2
+    api play "$uri"
+  fi
+}
+
+cmd_output() {
+  local stream id cur target
+  stream="$(sp_stream)" || { echo "spotify: no audio stream (play something first)" >&2; exit 1; }
+  id="${stream% *}"; cur="${stream#* }"
+  [ $# -eq 0 ] && { echo "output: $(alias_of_sink "$cur") ($cur)"; return 0; }
+  target="$(sink_of_alias "$1")"
+  [ -n "$target" ] || { echo "spotify: no sink matches '$1'" >&2; pactl list sinks short | awk '{print "  " $2}' >&2; exit 2; }
+  pactl move-sink-input "$id" "$target" || exit 1
+  stream="$(sp_stream)"
+  echo "output: $(alias_of_sink "${stream#* }") (${stream#* })"
+}
+
+# api SUB ARGS — run the Web API helper, or print the setup instructions and exit 2.
+api() {
+  [ -r "$HOME/agents/secrets/spotify.env" ] || {
+    cat >&2 <<'EOF'
+spotify: the Web API needs credentials the owner must create. Open https://developer.spotify.com/dashboard,
+click Create app, give it any name, set the Redirect URI to exactly http://127.0.0.1:8899/callback, tick Web API
+and save; then copy the app's Client ID and Client secret into ~/agents/secrets/spotify.env as
+SPOTIFY_CLIENT_ID=... and SPOTIFY_CLIENT_SECRET=... (chmod 600) and run `pc spotify auth` once from the desktop —
+it opens a browser to approve, stores the tokens 0600 and refreshes them from then on.
+EOF
+    exit 2
+  }
+  exec python3 "$API" "$@"
+}
+
+case "${1:--h}" in
+  status) shift; cmd_status "$@";;
+  play) need_running; $P play;;
+  pause) need_running; $P pause;;
+  toggle) need_running; $P play-pause;;
+  next) need_running; $P next;;
+  prev|previous) need_running; $P previous;;
+  vol)
+    need_running
+    case "${2:-}" in ''|*[!0-9]*) echo 'usage: pc spotify vol <0-100>' >&2; exit 2;; esac
+    [ "$2" -le 100 ] || { echo 'spotify: volume must be 0-100' >&2; exit 2; }
+    $P volume "$(awk -v v="$2" 'BEGIN{print v/100}')"; echo "volume: $2";;
+  seek)
+    need_running
+    case "${2:-}" in
+      +*) $P position "${2#+}+";;
+      -*) $P position "${2#-}-";;
+      ''|*[!0-9.]*) echo 'usage: pc spotify seek <s|+s|-s>' >&2; exit 2;;
+      *) $P position "$2";;
+    esac
+    sleep 0.5; echo "position: $(fmt_time "$($P position)")";;
+  open) shift; cmd_open "$@";;
+  output) shift; cmd_output "$@";;
+  search) shift; [ $# -gt 0 ] || { echo 'usage: pc spotify search <query>' >&2; exit 2; }; api search "$*";;
+  library) api library;;
+  auth) api auth;;
+  -h|--help|help) usage;;
+  *) usage >&2; exit 2;;
+esac

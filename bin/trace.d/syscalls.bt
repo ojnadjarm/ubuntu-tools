@@ -1,0 +1,25 @@
+/*
+ * syscalls.bt — syscall count and total latency per syscall number. $1 = pid filter (0 = all), $2 = seconds.
+ * Numbers, not names: pc-trace maps them through asm/unistd_64.h (no ausyscall on this box).
+ */
+tracepoint:raw_syscalls:sys_enter /$1 == 0 || pid == (uint32)$1/
+{
+	@st[tid] = nsecs;
+	@sid[tid] = args->id;
+}
+
+tracepoint:raw_syscalls:sys_exit /@st[tid] != 0/
+{
+	@count[@sid[tid]] = count();
+	@ns[@sid[tid]] = sum(nsecs - @st[tid]);
+	$d1 = delete(@st, tid);
+	$d2 = delete(@sid, tid);
+}
+
+interval:s:$2 { exit(); }
+
+END
+{
+	clear(@st);
+	clear(@sid);
+}

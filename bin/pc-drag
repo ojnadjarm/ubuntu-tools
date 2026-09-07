@@ -1,0 +1,9 @@
+#!/bin/bash
+# pc drag X1 Y1 X2 Y2 — press at the first point, move, release at the second.
+. "$(dirname "$(readlink -f "$0")")/env.sh"
+[ "${1:-}" = -h ] || [ $# -lt 4 ] && { echo "usage: pc drag X1 Y1 X2 Y2"; exit 0; }
+pc_xy "$1" "$2"; pc_xy "$3" "$4"
+pc_moveto "$1" "$2"
+ydotool click 0x40 >/dev/null && sleep 0.15
+pc_moveto "$3" "$4"
+exec ydotool click 0x80 >/dev/null

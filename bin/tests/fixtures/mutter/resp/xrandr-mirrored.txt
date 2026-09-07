@@ -1,0 +1,1 @@
+Screen 0: minimum 16 x 16, current 1920 x 1080, maximum 32767 x 32767

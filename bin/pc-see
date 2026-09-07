@@ -1,0 +1,6 @@
+#!/bin/bash
+# pc see [SEL] [--json] [--max-bytes N] — text digest of the screen: focus, windows, UI tree, notifications, clipboard.
+. "$(dirname "$(readlink -f "$0")")/env.sh"
+[ "${1:-}" = -h ] || [ "${1:-}" = --help ] && {
+  echo 'usage: pc see [SEL] [--json] [--max-bytes N] (soft cap: the fixed sections are a floor)'; exit 0; }
+exec python3 "$PC_BIN/a11y_tree.py" --see "$@"

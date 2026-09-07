@@ -1,0 +1,80 @@
+[
+  {
+    "id": 80,
+    "type": "PipeWire:Interface:Metadata",
+    "props": { "metadata.name": "default" },
+    "metadata": [
+      { "subject": 0, "key": "default.audio.sink", "type": "", "value": { "name": "bluez_output.AC_80_0A_27_65_6C.1" } },
+      { "subject": 0, "key": "default.audio.source", "type": "", "value": { "name": "alsa_input.pci-0000_00_1f.3.analog-stereo" } }
+    ]
+  },
+  {
+    "id": 32,
+    "type": "PipeWire:Interface:Metadata",
+    "props": { "metadata.name": "settings" },
+    "metadata": [
+      { "subject": 0, "key": "log.level", "type": "", "value": 2 }
+    ]
+  },
+  {
+    "id": 93,
+    "type": "PipeWire:Interface:Device",
+    "info": {
+      "props": { "device.name": "alsa_card.pci-0000_00_1f.3", "device.api": "alsa", "device.description": "Built-in Audio" },
+      "params": { "Profile": [ { "index": 3, "name": "output:hdmi-stereo+input:analog-stereo" } ] }
+    }
+  },
+  {
+    "id": 201,
+    "type": "PipeWire:Interface:Device",
+    "info": {
+      "props": { "device.name": "bluez_card.AC_80_0A_27_65_6C", "device.api": "bluez5", "device.description": "WF-1000XM5" },
+      "params": { "Profile": [ { "index": 1, "name": "a2dp-sink" } ] }
+    }
+  },
+  {
+    "id": 105,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "state": "suspended",
+      "props": { "media.class": "Audio/Sink", "node.name": "alsa_output.pci-0000_00_1f.3.hdmi-stereo",
+                 "node.description": "Built-in Audio Digital Stereo (HDMI)", "device.id": 93 },
+      "params": { "Props": [ { "channelVolumes": [1.0, 1.0], "mute": false } ] }
+    }
+  },
+  {
+    "id": 200,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "state": "running",
+      "props": { "media.class": "Audio/Sink", "node.name": "bluez_output.AC_80_0A_27_65_6C.1",
+                 "node.description": "WF-1000XM5", "device.id": 201 },
+      "params": { "Props": [ { "channelVolumes": [1.0, 1.0], "mute": false } ] }
+    }
+  },
+  {
+    "id": 71,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "state": "suspended",
+      "props": { "media.class": "Audio/Source", "node.name": "alsa_input.pci-0000_00_1f.3.analog-stereo",
+                 "node.description": "Built-in Audio Analog Stereo", "device.id": 93 },
+      "params": { "Props": [ { "channelVolumes": [0.35], "mute": false } ] }
+    }
+  },
+  {
+    "id": 69,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "state": "running",
+      "props": { "media.class": "Stream/Output/Audio", "node.name": "speech-dispatcher-dummy",
+                 "application.name": "speech-dispatcher-dummy" },
+      "params": { "Props": [ { "channelVolumes": [1.0, 1.0], "mute": false } ] }
+    }
+  },
+  {
+    "id": 35,
+    "type": "PipeWire:Interface:Link",
+    "info": { "output-node-id": 69, "output-port-id": 53, "input-node-id": 200, "input-port-id": 82, "state": "active" }
+  }
+]

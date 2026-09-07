@@ -1,0 +1,6 @@
+{
+  "culprit": "pcbench-burn.service — a transient systemd user unit running `sh -c \"yes >/dev/null & yes >/dev/null & wait\"`, i.e. two `yes` processes (PIDs 357428, 357429) burning CPU under a 150% CPUQuota.",
+  "evidence": "`ps --sort=-pcpu` shows PIDs 357428 and 357429 (`yes`) at ~75% CPU each, elapsed ~12s, both children of PID 357426 `/usr/bin/sh -c \"yes >/dev/null & yes >/dev/null & wait\"` (parent 1846 = systemd --user). /proc/357428/cgroup = 0::/user.slice/user-1000.slice/user@1000.service/app.slice/pcbench-burn.service. `systemctl --user cat pcbench-burn.service` shows a transient unit (Description=pcbench CPU burner, CPUQuota=150.00%, ExecStart=\"/usr/bin/sh\" \"-c\" \"yes >/dev/null & yes >/dev/null & wait\"). Everything else is idle: load average 0.41/0.20/0.07; next highest are gnome-shell 9.8%, dockerd 8.3%, containerd 7.7%. Fix would be `systemctl --user stop pcbench-burn.service`; not run, as the user asked for a diagnosis only and the unit belongs to the pcbench harness.",
+  "fixed": false,
+  "unknown": false
+}

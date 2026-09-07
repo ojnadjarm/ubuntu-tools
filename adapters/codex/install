@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Codex adapter installer — idempotent. Symlinks the portable skills into ~/.agents/skills,
+# the location Codex reads. UNVERIFIED: no codex CLI is installed on this machine.
+set -uo pipefail
+BIN="$(cd "$(dirname "$(readlink -f "$0")")/../../bin" && pwd)"
+# shellcheck source=/dev/null
+. "$BIN/env.sh"
+SKILLS="$HARNESS_HOME/skills"
+DEST="${CODEX_SKILLS_DIR:-$HOME/.agents/skills}"
+changed=0
+
+for d in "$SKILLS"/*/; do
+  [ -f "$d/SKILL.md" ] || continue
+  name="$(basename "$d")"
+  target="$DEST/$name/SKILL.md"
+  if [ "$(readlink -f "$target" 2>/dev/null)" = "$(readlink -f "$d/SKILL.md")" ]; then continue; fi
+  mkdir -p "$DEST/$name"
+  ln -sfn "$d/SKILL.md" "$target"
+  echo "linked $target -> $d/SKILL.md"
+  changed=1
+done
+
+[ "$changed" = 0 ] && echo "codex adapter: no changes"
+exit 0

@@ -1,0 +1,59 @@
+#!/bin/bash
+# pc selftest — drives gnome-calculator with type/key/clip and a screenshot; prints PASS or FAIL.
+d="$(dirname "$(readlink -f "$0")")"; pc="$d/pc"
+[ "${1:-}" = -h ] && { echo "usage: pc selftest"; exit 0; }
+fail=0
+say() { printf '%-10s %s\n' "$1" "$2"; [ "$1" = FAIL ] && fail=1; return 0; }
+
+killall gnome-calculator gnome-calculato 2>/dev/null; sleep 0.5
+"$pc" open org.gnome.Calculator
+w="$("$pc" wait-for --focus Calculator --timeout 10)"
+[ $? -eq 0 ] && say OK "wait-for: focus Calculator $w" || say FAIL "wait-for: Calculator never focused ($w)"
+
+"$pc" see | grep -q 'button "7"' && say OK 'see: ui: lists button "7"' || say FAIL 'see: no button "7" in the digest'
+
+xy7="$("$pc" tree gnome-calculator --find 7)"; xy8="$("$pc" tree gnome-calculator --find 8)"
+case "$xy7" in [1-9]*" "[1-9]*) say OK "tree --find: real screen coordinates for \"7\" ($xy7)";;
+  *) say FAIL "tree --find: no positive coordinates for \"7\" (got '$xy7')";; esac
+
+"$pc" clip set "-" >/dev/null
+if [ -n "$xy7" ] && [ -n "$xy8" ]; then
+  "$pc" click $xy7 && "$pc" a11y-click "+" && "$pc" click $xy8 && "$pc" a11y-click "=" &&
+    sleep 0.5 && "$pc" key ctrl+c && sleep 0.4
+fi
+r="$("$pc" clip get)"
+[ "$r" = 15 ] && say OK "click by coordinates + a11y-click: 7+8 = $r" || say FAIL "click by coordinates: got '$r', want 15"
+
+"$pc" a11y-click "C" >/dev/null 2>&1; sleep 0.3
+"$pc" clip set "-" >/dev/null
+"$pc" type "7+8" && sleep 0.3 && "$pc" key Return && sleep 0.6 && "$pc" key ctrl+c && sleep 0.4
+r="$("$pc" clip get)"
+[ "$r" = 15 ] && say OK "type+key+clip: 7+8 = $r" || say FAIL "type+key+clip: got '$r', want 15"
+
+shot="$("$pc" shot /tmp/pc-selftest.png --scale 0.5 | cut -d" " -f1)"
+if [ -s "$shot" ] && python3 -c "import sys;from PIL import Image;sys.exit(0 if min(Image.open('$shot').size)>100 else 1)"; then
+  say OK "shot: $shot ($(python3 -c "from PIL import Image;print('x'.join(map(str,Image.open('$shot').size)))"))"
+else
+  say FAIL "shot: no usable PNG"
+fi
+
+"$pc" open gnome-text-editor >/dev/null; "$pc" win wait "Text Editor" 10 >/dev/null
+if "$pc" win focus Calculator && sleep 0.5 && "$pc" win focus "Text Editor" && sleep 0.5 &&
+   "$pc" win move "Text Editor" 100 100 && sleep 0.5 &&
+   "$pc" win list | grep -q "Text Editor" && "$pc" win list | grep "Text Editor" | grep -q '+100+100'; then
+  say OK "win: focus 2 apps by title, move Text Editor to 100,100"
+else
+  say FAIL "win: focus/move (see 'pc win list')"
+fi
+"$pc" win close "Text Editor" 2>/dev/null
+
+xy="$("$pc" find 7)"
+if [ -n "$xy" ]; then say OK "find: OCR located \"7\" at $xy"; else say FAIL "find: OCR did not locate \"7\" on the calculator"; fi
+
+"$pc" move 5 5 && say OK "pointer: move" || say FAIL "pointer: move"
+"$pc" scroll down 1 && say OK "pointer: scroll" || say FAIL "pointer: scroll"
+killall gnome-calculator gnome-calculato 2>/dev/null
+g="$("$pc" wait-for --gone Calculator --timeout 5)"
+[ $? -eq 0 ] && say OK "wait-for: Calculator gone ($g)" || say FAIL "wait-for: Calculator still listed ($g)"
+
+[ $fail -eq 0 ] && { echo PASS; exit 0; } || { echo FAIL; exit 1; }

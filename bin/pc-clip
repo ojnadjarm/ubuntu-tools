@@ -1,0 +1,8 @@
+#!/bin/bash
+# pc clip get|set "text" — read or write the Wayland clipboard.
+. "$(dirname "$(readlink -f "$0")")/env.sh"
+case "${1:-}" in
+  get) exec wl-paste --no-newline;;
+  set) shift; printf '%s' "$*" | wl-copy >/dev/null 2>&1;;
+  *) echo 'usage: pc clip get | pc clip set "text"'; [ "${1:-}" = -h ] && exit 0 || exit 2;;
+esac

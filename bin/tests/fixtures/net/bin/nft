@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+cat <<'JSON'
+{"nftables":[
+  {"rule":{"chain":"DOCKER-USER","expr":[
+    {"match":{"left":{"meta":{"key":"iifname"}},"right":"tailscale0"}},
+    {"match":{"left":{"payload":{"protocol":"tcp","field":"dport"}},"right":80}},
+    {"accept":null}]}},
+  {"rule":{"chain":"DOCKER-USER","expr":[
+    {"match":{"left":{"payload":{"protocol":"ip","field":"saddr"}},"right":"192.168.1.0/24"}},
+    {"match":{"left":{"payload":{"protocol":"tcp","field":"dport"}},"right":8025}},
+    {"accept":null}]}},
+  {"rule":{"chain":"DOCKER-USER","expr":[
+    {"match":{"left":{"meta":{"key":"iifname"}},"right":"tailscale0"}},
+    {"match":{"left":{"payload":{"protocol":"tcp","field":"dport"}},"right":4444}},
+    {"accept":null}]}},
+  {"rule":{"chain":"DOCKER-USER","expr":[
+    {"match":{"left":{"payload":{"protocol":"ip","field":"saddr"}},"right":"192.168.1.0/24"}},
+    {"match":{"left":{"payload":{"protocol":"tcp","field":"dport"}},"right":4444}},
+    {"accept":null}]}}
+]}
+JSON

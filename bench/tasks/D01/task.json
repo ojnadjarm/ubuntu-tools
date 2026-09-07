@@ -1,0 +1,24 @@
+{
+  "id": "D01",
+  "tier": "diagnose",
+  "set": "night",
+  "title": "CPU high",
+  "prompt": "the laptop feels slow, why is the CPU high?",
+  "answer_schema": {
+    "type": "object",
+    "required": ["culprit", "evidence", "fixed"],
+    "properties": {
+      "culprit": {"type": "string"},
+      "evidence": {"type": "string"},
+      "fixed": {"type": "boolean"},
+      "unknown": {"type": "boolean"},
+      "reason": {"type": "string"}
+    },
+    "additionalProperties": false
+  },
+  "allowed_side_effects": [],
+  "needs": [],
+  "budget": {"seconds": 480, "usd": 1.5, "screenshots": 0},
+  "oracle_s": 2,
+  "tags": ["cpu", "pc top", "pc trace"]
+}

@@ -1,0 +1,257 @@
+#!/usr/bin/env bash
+# Runaway-process check: kills stateless helpers pegged at >=90% of a core over two sentinel
+# runs, restarts fat/hot desktop portal helpers, and cleans up agent residue (orphan shell
+# loops, unread capture pipes, hand-run Dark Eye bodies, dead sessions' scratchpads).
+# Reads /proc directly (one pass, no per-process forks) so a quiet box costs ~nothing.
+set -uo pipefail
+# shellcheck source=/dev/null
+[ -n "${HARNESS_ENV_LOADED:-}" ] || . "$HOME/agents/bin/env.sh"
+st="${SENTINEL_STATE_DIR:-$HOME/agents/sentinel/state}"
+mkdir -p "$st"
+state="$st/runaway.tsv"
+restarts="$st/runaway-restarts.tsv"
+DRY=0; [ "${1:-}" = --dry-run ] && DRY=1
+DRYRULES="${SENTINEL_RUNAWAY_DRYRULES:-}"   # e.g. "1,3" forces those rules to log-only
+
+PROC="${SENTINEL_RUNAWAY_PROC:-/proc}"
+TMPROOT="${SENTINEL_RUNAWAY_TMPROOT:-/tmp}"
+
+# Scratch directories agents write into, from $AGENT_SCRATCH_GLOBS (config.env). Rules 1 and 5
+# both work off this list: rule 5 expands the globs, rule 1 matches paths against them. A glob
+# rooted at /tmp is re-rooted on $TMPROOT so the fixtures can run against a fake tree.
+SCRATCH_GLOBS=()   # the patterns, re-rooted; SCRATCH_RES, one regex each, "*" = one path segment
+SCRATCH_RES=()
+set -f   # split $AGENT_SCRATCH_GLOBS on whitespace only; the patterns expand later, under $TMPROOT
+for _g in $AGENT_SCRATCH_GLOBS; do
+  _g="${_g/#\/tmp/$TMPROOT}"; SCRATCH_GLOBS+=("$_g")
+  _r=${_g//./\\.}; SCRATCH_RES+=("${_r//\*/[^/]+}")
+done
+set +f
+# in_scratch <path> — true when the path is one of the scratch dirs or lives under one.
+in_scratch() {
+  local p=$1 r
+  for r in ${SCRATCH_RES[@]+"${SCRATCH_RES[@]}"}; do
+    [[ "$p" =~ $r(/|[[:space:]]|$) ]] && return 0
+  done
+  return 1
+}
+
+PCT_MIN=90        # % of one core, legacy + rule 4 CPU condition
+STRIKES_MIN=2     # consecutive sentinel runs above PCT_MIN (~30 min at 15-min ticks)
+ORPHAN_AGE=1800   # rule 2: hand-run test process / capture pipe, seconds
+SHELL_AGE=3600    # rule 1: shell loop under a scratchpad, seconds
+EYE_AGE=7200      # rule 3: hand-run eye-render/main.js outside dark-eye.service, seconds
+SCRATCH_AGE=86400 # rule 5: scratchpad of a dead session, seconds
+RSS_MIN_KB=307200 # rule 4: portal helper RSS, 300 MB
+
+log() { printf '%s %s\n' "$(date -Is)" "$*" >>"$st/sentinel.log"; }
+
+dry_for() {
+  [ "$DRY" = 1 ] && return 0
+  case ",${DRYRULES}," in *",$1,"*) return 0 ;; esac
+  return 1
+}
+
+# Legacy kill-list: stateless session helpers restarted on demand by systemd/D-Bus.
+legacy_allowed() {
+  case "$1" in
+    evolution-*-factory|tracker-*|localsearch-*|\
+    gnome-software|packagekitd|snapd-desktop-integration|ibus-*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Rule 4: desktop helpers that get restarted (not killed) when hot or fat.
+desktop_helper() {
+  case "$1" in
+    xdg-desktop-portal*|gsd-*|gjs) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+stop_pid() {
+  local rule="$1" pid="$2" why="$3" cmd="$4"
+  if dry_for "$rule"; then log "runaway would kill pid $pid (rule$rule: $why): $cmd"; return; fi
+  kill "$pid" 2>/dev/null || sudo -n kill "$pid" 2>/dev/null
+  for _ in $(seq 10); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -9 "$pid" 2>/dev/null || sudo -n kill -9 "$pid" 2>/dev/null
+  fi
+  log "runaway killed pid $pid (rule$rule: $why): $cmd"
+}
+
+restart_helper() {
+  local pid="$1" comm="$2" why="$3" unit
+  unit="${comm}.service"
+  if dry_for 4; then log "runaway would restart $unit (pid $pid, rule4: $why)"; return; fi
+  if systemctl --user restart "$unit" >>"$st/sentinel.log" 2>&1; then
+    log "runaway restarted $unit (pid $pid was $why)"
+  else
+    stop_pid 4 "$pid" "$why, no such unit $unit, killed instead" "$comm"
+    return
+  fi
+  local now_e last=0
+  now_e=$(date +%s)
+  last=$(awk -F'\t' -v c="$comm" '$1==c{print $2}' "$restarts" 2>/dev/null | tail -1)
+  [ -n "$last" ] || last=0
+  if [ $((now_e - last)) -lt 86400 ] && [ "$last" -gt 0 ]; then
+    notify-owner -p high -t sentinel "sentinel: $unit restarted again within 24h ($why)" 2>/dev/null || true
+  fi
+  { grep -v -F "$(printf '%s\t' "$comm")" "$restarts" 2>/dev/null; printf '%s\t%s\n' "$comm" "$now_e"; } >"$restarts.new" \
+    && mv "$restarts.new" "$restarts"
+}
+
+wipe_scratch() {
+  local dir="$1" age="$2"
+  if dry_for 5; then log "runaway would rm -rf $dir (rule5: dead session's scratchpad, $((age/3600))h old)"; return; fi
+  rm -rf -- "$dir"
+  log "runaway removed $dir (rule5: dead session's scratchpad, $((age/3600))h old)"
+}
+
+now=$(date +%s)
+read -r uptime_s _ <"$PROC/uptime" 2>/dev/null || uptime_s=0
+boot_epoch=$((now - ${uptime_s%.*}))
+HZ=100
+PAGE_KB=4
+
+declare -A PREV
+if [ -r "$state" ]; then
+  while IFS=$'\t' read -r p s c t k; do PREV["$p:$s"]="$c:$t:$k"; done <"$state"
+fi
+
+new=$(mktemp)
+CMD_ALL=()
+CLAUDE_PIDS=()
+
+for d in "$PROC"/[0-9]*; do
+  pid=${d##*/}
+  [ -r "$d/stat" ] || continue
+  stat_line=$(<"$d/stat") || continue
+  rest="${stat_line#*\(}"
+  comm="${rest%\)*}"
+  after="${rest##*\) }"
+  # state ppid pgrp session tty tpgid flags minflt cminflt majflt cmajflt utime stime cutime cstime priority nice nthreads itrealvalue starttime vsize rss...
+  read -r _ _ _ _ _ _ _ _ _ _ _ utime stime _ _ _ _ _ _ starttime _ rss_pages _ <<<"$after" || continue
+  [ -n "${starttime:-}" ] || continue
+  cpu=$(( (utime + stime) / HZ ))
+  start=$(( boot_epoch + starttime / HZ ))
+  age=$(( now - start ))
+  rss_kb=$(( rss_pages * PAGE_KB ))
+
+  cmd=""
+  argv=()
+  if [ -r "$d/cmdline" ]; then
+    mapfile -d '' -t argv <"$d/cmdline" 2>/dev/null
+    cmd="${argv[*]:-}"
+  fi
+  [ -n "$cmd" ] || cmd="$comm"
+  CMD_ALL+=("$cmd")
+  [ "$comm" = "claude" ] && CLAUDE_PIDS+=("$pid")
+  # /proc/*/stat truncates comm to 15 chars ("xdg-desktop-por"), too short to match or to
+  # restart by; prefer argv[0]'s basename, which carries the full executable name.
+  fname="$comm"
+  [ -n "${argv[0]:-}" ] && fname="${argv[0]##*/}"
+
+  [ "$pid" = "$$" ] && continue
+
+  # --- rule 4 + legacy: CPU-strike tracking, shared across both kill-list and restart-list ---
+  key="$pid:$start"
+  strikes=0
+  if [ -n "${PREV[$key]:-}" ]; then
+    IFS=: read -r pcpu pts pstrikes <<<"${PREV[$key]}"
+    dt=$((now - pts))
+    if [ "$dt" -gt 0 ]; then pct=$(( 100 * (cpu - pcpu) / dt )); else pct=0; fi
+    [ "$pct" -ge "$PCT_MIN" ] && strikes=$((pstrikes + 1))
+  else
+    pct=0
+  fi
+
+  if legacy_allowed "$fname" && [ "$strikes" -ge "$STRIKES_MIN" ]; then
+    stop_pid legacy "$pid" "${pct}% of a core over $strikes runs" "$cmd"
+    strikes=0
+  elif desktop_helper "$fname"; then
+    trigger=""
+    if [ "$strikes" -ge "$STRIKES_MIN" ]; then trigger="${pct}% of a core over $strikes runs"; fi
+    if [ "$rss_kb" -ge "$RSS_MIN_KB" ]; then
+      trigger="${trigger:+$trigger, }$((rss_kb / 1024)) MB RSS"
+    fi
+    if [ -n "$trigger" ]; then
+      restart_helper "$pid" "$fname" "$trigger"
+      strikes=0
+    fi
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\n' "$pid" "$start" "$cpu" "$now" "$strikes" >>"$new"
+
+  # --- rule 1: shell loop whose cwd or argv is under an agent scratchpad, > 60 min ---
+  if [ "$age" -ge "$SHELL_AGE" ] && [[ "$comm" =~ ^(bash|sh)$ ]]; then
+    cwd=$(readlink "$d/cwd" 2>/dev/null)
+    if [[ "$cmd" == *"/scratchpad"*/* ]] || in_scratch "$cmd" || in_scratch "$cwd"; then
+      stop_pid 1 "$pid" "shell loop under a scratchpad, $((age / 60)) min old" "$cmd"
+    fi
+  fi
+
+  # --- rule 2: capture command whose stdout is an unread pipe or a file nobody holds ---
+  if [ "$age" -ge "$ORPHAN_AGE" ]; then
+    is_capture=0
+    case "$comm" in
+      journalctl) [[ "$cmd" == *" -f"* || "$cmd" == *"--follow"* ]] && is_capture=1 ;;
+      tail) [[ "$cmd" == *" -f"* ]] && is_capture=1 ;;
+      btmon) is_capture=1 ;;
+      pw-cat) [[ "$cmd" == *" -r"* || "$cmd" == *"--record"* ]] && is_capture=1 ;;
+    esac
+    if [ "$is_capture" = 1 ]; then
+      target=$(readlink "$d/fd/1" 2>/dev/null)
+      orphan=0
+      if [[ "$target" =~ ^pipe:\[([0-9]+)\]$ ]]; then
+        inode="${BASH_REMATCH[1]}"
+        holders=$(find "$PROC" -maxdepth 3 -path '*/fd/*' -lname "pipe:\\[${inode}\\]" 2>/dev/null | grep -vc "^$d/fd/")
+        [ "${holders:-0}" -eq 0 ] && orphan=1
+      elif [ -n "$target" ] && [ ! -e "$target" ]; then
+        orphan=1
+      fi
+      if [ "$orphan" = 1 ]; then
+        stop_pid 2 "$pid" "capture with no reader, $((age / 60)) min old" "$cmd"
+      fi
+    fi
+  fi
+
+  # --- rule 3: hand-run eye-render/body outside dark-eye.service's cgroup, > 2 h ---
+  if [ "$age" -ge "$EYE_AGE" ]; then
+    is_body=0
+    [ "$comm" = "eye-render" ] && is_body=1
+    [[ "$comm" = "node"* && "$cmd" =~ src/main\.js ]] && is_body=1
+    if [ "$is_body" = 1 ]; then
+      cgroup=""
+      [ -r "$d/cgroup" ] && cgroup=$(<"$d/cgroup")
+      if [[ "$cgroup" != *dark-eye.service* ]]; then
+        stop_pid 3 "$pid" "hand-run Dark Eye body outside dark-eye.service, $((age / 3600))h old" "$cmd"
+      fi
+    fi
+  fi
+done
+
+if [ "$DRY" = 1 ]; then rm -f "$new"; else mv "$new" "$state"; fi
+
+# --- rule 5: scratchpads of sessions whose agent process is gone, > 24 h ---
+shopt -s nullglob
+# Unquoted on purpose: this is where the patterns expand into directories.
+# shellcheck disable=SC2068
+for scratch in ${SCRATCH_GLOBS[@]+${SCRATCH_GLOBS[@]}}; do
+  [ -d "$scratch" ] || continue
+  mtime=$(stat -c %Y "$scratch" 2>/dev/null) || continue
+  age=$(( now - mtime ))
+  [ "$age" -ge "$SCRATCH_AGE" ] || continue
+  uuid_dir="${scratch%/*}"          # the session directory, whatever the glob's last segment is called
+  uuid="${uuid_dir##*/}"
+  live=0
+  for c in "${CMD_ALL[@]:-}"; do
+    [[ "$c" == *"$uuid"* ]] && { live=1; break; }
+  done
+  if [ "$live" = 0 ]; then
+    for cp in "${CLAUDE_PIDS[@]:-}"; do
+      if find "$PROC/$cp/fd" -maxdepth 1 -lname "*$uuid*" 2>/dev/null | grep -q .; then live=1; break; fi
+    done
+  fi
+  [ "$live" = 0 ] && wipe_scratch "$scratch" "$age"
+done
+shopt -u nullglob

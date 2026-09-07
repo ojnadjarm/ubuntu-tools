@@ -1,0 +1,6 @@
+NAME                                TYPE      SIGNATURE RESULT/VALUE FLAGS
+org.freedesktop.DBus.Peer           interface -         -            -
+.Ping                               method    -         -            -
+pc.test.Iface                       interface -         -            -
+.Reload                             method    -         -            -
+.Level                              property  u         3            writable

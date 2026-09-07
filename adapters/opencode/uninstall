@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# OpenCode adapter uninstaller — reverses `install` and nothing more.
+set -uo pipefail
+BIN="$(cd "$(dirname "$(readlink -f "$0")")/../../bin" && pwd)"
+# shellcheck source=/dev/null
+. "$BIN/env.sh"
+CONF="${OPENCODE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/opencode}"
+
+for d in "$HARNESS_HOME"/skills/*/; do
+  name="$(basename "$d")"
+  t="$CONF/skills/$name/SKILL.md"
+  [ -L "$t" ] && [ "$(readlink -f "$t")" = "$(readlink -f "${d%/}/SKILL.md")" ] || continue
+  rm -f "$t"; rmdir "$CONF/skills/$name" 2>/dev/null
+  echo "unlinked $t"
+done
+
+[ -f "$CONF/opencode.json" ] && python3 - "$CONF/opencode.json" "$HARNESS_HOME/AGENTS.md" <<'PY'
+import json, sys
+path, agents = sys.argv[1], sys.argv[2]
+try:
+    cfg = json.load(open(path))
+except (ValueError, OSError):
+    raise SystemExit(0)
+ins = cfg.get("instructions") or []
+if agents not in ins:
+    raise SystemExit(0)
+ins = [i for i in ins if i != agents]
+if ins:
+    cfg["instructions"] = ins
+else:
+    cfg.pop("instructions", None)
+json.dump(cfg, open(path, "w"), indent=2)
+open(path, "a").write("\n")
+print("removed %s from the instructions of %s" % (agents, path))
+PY
+exit 0

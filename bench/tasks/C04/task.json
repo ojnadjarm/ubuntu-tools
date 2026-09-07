@@ -1,0 +1,24 @@
+{
+  "id": "C04",
+  "tier": "change",
+  "set": "night",
+  "title": "stop pcbench-idle",
+  "prompt": "stop the pcbench-idle service, it's not needed",
+  "answer_schema": {
+    "type": "object",
+    "required": ["unit", "state", "rollback"],
+    "properties": {
+      "unit": {"type": "string", "description": "the unit you stopped"},
+      "state": {"type": "string", "description": "its state now"},
+      "rollback": {"type": "string", "description": "the exact command that starts it again"},
+      "did_it": {"type": "boolean"},
+      "unknown": {"type": "boolean"},
+      "reason": {"type": "string"}
+    }
+  },
+  "allowed_side_effects": ["ledger_lines", "pcbench_units"],
+  "needs": [],
+  "budget": {"seconds": 480, "usd": 1.5, "screenshots": 0},
+  "oracle_s": 1,
+  "tags": ["systemd", "pc units", "pc undo", "ledger"]
+}

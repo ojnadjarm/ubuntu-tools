@@ -1,0 +1,9 @@
+[Unit]
+Description=Schedule for agent %i
+
+[Timer]
+Unit=agent@%i.service
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

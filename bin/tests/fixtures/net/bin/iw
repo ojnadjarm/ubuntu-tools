@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+cat <<'TXT'
+Connected to aa:bb:cc:dd:ee:ff (on wlo1)
+        SSID: HomeNet
+        freq: 5180
+        signal: -45 dBm
+        tx bitrate: 433.3 MBit/s
+TXT

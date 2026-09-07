@@ -1,0 +1,22 @@
+{
+  "id": "O04",
+  "tier": "observe",
+  "set": "night",
+  "title": "Disk full and healthy?",
+  "prompt": "how full is the disk and is it healthy?",
+  "answer_schema": {
+    "type": "object",
+    "required": ["used_pct", "smart_ok"],
+    "properties": {
+      "used_pct": {"type": "number"},
+      "smart_ok": {"type": "boolean"},
+      "unknown": {"type": "boolean"},
+      "reason": {"type": "string"}
+    }
+  },
+  "allowed_side_effects": [],
+  "needs": [],
+  "budget": {"seconds": 240, "usd": 1.0, "screenshots": 0},
+  "oracle_s": 0,
+  "tags": ["disk", "pc status", "night-safe"]
+}

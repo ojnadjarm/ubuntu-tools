@@ -1,0 +1,74 @@
+#!/bin/sh
+cat <<'EOF'
+# dmidecode 3.6
+Getting SMBIOS data from sysfs.
+SMBIOS 3.4.0 present.
+
+Handle 0x0001, DMI type 1, 27 bytes
+System Information
+	Manufacturer: ASUSTeK COMPUTER INC.
+	Product Name: Vivobook_ASUSLaptop X1503ZA_X1503ZA
+	Version: 1.0
+	Serial Number: TESTSERIAL0001
+	UUID: 00000000-0000-0000-0000-000000000000
+	Wake-up Type: Power Switch
+	SKU Number:
+	Family: Vivobook
+
+Handle 0x0002, DMI type 2, 15 bytes
+Base Board Information
+	Manufacturer: ASUSTeK COMPUTER INC.
+	Product Name: X1503ZA
+	Version: 1.0
+	Serial Number: TESTBOARD0001
+	Type: Motherboard
+
+Handle 0x0000, DMI type 0, 26 bytes
+BIOS Information
+	Vendor: American Megatrends International, LLC.
+	Version: X1503ZA.301
+	Release Date: 06/14/2022
+	BIOS Revision: 5.25
+
+Handle 0x000A, DMI type 16, 23 bytes
+Physical Memory Array
+	Location: System Board Or Motherboard
+	Use: System Memory
+	Error Correction Type: None
+	Maximum Capacity: 64 GB
+	Number Of Devices: 2
+
+Handle 0x000B, DMI type 17, 92 bytes
+Memory Device
+	Array Handle: 0x000A
+	Total Width: 64 bits
+	Data Width: 64 bits
+	Size: 8 GB
+	Form Factor: SODIMM
+	Locator: Controller0-ChannelA
+	Bank Locator: BANK 0
+	Type: DDR4
+	Type Detail: Synchronous
+	Speed: 3200 MT/s
+	Manufacturer: Micron Technology
+	Serial Number: 00000000
+	Part Number: 4ATF1G64HZ-3G2F1
+	Configured Memory Speed: 3200 MT/s
+
+Handle 0x000C, DMI type 17, 92 bytes
+Memory Device
+	Array Handle: 0x000A
+	Total Width: 64 bits
+	Data Width: 64 bits
+	Size: 32 GB
+	Form Factor: SODIMM
+	Locator: Controller1-ChannelA-DIMM0
+	Bank Locator: BANK 0
+	Type: DDR4
+	Type Detail: Synchronous
+	Speed: 3200 MT/s
+	Manufacturer: Patriot Memory (PDP Systems)
+	Serial Number: 0731010B
+	Part Number: 3200 C18 Series
+	Configured Memory Speed: 3200 MT/s
+EOF
