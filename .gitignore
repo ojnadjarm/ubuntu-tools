@@ -28,3 +28,10 @@
 # Python bytecode.
 __pycache__/
 *.pyc
+
+# Planning artefacts: plans, tickets and spikes are pre-development, never part of the product.
+/PLAN-*.md
+/ubuntu-ai-first/
+/bench/PLAN-*.md
+/bench/tickets/
+/bench/spike/

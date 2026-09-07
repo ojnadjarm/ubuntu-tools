@@ -1,1 +1,0 @@
-arm=new rc=0 wall=21.9 pass=1

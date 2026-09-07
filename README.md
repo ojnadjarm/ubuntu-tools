@@ -6,7 +6,7 @@ that wire it to whichever agent CLI is installed.
 
 - **The contract:** `AGENTS.md` (`FLEET.md` is a symlink to it). Every agent reads it.
 - **The machine:** `KB/toolbox.md`, `KB/quirks.md`, `KB/runbooks/`; `KB/machine.md` is generated.
-- **The plan:** `ubuntu-ai-first/PLAN.md`, `PLAN-GENERAL-HARNESS.md`.
+- **The contract:** `AGENTS.md`; results: `bench/BASELINE-PCBENCH.md`, `bench/QA-REPORT.md`.
 
 ## Install
 
@@ -107,5 +107,5 @@ git commit -m "pc-harness: initial import"
 4. **Where the rest is**
    - Roster and orchestrator rules: `~/CLAUDE.md`. Rules every agent follows: `~/agents/AGENTS.md`.
    - Machine facts and runbooks: `~/agents/KB/`. Desktop control: `~/agents/README-pc-control.md`.
-   - Plan and tickets: `~/agents/ubuntu-ai-first/PLAN.md`, `~/agents/ubuntu-ai-first/tickets/`.
+   - Benchmark and QA results: `~/agents/bench/BASELINE-PCBENCH.md`, `~/agents/bench/QA-REPORT.md`.
    - How an agent is built and added: `~/agents/RUNNER.md` (`~/agents/hello/` is the template).

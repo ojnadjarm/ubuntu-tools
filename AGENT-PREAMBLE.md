@@ -16,7 +16,7 @@
   timers. Once T28a lands, `pc see` is the same rule for the screen.
 - **Never ask the owner for state you can read.** Machine facts: `~/agents/KB/machine.md`,
   quirks `~/agents/KB/quirks.md`, runbooks `~/agents/KB/runbooks/`, desktop cheat sheet
-  `~/agents/README-pc-control.md`, plan `~/agents/ubuntu-ai-first/PLAN.md`.
+  `~/agents/README-pc-control.md`.
 - **Text before pixels.** Prefer `pc win list` / `pc tree` / `pc find` over a screenshot; take a
   `pc shot` only when text cannot answer the question.
 

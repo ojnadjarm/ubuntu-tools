@@ -13,11 +13,9 @@ bad=0
 ok() { if [ "$1" = 1 ]; then echo "PASS $2"; else echo "FAIL $2"; bad=$((bad+1)); fi; }
 
 # Evidence and history keep the literals they recorded on purpose:
-#   ubuntu-ai-first/  the build log of this machine (tickets + QA runs), a record, not config
 #   bench/            frozen benchmark arms, recorded trajectories, and the safety selftest that
 #                     must name the real remote it proves the guard refuses (AGENTS.md §5.6)
-#   PLAN-GENERAL-HARNESS.md  quotes every literal in its inventory and its "never rename" list
-SKIP='^(ubuntu-ai-first/|bench/|PLAN-GENERAL-HARNESS\.md$)'
+SKIP='^bench/'
 # Test fixtures are command output recorded on this machine and replayed byte for byte, so they
 # carry an absolute home and a uid by nature. GH17 scrubbed the identities out of them
 # (`agentuser`, `example-host`, TEST-NET addresses), and the identity cases below still cover

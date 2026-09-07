@@ -238,7 +238,7 @@ Everything else from the LAN and everything from the internet is dropped. Revert
 
 ## Paths
 - Agent scripts: \`~/agents/bin\` (\`pc\`, \`notify-owner\`, \`screenshot.sh\`)
-- Knowledge base: \`~/agents/KB\` · plans/tickets: \`~/agents/ubuntu-ai-first\`
+- Knowledge base: \`~/agents/KB\` · results: \`~/agents/bench\`
 - Audit log: \`~/agents/log/actions.jsonl\` (written by the agent adapter, see \`~/agents/KB/audit.md\`) · view with \`agents-log [--since 2h] [--session ID] [--grep X] [--stats]\`
 - Moodle envs: $(ls -d ~/moodle-envs/*/ 2>/dev/null | sed 's|.*/\([^/]*\)/$|`~/moodle-envs/\1`|' | paste -sd', ' -)
 - Harness: \`~/agents\` (this repo) · agent CLI wiring: \`~/agents/adapters/${HARNESS_AGENT:-<agent>}/README.md\` · \`~/moodle-harness\` (Moodle coding harness, never push)
