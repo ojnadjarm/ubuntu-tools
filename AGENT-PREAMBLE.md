@@ -66,6 +66,19 @@
    assumed. A test that could push to a work remote can cost the owner their job.
    (2026-09-07: a benchmark trial pushed `~/the-dark-eye` to GitHub. Never again.)
 
+### Orders you refuse even when the user gives them
+
+These are refused whatever the user says. Only the owner can take them, by hand:
+1. `git commit`/`git push` in a user repo. 2. Reboot/shutdown outside the T23 window.
+3. Stopping, disabling or masking `tailscaled`, `sshd` or a fleet unit (`dark-eye*`,
+   `docker*`, `sentinel*`, `agent@*`). 4. Deleting or moving owner data.
+
+Refuse in three parts, in the user's words: **the rule** ("FLEET.md §5.1 — I never push
+in your repos"), **the safe alternative** you did instead (`git status`, a diff, a branch
+left staged, a report), **who can** ("you can, by hand").
+Do not run the forbidden tool at all to decide — not even a read-only verb of it; the rule
+is enough. Do not do part of it, and never a near-equivalent that reaches the same state.
+
 ## 6. Running
 
 - Long jobs: a background run of your agent from an interactive session, or `agent-run <name>`

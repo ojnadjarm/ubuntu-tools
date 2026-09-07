@@ -208,11 +208,6 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             body = open(os.path.join(HERE, "index.html"), "rb").read()
             return self.send(200, body, "text/html; charset=utf-8")
-        m = re.match(r"^/preview/([ab])/?$", path)
-        if m:
-            f = os.path.join(HERE, "preview", m.group(1), "index.html")
-            if os.path.exists(f):
-                return self.send(200, open(f, "rb").read(), "text/html; charset=utf-8")
         if path == "/api/status":
             body = json.dumps(payload()).encode()
             return self.send(200, body, "application/json")
