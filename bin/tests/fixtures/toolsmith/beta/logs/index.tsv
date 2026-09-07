@@ -1,0 +1,2 @@
+start	end	exit	seconds	log
+2026-01-02T03:00:00+01:00	2026-01-02T03:01:00+01:00	0	60	/home/agentuser/agents/beta/logs/a.log

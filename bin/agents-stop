@@ -18,10 +18,10 @@ stop_if_running() {
   stopped="$stopped ${1%.*}"
 }
 
-for u in $(units 'agent@*.service') sentinel-check.service moodle-keep-weekly.service; do
+for u in $(units 'agent@*.service') sentinel-check.service moodle-keep-weekly.service pcbench-weekly.service; do
   stop_if_running "$u"
 done
-for u in $(units 'agent@*.timer') sentinel-check.timer moodle-keep-weekly.timer; do
+for u in $(units 'agent@*.timer') sentinel-check.timer moodle-keep-weekly.timer pcbench-weekly.timer; do
   stop_if_running "$u"
 done
 

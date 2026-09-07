@@ -86,7 +86,11 @@ git commit -m "pc-harness: initial import"
 # Your agents
 
 1. **What runs by itself**
-   - `sentinel-check` (bash, every 15 min), `moodle-keeper`, `moodle-keep-weekly`, `sentinel-digest`.
+   - `sentinel-check` (bash, every 15 min), `moodle-keeper`, `moodle-keep-weekly`, `sentinel-digest`,
+     `maintenance`, `pcbench-weekly` (bash, Sun 02:00 — the toolbox A/B run; it drives the desktop,
+     so it skips itself whenever you are at the machine),
+     `toolsmith` (Mon + Thu 03:00 — plans the next improvements and writes proposals you approve
+     with "go TSP-nnn"; it never implements).
    - The roster of record — every agent, its schedule, its task and when it contacts you — is the table
      in `~/CLAUDE.md`; each agent's own brief is `~/agents/<name>/BRIEF.md`.
 

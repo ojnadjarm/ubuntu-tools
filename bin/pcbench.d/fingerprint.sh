@@ -23,7 +23,8 @@ f win_list          bash -c 'timeout 5 pc win list 2>/dev/null | md5sum | cut -c
 f ledger_lines      bash -c 'wc -l < "$HOME/agents/log/changes.jsonl" 2>/dev/null || echo 0'
 f uptime_since      uptime -s
 f dark_eye_head     bash -c 'git -C "$HOME/the-dark-eye" rev-parse HEAD 2>/dev/null'
-f pcbench_units     bash -c "systemctl --user list-units 'pcbench-*' --all --no-legend 2>/dev/null | wc -l"
+# pcbench-weekly.{timer,service} is the fleet's own weekly runner, not a trial object (PB09).
+f pcbench_units     bash -c "systemctl --user list-units 'pcbench-*' --all --no-legend 2>/dev/null | grep -v pcbench-weekly | wc -l"
 wait
 
 for n in default_sink null_modules power_profile failed_user_units docker monitors tailscale \

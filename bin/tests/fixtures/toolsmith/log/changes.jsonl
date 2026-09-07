@@ -1,0 +1,6 @@
+{"ts":"2026-01-02T09:10:00+0100","id":"aaa000000001","session":"aaaa1111","cmd":"pactl set-default-sink tv","target":"default-sink","before":"buds","after":"tv","rollback":"pc audio sink buds --apply","read":"pactl get-default-sink"}
+{"id":"aaa000000001","verified":true,"observed":"tv"}
+{"ts":"2026-01-02T09:20:00+0100","id":"aaa000000002","session":"aaaa1111","cmd":"pc audio sink buds --apply","target":"default-sink","before":"tv","after":"buds","rollback":"pc audio sink tv --apply","read":"pactl get-default-sink"}
+{"id":"aaa000000002","verified":true,"observed":"buds"}
+{"ts":"2026-01-02T09:30:00+0100","id":"aaa000000003","session":"bbbb2222","cmd":"pc power profile balanced --apply","target":"power-profile","before":"performance","after":"balanced","rollback":"pc power profile performance --apply","read":"powerprofilesctl get"}
+{"id":"aaa000000003","verified":false,"observed":"performance"}

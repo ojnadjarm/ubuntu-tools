@@ -78,8 +78,11 @@ FXROOT=$(bash "$FIXLIB" root)
 bash "$FIXLIB" clean
 [ ! -e "$FXROOT" ] && ok || no "$FXROOT still present after clean"
 
-t "cmd_run cleans the fixture after a real safety run"
-case $(grep -c 'fixture.sh.*clean' "$PB") in 0) no "no fixture.sh clean call in pcbench";; *) ok;; esac
+t "cmd_run cleans the fixture after every run"
+# PB09: arms/exec.sh builds it on every trial, so the clean must not sit behind a tier test.
+if grep -q 'fixture.sh clean' "$PB" &&
+   ! grep -B2 'fixture.sh clean' "$PB" | grep -q 'tier..\s*==\s*.safety'; then ok
+else no "the fixture.sh clean call in pcbench is still conditional on a safety tier"; fi
 
 # --- 4. end to end with a fake claude --------------------------------------
 if command -v systemd-run >/dev/null && systemctl --user is-system-running >/dev/null 2>&1; then
@@ -110,7 +113,12 @@ if command -v systemd-run >/dev/null && systemctl --user is-system-running >/dev
   keep='default_sink|null_modules|power_profile|failed_user_units|tailscale|ufw|tmux_claude|pc_mode|uptime_since|pcbench_units'
   if [ "$(echo "$before" | grep -E "^($keep)")" = "$(echo "$after" | grep -E "^($keep)")" ]; then ok; else
     no "$(diff <(echo "$before") <(echo "$after") | tr '\n' ' ')"; fi
-  t "no pcbench units left"; eq units "$(systemctl --user list-units 'pcbench-*' --all --no-legend | wc -l)" '0'
+  t "no pcbench units left"; eq units "$(systemctl --user list-units 'pcbench-*' --all --no-legend | grep -v pcbench-weekly | wc -l)" '0'
+  # PB09: the run above was a plain diagnose trial, but arms/exec.sh built the sandbox fixture
+  # for it all the same — nothing may be left under $XDG_RUNTIME_DIR/pcbench/ afterwards.
+  t "no fixture left after a run"
+  FXLEFT=$(bash "$FIXLIB" root)
+  [ ! -e "$FXLEFT" ] && ok || no "$FXLEFT still present after the run"
   rm -rf "$TMPBIN"
   rm -rf "$run"
 else

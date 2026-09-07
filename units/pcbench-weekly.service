@@ -1,0 +1,9 @@
+[Unit]
+Description=Weekly pcbench A/B run (all tiers, both arms, n=3) — gated on nobody-home
+
+[Service]
+Type=oneshot
+TimeoutStartSec=5400
+Nice=10
+ExecStart=/bin/bash -lc 'exec %h/agents/bin/pcbench-weekly'
+ExecStopPost=/bin/bash -lc 'test "$EXIT_STATUS" = 0 || %h/agents/bin/notify-owner -p high -t pcbench "weekly bench failed (exit $EXIT_STATUS): journalctl --user -u pcbench-weekly"'

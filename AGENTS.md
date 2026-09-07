@@ -32,6 +32,12 @@
 
 ## 3. Act, then verify
 
+- **When the user asks for a change, make it with the `pc` verb's `--apply`** — find the verb
+  (`pc help`, `pc <verb> --help`), not `pactl`/`powerprofilesctl`/`systemctl`/`docker` by hand.
+  Without `--apply` a mutating verb only prints `would: <before> → <after>` and changes nothing;
+  with it the change is ledgered and the last line is `rollback: pc undo <id>`. Then read the
+  state back and report that `pc undo <id>` as the rollback. Use the raw tool only when no `pc`
+  verb covers the change, and say in your answer that you did.
 - Every control action has a read-back: `pc status` / `pc see` after a system change, a browser
   snapshot after a click, an exit code and a file check after a command.
 - Screenshot or text digest **after** each desktop or browser action, not only before.
@@ -101,5 +107,5 @@ is enough. Do not do part of it, and never a near-equivalent that reaches the sa
 - End every run by overwriting `REPORT.md` with at most 5 lines: what you did, what you found,
   what needs the owner. The runner prepends the run metadata.
 - Be terse. No preamble, no recap.
-- This file is the whole contract. `AGENT-PREAMBLE.md` is generated from it by `make preamble` —
-  edit `AGENTS.md`, never the copy.
+- This file is the whole contract. `AGENT-PREAMBLE.md` and `bench/TRIAL-PREAMBLE.md` are
+  generated from it by `make preamble` — edit `AGENTS.md`, never a copy.

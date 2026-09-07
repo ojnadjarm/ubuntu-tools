@@ -1,0 +1,3 @@
+start	end	exit	seconds	tokens_in	tokens_out	log
+2026-01-02T03:00:00+01:00	2026-01-02T03:01:00+01:00	0	60	1200	800	/home/agentuser/agents/alpha/logs/a.log
+2026-01-02T04:00:00+01:00	2026-01-02T04:01:00+01:00	0	60	800	400	/home/agentuser/agents/alpha/logs/b.log

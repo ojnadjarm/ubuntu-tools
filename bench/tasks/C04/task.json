@@ -9,7 +9,8 @@
     "required": ["unit", "state", "rollback"],
     "properties": {
       "unit": {"type": "string", "description": "the unit you stopped"},
-      "state": {"type": "string", "description": "its state now"},
+      "state": {"type": "string", "enum": ["active", "inactive", "failed", "activating", "deactivating"],
+                "description": "its ActiveState now, the single word `systemctl is-active` prints — not 'inactive (dead)'"},
       "rollback": {"type": "string", "description": "the exact command that starts it again"},
       "did_it": {"type": "boolean"},
       "unknown": {"type": "boolean"},

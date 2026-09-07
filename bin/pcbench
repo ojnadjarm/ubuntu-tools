@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """pcbench — run a task pack against a toolbox arm, classify the trajectory, report the A/B.
 
-Subcommands: list · validate · arm · parse · run · report.  Design: PLAN-PCBENCH §2, corrected
+Subcommands: list · validate · arm · parse · run · away · report.  Design: PLAN-PCBENCH §2, corrected
 by bench/spike/SPIKE.md (no --max-turns; budget = --max-budget-usd + timeout; `< /dev/null`;
 --setting-sources user; --disallowedTools Agent).  Task schema: bench/SCHEMA.md.
 """
@@ -354,6 +354,53 @@ def needs_met(need, owner_go=None):
     if need == "owner_go":
         return bool(owner_go)
     return True
+
+
+AWAY_IDLE_S = float(os.environ.get("PCBENCH_AWAY_IDLE_S", 1800))
+
+
+def owner_presence():
+    """Is the owner at the machine? -> (present, reasons).
+
+    One source: `pc status --json --fresh`, whose desktop/power sections already carry lock,
+    lid, idle (PB09), players (PB09) and seat_logins (PB09). A missing field is read as absent,
+    never as present, so a broken probe never blocks a run silently — it is listed in reasons.
+    """
+    rc, out = sh("pc status --json --fresh 2>/dev/null")
+    try:
+        sec = json.loads(out)["sections"]
+    except Exception:
+        return True, ["pc status --json unreadable"]
+
+    def v(section, key):
+        return str((sec.get(section) or {}).get(key, {}).get("value", "")).strip()
+
+    reasons = []
+    lock, idle = v("desktop", "lock"), v("desktop", "idle")
+    try:
+        idle_s = float(idle.split()[0])
+    except (ValueError, IndexError):
+        idle_s = None
+    if lock == "unlocked" and idle_s is not None and idle_s < AWAY_IDLE_S:
+        reasons.append("session unlocked, last input %.0fs ago (< %.0fs)" % (idle_s, AWAY_IDLE_S))
+    if v("power", "lid") == "open":
+        reasons.append("lid open")
+    players = v("desktop", "players")
+    if "Playing" in players:
+        reasons.append("player playing: " + players)
+    seats = v("desktop", "seat_logins")
+    if seats.isdigit() and int(seats) > 0:
+        reasons.append("%s interactive login(s) on the seat" % seats)
+    return bool(reasons), reasons
+
+
+def cmd_away(args):
+    present, reasons = owner_presence()
+    if args.json:
+        print(json.dumps({"away": not present, "present": present, "reasons": reasons}))
+    else:
+        print(("present: " + "; ".join(reasons)) if present else "away")
+    return 1 if present else 0
 
 
 def real_dark_eye():
@@ -735,6 +782,11 @@ def cmd_parse(args):
 
 
 def cmd_run(args):
+    if getattr(args, "require_away", False):
+        present, reasons = owner_presence()
+        if present:
+            print("skipped: owner present — " + "; ".join(reasons))
+            return 0
     tasks = load_tasks(args.set and [args.set], args.tier and [args.tier], args.task)
     if not tasks:
         die("no tasks selected")
@@ -796,8 +848,8 @@ def cmd_run(args):
                         die("run budget exceeded ($%.2f)" % total_cost, 4)
     if real_dark_eye() != de_before:
         die("~/the-dark-eye moved during the run — the owner's repo must be untouchable", 5)
-    if not args.dry_run and any(t["tier"] == "safety" for t in tasks):
-        sh("bash %s/tasks/_lib/fixture.sh clean" % BENCH)
+    # arms/exec.sh builds the fixture on *every* trial, so clean it after every run.
+    sh("bash %s/tasks/_lib/fixture.sh clean" % BENCH)
     print(run_dir)
     return 0
 
@@ -838,8 +890,14 @@ def main():
     a.add_argument("--dry-run", action="store_true", help="setup/solve/check/teardown, no model")
     a.add_argument("--owner-go", default="")
     a.add_argument("--force", action="store_true", help="skip the fleet/timer start guard")
+    a.add_argument("--require-away", action="store_true",
+                   help="exit 0 without running when the owner is at the machine")
     a.add_argument("--max-budget-usd-total", type=float, default=150.0)
     a.set_defaults(fn=cmd_run)
+
+    a = sub.add_parser("away", help="is the owner away from the machine?", parents=[common])
+    a.add_argument("--json", action="store_true")
+    a.set_defaults(fn=cmd_away)
 
     a = sub.add_parser("report", help="rows → the markdown tables", parents=[common])
     a.add_argument("runs", nargs="+")

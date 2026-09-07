@@ -1,0 +1,9 @@
+[Unit]
+Description=Weekly pcbench A/B run (Sun 02:00, before maintenance)
+
+[Timer]
+OnCalendar=Sun *-*-* 02:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

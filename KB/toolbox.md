@@ -157,6 +157,8 @@ read-only without `--apply`; the ledger, `pc undo` and the guard exits are in
   prints the case power-cycle instruction if the taps still fail. Destroys the failing state: capture first.
 - Other helpers in `~/agents/bin`: `boot-check.sh` (post-boot OK/FAIL), `lockcheck.sh` (always-on desktop),
   `baseline.sh` (config tarball before changing user config), `maintenance-run`, `moodle-keep`,
+  `pcbench-weekly` (Sunday 02:00 A/B run, gated on `pcbench away` — never starts while the owner
+  is at the machine; `pcbench-weekly --dry-run` prints the verdict),
   `moodle-envs` (list Moodle envs), `moodle-login-check`, `power-profile-auto`, `sentinel-check`,
   `sentinel-runaway` (runaway-process killer, called by `sentinel-check`; `--dry-run` to preview),
   `playwright-mcp` (headless unless `PW_HEADED=1`, `PW_PROFILE=<name>`).

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Fake `pc` for the PB09 gate test: `pc status --json` prints $PCFAKE_STATUS, nothing else works.
+case "$1 $2" in
+  "status --json") cat "$PCFAKE_STATUS";;
+  *) echo "fake pc: refusing $*" >&2; exit 2;;
+esac

@@ -1,0 +1,10 @@
+{
+ "ts": "2026-01-02T02:00:00+01:00",
+ "runs": ["20260101-000000-ab", "20260102-000000-ab"],
+ "trials": 8,
+ "arms": {
+  "new": {"tasks": 4, "pass": 0.75, "passN": 0.5, "residue": 0, "cost": 0.8},
+  "old": {"tasks": 4, "pass": 0.5, "passN": 0.25, "residue": 1, "cost": 0.9}
+ },
+ "regressions": ["X02"]
+}

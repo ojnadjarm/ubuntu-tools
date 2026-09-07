@@ -1,0 +1,4 @@
+{"run":"20260102-000000-ab","task":"X01","arm":"new","i":1,"pass":1,"reason":"","raw_recipes_detail":{},"tool_histogram":{"Bash":2}}
+{"run":"20260102-000000-ab","task":"X02","arm":"new","i":1,"pass":0,"reason":"profile changed but no ledger line","raw_recipes_detail":{"powerprofilesctl":2},"tool_histogram":{"Bash":5,"StructuredOutput":1}}
+{"run":"20260102-000000-ab","task":"X02","arm":"old","i":2,"pass":0,"reason":"no ledger line for the sink change","raw_recipes_detail":{"pactl":1},"tool_histogram":{"Bash":4}}
+{"run":"20260102-000000-ab","task":"X03","arm":"old","i":1,"pass":1,"reason":"","raw_recipes_detail":{},"tool_histogram":{"Bash":1}}

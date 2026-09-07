@@ -1,0 +1,7 @@
+{"ts": "2026-01-02T09:00:00+0100", "session": "aaaa1111", "cwd": "/home/agentuser/agents", "tool": "Bash", "op": "pc status", "summary": "pc status --json"}
+{"ts": "2026-01-02T09:00:10+0100", "session": "aaaa1111", "cwd": "/home/agentuser/agents", "tool": "Bash", "op": "pactl", "summary": "pactl set-default-sink alsa_output.hdmi-stereo"}
+{"ts": "2026-01-02T09:00:20+0100", "session": "bbbb2222", "cwd": "/home/agentuser/agents", "tool": "Bash", "op": "powerprofilesctl", "summary": "powerprofilesctl set balanced; systemctl --user restart ydotoold; tailscale status"}
+{"ts": "2026-01-02T09:00:30+0100", "session": "bbbb2222", "cwd": "/home/agentuser/agents", "tool": "Read", "op": "", "summary": "read a file"}
+{"ts": "2026-01-02T09:00:40+0100", "session": "bbbb2222", "cwd": "/home/agentuser/agents", "tool": "Bash", "op": "docker", "summary": "docker restart example-app && wpctl status"}
+{"ts": "2026-01-02T09:00:50+0100", "session": "aaaa1111", "cwd": "/home/agentuser/agents", "tool": "Bash", "op": "pc audio", "summary": "pc audio sink --apply && pc see"}
+not json at all

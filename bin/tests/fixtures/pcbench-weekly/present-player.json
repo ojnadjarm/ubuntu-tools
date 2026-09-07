@@ -1,0 +1,6 @@
+{"generated":"fixture","fails":0,"sections":{
+ "power":{"lid":{"value":"closed","state":"-"}},
+ "desktop":{"lock":{"value":"unlocked","state":"OK"},
+            "idle":{"value":"9000.0 s","state":"-"},
+            "players":{"value":"spotify:Playing","state":"-"},
+            "seat_logins":{"value":"0","state":"-"}}}}

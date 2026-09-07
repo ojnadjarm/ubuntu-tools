@@ -1,0 +1,4 @@
+{"rapl":{"seconds":0.30,"package_w":4.20,"core_w":1.10,"uncore_w":0.00,"psys_w":5.00,"pl1_w":95},
+ "gpu":{"rc6_pct":98,"cur_mhz":600},
+ "battery":{"capacity_pct":80,"ac":true},
+ "profiles":{"ppd":"balanced"}}

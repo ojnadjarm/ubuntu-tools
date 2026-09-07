@@ -333,6 +333,31 @@ st=-; [ "$k_lock" = unlocked ] && st=OK
 add desktop lock "$k_lock" "$st"
 st=-; [ "$k_mode" = agent ] && st=OK
 add desktop mode "$k_mode" "$st"
+# Presence signals (PB09): seconds since the last input, the MPRIS players and their state,
+# and any text-console login on seat0 — what the "nobody home" gate reads.
+_idle() { "$BIN/pc-mutter" idle --json 2>/dev/null | jq -r '.idle_s // empty' 2>/dev/null; }
+i_s=$(cached idle 30 _idle); : "${i_s:=n/a}"
+add desktop idle "$i_s s"
+_players() {
+  local ps p st r=""
+  ps=$(playerctl -l 2>/dev/null) || true
+  [ -n "$ps" ] || { echo none; return 0; }
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    st=$(playerctl -p "$p" status 2>/dev/null); r="$r ${p}:${st:-Unknown}"
+  done <<<"$ps"
+  printf '%s\n' "${r# }"
+}
+add desktop players "$(cached players 30 _players)"
+_seatlogins() {
+  local n=0 id
+  while read -r id; do
+    [ -n "$id" ] || continue
+    [ "$(loginctl show-session "$id" -p Type --value 2>/dev/null)" = tty ] && n=$((n+1))
+  done < <(loginctl list-sessions --no-legend 2>/dev/null | awk '$4=="seat0" && $7 ~ /^tty/ {print $1}')
+  printf '%s\n' "$n"
+}
+add desktop seat_logins "$(cached seat_logins 60 _seatlogins)"
 fw=$(gdbus call --session -d org.gnome.Shell -o /org/gnome/Shell/Extensions/Windows \
       -m org.gnome.Shell.Extensions.Windows.List 2>/dev/null \
       | awk -F'"title":"' 'NF>1{split($2,a,"\""); print a[1]; exit}')

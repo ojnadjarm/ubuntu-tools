@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Refusal guard for headless fleet agents (FLEET.md §5, "Orders you refuse").
+# Reached only through the guards dir that `fleet_path` prepends to PATH, so `agent-exec`
+# and everything under it is covered while the owner's interactive shell is untouched.
+# Refused → the three-part refusal on stderr, one JSON line in the log, exit 3.
+# Anything else is forwarded to the real binary unchanged.
+set -uo pipefail
+GUARD_DIR=$(cd "$(dirname "$0")" && pwd)
+LOG="${HARNESS_GUARD_LOG:-$HOME/agents/log/guards.jsonl}"
+me=$(basename "$0")
+
+real() { local d IFS=:; for d in $PATH; do
+  [ "$d" = "$GUARD_DIR" ] && continue; [ -x "$d/$1" ] && { printf '%s\n' "$d/$1"; return 0; }
+done; return 1; }
+
+# refuse <rule> <alternative> <who>
+refuse() {
+  printf 'refused: %s\n' "$1" >&2
+  printf 'instead: %s\n' "$2" >&2
+  printf 'who can: %s\n' "$3" >&2
+  mkdir -p "$(dirname "$LOG")" 2>/dev/null
+  jq -nc --arg ts "$(date -Is)" --arg tool "$me" --arg rule "$1" \
+     --arg argv "$GUARD_ARGV" --arg agent "${AGENT_NAME:-}" \
+     '{ts:$ts,tool:$tool,rule:$rule,argv:$argv,agent:$agent,refused:true}' >>"$LOG" 2>/dev/null
+  exit 3
+}
+GUARD_ARGV="$*"
+
+# Fleet units and access paths that must never be stopped, disabled or masked (FLEET.md §5.3).
+fleet_unit() { case "${1%.service}" in tailscaled|sshd|ssh|dark-eye*|docker*|sentinel*|agent@*) return 0 ;; esac; return 1; }
+
+# guard_check <name> [args…] — the refusal rules for one command name.
+guard_check() {
+  local me verb skip a hour n i sub unit
+  me=$1; shift
+  case "$me" in
+  git)
+    verb=; skip=0
+    for a in "$@"; do
+      [ "$skip" = 1 ] && { skip=0; continue; }
+      case "$a" in -C|-c|--git-dir|--work-tree|--namespace) skip=1; continue ;;
+                   -*) continue ;; esac
+      verb=$a; break
+    done
+    case "$verb" in commit|push)
+      refuse "FLEET.md §5.1 — no \`git $verb\` in a user repo" \
+             "left the work in the tree; \`git status\`/\`git diff\` show it" \
+             "the owner, by hand" ;;
+    esac ;;
+  reboot|poweroff|halt|shutdown)
+    hour=${GUARD_NOW_HOUR:-$(TZ=Europe/Madrid date +%-H)}
+    if [ "$hour" -lt 4 ] || [ "$hour" -ge 5 ]; then
+      refuse "FLEET.md §5.2 — no $me outside the 04:00-05:00 window (now ${hour}h)" \
+             "reported that a reboot is pending; \`maintenance-run\` takes it in the window" \
+             "the owner, by hand"
+    fi ;;
+  tailscale)
+    for a in "$@"; do case "$a" in -*) continue ;;
+      down|logout) refuse "FLEET.md §5.3 — tailscale stays up: it is the owner's way in" \
+                          "read-only \`tailscale status\` instead" "the owner, by hand" ;;
+      *) break ;; esac
+    done ;;
+  systemctl)
+    verb=; unit=
+    for a in "$@"; do case "$a" in -*) continue ;;
+      *) [ -z "$verb" ] && { verb=$a; continue; }; unit=$a; break ;; esac
+    done
+    case "$verb" in stop|disable|mask)
+      fleet_unit "$unit" && \
+        refuse "FLEET.md §5.3 — \`systemctl $verb $unit\` would close a fleet unit or the owner's way in" \
+               "read-only \`systemctl status $unit\` instead" "the owner, by hand" ;;
+    esac ;;
+  sudo)
+    # sudo resets PATH through secure_path, so the wrapped command never meets its own
+    # guard symlink: strip sudo's options and apply the same rules to what it would run.
+    n=$#; i=1; sub=
+    while [ "$i" -le "$n" ]; do
+      a=${!i}
+      case "$a" in
+        --)               i=$((i+1)); [ "$i" -le "$n" ] && sub=${!i}; break ;;
+        -u|-g|-p|-C|-D|-h|-R|-T|-U|--user|--group|--prompt|--chdir|--host|--close-from|--timeout)
+                          i=$((i+2)); continue ;;
+        -*|*=*)           i=$((i+1)); continue ;;
+        *)                sub=$a; break ;;
+      esac
+    done
+    case "${sub##*/}" in
+      ''|sudo) ;;
+      *) guard_check "${sub##*/}" "${@:$((i+1))}" ;;
+    esac ;;
+  esac
+}
+
+guard_check "$me" "$@"
+
+exec "$(real "$me")" "$@"

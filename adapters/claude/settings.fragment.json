@@ -15,7 +15,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit|mcp__.*",
+        "matcher": "*",
         "hooks": [
           { "type": "command", "command": "@HARNESS_HOME@/adapters/claude/hooks/audit-log.py" }
         ]

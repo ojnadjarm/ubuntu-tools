@@ -1,0 +1,357 @@
+#!/usr/bin/env python3
+"""toolsmith-inputs [--since 4d] [--json|--md] [--qa] — read-only evidence collector for toolsmith.
+
+One JSON object with the sections bench_last, bench_failures, audit, guards, changes, doctor,
+qa, idle and tokens. Reads only; runs no mutating verb. Root: TOOLSMITH_ROOT, else HARNESS_HOME,
+else ~/agents. A live probe is replaced by $ROOT/mock/<name>.json (doctor, power, top) or
+$ROOT/mock/qa.tsv when that file exists, so tests never call pc.
+"""
+import argparse, json, os, re, subprocess, sys, time
+from collections import Counter
+
+ROOT = os.environ.get('TOOLSMITH_ROOT') or os.environ.get('HARNESS_HOME') \
+    or os.path.expanduser('~/agents')
+MOCK = os.path.join(ROOT, 'mock')
+
+RAW = {
+    'pactl': r'\bpactl\b', 'powerprofilesctl': r'\bpowerprofilesctl\b', 'wpctl': r'\bwpctl\b',
+    'docker restart': r'\bdocker\s+restart\b', 'tailscale': r'\btailscale\b',
+    'systemctl stop': r'\bsystemctl\b[^;|&]*\bstop\b', 'systemctl restart': r'\bsystemctl\b[^;|&]*\brestart\b',
+}
+RAW_RE = {k: re.compile(v) for k, v in RAW.items()}
+PC_RE = re.compile(r'\bpc ([a-z][a-z0-9-]*)')
+
+
+def die(msg):
+    sys.exit(f'toolsmith-inputs: {msg}')
+
+
+def since_seconds(s):
+    m = re.fullmatch(r'(\d+)([smhd])', s)
+    if not m:
+        die('bad --since (use 30m, 2h, 4d)')
+    return int(m[1]) * {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}[m[2]]
+
+
+def ts_epoch(s):
+    try:
+        return time.mktime(time.strptime(s[:19], '%Y-%m-%dT%H:%M:%S'))
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def read_json(path, default=None):
+    try:
+        with open(path) as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return default
+
+
+def read_jsonl(path):
+    rows = []
+    try:
+        fh = open(path)
+    except OSError:
+        return rows
+    with fh:
+        for line in fh:
+            try:
+                rows.append(json.loads(line))
+            except ValueError:
+                continue
+    return rows
+
+
+def strip_money(obj):
+    """Drop every cost key: this collector reports tokens, never amounts."""
+    if isinstance(obj, dict):
+        return {k: strip_money(v) for k, v in obj.items()
+                if not re.search(r'cost|usd|price|spend', k, re.I)}
+    if isinstance(obj, list):
+        return [strip_money(v) for v in obj]
+    return obj
+
+
+def probe(name, argv):
+    """A live pc probe, or $ROOT/mock/<name>.json when that file exists."""
+    mock = os.path.join(MOCK, name + '.json')
+    if os.path.exists(mock):
+        return read_json(mock)
+    pc = os.path.join(ROOT, 'bin', 'pc')
+    argv = [pc if os.path.exists(pc) else 'pc'] + argv
+    try:
+        out = subprocess.run(argv, capture_output=True, text=True, timeout=20).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    try:
+        return json.loads(out)
+    except ValueError:
+        return None
+
+
+# --- sections --------------------------------------------------------------
+
+def sec_bench_last():
+    j = read_json(os.path.join(ROOT, 'bench', 'LAST.json'))
+    return strip_money(j) if j else {'present': False}
+
+
+def newest_rows():
+    runs = os.path.join(ROOT, 'bench', 'runs')
+    try:
+        names = sorted(d for d in os.listdir(runs)
+                       if os.path.exists(os.path.join(runs, d, 'rows.jsonl')))
+    except OSError:
+        return None, []
+    if not names:
+        return None, []
+    return names[-1], read_jsonl(os.path.join(runs, names[-1], 'rows.jsonl'))
+
+
+def sec_bench_failures():
+    run, rows = newest_rows()
+    if run is None:
+        return {'present': False}
+    fails = [r for r in rows if not r.get('pass')]
+    return {
+        'present': True, 'run': run, 'trials': len(rows), 'fails': len(fails),
+        'by_task': dict(Counter(r.get('task') for r in fails).most_common()),
+        'rows': [{
+            'task': r.get('task'), 'arm': r.get('arm'), 'i': r.get('i'),
+            'reason': r.get('reason'),
+            'raw_recipes_detail': r.get('raw_recipes_detail') or {},
+            'tool_histogram': r.get('tool_histogram') or {},
+        } for r in fails],
+    }
+
+
+def sec_audit(since, cut):
+    path = os.path.join(ROOT, 'log', 'actions.jsonl')
+    rows = [r for r in read_jsonl(path) if ts_epoch(r.get('ts', '')) >= cut]
+    per_session, raw_by_tool, pc_verbs = {}, Counter(), Counter()
+    raw_by_session, pc_by_session = Counter(), Counter()
+    for r in rows:
+        sess = r.get('session', '')
+        per_session.setdefault(sess, Counter())[(r.get('op') or '').split(' ')[0]] += 1
+        if r.get('tool') != 'Bash':
+            continue
+        blob = r.get('summary') or ''
+        for tool, rx in RAW_RE.items():
+            n = len(rx.findall(blob))
+            if n:
+                raw_by_tool[tool] += n
+                raw_by_session[sess] += n
+        for verb in PC_RE.findall(blob):
+            pc_verbs[verb] += 1
+            pc_by_session[sess] += 1
+    offenders = [{'session': s, 'raw': n, 'pc': pc_by_session.get(s, 0)}
+                 for s, n in raw_by_session.most_common(5)]
+    return {
+        'present': os.path.exists(path), 'since': since, 'lines': len(rows),
+        'sessions': {s: dict(c.most_common(10)) for s, c in per_session.items()},
+        'raw_total': sum(raw_by_tool.values()), 'raw_by_tool': dict(raw_by_tool.most_common()),
+        'pc_total': sum(pc_verbs.values()), 'pc_verbs': dict(pc_verbs.most_common(10)),
+        'top_raw_offenders': offenders,
+    }
+
+
+def sec_guards(cut):
+    path = os.path.join(ROOT, 'log', 'guards.jsonl')
+    if not os.path.exists(path):
+        return {'present': False, 'rows': 0}
+    rows = [r for r in read_jsonl(path) if ts_epoch(r.get('ts', '')) >= cut]
+    return {'present': True, 'rows': len(rows),
+            'by_reason': dict(Counter(r.get('reason') or r.get('guard') for r in rows).most_common())}
+
+
+def sec_changes(cut):
+    path = os.path.join(ROOT, 'log', 'changes.jsonl')
+    rows = read_jsonl(path)
+    verdict = {r['id']: r for r in rows if 'verified' in r and 'id' in r}
+    applies = [r for r in rows if 'target' in r]
+    window = [r for r in applies if ts_epoch(r.get('ts', '')) >= cut]
+    verified = unverified = undone = 0
+    for n, r in enumerate(applies):
+        if ts_epoch(r.get('ts', '')) < cut:
+            continue
+        if verdict.get(r.get('id'), {}).get('verified') is True:
+            verified += 1
+        else:
+            unverified += 1
+        # An undo is a later ledgered change that puts the same target back.
+        if any(later.get('target') == r.get('target') and later.get('before') == r.get('after')
+               and later.get('after') == r.get('before') for later in applies[n + 1:]):
+            undone += 1
+    return {'present': os.path.exists(path), 'total': len(applies), 'window': len(window),
+            'verified': verified, 'unverified': unverified, 'undone': undone,
+            'unverified_ids': [r.get('id') for r in window
+                               if verdict.get(r.get('id'), {}).get('verified') is not True][:10]}
+
+
+def sec_doctor():
+    rows = probe('doctor', ['doctor', '--quick', '--json'])
+    if not isinstance(rows, list):
+        return {'present': False, 'fail': 0, 'rows': []}
+    fails = [{'name': r.get('name'), 'detail': r.get('detail')}
+             for r in rows if r.get('status') == 'FAIL']
+    return {'present': True, 'checks': len(rows), 'fail': len(fails), 'rows': fails}
+
+
+def qa_table(text):
+    out = {}
+    for line in text.splitlines():
+        f = line.split('\t')
+        if len(f) >= 5 and f[0] != 'module':
+            try:
+                out[f[0]] = [int(x) for x in f[1:5]]
+            except ValueError:
+                continue
+    return out
+
+
+def sec_qa(run_qa):
+    if not run_qa:
+        return {'ran': False, 'hint': 'pass --qa (runs the linters, several seconds)'}
+    mock = os.path.join(MOCK, 'qa.tsv')
+    script = os.path.join(ROOT, 'bin', 'tests', 'qa-metrics.sh')
+    if os.path.exists(mock):
+        with open(mock) as fh:
+            cur = qa_table(fh.read())
+    elif os.path.exists(script):
+        try:
+            cur = qa_table(subprocess.run(['bash', script], capture_output=True,
+                                          text=True, timeout=600).stdout)
+        except (OSError, subprocess.SubprocessError):
+            return {'ran': False, 'error': 'qa-metrics.sh did not finish'}
+    else:
+        return {'ran': False, 'error': 'no qa-metrics.sh'}
+    base = {}
+    bpath = os.path.join(ROOT, 'bin', 'tests', 'BASELINE-QA.tsv')
+    if os.path.exists(bpath):
+        with open(bpath) as fh:
+            base = qa_table(fh.read())
+    cols = ['lines', 'dupes', 'shellcheck', 'ccn_gt15']
+    mods = []
+    for m, vals in cur.items():
+        row = {'module': m}
+        row.update(dict(zip(cols, vals)))
+        if m in base:
+            row['delta'] = dict(zip(cols, [v - b for v, b in zip(vals, base[m])]))
+        mods.append(row)
+    return {'ran': True, 'baseline': bool(base), 'modules': mods,
+            'worse': [m['module'] for m in mods
+                      if any(v > 0 for k, v in m.get('delta', {}).items() if k != 'lines')]}
+
+
+def sec_idle():
+    power = probe('power', ['power', '--json']) or {}
+    rapl = power.get('rapl') or {}
+    top = probe('top', ['top', '--json', '--sort', 'wake', '-n', '5'])
+    wakers = [{'comm': r.get('comm'), 'wake': r.get('wake'), 'unit': r.get('unit'),
+               'rss_kb': r.get('rss')} for r in top[:5]] if isinstance(top, list) else []
+    return {'present': bool(rapl) or bool(wakers),
+            'package_w': rapl.get('package_w'), 'core_w': rapl.get('core_w'),
+            'psys_w': rapl.get('psys_w'),
+            'gpu_rc6_pct': (power.get('gpu') or {}).get('rc6_pct'),
+            'wakers': wakers}
+
+
+def sec_tokens(cut):
+    agents, seen_cols = {}, False
+    try:
+        names = sorted(os.listdir(ROOT))
+    except OSError:
+        names = []
+    for name in names:
+        path = os.path.join(ROOT, name, 'logs', 'index.tsv')
+        if not os.path.exists(path):
+            continue
+        with open(path) as fh:
+            head = fh.readline().rstrip('\n').split('\t')
+            idx = {c: i for i, c in enumerate(head)}
+            ci = next((idx[c] for c in ('tokens_in', 'input_tokens', 'in_tokens') if c in idx), None)
+            co = next((idx[c] for c in ('tokens_out', 'output_tokens', 'out_tokens') if c in idx), None)
+            if ci is None and co is None:
+                continue
+            seen_cols = True
+            runs = tin = tout = 0
+            for line in fh:
+                f = line.rstrip('\n').split('\t')
+                if len(f) <= max(x for x in (ci, co) if x is not None):
+                    continue
+                if 'start' in idx and ts_epoch(f[idx['start']]) < cut:
+                    continue
+                runs += 1
+                tin += int(f[ci]) if ci is not None and f[ci].isdigit() else 0
+                tout += int(f[co]) if co is not None and f[co].isdigit() else 0
+            if runs:
+                agents[name] = {'runs': runs, 'in': tin, 'out': tout,
+                                'in_per_run': round(tin / runs), 'out_per_run': round(tout / runs)}
+    return {'columns_present': seen_cols, 'agents': agents,
+            'note': None if seen_cols else 'no token columns in */logs/index.tsv yet'}
+
+
+# --- rendering -------------------------------------------------------------
+
+def md(d):
+    L = [f"# toolsmith inputs — {d['generated']} (since {d['since']})", '']
+    b = d['bench_last']
+    if b.get('runs'):
+        arms = ' · '.join(f"{k} pass={v.get('pass')} passN={v.get('passN')} residue={v.get('residue')}"
+                          for k, v in (b.get('arms') or {}).items())
+        L += ['## bench_last', f"- {b.get('ts', '?')} · {b.get('trials', '?')} trials · {arms}",
+              f"- regressions: {', '.join(b.get('regressions') or []) or 'none'}", '']
+    f = d['bench_failures']
+    if f.get('present'):
+        by = ', '.join(f'{k}={v}' for k, v in f['by_task'].items()) or 'none'
+        L += ['## bench_failures', f"- run {f['run']}: {f['fails']}/{f['trials']} failed",
+              f"- by task: {by}"]
+        L += [f"  - {r['task']}/{r['arm']}#{r['i']}: {(r['reason'] or '')[:90]}" for r in f['rows'][:10]]
+        L.append('')
+    a = d['audit']
+    L += ['## audit',
+          f"- {a['lines']} rows, {len(a['sessions'])} sessions · raw={a['raw_total']} pc={a['pc_total']}",
+          '- raw: ' + (', '.join(f'{k}={v}' for k, v in a['raw_by_tool'].items()) or 'none'),
+          '- top raw sessions: ' + (', '.join(f"{o['session']}(raw {o['raw']}/pc {o['pc']})"
+                                              for o in a['top_raw_offenders']) or 'none'), '']
+    c, g, doc = d['changes'], d['guards'], d['doctor']
+    fails = '; '.join(f"{r['name']} {r['detail']}" for r in doc['rows'])
+    L += ['## guards · changes · doctor',
+          f"- guards: {g['rows']} rows" + ('' if g['present'] else ' (no guards.jsonl)'),
+          f"- changes: {c['window']} in window · verified {c['verified']} · "
+          f"unverified {c['unverified']} · undone {c['undone']}",
+          f"- doctor FAIL: {doc['fail']}" + (f': {fails}' if fails else ''), '']
+    q = d['qa']
+    if q.get('ran'):
+        L += ['## qa', '- worse than baseline: ' + (', '.join(q['worse']) or 'none'), '']
+    i = d['idle']
+    L += ['## idle',
+          f"- package {i['package_w']} W · core {i['core_w']} W · gpu rc6 {i['gpu_rc6_pct']}%",
+          '- wakers: ' + (', '.join(f"{w['comm']}({w['wake']}/s)" for w in i['wakers']) or 'none'), '']
+    t = d['tokens']
+    L += ['## tokens',
+          '- ' + (', '.join(f"{k}: {v['in_per_run']} in / {v['out_per_run']} out per run"
+                            for k, v in t['agents'].items()) or (t['note'] or 'none')), '']
+    return '\n'.join(L)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument('--since', default='4d', help='age window, e.g. 12h, 4d (default 4d)')
+    ap.add_argument('--json', action='store_true', help='one JSON object (default)')
+    ap.add_argument('--md', action='store_true', help='markdown digest instead of JSON')
+    ap.add_argument('--qa', action='store_true', help='also run qa-metrics.sh (several seconds)')
+    a = ap.parse_args()
+    cut = time.time() - since_seconds(a.since)
+    d = {
+        'generated': time.strftime('%Y-%m-%dT%H:%M:%S'), 'since': a.since,
+        'bench_last': sec_bench_last(), 'bench_failures': sec_bench_failures(),
+        'audit': sec_audit(a.since, cut), 'guards': sec_guards(cut), 'changes': sec_changes(cut),
+        'doctor': sec_doctor(), 'qa': sec_qa(a.qa), 'idle': sec_idle(), 'tokens': sec_tokens(cut),
+    }
+    print(md(d) if a.md else json.dumps(strip_money(d), indent=1))
+
+
+if __name__ == '__main__':
+    main()

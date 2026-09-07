@@ -23,7 +23,8 @@ user timer. `~/agents/hello/` is the working template.
 - `agent-disable <name>` / `agent-now <name>` — stop the timer / run once through systemd.
 - `agents-status` — name, enabled, schedule, next run, last run, last exit, last duration.
 - `agents-stop` — kill switch: stops every active `agent@*.service`, every `agent@*.timer` plus
-  `sentinel-check.timer` and `moodle-keep-weekly.timer` (stopped, not disabled), kills background
+  `sentinel-check.timer`, `moodle-keep-weekly.timer` and `pcbench-weekly.timer` (stopped, not
+  disabled), kills background
   `claude agents` sessions (never interactive ones), sends one high-priority push.
 - `agents-start` / `agents-stop --resume` — re-enables exactly the units the roster in `~/CLAUDE.md`
   lists and prints `list-timers`.
@@ -34,6 +35,19 @@ user timer. `~/agents/hello/` is the working template.
 `WorkingDirectory=%h/agents/%i`) and `agent@.timer` (`OnCalendar` only from the per-instance drop-in).
 systemd runs one instance of a service at a time, so an overrunning agent cannot stack.
 A non-zero exit sends `notify-owner -p high`.
+
+## Bash timers (not `agent@`)
+
+`sentinel-check`, `moodle-keep-weekly` and `pcbench-weekly` are plain bash runners on their own
+`.timer`/`.service` pair, not `claude -p` agents — no `BRIEF.md`, no `agent-run`. `agents-stop`
+stops them by name; `agents-start` re-enables them from the roster row's unit name in `~/CLAUDE.md`.
+
+`pcbench-weekly` (PB09) runs the whole task pack A/B on Sunday 02:00, then
+`pcbench report --baseline`. It never starts while the owner is at the machine: `pcbench away`
+reads `pc status --json` (lock + idle, lid, MPRIS players, seat logins) and both the runner and
+`pcbench run --require-away` refuse on a hit. A skip is logged to
+`~/agents/log/pcbench-weekly.log`, counted in `bench/state/weekly-skips`, and pushes the owner
+once at three in a row. `pcbench-weekly --dry-run` prints the verdict and the command.
 
 ## Adding an agent
 

@@ -19,6 +19,10 @@ def redact(s):
     return KEYLIKE.sub('<redacted>', s)
 
 
+ARG_KEYS = ('pattern', 'query', 'url', 'file_path', 'notebook_path', 'path',
+            'description', 'prompt', 'command')
+
+
 def summarise(tool, ti):
     """(op, summary) for one tool call: op is the searchable verb, summary the redacted detail."""
     if tool == 'Bash':
@@ -29,7 +33,15 @@ def summarise(tool, ti):
         return op, cmd[:500]
     if tool.startswith('mcp__'):
         return tool, redact(json.dumps(ti, default=str))[:200]
-    return tool, str(ti.get('file_path') or ti.get('notebook_path') or '')[:500]
+    arg = ''
+    for k in ARG_KEYS:
+        if ti.get(k):
+            arg = redact(str(ti[k]))
+            break
+    else:
+        arg = redact(json.dumps(ti, default=str)) if ti else ''
+    short = os.path.basename(arg) if arg.startswith(('/', '~', './')) else arg
+    return (tool + ' ' + short).strip()[:60], arg[:500]
 
 
 def record(tool, tool_input, cwd='', session=''):

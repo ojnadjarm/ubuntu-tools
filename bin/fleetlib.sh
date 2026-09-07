@@ -10,8 +10,11 @@
 # shellcheck source=/dev/null
 [ -n "${HARNESS_ENV_LOADED:-}" ] || . "$HOME/agents/bin/env.sh"
 
+# bin/guards goes first: it refuses the FLEET.md §5 orders (git commit/push, reboot outside
+# the window, tailscale down) for headless runs and forwards everything else. The owner's
+# interactive shell never sources this, so his own git and reboot are untouched.
 fleet_path() {
-  export PATH="$HOME/.local/bin:$HARNESS_HOME/bin:/usr/local/bin:/usr/bin:/bin"
+  export PATH="$HARNESS_HOME/bin/guards:$HOME/.local/bin:$HARNESS_HOME/bin:/usr/local/bin:/usr/bin:/bin"
 }
 
 fleet_lock() {

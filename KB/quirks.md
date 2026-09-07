@@ -60,6 +60,22 @@
   agent CLI's context dir (`$HARNESS_CONTEXT_DIR`). Edit live, then run `~/moodle-harness/sync.sh`.
   **Never push.** `hooks/machine-status.sh` is machine-specific and stays out of that repo.
 - Never commit or push in any user repo. Only `/etc` is auto-committed, by etckeeper.
+- **`bin/guards/` is on the headless PATH, not the owner's.** `fleet_path` (fleetlib.sh) puts
+  `~/agents/bin/guards` first, so anything under `agent-exec`/`agent-run` gets a `git`,
+  `reboot`/`shutdown`/`poweroff`/`halt` and `tailscale` that refuse the FLEET.md §5 orders —
+  `git commit|push` (any repo), a power verb outside 04:00-05:00 Europe/Madrid, `tailscale
+  down|logout` — with the three-part refusal on stderr, one JSON line in
+  `~/agents/log/guards.jsonl`, and **exit 3**. Every other verb is forwarded unchanged, so
+  `git status`/`pull --ff-only` and `tailscale status` still work. An interactive shell never
+  sources fleetlib, so the owner's own `git commit` is untouched.
+  `sudo` used to be a hole: it resets PATH through `secure_path`, so the wrapped command never
+  met its own guard symlink. Closed by `bin/guards/sudo` (TSP-001), which strips sudo's options
+  and applies the same rules to what sudo would run, plus `systemctl stop|disable|mask` of a
+  fleet unit (`tailscaled`, `sshd`, `dark-eye*`, `docker*`, `sentinel*`, `agent@*`).
+  `maintenance-run` is unaffected: its `sudo shutdown -r` only fires inside 04:00-05:00, which
+  the power rule already allows. One hole remains, by design: a pcbench trial does not get the
+  guards — `pcbench` builds its own PATH and relies on `bench/arms/safety/stubs` instead.
+  Test: `bash ~/agents/bin/tests/guards.test.sh`.
 
 ## Power / session
 - The laptop never suspends: logind lid switch ignored, sleep targets masked, gsettings sleep `nothing`.
@@ -186,6 +202,50 @@
   `body/src/audio.js` uses both.
 - Target sinks **by name, never by index**: the bluez sink is a brand-new node with a new index after every
   A2DP↔HFP switch (measured: 327726 → 328696 → 329831 within one session).
+
+## HDMI audio to the TV: the host is not the suspect (A01, 2026-09-07)
+- Symptom (2026-09-06 ~23:30): Spotify Playing on `alsa_output.pci-0000_00_1f.3.hdmi-stereo`,
+  sink RUNNING, 100 %, stream 50 %, unmuted, TV on and showing the app — **no sound at all**.
+- The whole host chain was audited and is clean. Nothing in EF01-EF10 touches audio:
+  `sudo git -C /etc log -- '*pipewire*' '*wireplumber*' '*alsa*' '*pulse*'` returns only
+  `Initial commit`; there are **no** `~/.config/pipewire`, `~/.config/wireplumber`,
+  `/etc/pipewire` or `/etc/wireplumber` files at all (only the distro
+  `/usr/share/wireplumber/wireplumber.conf.d/alsa-vm.conf`, untouched since install).
+  `/etc/security/limits.d/90-agents.conf` is nofile only, `/etc/sysctl.d/90-agents.conf` is
+  inotify/swappiness/map_count/somaxconn/sysrq. `sentinel-check`'s only audio line resets
+  `pw-metadata … log.level` to 2 — a log knob, no routing or volume effect. PipeWire's
+  `data-loop.0` is still `SCHED_RR`.
+- **The silent proof (repeatable, makes no sound):** play a zero-amplitude wav to the sink and
+  watch the kernel PCM, not PipeWire:
+  `python3 -c "import wave;w=wave.open('/tmp/s.wav','wb');w.setnchannels(2);w.setsampwidth(2);w.setframerate(48000);w.writeframes(b'\0'*(48000*2*2*6));w.close()"`
+  then `pw-play --target alsa_output.pci-0000_00_1f.3.hdmi-stereo -P '{ state.restore-target = false, state.restore-props = false }' /tmp/s.wav`
+  while reading `/proc/asound/card0/pcm3p/sub0/{hw_params,status}`.
+  2026-09-07 result: `S32_LE 2ch 48000 period 1024 buffer 32768`, `state: RUNNING` for the whole
+  6 s, `pw-top` 0 ERR / 0 xruns. HDA DMA to the TV pin is provably working.
+- The routing is unambiguous and worth writing down once: sink → `api.alsa.path=hdmi:0` →
+  `hw:0,3` (`HDMI 0`) → codec 2 pin **0x06** (`Pin-ctls: 0x40 OUT`, `Connection: 0x03*`) →
+  the only ELD with a monitor, `/proc/asound/card0/eld#2.4` (`SAMSUNG`, `codec_cvt_nid 0x3`,
+  `speakers FL/FR`, LPCM only). `HDMI/DP,pcm=3 Jack` = `on`, all four `IEC958 Playback Switch`
+  = `on`, `default-routes` has `hdmi-output-0` unmuted at 1.0. The other 35 `eld#2.*` are unused
+  pins reading 0 — same trap as EF10.
+- **Therefore: with everything above green, silence is the TV's, and only an ear can tell them
+  apart.** This 2011 Samsung is the classic case — an HDMI input labelled `PC`/`DVI PC` is
+  treated as DVI and the set mutes HDMI audio while showing perfect video; "Sound Output" left
+  on an external/optical device does the same. Neither is visible from the host: DDC/CI answers
+  `ERR` here (EF10) and nothing in sysfs, RandR, EDID or ELD moves.
+- **The discriminating test, by ear, in this order** (there is no `pc audio test` verb):
+  1. TV: `pw-play --target alsa_output.pci-0000_00_1f.3.hdmi-stereo -P '{ state.restore-target = false, state.restore-props = false }' /usr/share/sounds/alsa/Front_Center.wav`
+  2. If silent, the laptop speakers — this needs a profile change, so restore it:
+     `pactl set-card-profile alsa_card.pci-0000_00_1f.3 output:analog-stereo+input:analog-stereo`,
+     `pw-play --target alsa_output.pci-0000_00_1f.3.analog-stereo -P '{ state.restore-target = false, state.restore-props = false }' /usr/share/sounds/alsa/Front_Center.wav`,
+     then `pactl set-card-profile alsa_card.pci-0000_00_1f.3 output:hdmi-stereo+input:analog-stereo`.
+  Speakers audible + TV silent = the TV. Both silent = re-open host-side (and only then).
+- `snd_hda_intel power_save=1` (kernel default, no fleet drop-in) powers the codec down 1 s after
+  idle and can clip the **start** of a clip on this codec. It cannot explain a whole silent track;
+  do not chase it first, and do not raise it without the ear test above.
+- Never flap the card profile to "test" this (`analog ↔ off ↔ hdmi`, as happened on 2026-09-06):
+  it proves nothing the ELD and `pcm3p/status` do not already say, and the PTT sidecar owns the
+  bluez card profile (`toolbox.md` §4).
 
 ## XM5 buds: "the digital assistant is not connected" (E24)
 - Symptom: one tap on the right bud triggers the buds' own voice-assistant announcement and **nothing

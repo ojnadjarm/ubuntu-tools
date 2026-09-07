@@ -106,7 +106,7 @@ case "$sub" in
   fan) pc_guard "pwm1_enable";;   # always refuses: fan control is read-only in v1
   profile)
     need_arg "$arg" profile; one_of "$arg" 'power-saver balanced performance'
-    apply_change powerprofiles "$(ppd_get)" "$arg" profile 'powerprofilesctl get' \
+    apply_change powerprofiles "$(FRESH=1 ppd_get)" "$arg" profile 'powerprofilesctl get' \
       powerprofilesctl set "$arg"; exit $?;;
   platform)
     f="$PC_SYS/firmware/acpi/platform_profile"
