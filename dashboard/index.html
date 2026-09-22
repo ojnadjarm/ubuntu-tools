@@ -2,252 +2,53 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="#faf9f7" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0c0d0f" media="(prefers-color-scheme: dark)">
-<title>machine status</title>
-<style>
-:root{
-  --bg:#faf9f7; --fg:#16181c; --dim:#6c7078; --faint:#9aa0a8;
-  --rule:#e4e1dc; --rule2:#eeebe6;
-  --ok:#1f7a52; --bad:#a52f3b; --warn:#96650f; --accent:#1f7a52;
-  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
-}
-@media (prefers-color-scheme: dark){:root{
-  --bg:#0c0d0f; --fg:#f0efec; --dim:#8e9199; --faint:#63666d;
-  --rule:#22242a; --rule2:#191b20;
-  --ok:#63c79a; --bad:#e8737f; --warn:#e0aa4e; --accent:#63c79a;
-}}
-*{box-sizing:border-box}
-html,body{margin:0;background:var(--bg);color:var(--fg);
-  font:400 16px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-  -webkit-text-size-adjust:100%;-webkit-font-smoothing:antialiased}
-body{padding:0 20px calc(56px + env(safe-area-inset-bottom))}
-main{max-width:600px;margin:0 auto}
-.serif{font-family:ui-serif,Georgia,"Iowan Old Style","Times New Roman",serif;
-  font-weight:400;letter-spacing:-.015em}
-.n{font-family:var(--mono);font-variant-numeric:tabular-nums slashed-zero;
-  font-feature-settings:"tnum" 1,"zero" 1}
-header{padding:56px 0 40px}
-.eyebrow{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--faint);
-  display:flex;align-items:center;gap:9px}
-.pulse{width:7px;height:7px;border-radius:50%;background:var(--accent);flex:none;
-  box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 50%,transparent);animation:p 3.6s ease-out infinite}
-@keyframes p{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 45%,transparent)}
-  70%,100%{box-shadow:0 0 0 9px transparent}}
-h1{margin:16px 0 0;font-size:clamp(40px,13vw,56px);line-height:1.02;letter-spacing:-.03em}
-h1 em{font-style:italic;color:var(--accent)}
-.lede{margin-top:18px;font-size:17px;line-height:1.55;color:var(--dim);max-width:38ch}
-.lede b{color:var(--fg);font-weight:500;font-family:var(--mono);font-size:15.5px}
-section{padding:26px 0 4px;border-top:1px solid var(--rule)}
-h2{margin:0 0 16px;font-size:11px;letter-spacing:.18em;text-transform:uppercase;
-  color:var(--faint);font-weight:600}
-.row{display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:10px 0;
-  border-top:1px solid var(--rule2)}
-.row:first-of-type{border-top:0}
-.k{color:var(--dim);font-size:15px}
-.v{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums slashed-zero;
-  font-size:14.5px;overflow-wrap:anywhere}
-.v.bad{color:var(--bad)} .v.warn{color:var(--warn)}
-.mut{color:var(--faint)}
-.sub{border-top:0;padding-top:0;margin-top:-4px}
-.att{border-left:2px solid var(--bad);padding:2px 0 2px 16px;margin:0 0 18px}
-.att div{padding:5px 0;font-size:16px}
-.calm{font-size:17px;color:var(--dim);padding:2px 0 10px}
-.calm .serif{font-size:20px;color:var(--fg);display:block;margin-bottom:4px}
-.sparks{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--rule2);
-  border:1px solid var(--rule2);border-radius:14px;overflow:hidden}
-.sp{background:var(--bg);padding:14px 15px 10px}
-.sp .lbl{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);
-  display:flex;justify-content:space-between;gap:8px}
-.sp .pk{letter-spacing:.06em;font-family:var(--mono)}
-.sp .num{font-size:26px;margin-top:2px;letter-spacing:-.02em}
-.sp .num s{text-decoration:none;font-size:13px;color:var(--faint);margin-left:3px;letter-spacing:0}
-.sp svg{display:block;width:100%;height:30px;margin-top:8px;overflow:visible}
-.ag{display:flex;gap:14px;align-items:flex-start;padding:13px 0;border-top:1px solid var(--rule2)}
-.ag:first-child{border-top:0}
-.ag .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);margin-top:8px;flex:none}
-.ag .dot.off{background:var(--faint)} .ag .dot.bad{background:var(--bad)}
-.ag .b{flex:1;min-width:0}
-.ag .nm{font-size:16px;font-weight:500}
-.ag .m{color:var(--faint);font-size:13px;margin-top:2px}
-.ag .r{text-align:right;font-size:13px;color:var(--dim);flex:none;font-family:var(--mono)}
-.ev{padding:13px 0;border-top:1px solid var(--rule2);display:flex;gap:14px}
-.ev:first-child{border-top:0}
-.ev time{font-size:12.5px;color:var(--faint);flex:none;width:52px;padding-top:2px;
-  font-family:var(--mono)}
-.ev p{margin:0;font-size:15px;line-height:1.5;color:var(--dim)}
-.ev .meta{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);
-  margin-bottom:2px}
-.ev.hi p{color:var(--fg)}
-.ev.hi{border-left:2px solid var(--bad);padding-left:12px;margin-left:-14px}
-a{color:inherit;text-decoration:none}
-.link{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:12px 0;
-  border-top:1px solid var(--rule2)}
-.tag{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);
-  border:1px solid var(--rule);border-radius:999px;padding:3px 9px;flex:none;font-family:var(--mono)}
-.tag.on{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 35%,transparent)}
-.tag.off{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 35%,transparent)}
-footer{padding:30px 0 0;border-top:1px solid var(--rule);margin-top:26px;display:flex;
-  justify-content:space-between;font-size:13px;color:var(--faint);font-family:var(--mono)}
-footer a{color:var(--dim);border-bottom:1px solid var(--rule)}
-@media (min-width:700px){
-  body{padding:0 40px 80px} main{max-width:720px}
-  .cols{display:grid;grid-template-columns:1fr 1fr;gap:0 44px;align-items:start}
-  .sparks{grid-template-columns:repeat(4,1fr)}
-  h1{font-size:64px}
-}
-@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
-</style>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#000000">
+<title>panel</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23000'/%3E%3Cpath d='M4 4h8v2H6v6H4zM20 4h8v8h-2V6h-6zM4 20h2v6h6v2H4zM26 20h2v8h-8v-2h6z' fill='%234dffa0'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%234dffa0'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/eye.css">
+<link rel="modulepreload" href="/static/js/app.js">
+<link rel="modulepreload" href="/static/js/core/fmt.js">
+<link rel="modulepreload" href="/static/js/core/api.js">
+<link rel="modulepreload" href="/static/js/core/router.js">
+<link rel="modulepreload" href="/static/js/core/poll.js">
 </head>
-<body>
-<main id="app"><header><div class="eyebrow"><span class="pulse"></span>loading</div>
-<h1 class="serif">One moment</h1></header></main>
-<script>
-const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const cls=s=>s==='FAIL'?'bad':'';
-const sec=(s,n)=>((s.sections||{})[n])||{};
-const val=(o,k)=>(o[k]||{}).value;
-function row(k,o,key,mod){const it=o[key];if(!it)return'';
-  return `<div class="row"><span class="k">${esc(k)}</span><span class="v ${cls(it.state)}">${esc(mod?mod(it.value):it.value)}</span></div>`;}
-function ago(iso){if(!iso)return'—';const d=(Date.now()-new Date(iso))/1000;if(isNaN(d))return iso;
-  if(d<90)return Math.round(d)+' s ago';if(d<5400)return Math.round(d/60)+' min ago';
-  if(d<172800)return Math.round(d/3600)+' h ago';return Math.round(d/86400)+' d ago';}
-function clock(iso){if(!iso||iso==='0'||iso==='n/a')return'—';const d=new Date(iso);if(isNaN(d))return iso;
-  return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',hour12:false});}
-function day(iso){if(!iso||iso==='0'||iso==='n/a')return'—';const d=new Date(iso);if(isNaN(d))return iso;
-  const t=new Date(),sd=d.toDateString()===t.toDateString();
-  return (sd?'':d.toLocaleDateString([],{weekday:'short'})+' ')+d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',hour12:false});}
-function spark(vals,full){
-  if(!vals||vals.length<2)return'<svg viewBox="0 0 100 30"></svg>';
-  const mx=full?100:Math.max(...vals,.0001)*1.15,sp=mx||1,n=vals.length;
-  const pts=vals.map((v,i)=>[i*100/(n-1),28-(v/sp)*26]);
-  const l=pts.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');const e=pts[n-1];
-  return `<svg viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true">
-   <polyline points="${l}" fill="none" stroke="currentColor" stroke-width="1.25" opacity=".45"
-     stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
-   <circle cx="${e[0].toFixed(1)}" cy="${e[1].toFixed(1)}" r="1.6" fill="currentColor"
-     vector-effect="non-scaling-stroke"/></svg>`;}
-const rate=u=>v=>v>1024?[(v/1024).toFixed(1),'M'+u]:[Math.round(v),u];
-const pct=v=>[Math.round(v),'%'];
-function spCard(lbl,s,fmt,full){
-  const a=(s&&s.values)||[],v=a.length?a[a.length-1]:null;
-  const f=v==null?['—','']:fmt(v);
-  const pk=a.length?fmt(Math.max(...a)):null;
-  return `<div class="sp"><div class="lbl"><span>${lbl}</span>${
-    pk?`<span class="pk">pk ${pk[0]}${pk[1]?' '+pk[1]:''}</span>`:''}</div>
-   <div class="num n">${f[0]}<s>${f[1]}</s></div>${spark(a,full)}</div>`;}
+<body class="panel">
+<header class="head">
+  <div class="id"><b id="host">…</b><s id="idsub">panel · loading</s></div>
+  <div class="gauges" id="gauges"></div>
+  <div class="right"><span class="clk" id="clk">--:--:--</span><span class="ok" id="verdict" role="status" aria-live="polite">…</span><span class="stale" id="stale" hidden></span><button class="clear" id="clear" hidden title="mark everything seen" aria-live="polite">clear</button></div>
+</header>
+<div class="refresh" aria-hidden="true"></div>
+<nav class="spine" id="spine" aria-label="Screens">
+  <button data-go="sites"><em>01</em><span>Sites</span><i class="none"></i></button>
+  <button data-go="services"><em>02</em><span>Services</span><i class="none"></i></button>
+  <button data-go="files"><em>03</em><span>Files</span><i class="none"></i></button>
+  <button data-go="docs"><em>04</em><span>Docs</span><i class="none"></i></button>
+  <button data-go="notes"><em>05</em><span>Notes</span><i class="none"></i></button>
+  <button data-go="machine"><em>06</em><span>Machine</span><i class="none"></i></button>
+  <button data-go="style"><em>07</em><span>Style</span><i class="none"></i></button>
+  <a href="/voice" data-voice title="voice training: read prompts aloud"><em>08</em><span>Voice</span><i class="none"></i></a>
+</nav>
+<main class="board" id="board" tabindex="0" aria-label="Board"><div class="grid" id="grid"><div class="empty">loading…</div></div></main>
+<footer class="foot">
+  <span><u>1</u>–<u>8</u> screens</span><span><u>←</u><u>→</u> next</span><span><u>esc</u> back</span>
+  <span class="sp"></span>
+  <span id="crumb">01 · sites</span>
+  <span>refresh <b>30 s</b></span>
+  <nav class="tabs" aria-label="Screens">
+    <button data-go="sites"><em>01</em><span>Sites</span></button>
+    <button data-go="services"><em>02</em><span>Services</span></button>
+    <button data-go="files"><em>03</em><span>Files</span></button>
+    <button data-go="docs"><em>04</em><span>Docs</span></button>
+    <button data-go="notes"><em>05</em><span>Notes</span></button>
+    <button data-go="machine"><em>06</em><span>Machine</span></button>
+    <button data-go="style"><em>07</em><span>Style</span></button>
+    <a href="/voice" data-voice><em>08</em><span>Voice</span></a>
+  </nav>
+</footer>
 
-function render(d){
-  if(d.host)document.title=d.host;
-  const s=d.status||{},host=sec(s,'host'),pw=sec(s,'power'),res=sec(s,'resources'),
-    disk=sec(s,'disk'),net=sec(s,'network'),svc=sec(s,'services'),dk=sec(s,'docker'),agS=sec(s,'agents');
-  const v=d.verdict||{ok:true,problems:[]};
-  const nev=(d.events||[]).length;
-  const P=[];
-  document.documentElement.style.setProperty('--accent',v.ok?'var(--ok)':'var(--bad)');
-
-  P.push(`<header>
-   <div class="eyebrow"><span class="pulse"></span>${esc(d.host||'machine')}</div>
-   <h1 class="serif">${v.ok?'Everything is <em>in order</em>.':'Something <em>needs you</em>.'}</h1>
-   <p class="lede">Up <b>${esc(val(host,'uptime')||'—')}</b>, load <b>${esc((val(host,'load')||'—').split(' ')[0])}</b>,
-     <b>${esc(val(res,'temp_max')||'—')}</b>. Sentinel last confirmed ${esc(ago(d.sentinel_last_ok))}.</p>
-  </header>`);
-
-  P.push(`<section><h2>What needs attention</h2>${
-    v.problems.length
-      ? `<div class="att">${v.problems.map(p=>`<div>${esc(p)}</div>`).join('')}</div>`
-      : `<div class="calm"><span class="serif">Nothing.</span>
-         <span class="n">${nev}</span> events in the last 24 hours, none unresolved.</div>`}
-  </section>`);
-
-  const sp=d.sparks||{};
-  P.push(`<section><h2>Last 30 minutes</h2><div class="sparks">
-    ${spCard('CPU',sp.cpu,pct,1)}${spCard('Memory',sp.ram,pct,1)}
-    ${spCard('Disk',sp.io,rate('iB/s'))}${spCard('Network',sp.net,rate('bps'))}
-  </div></section>`);
-
-  const ags=(d.agents||[]).map(a=>{const l=a.last||{},bad=l.exit&&l.exit!=='0';
-    const on=a.enabled==='enabled';
-    return `<div class="ag"><span class="dot ${bad?'bad':on?'':'off'}"></span><div class="b">
-      <div class="nm">${esc(a.name)}</div>
-      <div class="m n">${esc(a.enabled)} · next ${esc(day(a.next))}${a.schedule?' ('+esc(a.schedule)+')':''}</div>
-      <div class="m n">last ${esc(day(l.end))} · ${esc(l.seconds||'—')} s · ${l.cost?'$'+Number(l.cost).toFixed(2):'—'}</div>
-      </div>
-      <div class="r">${bad?`<span style="color:var(--bad)">exit ${esc(l.exit)}</span>`:'exit '+esc(l.exit||'—')}</div></div>`;}).join('');
-  P.push(`<section><h2>Agents</h2>
-    ${row('tmux claude',agS,'tmux_claude')}
-    ${row('Live sessions',agS,'claude_sessions')}
-    <div style="margin-top:6px">${ags||'<div class="calm">No agents.</div>'}</div></section>`);
-
-  const ram=(val(res,'ram_available')||'').match(/(\d+) MB of (\d+) MB/);
-  P.push(`<div class="cols"><section><h2>Machine</h2>
-    ${row('Memory free',res,'ram_available')}
-    ${ram?`<div class="row sub"><span class="k"></span><span class="v mut">${Math.round(100*(1-ram[1]/ram[2]))} % used</span></div>`:''}
-    ${row('Disk',res,'disk_root')}
-    ${row('Swap',res,'swap_used')}
-    ${row('Temperature',res,'temp_max')}
-    ${row('SSD health',disk,'smart',v=>v==='PASSED'?'passed':v)}
-    ${row('SSD wear',disk,'percent_used')}
-    ${row('Spare blocks',disk,'available_spare')}
-    ${row('Power',pw,'source')}
-    ${row('Battery',pw,'battery')}
-    ${row('Battery health',pw,'battery_health')}
-    ${row('Charge limit',pw,'battery_limit')}
-    ${row('Profile',pw,'profile')}
-    ${row('Lid',pw,'lid')}
-  </section>
-  <section><h2>Network &amp; services</h2>
-    ${row('Tailscale',net,'tailscale')}
-    ${row('Tailnet IP',net,'tailscale_ip')}
-    ${row('Wi-Fi',net,'wifi_ssid')}
-    ${row('LAN IP',net,'lan_ip')}
-    ${row('Internet',net,'internet')}
-    ${row('SSH',svc,'ssh')}
-    ${row('Docker',svc,'docker')}
-    ${row('Netdata',svc,'netdata')}
-  </section></div>`);
-
-  const stacks=Object.keys(dk).map(k=>{const it=dk[k],t=String(it.value||'');
-    const ports=(t.match(/ports (.*)/)||[])[1];
-    return `<div class="row"><span class="k">${esc(k)}</span>
-      <span class="v ${cls(it.state)}">${esc(t.replace(/, ports .*/,''))}</span></div>`
-      +(ports?`<div class="row sub"><span class="k"></span><span class="v mut">:${esc(ports.replace(/,/g,' :'))}</span></div>`:'');}).join('');
-  const envs=(d.envs||[]).map(e=>`<a class="link" href="${esc(e.url)}" target="_blank" rel="noopener">
-     <span>Moodle ${esc(e.version)} <span class="mut">${esc(e.release||'')}</span></span>
-     <span class="tag ${e.state==='up'?'on':'off'}">${esc(e.state)} ${esc(e.containers_up||'')}</span></a>`).join('');
-  P.push(`<section><h2>Stacks</h2>${stacks}${envs}</section>`);
-
-  const shown=(d.events||[]).slice(0,8),more=nev-shown.length;
-  P.push(`<section><h2>Last 24 hours</h2>${shown.map(e=>`
-    <div class="ev ${e.kind==='incident'||e.prio==='high'?'hi':''}">
-      <time>${esc(clock(e.t))}</time>
-      <div><div class="meta">${esc(e.kind)}${e.prio&&e.prio!=='default'?' · '+esc(e.prio):''}</div>
-      <p>${esc(e.text)}</p></div></div>`).join('')
-    ||'<div class="calm">Nothing happened.</div>'}
-    ${more>0?`<div class="ev"><time></time><p class="mut">+${more} older · <code>agents-log</code></p></div>`:''}
-  </section>`);
-
-  P.push(`<footer><span>updated ${esc(clock(d.now))}</span>
-    <a href="${esc(d.netdata)}" target="_blank" rel="noopener">netdata</a></footer>`);
-  document.getElementById('app').innerHTML=P.join('');
-}
-async function tick(){
-  try{render(await(await fetch('/api/status',{cache:'no-store'})).json());}
-  catch(e){document.getElementById('app').innerHTML=
-   `<header><div class="eyebrow">offline</div><h1 class="serif">No data.</h1>
-    <p class="lede">${esc(e.message)}</p></header>`;}
-}
-let timer=null;
-function poll(on){
-  if(timer){clearInterval(timer);timer=null;}
-  if(on)timer=setInterval(tick,30000);
-}
-tick();poll(true);
-document.addEventListener('visibilitychange',()=>{
-  if(document.hidden){poll(false);}else{tick();poll(true);}
-});
-</script>
+<script type="module" src="/static/js/app.js"></script>
 </body>
 </html>

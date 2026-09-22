@@ -1,7 +1,7 @@
 [
   {
     "index": 42,
-    "name": "bluez_card.AC_80_0A_27_65_6C",
+    "name": "bluez_card.00_00_5E_00_53_01",
     "driver": "bluez5",
     "active_profile": "a2dp-sink",
     "profiles": {
@@ -32,7 +32,7 @@
     },
     "properties": {
       "device.description": "WF-1000XM5",
-      "api.bluez5.address": "AC:80:0A:27:65:6C"
+      "api.bluez5.address": "00:00:5E:00:53:01"
     },
     "ports": {}
   }

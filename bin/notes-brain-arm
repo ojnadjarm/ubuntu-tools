@@ -1,0 +1,109 @@
+#!/bin/sh
+# Types the notes brain's first turn into its tmux pane and verifies the ear actually armed.
+# Readiness is a stable pane carrying a prompt; a turn is only submitted once the prompt line
+# echoes it whole; success is `notes` connected in `eye brains`.
+set -u
+
+SESSION=${NOTES_TMUX_SESSION:-notes}
+TURN=${NOTES_FIRST_TURN:-Start: arm the ear.}
+BOX_WAIT=${NOTES_BOX_WAIT:-60}
+ARM_WAIT=${NOTES_ARM_WAIT:-25}
+ECHO_WAIT=${NOTES_ECHO_WAIT:-6}
+POLL=${NOTES_POLL:-2}
+SENDS=3
+
+# Worst case in seconds: waiting for the box, then SENDS attempts of (echo read-back, Enter,
+# arm wait), then one late re-check. Enforced as a hard deadline so it cannot outgrow the
+# unit's TimeoutStartSec — if it did, systemd would kill this script and Restart=on-failure
+# would loop, which is what the "always exit 0" design exists to prevent.
+BUDGET=$(( BOX_WAIT + SENDS * (ECHO_WAIT + 1 + ARM_WAIT) + ARM_WAIT ))
+[ "${1:-}" = --budget ] && { echo "$BUDGET"; exit 0; }
+DEADLINE=$(( $(date +%s) + BUDGET ))
+
+say() { echo "notes-brain: $*"; }
+left() { [ "$(date +%s)" -lt "$DEADLINE" ]; }
+pane() { tmux capture-pane -pJt "$SESSION" 2>/dev/null; }
+armed() { eye brains 2>/dev/null | grep -q '"name":"notes"[^}]*"connected":true'; }
+
+# The current input line is the last line starting with the prompt glyph; earlier ones are
+# scrollback. `typed` = the whole turn sits there, ready for Enter — the only state worth
+# retrying, since an Enter the session took leaves the input line empty whether the turn is
+# still visible in the pane or has scrolled out of it.
+prompt_line() { pane | grep -E '^(❯|>)' | tail -n1; }
+typed() { prompt_line | grep -qF "$TURN"; }
+clear_line() { tmux send-keys -t "$SESSION" C-u 2>/dev/null; }
+
+# The prompt box is up when a line starts with the prompt glyph, no dialog is on screen, and
+# the pane has not changed for one poll — a transient startup frame is never stable.
+wait_for_box() {
+  prev=
+  waited=0
+  while [ "$waited" -lt "$BOX_WAIT" ] && left; do
+    sleep "$POLL"
+    waited=$((waited + POLL))
+    now=$(pane)
+    case $now in *'Do you trust'*) prev=$now; continue ;; esac
+    printf '%s' "$now" | grep -qE '^(❯|>)' || { prev=$now; continue; }
+    [ -n "$prev" ] && [ "$now" = "$prev" ] && return 0
+    prev=$now
+  done
+  return 1
+}
+
+# Clears whatever the line holds, types the turn, and presses Enter only once the prompt line
+# echoes it whole. A line the terminal drained only in part is cleared instead of submitted.
+# 0 = submitted, 1 = send-keys failed, 2 = never echoed whole.
+send_turn() {
+  clear_line
+  tmux send-keys -t "$SESSION" -l "$TURN" || return 1
+  waited=0
+  while [ "$waited" -lt "$ECHO_WAIT" ] && left; do
+    sleep 1
+    waited=$((waited + 1))
+    if typed; then tmux send-keys -t "$SESSION" Enter; return 0; fi
+  done
+  clear_line
+  return 2
+}
+
+wait_for_arm() {
+  waited=0
+  while [ "$waited" -lt "$ARM_WAIT" ] && left; do
+    sleep "$POLL"
+    waited=$((waited + POLL))
+    armed && return 0
+  done
+  return 1
+}
+
+if ! wait_for_box; then
+  say "no prompt box after ${BOX_WAIT}s (trust dialog?) — nothing typed"
+  notify-owner -p high "notes brain did not arm: no prompt box after ${BOX_WAIT}s. Attach tmux notes and type: $TURN" >/dev/null 2>&1
+  exit 0
+fi
+
+n=0
+submitted=0
+while [ "$n" -lt "$SENDS" ] && left; do
+  n=$((n + 1))
+  if [ "$submitted" = 1 ] && ! typed; then
+    say "attempt $n: the turn is no longer on the input line — the session took it; waiting instead of re-sending it"
+  else
+    send_turn
+    case $? in
+      1) say "attempt $n: send-keys failed"; continue ;;
+      2) say "attempt $n: the prompt line never echoed the whole turn in ${ECHO_WAIT}s — line cleared, not submitted"; continue ;;
+    esac
+    submitted=1
+  fi
+  if wait_for_arm; then say "ear armed (attempt $n)"; exit 0; fi
+  say "attempt $n: turn submitted but notes is still not connected in eye brains after ${ARM_WAIT}s"
+done
+
+# A first Sonnet turn can reach its listen loop late; re-check before waking the owner. The
+# wait helper makes no check at all once the deadline has passed, so check once unconditionally.
+if armed || wait_for_arm; then say "ear armed late, after $n attempt(s)"; exit 0; fi
+
+say "could not arm the ear after $n attempt(s) — nothing is listening"
+notify-owner -p high "notes brain did not arm after $n tries. Attach tmux notes and type: $TURN" >/dev/null 2>&1
+exit 0

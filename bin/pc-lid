@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# pc lid [status|policy [panel-off|none]|watch] [--apply] [--json] — lid, panel power save and the lid policy unit (panel off while the lid is closed).
+# shellcheck disable=SC2034
+set -uo pipefail
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+
+pc_usage 'usage: pc lid [status] [--json]                 lid, PowerSaveMode, eDP dpms, external monitor, unit, reasserts
+       pc lid policy [--json]                   the active policy: panel-off or none
+       pc lid policy panel-off|none [--apply]   install/enable or remove pc-lid.service
+       pc lid watch                             the watcher itself (ExecStart of pc-lid.service)
+
+panel-off: lid closed and no external monitor -> mutter DisplayConfig PowerSaveMode 3 (panel
+unpowered, mutter keeps compositing: screenshots, a11y, input and Playwright keep working);
+lid open -> 0. It reasserts 3 when gnome-settings-daemon resets it while the lid is closed.
+Event-driven (UPower LidIsClosed + DisplayConfig signals), no polling. Runbook:
+~/agents/KB/runbooks/lid-panel-off.md. Undo: pc undo <id>, or pc lid policy none --apply.' "$@"
+
+PC_SUB='pc lid'
+pc_opt "$@"; ARGS=("${PC_ARGS[@]}")
+SELF="$BIN/pc-lid"
+UNIT=pc-lid.service
+UNIT_DIR="${PC_LID_UNIT_DIR:-$HOME/.config/systemd/user}"
+STATE="${PC_LID_STATE:-${XDG_RUNTIME_DIR:-/tmp}/pc-lid.json}"
+UP=(org.freedesktop.UPower /org/freedesktop/UPower org.freedesktop.UPower)
+DC=(org.gnome.Mutter.DisplayConfig /org/gnome/Mutter/DisplayConfig org.gnome.Mutter.DisplayConfig)
+
+prop() { pc_cmd busctl "$@" 2>/dev/null | awk '{print $2}'; }
+lid_closed() { prop get-property "${UP[@]}" LidIsClosed; }
+psm() { prop --user get-property "${DC[@]}" PowerSaveMode; }
+ext() { prop --user get-property "${DC[@]}" HasExternalMonitor; }
+edp() { local f; for f in "$PC_SYS"/class/drm/card*-eDP-*/dpms; do pc_rd "$f" '?'; return; done; printf '?'; }
+unit_state() { pc_cmd systemctl --user is-active "$UNIT" 2>/dev/null || true; }
+policy() {
+  [ -f "$UNIT_DIR/$UNIT" ] && [ "$(pc_cmd systemctl --user is-enabled "$UNIT" 2>/dev/null)" = enabled ] \
+    && echo panel-off || echo none
+}
+
+unit_text() {
+  cat <<UNIT
+[Unit]
+Description=pc lid — laptop panel off while the lid is closed (mutter PowerSaveMode)
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+Environment=PATH=%h/agents/bin:/usr/local/bin:/usr/bin:/bin
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus
+ExecStart=/usr/bin/python3 %h/agents/bin/pc_lid.py
+ExecStopPost=-/usr/bin/busctl --user set-property ${DC[*]} PowerSaveMode i 0
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target
+UNIT
+}
+
+sub="${ARGS[0]:-status}"
+case "$sub" in
+  status)
+    l=$(lid_closed); p=$(psm); e=$(ext); d=$(edp); u=$(unit_state)
+    r=$(jq -r '.reasserts // 0' "$STATE" 2>/dev/null || echo 0); [ -n "$r" ] || r=0
+    case $l in true) l=closed;; false) l=open;; *) l='?';; esac
+    case $e in true) e=yes;; false) e=no;; *) e='?';; esac
+    if [ "$JSON" = 1 ]; then
+      pc_json '{lid:$l,psm:($p|tonumber? // null),edp:$d,ext:$e,unit:$u,policy:$po,reasserts:($r|tonumber)}' -c \
+        --arg l "$l" --arg p "$p" --arg d "$d" --arg e "$e" --arg u "$u" --arg po "$(policy)" --arg r "$r"
+    else
+      printf 'lid=%s psm=%s edp=%s ext=%s unit=%s reasserts=%s\n' "$l" "${p:-?}" "$d" "$e" "$u" "$r"
+    fi;;
+  policy)
+    want="${ARGS[1]:-}"
+    if [ -z "$want" ]; then
+      [ "$JSON" = 1 ] && pc_json '{policy:$p}' -c --arg p "$(policy)" || policy
+      exit 0
+    fi
+    case "$want" in
+      panel-off) PC_READ_CMD="$SELF policy" pc_apply "$UNIT" "$(policy)" panel-off "$SELF _remove" "$SELF" _install;;
+      none)      PC_READ_CMD="$SELF policy" pc_apply "$UNIT" "$(policy)" none "$SELF _install" "$SELF" _remove;;
+      *) echo "pc lid: unknown policy '$want' (panel-off|none)" >&2; exit 2;;
+    esac;;
+  _install)
+    mkdir -p "$UNIT_DIR" && unit_text >"$UNIT_DIR/$UNIT" || exit 1
+    pc_cmd systemctl --user daemon-reload && pc_cmd systemctl --user enable --now "$UNIT" >/dev/null 2>&1;;
+  _remove)
+    pc_cmd systemctl --user disable --now "$UNIT" >/dev/null 2>&1
+    rm -f "$UNIT_DIR/$UNIT" "$STATE"
+    pc_cmd systemctl --user daemon-reload
+    pc_cmd busctl --user set-property "${DC[@]}" PowerSaveMode i 0;;
+  watch) exec python3 "$BIN/pc_lid.py";;
+  *) echo "pc lid: unknown command '$sub' (try: pc lid --help)" >&2; exit 2;;
+esac

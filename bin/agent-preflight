@@ -60,10 +60,10 @@ if [ -z "$BRIEF" ]; then
 
 RULES     kill by PID (never killall / pkill -f) · never restart dark-eye without the
           orchestrator · the live render.sock, orbiters.json and remote sessions are off limits
-COMMANDS  eval "$(body-sandbox up --eye offscreen --stats --audio null)"   # isolated body
+COMMANDS  eval "$(body-sandbox up --name t1 --eye offscreen --stats --audio null)"   # isolated body
           body-sandbox eye --dump /tmp/f.png --scene idle                  # offscreen frame
           MEASURE_PIDS=$MEASURE_PIDS bash ~/the-dark-eye/body/scripts/measure.sh --state idle
-          body-sandbox down                                                # no residue
+          body-sandbox down --name t1                                      # no residue
 EOF
 fi
 

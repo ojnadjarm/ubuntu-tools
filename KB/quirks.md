@@ -18,6 +18,7 @@
   `timeout 3 <cmd>` measures 104 ms against 12 ms for the same command run directly (PT15). It is
   the wrapper, not the command. Do not wrap cheap probes in a loop with it: `pc doctor` spent 2 s
   of its 5.6 s on `timeout` alone before the wrapper was dropped from everything that cannot hang.
+- **Never hash or walk a tree under `bin/` by reading file contents** — `bin/tests/fixtures/input/proc/2138/fd/21` is a symlink to `/dev/input/event3`, and a 64 KiB read of it blocks until 64 KiB of key events arrive (this hung `pcbench arm status` and the weekly bench from 2026-09-13 to 2026-09-21, TSP-019). Hash symlinks by `os.readlink()` target and skip anything that is not a regular file.
 - `pkill -f <name>` from a script kills the calling shell too (its cmdline matches). Use `killall`
   (`killall gnome-calculator` works; `killall gnome-calculato` is the one that says "no process found").
 - Scripts that touch the desktop must source `~/agents/bin/env.sh` (XDG_RUNTIME_DIR, WAYLAND_DISPLAY,
@@ -254,7 +255,7 @@
 - Cause: bud-side gesture state, not the host. The buds keep a phantom voice/call context after a mic close
   and re-route the right-bud gestures to their assistant. Marker in the journal, seconds after the last good
   mic close: `kernel: Bluetooth: hci0: SCO packet for unknown connection handle` + `bluetoothd: .../fd0: fd(N) ready`.
-- Fix: case in and out, or `bluetoothctl disconnect AC:80:0A:27:65:6C && sleep 5 && bluetoothctl connect …`.
+- Fix: case in and out, or `bluetoothctl disconnect $HARNESS_BUDS_MAC && sleep 5 && bluetoothctl connect …`.
   Both restore the taps within seconds; check the card lands back on `a2dp-sink`.
 - Mechanism: PipeWire holds the (e)SCO for its whole suspend timeout after the recorder stops — **6.2 s
   measured** — and the old close path flipped the card back to A2DP on top of the live link. The cheap
@@ -264,7 +265,7 @@
   and the AVRCP node survive), and only then returns to A2DP; then watches 30 s. Verified at the audio
   layer (close 1.09-1.14 s, link down before the flip); **not yet verified with the owner's own taps**.
 - **The kernel marker is the teardown's own echo, not a stuck link (E30).** A live mic open on this box is
-  `< eSCO AC:80:0A:27:65:6C handle 3584` — the *same* handle as every "SCO packet for unknown connection
+  `< eSCO $HARNESS_BUDS_MAC handle 3584` — the *same* handle as every "SCO packet for unknown connection
   handle 3584" line (~35 of them on 2026-09-06, ~7-9 s after each close, working cycles either side). So
   the marker never justifies a recovery on its own: a bounce fired on it at 15:51:52 and cost the owner
   10 s of audio for a healthy link. A live (e)SCO in `hcitool con` is the only evidence worth acting on,
@@ -278,7 +279,7 @@
 ## Screen captures while the owner is present
 Every `pc shot` / gnome-screenshot is visible to the owner on the TV (he counted 20 during a parity check and asked why). The rule that follows from it is `KB/toolbox.md` §6 practice 2; renderer comparisons dump frames offscreen (cairo `write_to_png`, `glReadPixels`/FBO) from a seeded scene instead.
 
-- **Hand-run eye-render hijacks the live eye** unless the socket is private (the bridge `sock` option alone is not enough; `net.createServer` accepts any number of clients). 2026-09-06 15:46: E29 made the production eye flap and vanish 3 s. **Do not type the recipe — run `body-sandbox`** (EF06); its subcommands, the mandatory `--x-offset -1400` and the scene names are in `KB/toolbox.md` §3. Sandbox processes carry `DARK_EYE_SANDBOX=<name>` and live under the sandbox dir, so `sentinel-runaway` rule 3 tells them from a hijack and still reaps one older than 2 h — `body-sandbox down` is the normal exit.
+- **Hand-run eye-render hijacks the live eye** unless the socket is private (the bridge `sock` option alone is not enough; `net.createServer` accepts any number of clients). 2026-09-06 15:46: E29 made the production eye flap and vanish 3 s. **Do not type the recipe — run `body-sandbox`** (EF06); its subcommands, the mandatory `--x-offset -1400` and the scene names are in `KB/toolbox.md` §3. Sandbox processes carry `DARK_EYE_SANDBOX=<name>` and live under the sandbox dir, so `sentinel-runaway` rule 3 tells them from a hijack and still reaps one older than 2 h — `body-sandbox down` is the normal exit. Since TSP-016 (2026-09-21) rule 3 matches the body by argv[0] (Node >= 23 sets comm to `MainThread`) and, when `/proc/<pid>/environ` carries `DARK_EYE_SANDBOX=<name>`, runs `body-sandbox down --name <name>` once per name instead of killing one pid; processes inside `dark-eye.service`'s cgroup are never touched.
 
 - **Sony WF-1000XM5 "digital assistant is not connected" on tap**: caused by the Sony app voice-assistant setting ("Asistente digital"), not by the host. Set it to "No utilizar". Verified 2026-09-06. Do not chase it host-side again; `buds-capture` shows the gesture is silent on the wire in that state.
 
@@ -298,3 +299,4 @@ Every `pc shot` / gnome-screenshot is visible to the owner on the TV (he counted
 - **`dmesg -J` ignores `--time-format`**: JSON output always carries raw monotonic/realtime microsecond fields regardless of `--time-format`; convert them in `jq`/python, don't pass `--time-format iso` expecting it to touch the JSON path.
 - **python-evdev's `UInput` node lookup costs 1.9 s of a 2.3 s `pc input inject`**: it retries `/dev/input/event*` 19 times at 0.1 s on a node the calling user cannot open, before falling back. `UI_GET_SYSNAME` on the freshly created uinput fd gets the node name directly and skips the retry loop (PT10).
 - **jq operator precedence in `a|b and c`**: `|` binds looser than expected next to `and`/`or`, so `.pci|length>5 and (...)` pipes `.pci` into the *entire* `and` expression, not just `length>5`. Parenthesise the piped side: `(.pci|length>5) and (...)` (found in `pc hw`'s own success-check line, PT07).
+- **Parallel sandboxes collide on the default name.** 2026-09-14: a second ticket's `body-sandbox up` found `s1` already up, left `DARK_EYE_CONFIG` empty and its `eye speak` reached the live body; its unnamed `down` then killed the sibling's sandbox. When more than one agent may be running, always `body-sandbox up --name <ticket>` and `down --name <ticket>`. Guarded since M02b (2026-09-14): `down` refuses without `--name`/`--all`, an unnamed `up` is `sb-<pid>`, and `up` on a name already up prints `export DARK_EYE_CONFIG=/nonexistent; false` so the eval'd session cannot reach the live body.

@@ -1,20 +1,41 @@
 #!/usr/bin/env bash
 # Claude Code adapter for agent-exec: the flags agent-run used before GH07.
-# stdout = the run's result text · $RAW_OUT = claude's own JSON · $META_OUT = cost/tokens.
+# stdout = the run's result text · $RAW_OUT = claude's own result JSON · $META_OUT = cost/tokens/tools.
 set -uo pipefail
 
 cmd=(claude -p "$(cat "$PROMPT_FILE")" --model "$MODEL" --permission-mode bypassPermissions)
 [ -n "${AGENT_NAME:-}" ] && cmd+=(--name "agent-$AGENT_NAME")
-[ -n "${SYSTEM_FILE:-}" ] && [ -r "$SYSTEM_FILE" ] && cmd+=(--append-system-prompt "$(cat "$SYSTEM_FILE")")
-cmd+=(--output-format json)
-[ -n "${BUDGET_USD:-}" ] && cmd+=(--max-budget-usd "$BUDGET_USD")
+# TSP-013: under $HOME the cwd chain (~/CLAUDE.md -> @~/agents/AGENTS.md) already carries the
+# fleet contract, so appending AGENT-PREAMBLE.md would load it twice.
+contract_imported() {
+  case "$PWD" in "$HOME"/*) grep -q '^@~/agents/AGENTS.md' "$HOME/CLAUDE.md" 2>/dev/null;; *) false;; esac
+}
+if [ -n "${SYSTEM_FILE:-}" ] && [ -r "$SYSTEM_FILE" ] && ! contract_imported; then
+  cmd+=(--append-system-prompt "$(cat "$SYSTEM_FILE")")
+fi
+cmd+=(--output-format stream-json --verbose)
 [ -n "${AGENT_TIMEOUT:-}" ] && cmd=(timeout "$AGENT_TIMEOUT" "${cmd[@]}")
 
-"${cmd[@]}" >"$RAW_OUT" </dev/null
+stream="$(mktemp "${TMPDIR:-/tmp}/agent-stream.XXXXXX")"
+trap 'rm -f "$stream"' EXIT
+
+"${cmd[@]}" >"$stream" </dev/null
 rc=$?
 
-jq -n --slurpfile r "$RAW_OUT" \
-  '{cost_usd: ($r[0].total_cost_usd? // null), tokens: ($r[0].usage? // null)}' \
-  >"$META_OUT" 2>/dev/null || jq -n '{}' >"$META_OUT"
+# Only the `result` line carries final usage; per-turn usage in the stream is a placeholder.
+jq -Rc 'fromjson? | select(.type == "result")' "$stream" 2>/dev/null | tail -1 >"$RAW_OUT"
+[ -s "$RAW_OUT" ] || jq -Rc 'fromjson?' "$stream" 2>/dev/null | tail -1 >"$RAW_OUT"
+
+hist="$(jq -Rr 'fromjson? | select(.type == "assistant") | .message.content[]?
+                | select(.type == "tool_use") | .name' "$stream" 2>/dev/null \
+        | sort | uniq -c | jq -Rn '[inputs | capture("^ *(?<n>[0-9]+) +(?<t>.+)$")
+                                   | {key: .t, value: (.n | tonumber)}] | from_entries')"
+[ -n "$hist" ] || hist='{}'
+
+jq -n --slurpfile r "$RAW_OUT" --argjson hist "$hist" \
+  '{cost_usd: ($r[0].total_cost_usd? // null), tokens: ($r[0].usage? // null),
+    tool_calls: ($hist | to_entries | map(.value) | add // 0), tool_histogram: $hist}' \
+  >"$META_OUT" 2>/dev/null || jq -n --argjson hist "$hist" \
+  '{tool_calls: ($hist | to_entries | map(.value) | add // 0), tool_histogram: $hist}' >"$META_OUT"
 jq -r '.result // empty' "$RAW_OUT" 2>/dev/null
 exit "$rc"

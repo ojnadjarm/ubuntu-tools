@@ -34,6 +34,7 @@ Regenerate: `pc help --md > ~/agents/KB/pc-cli.md`. Never hand-edit.
 | command | description | usage | bench (warm) |
 |---|---|---|---|
 | `pc hw` | PCI/USB/DMI/sensors/block/memory, cached where it never changes. | `pc hw [summary] [--json]` | 0.09 s |
+| `pc idle` | idle power baseline: median package/psys watts over a window, the top wakers and the resident fleet RSS. | `pc idle [--seconds 60] [--json\|--tsv]` | — |
 | `pc io` | disk throughput/latency, top IO procs, SMART (default: disks + top 5 procs) | `pc io [disks\|procs\|smart] [--seconds 0.3] [-n 5] [--json]` | 0.39 s |
 | `pc kernel` | ring buffer with a severity digest, modules, ledgered sysctl, cgroup cost and PSI. | `pc kernel [--json]                                   overview: release, boot, taint, lockdown, dmesg digest` | 0.16 s |
 | `pc net` | interfaces, listeners, port owners, tailscale, firewall (read-only), wifi, DNS. | `pc net [ifaces\|listeners\|tailscale] [--json]        default: ifaces + listeners + tailscale one-liners` | 0.28 s |
@@ -50,6 +51,7 @@ Regenerate: `pc help --md > ~/agents/KB/pc-cli.md`. Never hand-edit.
 | `pc bt` | bluez adapter, devices, battery and the sidecar-guarded mutations. | `pc bt [status] [--json]` | — |
 | `pc dbus` | the session, system and a11y buses as JSON. | `pc dbus list [--user\|--system\|--a11y] [--activatable] [--json]` | 0.03 s |
 | `pc input` | the evdev layer: nodes, capabilities, live events, who holds them, uinput injection. | `pc input devices [--json]` | 0.12 s |
+| `pc lid` | lid, panel power save and the lid policy unit (panel off while the lid is closed). | `pc lid [status] [--json]                 lid, PowerSaveMode, eDP dpms, external monitor, unit, reasserts` | — |
 | `pc mutter` | the compositor's state as JSON: monitors, workspaces, windows, idle, shell, extensions. Read-only. | `pc mutter [summary] [--json]      one line per section (default)` | 0.12 s |
 
 ## Services — systemd units, journal, docker
@@ -82,7 +84,7 @@ trace` is the declared exception (bpftrace floor 0.4 s + the window, always unde
 ## Guard list (`pclib.sh`, FLEET §5)
 
 A guarded verb exits 3 with the FLEET §5 line, `--apply` or not: `DisplayConfig.Apply*` /
-`SetBacklight` (monitor config); `login1` Reboot/PowerOff/Suspend/Hibernate/HybridSleep (power
+`SetBacklight` (monitor config); `PowerSaveMode` outside `pc lid`; `login1` Reboot/PowerOff/Suspend/Hibernate/HybridSleep (power
 state); a `systemctl`/D-Bus stop or restart on `ssh*`/`ufw`/`tailscaled` (a second access
 path); `org.gnome.Shell.Eval` (arbitrary code in the shell); `SessionManager`
 Logout/Reboot/Shutdown; `ScreenSaver.SetActive true` (locking the screen); edits under

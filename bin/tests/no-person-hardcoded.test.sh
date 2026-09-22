@@ -28,7 +28,7 @@ files="$(bash "$HERE/tracked-files.sh" "$DIR" | grep -vE "$SKIP")"
 
 hits() { # hits <label> <ere> [file list]
   local out list="${3:-$files}"
-  out="$(cd "$DIR" && printf '%s\n' "$list" | tr '\n' '\0' | xargs -0 grep -nIE "$2" 2>/dev/null)"
+  out="$(cd "$DIR" && printf '%s\n' "$list" | tr '\n' '\0' | xargs -0 grep -nIE --devices=skip "$2" 2>/dev/null)"
   if [ -z "$out" ]; then ok 1 "no $1"; else ok 0 "no $1"; printf '%s\n' "$out" | cut -c1-160 | head -8; fi
 }
 

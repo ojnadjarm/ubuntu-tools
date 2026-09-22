@@ -4,6 +4,8 @@
 set -uo pipefail
 BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 . "$BIN/pclib.sh"
+# Entries pc_apply drops after a unit mutation (tailscaled and the docker units feed these).
+export PC_CACHE_KEYS='docker tailscale ts_pair'
 
 pc_usage 'usage: pc units [list|timers|fleet|show|cost|log|deps|start|stop|restart] [args]
        pc units list [--user|--system|--all] [--failed] [--json]

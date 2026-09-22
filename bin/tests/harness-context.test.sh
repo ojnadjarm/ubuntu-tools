@@ -38,7 +38,9 @@ b1=$("$HARNESS" context --brief); b2=$("$HOME/agents/bin/pc" status --brief)
 [ -n "$b1" ] && [ "${b1%% *}" = "${b2%% *}" ] && ok 1 "context --brief is the machine brief" || ok 0 "context --brief is the machine brief"
 
 "$HARNESS" context --moodle | grep -q "MOODLE PROJECT DETECTED" && ok 1 "--moodle forces the guidelines section" || ok 0 "--moodle forces the guidelines section"
-"$HARNESS" context | grep -q "ADHD OUTPUT MODE" && ok 1 "plain text carries the output rules" || ok 0 "plain text carries the output rules"
+env -u AGENT_NAME "$HARNESS" context | grep -q "ADHD OUTPUT MODE" && ok 1 "plain text carries the output rules" || ok 0 "plain text carries the output rules"
+AGENT_NAME=x "$HARNESS" context --json | grep -q "ADHD OUTPUT MODE" && ok 0 "AGENT_NAME drops the output rules" || ok 1 "AGENT_NAME drops the output rules"
+AGENT_NAME=x "$HARNESS" context --json | grep -q '"hookEventName": "SessionStart"' && ok 1 "AGENT_NAME keeps the machine context" || ok 0 "AGENT_NAME keeps the machine context"
 "$HARNESS" bogus >/dev/null 2>&1; [ $? = 2 ] && ok 1 "unknown subcommand exits 2" || ok 0 "unknown subcommand exits 2"
 
 [ "$bad" = 0 ] && echo "all harness-context cases pass" || echo "$bad FAILURES"

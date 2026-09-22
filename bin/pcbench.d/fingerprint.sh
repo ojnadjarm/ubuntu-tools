@@ -5,21 +5,23 @@ set -uo pipefail
 export LC_ALL=C
 # shellcheck source=/dev/null
 . "$HOME/agents/bin/env.sh"
+# TSP-011: the uutils `timeout` costs a flat ~100 ms; prefer the GNU binary.
+export PC_TIMEOUT_BIN="${PC_TIMEOUT_BIN:-$(command -v gnutimeout || echo timeout)}"
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 f() { local n=$1; shift; ( printf '%s' "$( "$@" 2>/dev/null )" > "$W/$n" ) & }
 
-f default_sink      timeout 2 pactl get-default-sink
+f default_sink      "$PC_TIMEOUT_BIN" 2 pactl get-default-sink
 f null_modules      bash -c 'pactl list modules short 2>/dev/null | grep -c module-null-sink'
-f power_profile     timeout 2 powerprofilesctl get
+f power_profile     "$PC_TIMEOUT_BIN" 2 powerprofilesctl get
 f failed_user_units bash -c 'systemctl --user list-units --state=failed --no-legend 2>/dev/null | wc -l'
 f docker            bash -c "docker ps -a --format '{{.Names}}:{{.State}}' 2>/dev/null | sort | md5sum | cut -c1-12"
 f monitors          bash -c 'gdctl show 2>/dev/null | md5sum | cut -c1-12'
-f tailscale         bash -c 'timeout 3 tailscale status --json 2>/dev/null | jq -r .BackendState'
-f ufw               bash -c 'timeout 3 sudo -n ufw status 2>/dev/null | head -1'
+f tailscale         bash -c '"$PC_TIMEOUT_BIN" 3 tailscale status --json 2>/dev/null | jq -r .BackendState'
+f ufw               bash -c '"$PC_TIMEOUT_BIN" 3 sudo -n ufw status 2>/dev/null | head -1'
 # Field name kept: recorded bench runs compare on it (SCHEMA.md).
 f tmux_claude       bash -c 'tmux has-session -t "$ORCHESTRATOR_TMUX_SESSION" 2>/dev/null && echo alive || echo gone'
-f pc_mode           bash -c 'timeout 3 pc mode 2>/dev/null | head -1'
-f win_list          bash -c 'timeout 5 pc win list 2>/dev/null | md5sum | cut -c1-12'
+f pc_mode           bash -c '"$PC_TIMEOUT_BIN" 3 pc mode 2>/dev/null | head -1'
+f win_list          bash -c '"$PC_TIMEOUT_BIN" 5 pc win list 2>/dev/null | md5sum | cut -c1-12'
 f ledger_lines      bash -c 'wc -l < "$HOME/agents/log/changes.jsonl" 2>/dev/null || echo 0'
 f uptime_since      uptime -s
 f dark_eye_head     bash -c 'git -C "$HOME/the-dark-eye" rev-parse HEAD 2>/dev/null'

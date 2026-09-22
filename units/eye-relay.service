@@ -1,0 +1,16 @@
+[Unit]
+Description=Eye voice relay: bus -> spool for eye-channel sessions (runbook KB/runbooks/eye-relay.md)
+After=dark-eye.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/agents/bin/eye-relay main notes
+# A stop lets each in-flight 50 s long-poll land in the spool before exiting.
+KillMode=mixed
+TimeoutStopSec=70
+Restart=always
+RestartSec=5
+MemoryMax=64M
+
+[Install]
+WantedBy=default.target

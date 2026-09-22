@@ -10,6 +10,10 @@ ap.add_argument('--grep', help='regex over tool/op/summary')
 ap.add_argument('--stats', action='store_true',
                 help='count commands (op basename) per session instead of lines')
 ap.add_argument('--pc', action='store_true', help='pixel-vs-text look counts per session')
+ap.add_argument('--raw', action='store_true',
+                help='raw tool calls and the pc verb that covers each (\u2014 = toolbox gap)')
+ap.add_argument('--tokens', action='store_true',
+                help='context/token cost per Claude session, read from the transcripts')
 a = ap.parse_args()
 
 cut = 0.0
@@ -18,6 +22,103 @@ if a.since:
     if not m:
         sys.exit('bad --since (use 30m, 2h, 3d)')
     cut = time.time() - int(m[1]) * {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}[m[2]]
+
+def tokens_view(session, cut):
+    """One row per transcript session: turns, context carried, results, re-reads."""
+    import calendar, glob, statistics
+    root = os.environ.get('CLAUDE_PROJECTS_DIR',
+                          os.path.expanduser('~/.claude/projects'))
+    rows, days = [], {}
+    for f in sorted(glob.glob(os.path.join(root, '*', '*.jsonl'))):
+        sid = os.path.basename(f)[:8]
+        if session and not sid.startswith(session):
+            continue
+        ctx, cread, out, res, names, imgs, reads = [], 0, 0, Counter(), {}, 0, []
+        last = 0.0
+        for line in open(f, errors='replace'):
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            t = r.get('timestamp', '')[:19]
+            stamp = 0.0
+            if t:
+                try:
+                    stamp = calendar.timegm(
+                        time.strptime(t, '%Y-%m-%dT%H:%M:%S'))
+                except ValueError:
+                    stamp = 0.0
+            last = max(last, stamp)
+            if r.get('type') == 'assistant':
+                u = (r.get('message') or {}).get('usage') or {}
+                ctx.append(u.get('input_tokens', 0)
+                           + u.get('cache_read_input_tokens', 0)
+                           + u.get('cache_creation_input_tokens', 0))
+                cread += u.get('cache_read_input_tokens', 0)
+                out += u.get('output_tokens', 0)
+                days[t[:10]] = days.get(t[:10], [0, 0])
+                days[t[:10]][0] += 1
+                days[t[:10]][1] += ctx[-1]
+                for b in (r.get('message') or {}).get('content') or []:
+                    if isinstance(b, dict) and b.get('type') == 'tool_use':
+                        names[b.get('id')] = b.get('name', '?')
+                        if b.get('name') == 'Read':
+                            reads.append((b.get('input') or {}).get('file_path'))
+            elif r.get('type') == 'user':
+                c = (r.get('message') or {}).get('content')
+                for b in c if isinstance(c, list) else []:
+                    if not isinstance(b, dict):
+                        continue
+                    if b.get('type') == 'image':
+                        imgs += 1
+                    elif b.get('type') == 'tool_result':
+                        body = b.get('content')
+                        if isinstance(body, list):
+                            n = 0
+                            for x in body:
+                                if isinstance(x, dict) and x.get('type') == 'image':
+                                    imgs += 1
+                                    n += len(((x.get('source') or {})
+                                              .get('data') or ''))
+                                elif isinstance(x, dict):
+                                    n += len(x.get('text') or '')
+                        else:
+                            n = len(body or '')
+                        res[names.get(b.get('tool_use_id'), '?')] += n
+        if not ctx or (cut and last < cut):
+            continue
+        rereads = len(reads) - len({p for p in reads if p})
+        rows.append((sid, len(ctx), statistics.mean(ctx),
+                     statistics.median(ctx), max(ctx), cread, out,
+                     res, imgs, max(rereads, 0)))
+    head = (f"{'session':9} {'turns':>6} {'mean ctx':>9} {'median':>9} {'max':>9} "
+            f"{'cacheR M':>9} {'out k':>7} {'imgs':>5} {'re-rd':>6}  results KB (top 3)")
+    print(head)
+    tot = [0, 0, 0, 0, 0]
+    allres = Counter()
+    for sid, n, mean, med, mx, cread, out, res, imgs, rr in sorted(
+            rows, key=lambda r: -r[1]):
+        allres.update(res)
+        tot[0] += n
+        tot[1] += mean * n
+        tot[2] += cread
+        tot[3] += out
+        tot[4] += imgs
+        top = ' '.join(f'{k}:{v / 1024:.0f}' for k, v in res.most_common(3))
+        print(f'{sid:9} {n:6} {mean:9,.0f} {med:9,.0f} {mx:9,.0f} '
+              f'{cread / 1e6:9.1f} {out / 1000:7.1f} {imgs:5} {rr:6}  {top}')
+    mean = tot[1] / tot[0] if tot[0] else 0
+    top = ' '.join(f'{k}:{v / 1024:.0f}' for k, v in allres.most_common(3))
+    print(f"{'TOTAL':9} {tot[0]:6} {mean:9,.0f} {'':9} {'':9} "
+          f"{tot[2] / 1e6:9.1f} {tot[3] / 1000:7.1f} {tot[4]:5} {'':6}  {top}")
+    for d in sorted(days):
+        n, c = days[d]
+        print(f'{d}  turns {n:5}  mean ctx {c / n:9,.0f}')
+
+
+if a.tokens:
+    tokens_view(a.session, cut)
+    sys.exit(0)
 
 path = os.path.expanduser('~/agents/log/actions.jsonl')
 rows = []
@@ -37,10 +138,47 @@ for line in open(path) if os.path.exists(path) else []:
         continue
     rows.append(r)
 
+# Raw shell tool -> the pc verb that covers it; None = no pc verb yet (a toolbox gap).
+# Source of truth for this table; toolsmith-inputs mirrors it in audit.raw_map.
+RAW_MAP = {
+    'pactl': (r'\bpactl\b', 'pc audio'),
+    'wpctl': (r'\bwpctl\b', 'pc audio'),
+    'powerprofilesctl': (r'\bpowerprofilesctl\b', 'pc power profile'),
+    'systemctl stop': (r'\bsystemctl\b[^;|&]*\bstop\b', 'pc units'),
+    'systemctl restart': (r'\bsystemctl\b[^;|&]*\brestart\b', 'pc units'),
+    'docker restart': (r'\bdocker\s+restart\b', 'pc docker restart'),
+    'tailscale': (r'\btailscale\b', 'pc net tailscale'),
+    'nmcli': (r'\bnmcli\b', None),
+    'brightnessctl': (r'\bbrightnessctl\b', None),
+}
+RAW_MAP_RE = {k: re.compile(v[0]) for k, v in RAW_MAP.items()}
+
 PIXEL = re.compile(r'\bpc (?:shot|find|click-text)\b|\bpc wait [0-9]')
 TEXT = re.compile(r'\bpc (?:see|wait-for|tree|a11y-click)\b|\bpc win (?:list|focused)\b')
 
-if a.pc:
+if a.raw:
+    counts, sessions = Counter(), {}
+    for r in rows:
+        if r.get('tool') != 'Bash':
+            continue
+        blob = r.get('summary') or ''
+        for tool, rx in RAW_MAP_RE.items():
+            n = len(rx.findall(blob))
+            if n:
+                counts[tool] += n
+                sessions.setdefault(tool, set()).add(r.get('session', ''))
+    print(f"{'raw verb':20} {'pc verb':20} {'count':>6} {'sessions':>9}")
+    covered = 0
+    for tool, n in counts.most_common():
+        verb = RAW_MAP[tool][1]
+        if verb:
+            covered += n
+        print(f'{tool:20} {verb or "\u2014":20} {n:6} {len(sessions[tool]):9}')
+    total = sum(counts.values())
+    pct = 100 * covered / total if total else 0
+    print(f"{'TOTAL':20} {'pc-coverable':20} {covered:6} {'':9}  "
+          f'of {total} raw calls ({pct:.0f}%)')
+elif a.pc:
     tot = [0, 0]
     print(f"{'session':10} {'pixel':>6} {'text':>6} {'ratio':>6}")
     for sess in sorted({r.get('session', '') for r in rows}):

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Recorded `pc power rapl` / `pc top` output for pc-idle.test.sh. Reads nothing real.
+set -u
+S="${PC_STUB_STATE:-/dev/null}"
+case "$1 ${2:-}" in
+  "power rapl")
+    n=$(cat "$S" 2>/dev/null); : "${n:=0}"; printf '%s\n' $(( n + 1 )) > "$S" 2>/dev/null
+    case "$n" in
+      0) echo '{"seconds":1,"package_w":4.00,"core_w":2.00,"uncore_w":0.00,"psys_w":6.00,"pl1_w":95}';;
+      1) echo '{"seconds":1,"package_w":9.00,"core_w":6.00,"uncore_w":0.00,"psys_w":8.00,"pl1_w":95}';;
+      *) echo '{"seconds":1,"package_w":5.00,"core_w":3.00,"uncore_w":0.00,"psys_w":7.00,"pl1_w":95}';;
+    esac;;
+  "top --sort")
+    case "$3" in
+      wake) cat <<'J'
+[{"pid":1,"comm":"claude","cpu":13.3,"wake":140.0,"rss":679632,"io_r":0.0,"io_w":0.0,"unit":"-","pss":676771},
+ {"pid":2,"comm":"rcu_preempt","cpu":0.0,"wake":46.7,"rss":0,"io_r":0.0,"io_w":0.0,"unit":"-","pss":0},
+ {"pid":3,"comm":"mt76-tx phy0","cpu":0.0,"wake":40.0,"rss":0,"io_r":0.0,"io_w":0.0,"unit":"-","pss":0},
+ {"pid":4,"comm":"kworker/u64:2","cpu":0.0,"wake":30.0,"rss":0,"io_r":0.0,"io_w":0.0,"unit":"-","pss":0},
+ {"pid":5,"comm":"tmux","cpu":0.0,"wake":20.0,"rss":6924,"io_r":0.0,"io_w":0.0,"unit":"-","pss":4722}]
+J
+        ;;
+      rss) cat <<'J'
+[{"pid":10,"comm":"firefox","cpu":1.0,"wake":5.0,"rss":900000,"io_r":0.0,"io_w":0.0,"unit":"app-firefox.scope","pss":800000},
+ {"pid":11,"comm":"dark-eye","cpu":2.0,"wake":9.0,"rss":204800,"io_r":0.0,"io_w":0.0,"unit":"dark-eye.service","pss":200000},
+ {"pid":12,"comm":"claude","cpu":0.5,"wake":3.0,"rss":102400,"io_r":0.0,"io_w":0.0,"unit":"agent@moodle-keeper.service","pss":100000},
+ {"pid":13,"comm":"bash","cpu":0.1,"wake":1.0,"rss":51200,"io_r":0.0,"io_w":0.0,"unit":"sentinel-check.service","pss":50000}]
+J
+        ;;
+    esac;;
+  *) echo "stub pc: unexpected '$*'" >&2; exit 99;;
+esac

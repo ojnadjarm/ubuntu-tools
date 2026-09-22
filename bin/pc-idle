@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# pc idle — idle power baseline: median package/psys watts over a window, the top wakers and the resident fleet RSS.
+set -uo pipefail
+export LC_ALL=C
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+PC_SUB='pc idle'
+
+pc_usage 'usage: pc idle [--seconds 60] [--json|--tsv]
+
+Samples `pc power rapl` every PC_IDLE_INTERVAL seconds (default 2) for the window and reports
+the median package and psys watts with the psys standard deviation, the five busiest wakers
+from `pc top --sort wake`, the resident RSS of the agent@*, sentinel* and dark-eye* units and,
+as other_rss_mb, the RSS of any leftover playwright-mcp / headless-chrome tree.
+Read-only: nothing is mutated and no ledger entry is written. `--tsv` prints one row for
+bench/BASELINE-IDLE.tsv, which pcbench-weekly appends to on Sunday.' "$@"
+
+PC_EXTRA_FLAGS=(--tsv)
+pc_opt "$@"
+TSV=0; [ -n "${PC_OPT[--tsv]:-}" ] && TSV=1
+
+SECS=$SECONDS_
+case "$SECS" in ""|*[!0-9]*) SECS=60;; 0) SECS=60;; esac
+INT=${PC_IDLE_INTERVAL:-2}
+N=$(( SECS / INT )); [ "$N" -lt 1 ] && N=1
+RAPL_S=$(( INT > 1 ? 1 : INT )); [ "$RAPL_S" -lt 1 ] && RAPL_S=1
+
+samples=$(
+  i=0
+  while [ "$i" -lt "$N" ]; do
+    [ "$i" = 0 ] || { [ $(( INT - RAPL_S )) -gt 0 ] && sleep $(( INT - RAPL_S )); }
+    pc_cmd pc power rapl --seconds "$RAPL_S" --json
+    i=$(( i + 1 ))
+  done
+)
+
+power=$(jq -sc '
+  def r2: (. * 100 | round) / 100;
+  def med: sort | if length == 0 then 0
+                  elif length % 2 == 1 then .[(length / 2) | floor]
+                  else (.[length / 2 - 1] + .[length / 2]) / 2 end;
+  def sd: if length == 0 then 0 else (add / length) as $m
+          | (map(($m - .) * ($m - .)) | add / length | sqrt) end;
+  { samples: length,
+    package_w: ([.[].package_w] | med | r2),
+    psys_w:    ([.[].psys_w]    | med | r2),
+    psys_sd:   ([.[].psys_w]    | sd  | r2) }' <<<"$samples")
+
+wakers=$(pc_cmd pc top --sort wake -n 5 --json |
+  jq -c '[.[] | {comm, wake, rss}]')
+
+fleet=$(pc_cmd pc top --sort rss -n 100 --json |
+  jq -c '[.[] | select(.unit | test("^(agent@|sentinel|dark-eye)"))]
+         | { rss_mb: ((([.[].rss] | add // 0) / 1024 * 10 | round) / 10),
+             units: ([.[].unit] | unique) }')
+
+# Session leftovers the fleet does not own: the Playwright MCP server and headless Chrome
+# trees that outlive a browser task (TSP-020), summed in KB apart from fleet_rss_mb.
+other_rss_kb() {
+  local d cmd rss args kb=0
+  for d in "$PC_PROC"/[0-9]*; do
+    mapfile -d '' args <"$d/cmdline" 2>/dev/null || continue
+    cmd="${args[*]}"
+    case $cmd in
+      *playwright-mcp*|*headless_shell*) ;;
+      *--headless*) case $cmd in *chrom*) ;; *) continue;; esac;;
+      *) continue;;
+    esac
+    read -r _ rss _ <"$d/statm" 2>/dev/null || continue
+    kb=$(( kb + rss * 4 ))
+  done
+  printf '%s' "$kb"
+}
+
+OUT=$(pc_json '$p + {seconds:$s, wakers:$w, fleet:$f, other_rss_mb:(($o / 1024 * 10 | round) / 10), t:$t}' -c \
+  --argjson p "$power" --argjson s "$SECS" --argjson w "$wakers" --argjson f "$fleet" \
+  --argjson o "$(other_rss_kb)" --arg t "$(date -Is)")
+
+if [ "$TSV" = 1 ]; then
+  jq -r '[.t, .seconds, .samples, .package_w, .psys_w, .psys_sd,
+          (.wakers[0].comm // "-"), (.wakers[0].wake // 0), .fleet.rss_mb,
+          .other_rss_mb] | @tsv' <<<"$OUT"
+elif [ "$JSON" = 1 ]; then
+  printf '%s\n' "$OUT"
+else
+  jq -r '"idle    \(.seconds) s, \(.samples) samples",
+         "power   package \(.package_w) W median  psys \(.psys_w) W ±\(.psys_sd)",
+         "wakers  " + ([.wakers[] | "\(.comm) \(.wake)/s"] | join(" · ")),
+         "fleet   \(.fleet.rss_mb) MB resident in \(.fleet.units | length) units · other \(.other_rss_mb) MB in browser trees"' <<<"$OUT"
+fi
+exit 0

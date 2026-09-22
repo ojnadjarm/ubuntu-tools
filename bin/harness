@@ -30,10 +30,12 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-brief=$(timeout 5 "$BIN/pc" status --brief 2>/dev/null) || brief=""
+# TSP-011: the uutils `timeout` costs ~100 ms per call; prefer the GNU binary when installed.
+TMO="${PC_TIMEOUT_BIN:-$(command -v gnutimeout || echo timeout)}"
+brief=$("$TMO" 5 "$BIN/pc" status --brief 2>/dev/null) || brief=""
 case "$PWD" in
   "$HOME/the-dark-eye"*)
-    pf=$(timeout 3 "$BIN/agent-preflight" --brief 2>/dev/null | tr -s "\n " "  ")
+    pf=$("$TMO" 3 "$BIN/agent-preflight" --brief 2>/dev/null | tr -s "\n " "  ")
     [ -n "$pf" ] && [ -n "$brief" ] && brief="$brief | eye: $pf";;
 esac
 
@@ -57,9 +59,13 @@ def read(rel):
     path = os.path.join(base, rel)
     return open(path).read() if os.path.exists(path) else ""
 
-adhd = re.sub(r"\A---\n.*?\n---\n", "", read("skills/i-have-adhd/SKILL.md"), count=1, flags=re.S)
-parts = ["=== ADHD OUTPUT MODE — active for this whole session ===", adhd]
-banner = "Harness: ADHD mode on"
+# Headless agent runs (AGENT_NAME set by agent-exec) skip the human-facing output rules.
+if os.environ.get("AGENT_NAME"):
+    parts, banner = [], "Harness: headless agent context"
+else:
+    adhd = re.sub(r"\A---\n.*?\n---\n", "", read("skills/i-have-adhd/SKILL.md"), count=1, flags=re.S)
+    parts = ["=== ADHD OUTPUT MODE — active for this whole session ===", adhd]
+    banner = "Harness: ADHD mode on"
 if root:
     parts += [
         "=== MOODLE PROJECT DETECTED — these rules are mandatory for this session ===",

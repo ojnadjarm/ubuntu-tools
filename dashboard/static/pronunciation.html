@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#000000">
+<title>Pronunciation drill</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23000'/%3E%3Cpath d='M4 4h8v2H6v6H4zM20 4h8v8h-2V6h-6zM4 20h2v6h6v2H4zM26 20h2v8h-8v-2h6z' fill='%234dffa0'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%234dffa0'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/eye.css">
+<link rel="stylesheet" href="/static/css/voice.css">
+<link rel="modulepreload" href="/static/js/voice/common.js">
+<link rel="modulepreload" href="/static/js/voice/recorder.js">
+</head>
+<body class="pg-pron">
+<header class="top"><a href="/">&larr; panel</a><span class="seg"><a href="/voice" data-sec="prompts">Prompts</a><b>Voice training</b></span><span></span></header>
+
+<nav class="path" aria-label="the 30-step path"><button class="nav" id="back" type="button" disabled>&lsaquo; back</button><div class="pbar" id="pbar" aria-hidden="true"></div><button class="nav" id="resume" type="button" hidden></button><span class="cnt" id="pathCount"></span></nav>
+
+<main class="col">
+<section class="prompt short" id="prompt" data-rs="idle">
+  <div class="meta"><span class="pos" id="pos">…</span><span class="grp" id="grp"></span><span class="pill dim" id="len"></span></div>
+  <p class="say" id="say">loading the path…</p>
+  <div class="listen" role="group" aria-labelledby="listenK">
+    <span class="k" id="listenK">Listen</span>
+    <div class="lbtns"><button class="hear line" id="hearSay" type="button" aria-label="hear the sentence">&#9654; full line</button><div class="words" id="words"></div></div>
+  </div>
+  <p class="rule" id="rule">Say every marked word right in one take — or across three takes — and the next step opens.</p>
+  <div class="status" id="status"><i class="dot"></i><span class="txt" id="stateText">loading</span><span class="timer" id="timer"></span></div>
+  <div class="meter"><i id="meter"></i></div>
+</section>
+
+<section class="alert" id="alert" role="alert" hidden></section>
+
+<section class="takes" id="takes" hidden>
+  <h2>This step <s id="takeCount"></s></h2>
+  <div id="takeList"></div>
+  <div id="clearBox"></div>
+  <div class="legend" id="legend" hidden><i class="gold">gold</i> = you said it, it missed or changed it &middot; <i class="vio">violet</i> = it heard a word you did not say</div>
+</section>
+
+<details class="drawer prog" id="prog" hidden>
+  <summary>Errors per 100 target words <s id="progSum"></s></summary>
+  <div class="grid" id="progGrid"></div>
+</details>
+
+<details class="drawer trail" id="trail" hidden>
+  <summary>Cleared steps <s id="trailCount"></s></summary>
+  <div id="trailRows"></div>
+</details>
+</main>
+
+<footer class="bar" role="toolbar" aria-label="Recording">
+  <div class="acts-bar"><button class="go" id="go" disabled><span id="goLabel">Continue</span><em id="goSub"></em></button></div>
+</footer>
+
+<script type="module" src="/static/js/voice/pronunciation.js"></script>
+</body>
+</html>

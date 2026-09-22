@@ -2,6 +2,8 @@
 # pc shot [out.png] [--scale F] [--region X,Y,W,H] [--diff [PREV]] [--ignore X,Y,W,H] [--changed-only] [--quiet] — screenshot the screen or a region; --diff reports what changed since the previous shot.
 # Screenshot via xdg portal; prints "path WxH NKB" and, with --diff, "changed bbox=X,Y,W,H" or "unchanged".
 . "$(dirname "$(readlink -f "$0")")/env.sh"
+# TSP-011: the uutils `timeout` costs a flat ~100 ms; prefer the GNU binary.
+export PC_TIMEOUT_BIN="${PC_TIMEOUT_BIN:-$(command -v gnutimeout || echo timeout)}"
 out=""; scale=""; region=""; diff=""; prev=""; ignore="0,0,1366,32"; conly=""; quiet=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -22,7 +24,7 @@ if [ -n "$diff" ] && [ -z "$prev" ]; then
   [ -f "$out" ] && cp -f "$out" "$prev"
 fi
 tmp="$(mktemp --suffix=.png)"
-timeout 30 python3 "$PC_BIN/portal_shot.py" "$tmp" >/dev/null || { rm -f "$tmp"; exit 1; }
+"$PC_TIMEOUT_BIN" 30 python3 "$PC_BIN/portal_shot.py" "$tmp" >/dev/null || { rm -f "$tmp"; exit 1; }
 python3 - "$tmp" "$out" "$region" "$scale" "$prev" "$ignore" "$conly" "$quiet" <<'PY'
 import os, sys
 from PIL import Image, ImageChops

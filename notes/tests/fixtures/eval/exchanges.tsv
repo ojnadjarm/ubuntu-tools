@@ -1,0 +1,21 @@
+# id	kind	speak	ops	files	kw	prompt
+# kind: start | voice | remote | dropped | word (trigger only) | chat (not a note) | timer | novault. speak: exact count or le1. ops: none or comma list of
+# applier ops expected in this turn. files: ';' substrings expected among the touched paths. kw: ';' words
+# expected in the filed text (or '?' = the spoken line is a question, or a word the spoken line must carry).
+T0	start	0	none	-	-	Start: arm the ear.
+E1	voice	1	none	-	-	VOICE: idea for the garage, put a motion light over the workbench so I stop fumbling for the switch in the dark
+E2	voice	1	none	-	-	VOICE: sobre la lámpara de la cocina, mejor una bombilla regulable y que se encienda sola al anochecer
+E3	timer	0	create,append	kitchen-lamp.md;ideas/	-	[Monitor 'settle' (sleep 600) finished: exit 0]
+E4	voice	1	none	-	-	VOICE: for the eye brains thing, the chip should also show un puntito cuando a brain has parked words, so I know it's waiting for me
+E5	word	le1	append	eye-brains.md	parked	VOICE: file it
+E7	voice	1	none	-	?	VOICE: one more on the colour thing, warmer is better
+E8	voice	le1	append	kitchen-lamp.md	warm	VOICE: the kitchen lamp, save it
+E6	dropped	le1	create	ideas/	dim	VOICE: the eye should dim the when the room goes dark after eleven at night, that's it
+E9a	voice	1	none	-	-	VOICE: new idea, a weekly digest of my notes read out loud on sunday morning
+E9b	voice	1	none	-	-	VOICE: actually only the unsure ones, and on the phone not on the tv
+E9c	word	le1	create	ideas/	phone	VOICE: done
+E10	remote	1	none	-	-	VOICE [remote]: quick one, the earbuds should say their battery level when I put them on
+E10t	timer	0	create	ideas/	battery	[Monitor 'settle' (sleep 600) finished: exit 0]
+E11	chat	1	none	-	main	VOICE: what's the weather like tomorrow
+E12a	novault	1	none	-	notes|vault	VOICE: note that the garden hose leaks at the tap, it needs a new washer
+E12b	word	le1	create	ideas/	hose	VOICE: ya está, guárdalo

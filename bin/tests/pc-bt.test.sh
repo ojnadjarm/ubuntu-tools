@@ -12,7 +12,7 @@ bad=0
 ok()  { printf 'ok   %s\n' "$1"; }
 nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
 is()  { [ "$2" = "$3" ] && ok "$1" || nok "$1" "expected '$3', got '$2'"; }
-fx()  { PC_FIXTURE="$FIX" XDG_RUNTIME_DIR="$WORK" "$PC" "$@"; }
+fx()  { BUDS_MAC=00:00:5E:00:53:01 PC_FIXTURE="$FIX" XDG_RUNTIME_DIR="$WORK" "$PC" "$@"; }
 
 # 1. shape: the description line pc help prints, -h, the exit codes.
 l=$(sed -n 2p "$PC")
@@ -24,7 +24,7 @@ fx info zzz-no-such-device >/dev/null 2>&1; is 'an unknown device exits 1' "$?" 
 
 # 2. read verbs against the recording.
 s=$(fx status --json)
-is 'status --json reads the adapter' "$(jq -r .adapter.address <<<"$s")" 14:13:33:55:29:FE
+is 'status --json reads the adapter' "$(jq -r .adapter.address <<<"$s")" 00:00:5E:00:53:02
 is 'status --json counts the connected device' "$(jq -r .counts.connected <<<"$s")" 1
 is 'status --json carries the battery of a connected device' "$(jq -r '.connected[0].battery' <<<"$s")" 85
 is 'status --json names the sidecar' "$(jq -r '.sidecar.unit + ":" + (.sidecar.active|tostring)' <<<"$s")" dark-eye-ptt:true
@@ -35,10 +35,10 @@ is 'devices --json types the numbers as numbers' \
   "$(fx devices --json | jq -r '.[]|select(.name=="WF-1000XM5")|[(.battery|type),(.rssi|type)]|join(",")')" number,number
 is 'battery --json lists the percentage' "$(fx battery --json | jq -r '.[0].percentage')" 85
 is 'info --json adds the bluez5 card and its profiles' \
-  "$(fx info buds --json | jq -r '.card=="bluez_card.AC_80_0A_27_65_6C" and .profile=="a2dp-sink" and (.profiles|index("headset-head-unit")!=null)')" true
-is 'a MAC selector resolves' "$(fx info AC:80:0A:27:65:6C --json | jq -r .name)" WF-1000XM5
-is 'a name substring resolves' "$(fx info 1000xm5 --json | jq -r .mac)" AC:80:0A:27:65:6C
-is 'profile with no argument prints the active one' "$(fx profile buds)" 'bluez_card.AC_80_0A_27_65_6C a2dp-sink'
+  "$(fx info buds --json | jq -r '.card=="bluez_card.00_00_5E_00_53_01" and .profile=="a2dp-sink" and (.profiles|index("headset-head-unit")!=null)')" true
+is 'a MAC selector resolves' "$(fx info 00:00:5E:00:53:01 --json | jq -r .name)" WF-1000XM5
+is 'a name substring resolves' "$(fx info 1000xm5 --json | jq -r .mac)" 00:00:5E:00:53:01
+is 'profile with no argument prints the active one' "$(fx profile buds)" 'bluez_card.00_00_5E_00_53_01 a2dp-sink'
 
 # 3. the sidecar guard — the reason this command exists.
 fx profile buds hfp --apply >/dev/null 2>&1; is 'profile --apply on the buds exits 3 while the sidecar is active' "$?" 3
@@ -47,9 +47,9 @@ fx connect buds --apply >/dev/null 2>&1; is 'connect --apply on the buds exits 3
 fx disconnect buds --apply >/dev/null 2>&1; is 'disconnect --apply on the buds exits 3 while the sidecar is active' "$?" 3
 fx disconnect buds --apply --force >/dev/null 2>&1; is '--force without --why exits 2' "$?" 2
 is 'a dry run still prints would: under the guard' \
-  "$(fx disconnect buds 2>/dev/null)" 'would: AC:80:0A:27:65:6C connected → disconnected'
+  "$(fx disconnect buds 2>/dev/null)" 'would: 00:00:5E:00:53:01 connected → disconnected'
 is 'the sidecar-inactive path reaches the profile change' \
-  "$(FIX_SIDECAR=inactive fx profile buds hfp 2>&1)" 'would: bluez_card.AC_80_0A_27_65_6C a2dp-sink → headset-head-unit'
+  "$(FIX_SIDECAR=inactive fx profile buds hfp 2>&1)" 'would: bluez_card.00_00_5E_00_53_01 a2dp-sink → headset-head-unit'
 is 'an unknown profile exits 2' "$(FIX_SIDECAR=inactive fx profile buds nosuch >/dev/null 2>&1; echo $?)" 2
 is 'power off is refused while a device is connected' "$(fx power off >/dev/null 2>&1; echo $?)" 3
 is 'power on when it is already on is a no-op' "$(fx power on)" 'already: adapter on'
@@ -61,7 +61,7 @@ id=$(printf '%s\n' "$out" | tail -1 | sed -n 's/^rollback: pc undo //p')
 e=$(PC_LEDGER="$WORK/changes.jsonl" "$BIN/pc-undo" show "$id" --json)
 is 'the ledger verified the disconnect' "$(jq -r .verified <<<"$e")" true
 is 'the ledger records before → after' "$(jq -r '.before + " → " + .after' <<<"$e")" 'connected → disconnected'
-is 'the rollback is the inverse verb' "$(jq -r '.rollback|test("pc-bt connect AC:80:0A:27:65:6C --apply")' <<<"$e")" true
+is 'the rollback is the inverse verb' "$(jq -r '.rollback|test("pc-bt connect 00:00:5E:00:53:01 --apply")' <<<"$e")" true
 is 'the live ledger was not touched' "$(grep -c . "$WORK/changes.jsonl")" 2
 
 # 5. live, read-only (plus one 1 s scan). Skipped when bluez is not reachable. XDG_RUNTIME_DIR

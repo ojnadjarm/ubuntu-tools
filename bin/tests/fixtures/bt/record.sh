@@ -6,8 +6,10 @@
 # same keys `buds-capture` sees on a healthy link (RUNBOOK-earbuds.md). Run by hand when bluez
 # or the device object changes.
 set -eu
+. "$HOME/agents/bin/env.sh"
+MAC="${BUDS_MAC:-${HARNESS_BUDS_MAC:?set HARNESS_BUDS_MAC in config.env}}"
 d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/resp"; mkdir -p "$d"
-DEV=/org/bluez/hci0/dev_AC_80_0A_27_65_6C
+DEV=/org/bluez/hci0/dev_${MAC//:/_}
 key() { printf '%s\0' "$@" | sha1sum | cut -c1-16; }
 
 # 1. the introspection pc dbus does to resolve ObjectManager.GetManagedObjects on /.
@@ -30,11 +32,11 @@ journalctl -u bluetooth -p err -n 1 -o json --no-pager >"$d/journal.json"
 
 # 4. the bluez5 card. Crafted, not recorded: the card only exists while the buds are connected.
 #    Profile list from RUNBOOK-earbuds.md ("Profiles offered"), active profile a2dp-sink.
-jq -n '[{index: 42, name: "bluez_card.AC_80_0A_27_65_6C", driver: "bluez5",
+jq -n --arg mac "$MAC" '[{index: 42, name: ("bluez_card." + ($mac | gsub(":"; "_"))), driver: "bluez5",
   active_profile: "a2dp-sink",
   profiles: (["a2dp-sink","a2dp-sink-sbc","a2dp-sink-sbc_xq","headset-head-unit","headset-head-unit-cvsd","off"]
              | map({key:., value:{description:., available:true}}) | from_entries),
-  properties: {"device.description": "WF-1000XM5", "api.bluez5.address": "AC:80:0A:27:65:6C"},
+  properties: {"device.description": "WF-1000XM5", "api.bluez5.address": $mac},
   ports: {}}]' >"$d/cards.json"
 
 # 5. the one mutation the tests replay: Device1.Disconnect succeeds (empty reply) and the

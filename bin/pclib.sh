@@ -11,7 +11,8 @@
 #   pc_rd <file> [default]          the file's contents, or the default when it is unreadable
 #   pc_bat_health                   BAT0's energy_full as a percentage of design (0 when unknown)
 #   pc_json '<filter>' [jq-args…]   jq -n with the filter last, so callers pass -c/--arg/--argjson before it
-#   pc_root <cmd…>                  timeout ${PC_ROOT_TIMEOUT:-5} sudo -n <cmd…>
+#   pc_timeout <secs> <cmd…>        $PC_TIMEOUT_BIN (gnutimeout when installed, else timeout)
+#   pc_root <cmd…>                  pc_timeout ${PC_ROOT_TIMEOUT:-5} sudo -n <cmd…>
 #   pc_cmd <name> [args…]           run $PC_FIXTURE/bin/<name> (recorded stdout) when it exists, else the real binary
 #   cached <name> <ttl> <cmd…>      stdout of cmd, reused while the cache entry is younger than ttl; FRESH=1 bypasses
 #   pc_guard <cmd-string…>          exit 3 with the FLEET §5 line when the command is on the deny-list
@@ -23,7 +24,7 @@
 #                                   without APPLY prints "would: <target> <before> → <after>"; with it appends the
 #                                   ledger entry, runs the command, appends {id,verified,observed} and prints
 #                                   "rollback: pc undo <id>" as the last line
-# Globals: PC_SYS PC_PROC PC_BAT PC_FIXTURE PC_LEDGER PC_ROOT_TIMEOUT PC_READ_CMD PC_USAGE PC_SUB JSON APPLY FRESH
+# Globals: PC_SYS PC_PROC PC_BAT PC_FIXTURE PC_LEDGER PC_ROOT_TIMEOUT PC_TIMEOUT_BIN PC_READ_CMD PC_USAGE PC_SUB JSON APPLY FRESH
 #          SECONDS_ PC_ARGS[] PC_EXTRA_FLAGS[] PC_EXTRA[] PC_OPT[]
 
 # shellcheck disable=SC2034
@@ -92,7 +93,11 @@ pc_bat_health() {
 }
 
 pc_json() { local f=$1; shift; jq -n "$@" "$f"; }
-pc_root() { timeout "$PC_ROOT_TIMEOUT" sudo -n "$@"; }
+# pc_timeout <secs> <cmd…> — `timeout`, but the GNU binary when it is installed: the uutils
+# `timeout` this box ships polls and costs a flat ~100 ms per call (TSP-011).
+export PC_TIMEOUT_BIN="${PC_TIMEOUT_BIN:-$(command -v gnutimeout || echo timeout)}"
+pc_timeout() { "$PC_TIMEOUT_BIN" "$@"; }
+pc_root() { pc_timeout "$PC_ROOT_TIMEOUT" sudo -n "$@"; }
 pc_cmd() {
   local n=$1; shift
   [ -n "$PC_FIXTURE" ] && [ -x "$PC_FIXTURE/bin/$n" ] && { "$PC_FIXTURE/bin/$n" "$@"; return; }
@@ -111,6 +116,8 @@ CACHE="${XDG_RUNTIME_DIR:+$XDG_RUNTIME_DIR/pc-status}"
 [ -d "$CACHE" ] || mkdir -p "$CACHE" 2>/dev/null
 printf -v NOW '%(%s)T' -1
 # cached <name> <ttl-seconds> <cmd...> — stdout of cmd, reused while the entry is younger than ttl.
+# A verb that mutates state sets PC_CACHE_KEYS to the entries its change invalidates; pc_apply
+# drops them after the mutation so the next read is live.
 cached() {
   local name=$1 ttl=$2 f data ts; shift 2
   f="$CACHE/$name"
@@ -152,6 +159,7 @@ pc_guard() {
   local s="$*" why= w words=()
   case $s in
     *DisplayConfig.Apply*|*DisplayConfig*Apply*|*ApplyMonitorsConfig*|*ApplyConfiguration*|*SetBacklight*) why='monitor config';;
+    *PowerSaveMode*) why='monitor power (pc lid is the only writer)';;
     *login1*Reboot*|*login1*PowerOff*|*login1*Suspend*|*login1*Hibernate*|*login1*HybridSleep*) why='power state';;
     *systemd1*StopUnit*ssh*|*systemd1*RestartUnit*ssh*|*systemd1*StopUnit*ufw*|*systemd1*RestartUnit*ufw*|\
     *systemd1*StopUnit*tailscaled*|*systemd1*RestartUnit*tailscaled*) why='a second access path';;
@@ -209,6 +217,9 @@ pc_apply() {
     --arg t "$target" --arg b "$before" --arg a "$after" --arg r "$rollback" \
     --arg rd "${PC_READ_CMD:-}" >>"$PC_LEDGER"
   PC_NESTED=1 "$@"; rc=$?
+  # The mutation invalidates whatever `cached` holds for this domain, so the next
+  # `pc status` reads live instead of serving a stale value for the rest of the TTL.
+  local k; for k in ${PC_CACHE_KEYS:-}; do rm -f "$CACHE/$k" 2>/dev/null; done
   observed=$(pc_read "$target" 2>/dev/null)
   verified=false; [ "$observed" = "$after" ] && verified=true
   pc_json '{id:$id,verified:$v,observed:$o}' -c --arg id "$id" --argjson v "$verified" --arg o "$observed" >>"$PC_LEDGER"

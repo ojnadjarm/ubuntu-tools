@@ -9,6 +9,7 @@ export PATH="$HOME/.local/bin:$HOME/agents/bin:$PATH"
 WINDOW_START=4                                 # inclusive hour, Europe/Madrid — not overridable
 WINDOW_END=5                                   # exclusive hour — not overridable
 REBOOT_DELAY=${MAINT_REBOOT_DELAY:-5}          # minutes announced and passed to shutdown
+AUTO_REBOOT=${MAINT_AUTO_REBOOT:-1}            # 0 = never schedule a reboot, push and exit 3 (owner decision 2026-09-13)
 DOCKER_PKGS="docker.io docker-buildx docker-compose-v2 containerd"
 
 dry=0; with_docker=0; assume_reboot=0; ignore_window=0
@@ -69,6 +70,15 @@ reboot_required=0
 out "reboot required: $([ "$reboot_required" = 1 ] && echo yes || echo no)"
 [ "$reboot_required" = 0 ] && exit 0
 out "reason: $(cat /var/run/reboot-required.pkgs 2>/dev/null | tr '\n' ' ' || echo 'simulated')"
+
+# Owner switch first: with MAINT_AUTO_REBOOT=0 no other gate is consulted.
+if [ "$AUTO_REBOOT" != 1 ]; then
+  out "REBOOT REFUSED: auto-reboot-disabled-by-owner"
+  msg="reboot required on ${HARNESS_HOST:-this machine} (auto-reboot off): do it yourself when convenient"
+  if [ "$dry" = 1 ]; then out "would run: notify-owner -t maintenance \"$msg\""
+  else notify-owner -t maintenance "$msg" || true; fi
+  exit 3
+fi
 
 # Gates: all must pass or the reboot waits for the next window.
 refuse=""

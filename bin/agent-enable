@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Enable the timer for one agent: agent-enable <name> "<OnCalendar>".
 set -euo pipefail
-name="${1:-}"; cal="${2:-}"
-[ -n "$name" ] && [ -n "$cal" ] || { echo 'usage: agent-enable <name> "<OnCalendar>"' >&2; exit 2; }
-[ -r "$HOME/agents/$name/BRIEF.md" ] || { echo "agent-enable: no ~/agents/$name/BRIEF.md" >&2; exit 2; }
+usage() { echo 'usage: agent-enable <name> "<OnCalendar>"' >&2; exit 2; }
+[ $# -eq 2 ] || usage
+case "$1" in -h|--help) usage ;; esac
+. "$HOME/agents/bin/fleetlib.sh"
+name="$1"; cal="$2"
+agent_name_check agent-enable "$name" || exit 2
 systemd-analyze calendar "$cal" >/dev/null
 d="$HOME/.config/systemd/user/agent@$name.timer.d"
 mkdir -p "$d"

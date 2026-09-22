@@ -19,7 +19,7 @@ re-derive it. Deeper detail: `~/agents/KB/machine.md`, `~/agents/KB/quirks.md`,
   Samsung 32" TV, **1366x768@59.79**. `eDP-1` (built-in, 1920x1080 preferred) is present but in no
   logical monitor. Screen coordinates are therefore 1366x768. **Never change monitor config without the owner.**
 - Audio (PipeWire/WirePlumber): sinks are `alsa_output.pci-0000_00_1f.3.hdmi-stereo` (TV) and
-  `bluez_output.AC_80_0A_27_65_6C.1` (Sony WF-1000XM5). Default sink = the earbuds.
+  `bluez_output.<HARNESS_BUDS_MAC with _>.1` (Sony WF-1000XM5). Default sink = the earbuds.
 - Network: LAN and Tailscale addresses are `HARNESS_LAN_IP` / `HARNESS_TAILNET_FQDN` in config.env and
   are printed in full by `machine.md`. ufw allows the tailnet and the LAN only; ports table in `machine.md`.
 
@@ -37,7 +37,7 @@ re-derive it. Deeper detail: `~/agents/KB/machine.md`, `~/agents/KB/quirks.md`,
 | act | `pc click X Y`, `pc a11y-click "name"`, `pc click-text`, `pc move`, `pc drag`, `pc scroll`, `pc type`, `pc key`, `pc clip get\|set`, `pc open`, `pc notify` | one verified action at a time |
 | wait | `pc wait-for --window\|--focus\|--text\|--gone SUB [--timeout S] [--see]`, `pc wait S` | never `sleep`; animations are off, windows appear at once |
 | profile | `pc mode [agent\|human\|status]`, `pc selftest`, `pc spotify …` | agent mode = no animations, one workspace, no overview |
-| kernel | `pc top`, `pc io`, `pc power`, `pc thermal`, `pc trace`, `pc kernel`, `pc net`, `pc hw` | CPU/wake/IO, watts/RAPL/GPU, thermal zones, eBPF/perf one-liners, dmesg/sysctl/cgroups, sockets/tailscale/fw, PCI/USB/DMI — `pc mutter` replaces a screenshot for window/monitor geometry, `pc trace` replaces guessing who wakes the CPU or writes the disk |
+| kernel | `pc top`, `pc io`, `pc power`, `pc idle`, `pc thermal`, `pc trace`, `pc kernel`, `pc net`, `pc hw` | CPU/wake/IO, watts/RAPL/GPU, `pc idle` for the idle-power baseline (median package/psys watts, top wakers, fleet RSS; the weekly row lands in `bench/BASELINE-IDLE.tsv`), thermal zones, eBPF/perf one-liners, dmesg/sysctl/cgroups, sockets/tailscale/fw, PCI/USB/DMI — `pc mutter` replaces a screenshot for window/monitor geometry, `pc trace` replaces guessing who wakes the CPU or writes the disk |
 | session | `pc dbus`, `pc mutter`, `pc input`, `pc audio`, `pc bt` | the session/system bus, compositor state (read-only), evdev, PipeWire, bluez |
 | services | `pc units`, `pc journal`, `pc docker` | systemd units/timers, structured journal queries, compose stacks |
 | safety | `pc undo`, `pc explain <thing>`, `pc bench`, `pc doctor` | the change ledger and rollback, ranked KB lookup (`pc explain` before opening `toolbox.md`/`quirks.md` whole), timing table, night-safe PASS/FAIL |
@@ -89,30 +89,57 @@ read-only without `--apply`; the ledger, `pc undo` and the guard exits are in
   Rollback, no rebuild: `systemctl --user edit dark-eye` → `[Service]` `Environment=DARK_EYE_GPU=0`
   → `systemctl --user restart dark-eye` (`systemctl --user revert dark-eye` undoes it).
   Full block: `RUNBOOK.md` "GPU backend"; design `~/the-dark-eye/PLAN-GPU.md`.
-- **The phone page (R04, 2026-09-06)**: `https://$HARNESS_TAILNET_FQDN:8644/` — hold-to-talk
-  into the same ear, replies come back on the phone (`eye speak --to remote`). Tailnet only via
-  `tailscale serve`, loopback bind, login is the body's `secret`. RUNBOOK.md "Remote (phone)";
-  silent end-to-end: `bash ~/the-dark-eye/body/test/e2e-remote.sh`.
+- **The page, phone and desktop (R04 2026-09-06, M11 · M12 2026-09-15)**:
+  `https://$HARNESS_TAILNET_FQDN:8644/` — tap to talk into the same ear, replies come back on it
+  (`eye speak --to remote`). Tailnet only via `tailscale serve`, loopback bind, login is the
+  body's `secret`. **A turn survives a browser tab switch** (M11): the tab reads `● listening`
+  while it records, the upload is counted off the worklet, the turn cap is 300 s / 10 MB, an
+  iPhone's `mute` pauses instead of losing it, and a "keep visible" glyph puts the eye in a Document-PiP
+  window where the browser has it. **Every Eye line has a ▶ glyph** (M12): the ring's bytes
+  while they last, else the body says those words again **to the page only** — which is also how
+  a reply waiting in audio notes mode is heard without a sound in the room. **Two modes, the
+  Eye's own and global to every channel** (M14): `call` plays a reply as it arrives, `audio
+  notes` leaves it waiting for his ▶ — `eye mode [call|notes]`, `eye health` carries it, and
+  `eye quiet on|off` is the old name of the same thing. RUNBOOK.md "Remote (the page — phone and desktop)"; silent
+  end-to-end: `bash ~/the-dark-eye/body/test/e2e-remote.sh` (needs the live `remotePort`; a
+  sandbox drops it — drive the page with `remote.js` in-process on a loopback port instead).
 - **A hand-run body or eye: `body-sandbox`, never the recipe by hand** (EF06,
   `body/scripts/body-sandbox` → `~/.local/bin/body-sandbox`). It is the only sanctioned way to run
   a second body or a bare `eye-render`; typing `DARK_EYE_RENDER_SOCK=`/`XDG_CONFIG_HOME=`/
   `node src/main.js` by hand is what hijacked the owner's eye on 2026-09-06 (E29).
-  - `eval "$(body-sandbox up --eye offscreen --stats --audio null)"` — a second body with its own
+  - `eval "$(body-sandbox up --name <ticket> --eye offscreen --stats --audio null)"` — a second body with its own
     config and port (8643+, **`remotePort` dropped**: never a second tailnet listener), its own
     `render.sock`, its own `orbiters.json`, its own state dir and its own `module-null-sink`, all
     under `$XDG_RUNTIME_DIR/dark-eye/sandbox/<name>/`. Up in **~0.2 s**; it exports
     `DARK_EYE_CONFIG` (so `eye health`/`eye speak` talk to the sandbox), `MEASURE_PIDS` and
-    `BODY_PID`. `--eye off` runs a body with no renderer at all.
+    `BODY_PID`. `--eye off` runs a body with no renderer at all. Without `--name` the name is
+    `sb-<pid>` (unique); a name already up fails and prints `export DARK_EYE_CONFIG=/nonexistent;
+    false`, so an eval'd session cannot reach the live body by mistake.
+  - **An agent's shell resets its environment between bash calls**, so the `eval` is gone on the
+    next call and the next `eye speak` hits the **live** body — that is how a sentence was spoken
+    in the owner's room on 2026-09-15. Re-`eval "$(body-sandbox env --name <n>)"` inside *every*
+    bash call that touches the sandbox, or prefix each command with `DARK_EYE_CONFIG=…`.
   - `body-sandbox eye [--dump PNG --scene S] [--demo --busy] [--gpu 0|1] [--stats] [--seed N]
-    [--seconds N]` — a bare `eye-render` on a dead socket, **always** `--x-offset -1400`; no other
-    offset is accepted. `place()` puts the eye at `1010 + offset`, so `-700` lands at x = 310 —
-    **on the TV, in front of the owner**; only `-1400` or less (x = -390) is offscreen.
+    [--seconds N]` — a bare `eye-render` on a dead socket, **always** the offset the script
+    derives from RandR at launch; no caller-supplied `--x-offset` is accepted. `place()` puts the
+    eye at `largest.x + largest.w - 356 + offset`, so a *fixed* offset is only offscreen on the
+    output it was calibrated for: `-1400` was offscreen on the 1366-wide TV and put the eye at
+    **x = 164 on the laptop panel with the TV off** (2026-09-15). The script now computes an
+    offset that misses every output (1920 wide alone → -2244, x = -680). Its dead socket must be
+    inside `$XDG_RUNTIME_DIR/dark-eye/sandbox` and `--dump` an absolute `*.png` there or under
+    `/tmp` — an ambient `DARK_EYE_RENDER_SOCK` pointing at a note used to **delete that note**.
     Scenes the binary actually has: `caption`, `resolved`, `heard-caption`, `rings`, `agents`
     (there is no `idle` scene). `DARK_EYE_SEED=<n>` makes both backends draw the same frame.
-  - `body-sandbox status | logs [-f] | env | down [--all]` — `down` kills by PID (node, then any
+  - `eval "$(body-sandbox restart --name <ticket>)"` — the same body again on the same dir, config,
+    port and sink: `mode.json`, `active.json` and `state/` survive, which is how "this is read back
+    on boot" is checked by hand (`eye mode notes` → `restart` → `eye mode` is still `notes`). `up`
+    wipes the dir, so the same sequence with `up` loses it. Needs `--name`; non-zero if it is not up.
+  - `body-sandbox status | logs [-f] | env | down --name N|--all` — `down` needs an explicit name
+    (no shared default); `env`/`logs` need one unless a single sandbox exists. `down` kills by PID (node, then any
     surviving `eye-render`), unloads the sink it loaded, removes the dir and exits 1 if anything
     survived. Down in ~0.15 s. `up` and `eye` **exit 2** if the socket resolves to the live
-    `render.sock`. Test: `bash ~/agents/bin/tests/run.sh` (or `body/test/body-sandbox.test.sh`).
+    `render.sock`. Test: `bash ~/agents/bin/tests/run.sh` (or `body/test/body-sandbox.test.sh`);
+    guards on a stub: `bridge/tests/body-sandbox-guards.test.sh`.
 - **`agent-preflight` is the first command of every Dark-Eye agent** (`~/agents/bin`, **0.08–0.16 s**):
   unit state + `NRestarts` + backend + last `eye up at`, `eye health`, dirty-file count, any hand-run
   body outside the unit cgroup (sandboxes listed apart), the working orbiters, and hour/sink/buds/
@@ -125,6 +152,8 @@ read-only without `--apply`; the ledger, `pc undo` and the guard exits are in
   CPU %/process, RSS/PSS, GPU busy, RC6, fps. `MEASURE_PIDS=<pids>` for a hand-run body,
   `MEASURE_PROC=<dir>` for fixtures. **`speaking` and `mic` refuse without `--allow-sound` — the owner
   may be asleep.** Same night rule for anything that makes noise or lights the TV.
+- **Speak without interrupting**: the body holds speech while his mic is open (buds or phone)
+  and for 1.5 s after, then says it in order; just `eye speak`. `eye health` shows `held`.
 
 ## 4. Audio and Bluetooth
 

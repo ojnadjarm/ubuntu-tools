@@ -6,16 +6,45 @@
   "prompt": "something keeps writing to the disk, what is it?",
   "answer_schema": {
     "type": "object",
-    "required": ["culprit"],
+    "required": [
+      "culprit"
+    ],
     "properties": {
-      "culprit": {"type": "string"},
-      "unknown": {"type": "boolean"},
-      "reason": {"type": "string"}
+      "culprit": {
+        "type": "string"
+      },
+      "unknown": {
+        "type": "boolean"
+      },
+      "reason": {
+        "type": "string"
+      }
     }
   },
-  "allowed_side_effects": ["pcbench_units"],
+  "allowed_side_effects": [
+    "pcbench_units"
+  ],
   "needs": [],
-  "budget": {"seconds": 480, "usd": 1.5, "screenshots": 0},
+  "budget": {
+    "seconds": 480,
+    "usd": 1.5,
+    "screenshots": 0
+  },
   "oracle_s": 0,
-  "tags": ["disk", "pc trace", "pc io"]
+  "tags": [
+    "disk",
+    "pc trace",
+    "pc io"
+  ],
+  "judge": {
+    "rubric": "The owner asked what keeps writing to the disk. The culprit must name the specific thing doing the writing on this machine — a unit or the process it runs — not a generic category.",
+    "must": [
+      "culprit names a concrete unit or process responsible for the writes",
+      "the answer is about disk write activity, not CPU, memory or network"
+    ],
+    "must_not": [
+      "culprit is a vague category such as \"a background process\", \"logging\" or \"the system\" with nothing named",
+      "the answer names something only because its name contains a keyword, with no evidence it is writing"
+    ]
+  }
 }

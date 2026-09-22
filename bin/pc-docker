@@ -5,6 +5,8 @@ export LC_ALL=C
 BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 . "$BIN/pclib.sh"
 : "${PC_ENVS:=$HOME/moodle-envs}"
+# Entries pc_apply drops after a stack or container mutation.
+export PC_CACHE_KEYS='docker docker_disk'
 
 pc_usage 'usage: pc docker [stacks] [--json]                    compose project -> services (state/health/ports/uptime)
        pc docker ps [--json]                             every container, flat

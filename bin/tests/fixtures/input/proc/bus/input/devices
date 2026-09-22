@@ -33,9 +33,9 @@ B: REL=147
 
 I: Bus=0005 Vendor=054c Product=0000 Version=0000
 N: Name="WF-1000XM5 (AVRCP)"
-P: Phys=ac:80:0a:27:65:6c
+P: Phys=00:00:5e:00:53:01
 S: Sysfs=/devices/virtual/input/input99
-U: Uniq=ac:80:0a:27:65:6c
+U: Uniq=00:00:5e:00:53:01
 H: Handlers=kbd event20 
 B: PROP=0
 B: EV=100013

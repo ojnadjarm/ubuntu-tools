@@ -35,3 +35,40 @@ __pycache__/
 /bench/PLAN-*.md
 /bench/tickets/
 /bench/spike/
+
+# portfolio raw material: LinkedIn PDF, USB dump, .env files
+portfolio/incoming/
+
+# Owner voice data: his recorded clips, his drill and long-form prompt set.
+/asr-corpus/
+/dashboard/voice_prompts.json
+
+# Agent working papers: briefs, research, reviews, mockups, surveys, the claims board, the trash.
+/briefs/
+/research/
+/eye-review/
+/dashboard/plans/
+/dashboard/review/
+/dashboard/mockups/
+/CLEANUP-*.md
+/FILE-CLAIMS.md
+/.trash/
+
+# Personal site material and this install's orchestrator reference (roster, envs, demo).
+/portfolio/
+/KB/orchestrator.md
+
+# Machine-local relay config: absolute paths to this home.
+/eye-relay/mcp-*.json
+
+# Agent run output: toolsmith proposals, backlog and dated reports; pcbench results.
+/toolsmith/proposals/*
+!/toolsmith/proposals/.gitkeep
+!/toolsmith/proposals/TSP-000-example.md
+/toolsmith/BACKLOG.md
+/toolsmith/PLAN-*.md
+/toolsmith/*-20*.md
+/bench/LAST.json
+/bench/BASELINE-*.md
+/bench/BASELINE-*.tsv
+/bench/QA-REPORT.md

@@ -22,12 +22,30 @@ FAULTS=(
   'services.ydotoold  sudo systemctl restart ydotoold'
   'network.tailscale  sudo tailscale up --timeout 30s'
   'docker.*           fix_stack'
+  'agents.orchestrator fix_orch'
 )
 # Bring the compose stack named by $key (docker.<project>) back up.
 fix_stack() {
   local cf
   cf=$(grep -l "^name: ${key#docker.}\$" "$HOME"/moodle-envs/*/docker-compose.yml 2>/dev/null | head -1)
   [ -n "$cf" ] && docker compose -f "$cf" up -d
+}
+
+# Orchestrator pane not serving ($val = trust-prompt|shell|dead): one repair per episode.
+# The trust dialog is answered (Down Enter = "Yes, I trust this folder": the folder is the
+# owner's home); a dead pane or a bare shell gets one unit restart. The owner is pushed only
+# if the pane is still not serving afterwards (below); the Claude sentinel never handles it.
+fix_orch() {
+  [ "$val" = off ] && return 0
+  [ -e "$st/orch-repaired" ] && return 0
+  case "$val" in
+    trust-prompt) tmux send-keys -t "${ORCHESTRATOR_TMUX_SESSION:-claude}" Down Enter
+                  log "orchestrator trust-prompt: answered (Down Enter)";;
+    *) systemctl --user restart "${ORCHESTRATOR_UNIT:-claude-orchestrator.service}"
+       log "orchestrator $val: restarted ${ORCHESTRATOR_UNIT:-claude-orchestrator.service}";;
+  esac
+  : >"$st/orch-repaired"
+  sleep "${SENTINEL_ORCH_WAIT:-5}"
 }
 
 sentinel-runaway || true
@@ -40,10 +58,11 @@ if [ -n "$pw_lvl" ] && [ "$pw_lvl" -gt 2 ] 2>/dev/null; then
 fi
 
 json="$(snapshot)"; fails="$(failures "$json")"
+grep -q '^agents.orchestrator' <<<"$fails" || rm -f "$st/orch-repaired" "$st/orch-notified"
 if [ -z "$fails" ]; then date -Is >"$st/last-ok"; exit 0; fi
 log "FAIL: $(tr '\n' ';' <<<"$fails")"
 
-while IFS=$'\t' read -r key _; do
+while IFS=$'\t' read -r key val; do
   for row in "${FAULTS[@]}"; do
     # shellcheck disable=SC2086  # deliberate: the row splits into pattern + fix words
     set -- $row
@@ -53,6 +72,16 @@ while IFS=$'\t' read -r key _; do
 done <<<"$fails" >>"$st/sentinel.log" 2>&1
 
 json="$(snapshot --fresh)"; left="$(failures "$json")"
+orch=$(awk -F'\t' '$1=="agents.orchestrator"{print $2}' <<<"$left")
+if [ -n "$orch" ]; then
+  if [ ! -e "$st/orch-notified" ]; then
+    notify-owner -p high -t sentinel \
+      "orchestrator pane $orch after one repair: Remote Control is down. Runbook: KB/runbooks/orchestrator-down.md" && : >"$st/orch-notified"
+    log "orchestrator $orch after repair: owner notified"
+  fi
+  left=$(grep -v '^agents.orchestrator' <<<"$left")
+  [ -z "$left" ] && exit 0
+fi
 if [ -z "$left" ]; then log "fixed by bash"; date -Is >"$st/last-ok"; exit 0; fi
 
 # Cool-down: the same failure signature escalates to Claude at most once every COOLDOWN seconds.

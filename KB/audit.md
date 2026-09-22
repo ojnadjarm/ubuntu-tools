@@ -1,7 +1,7 @@
 # Audit log — `~/agents/log/actions.jsonl`
 
 One JSON object per line, one line per tool call, appended by whichever agent is running.
-Read it with `agents-log [--since 2h] [--session ID] [--grep X] [--stats] [--pc]`; never parse it
+Read it with `agents-log [--since 2h] [--session ID] [--grep X] [--stats] [--pc] [--raw]`; never parse it
 by hand. The file is machine-local and is never committed.
 
 ## Fields
@@ -39,3 +39,15 @@ before trusting a new secret shape.
     names come from the documented shape and stay unverified.
 
 To support a new agent, write one converter to the generic event. Nothing else changes.
+
+## Token meter — `agents-log --tokens`
+
+The audit log counts tool calls, not tokens. `agents-log --tokens [--since 7d] [--session ID]`
+reads the Claude transcripts (`$CLAUDE_PROJECTS_DIR`, default `~/.claude/projects/*/*.jsonl`,
+read-only) and prints one row per session: turns, mean/median/max context carried per turn
+(`input` + `cache_read` + `cache_creation`), total cache-read (M) and output (k), images, Read
+re-reads of the same path, and tool-result KB by tool (top 3); then a TOTAL row and one line per
+day. `--since` keeps a session whose **last** turn is inside the window and still reports its whole
+history, so the row matches the session, not the window. Unknown line types are ignored, so a CLI
+format change degrades instead of failing. `ccusage` reports 0 sessions on this box's transcript
+format; `/usage` is interactive and per-session — hence this reader.

@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""MCP channel server: pushes one brain's Eye spool into the Claude Code session that spawned it."""
+import fcntl
+import json
+import os
+import sys
+import threading
+import time
+
+BRAIN = sys.argv[1] if len(sys.argv) > 1 else "main"
+STATE = os.environ.get("EYE_RELAY_STATE", os.path.expanduser("~/agents/eye-relay/state"))
+SETTLE = float(os.environ.get("EYE_CHANNEL_SETTLE", "3"))
+SPOOL, OFFSET, LOCK = (f"{STATE}/{BRAIN}.{x}" for x in ("spool", "offset", "lock"))
+LEGACY = ("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")
+LOOP = "eye listen-loop" + ("" if BRAIN == "main" else f" --as {BRAIN}")
+INSTRUCTIONS = (
+    f"The owner's voice from The Dark Eye (brain '{BRAIN}') arrives as <channel source=\"eye-{BRAIN}\"> "
+    f"events. Each line is exactly what `{LOOP}` prints: VOICE: / VOICE [remote]: / EVENT: / "
+    "EYE OFFLINE / EYE BACK. Handle them as those lines; this channel replaces that Monitor, "
+    "so never arm a listen-loop. No reply tool: answer with `eye speak`."
+)
+out = threading.Lock()
+ready = threading.Event()
+
+
+def send(msg):
+    with out:
+        sys.stdout.write(json.dumps(msg) + "\n")
+        sys.stdout.flush()
+
+
+def save(pos):
+    with open(OFFSET + ".tmp", "w") as f:
+        f.write(str(pos))
+    os.replace(OFFSET + ".tmp", OFFSET)
+
+
+def deliver():
+    """Holds the brain's lock (the relay polls only while it is held) and streams the spool from the saved offset."""
+    os.makedirs(STATE, mode=0o700, exist_ok=True)
+    fd = os.open(LOCK, os.O_RDWR | os.O_CREAT, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    ready.wait()
+    time.sleep(SETTLE)
+    try:
+        with open(OFFSET) as f:
+            pos = int(f.read() or 0)
+    except (OSError, ValueError):
+        pos = 0
+    while True:
+        try:
+            size = os.path.getsize(SPOOL)
+        except OSError:
+            size = 0
+        if size < pos:
+            pos = 0
+        if size > pos:
+            with open(SPOOL, "rb") as f:
+                f.seek(pos)
+                chunk = f.read(size - pos)
+            end = chunk.rfind(b"\n") + 1
+            if end:
+                text = chunk[:end].decode("utf-8", "replace").rstrip("\n")
+                send({"jsonrpc": "2.0", "method": "notifications/claude/channel",
+                      "params": {"content": text, "meta": {"brain": BRAIN}}})
+                pos += end
+                save(pos)
+        time.sleep(0.5)
+
+
+def main():
+    threading.Thread(target=deliver, daemon=True).start()
+    for raw in sys.stdin:
+        try:
+            m = json.loads(raw)
+        except ValueError:
+            continue
+        method, mid = m.get("method"), m.get("id")
+        if method == "initialize":
+            asked = (m.get("params") or {}).get("protocolVersion")
+            send({"jsonrpc": "2.0", "id": mid, "result": {
+                "protocolVersion": asked if asked in LEGACY else LEGACY[-1],
+                "capabilities": {"experimental": {"claude/channel": {}}},
+                "serverInfo": {"name": f"eye-{BRAIN}", "version": "1"},
+                "instructions": INSTRUCTIONS}})
+        elif method == "notifications/initialized":
+            ready.set()
+        elif method == "ping":
+            send({"jsonrpc": "2.0", "id": mid, "result": {}})
+        elif mid is not None and method:
+            send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": f"no {method}"}})
+
+
+if __name__ == "__main__":
+    main()

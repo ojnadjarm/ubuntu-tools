@@ -4,7 +4,8 @@
 # BEFORE any disconnect, profile switch or case power-cycle.
 set -uo pipefail
 
-MAC="${BUDS_MAC:-AC:80:0A:27:65:6C}"
+. "$(dirname "$(readlink -f "$0")")/env.sh"
+MAC="${BUDS_MAC:-${HARNESS_BUDS_MAC:?set HARNESS_BUDS_MAC in config.env}}"
 SECONDS_WINDOW=60
 QUIET=0
 

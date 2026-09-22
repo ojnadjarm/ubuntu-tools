@@ -1,0 +1,68 @@
+/* Machine page components: tokens and .page .prose come from eye.css. */
+.lead { font-size: 14px; line-height: 1.65; color: var(--hi); max-width: 70ch; margin-top: 10px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 16px 0 0; padding: 10px 12px; border: 1px solid var(--line2); background: var(--bg1); font-size: 11px; color: var(--mid); }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.jump { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.jump a { font-size: var(--fs-label); letter-spacing: var(--ls-label); text-transform: uppercase; color: var(--g); border: 1px solid var(--line2); padding: 6px 10px; min-height: 32px; display: inline-flex; align-items: center; }
+@media (min-width: 1100px) { .jump { display: none; } .page { grid-template-rows: auto auto 1fr; } .page .meta { grid-row: 2; } .page .toc { grid-column: 1; grid-row: 3; align-self: start; } .page .prose { grid-column: 2; grid-row: 2 / span 2; } }
+
+/* verdict pill: the only colour on the page that means "what you can do with it" */
+.v { display: inline-flex; align-items: center; gap: 5px; padding: 0 7px; border: 1px solid var(--line2); border-radius: 2px; font-size: var(--fs-label); letter-spacing: var(--ls-label); text-transform: uppercase; line-height: 18px; white-space: nowrap; color: var(--g); }
+.v:before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.v.stop { color: var(--mid); border-color: var(--line); }
+.v.del { color: var(--gold); border-color: rgba(255, 209, 102, .4); background: var(--gold-w); }
+.v.off { color: var(--mute); border-color: var(--line); } .v.off:before { background: transparent; border: 1px solid currentColor; }
+
+/* the map: tiers of nodes, arrows between tiers, stacks on the phone */
+.map { margin-top: 14px; border: 1px solid var(--line2); background: var(--bg1); padding: 12px; display: grid; gap: 0; }
+.tier { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px; align-items: start; padding: 10px 0; }
+.tier + .tier { border-top: 1px dashed var(--line); }
+.tier > .k { padding-top: 7px; line-height: 1.4; }
+.nodes { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.node { border: 1px solid var(--line2); padding: 5px 9px; font-size: 11px; line-height: 1.4; color: var(--txt); background: var(--bg); min-width: 0; }
+.node b { color: var(--hi); font-weight: 600; } .node s { text-decoration: none; color: var(--mute); display: block; font-size: 10px; }
+.node.you { border-color: var(--line3); color: var(--hi); }
+.node.door { border-color: rgba(255, 209, 102, .4); }
+.node.dim { color: var(--mute); border-style: dashed; }
+.arrow { grid-column: 2; color: var(--mute); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; padding: 0 0 2px 4px; }
+@media (max-width: 600px) { .tier { grid-template-columns: 1fr; gap: 4px; } .tier > .k { padding-top: 0; } .arrow { grid-column: 1; } }
+
+/* a thing: name, ports, verdict; a paragraph; then the one-line facts */
+.group { margin-top: 30px; padding-top: 14px; border-top: 1px solid var(--line); }
+.group > h2 { margin: 0 0 6px; padding-top: 0; border-top: 0; }
+.group > p.why { color: var(--mid); font-size: 12.5px; line-height: 1.6; max-width: 80ch; margin: 0 0 10px; }
+.thing { border: 1px solid var(--line2); background: rgba(3, 5, 3, .92); margin-top: 10px; position: relative; }
+.thing:before, .thing:after { content: ""; position: absolute; width: 8px; height: 8px; border: 1px solid var(--line3); pointer-events: none; }
+.thing:before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; }
+.thing:after { bottom: -1px; right: -1px; border-left: 0; border-top: 0; }
+.thing > h3 { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 9px 12px; border-bottom: 1px solid var(--line); background: var(--w04); font-size: 13px; font-weight: 600; color: var(--hi); margin: 0; }
+.thing > h3 .n { flex: 1 1 auto; min-width: 0; }
+.thing > h3 .n em { font-style: normal; color: var(--mute); font-weight: 400; font-size: 10px; letter-spacing: .12em; margin-right: 8px; }
+.thing > h3 code { font-family: inherit; font-weight: 400; font-size: 10.5px; color: var(--g2); background: var(--w08); padding: 0 5px; border: 1px solid var(--line); white-space: nowrap; }
+.thing .body { padding: 10px 12px 4px; }
+.thing p { font-size: 12.5px; line-height: 1.65; color: var(--txt); max-width: 84ch; }
+.thing p + p { margin-top: 7px; }
+.thing p b { color: var(--hi); font-weight: 600; }
+.thing .facts { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 3px 10px; padding: 8px 12px 10px; border-top: 1px solid var(--line); font-size: 11px; color: var(--mid); line-height: 1.5; }
+.thing .facts .k { padding-top: 2px; }
+.thing .facts .warn { color: var(--gold); }
+.unsure { color: var(--gold); }
+.vs { margin-top: 10px; display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line2); }
+.vs div { background: var(--bg1); padding: 10px 12px; font-size: 12px; line-height: 1.6; }
+.vs b { color: var(--hi); display: block; font-weight: 600; margin-bottom: 2px; }
+.vs .k { display: block; margin-bottom: 4px; }
+.two { display: grid; gap: 10px; margin-top: 10px; }
+@media (min-width: 760px) { .two { grid-template-columns: 1fr 1fr; } }
+.list { border: 1px solid var(--line2); background: var(--bg1); }
+.list h4 { font-size: var(--fs-label); letter-spacing: var(--ls-label); text-transform: uppercase; font-weight: 400; padding: 8px 12px; border-bottom: 1px solid var(--line); margin: 0; }
+.list h4.del { color: var(--gold); } .list h4.keep { color: var(--g); }
+.list ol { list-style: none; padding: 0; margin: 0; }
+.list li { padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 12px; line-height: 1.55; }
+.list li:last-child { border-bottom: 0; }
+.list li b { color: var(--hi); font-weight: 600; }
+.cheat { margin-top: 10px; border: 1px solid var(--line2); background: var(--bg1); display: grid; }
+.cheat div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 4px 12px; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 11.5px; align-items: baseline; }
+.cheat div:last-child { border-bottom: 0; }
+.thing .facts code, .list li code, .cheat code { overflow-wrap: anywhere; }
+@media (max-width: 600px) { .cheat div { grid-template-columns: 1fr; } .thing .facts { grid-template-columns: 1fr; gap: 1px 0; } .thing .facts .k { margin-top: 5px; } }
+.foot-note { margin-top: 26px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--mute); font-size: 11px; line-height: 1.6; }

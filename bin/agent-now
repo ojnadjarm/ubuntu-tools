@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Run one agent immediately through systemd.
 set -euo pipefail
-name="${1:-}"
-[ -n "$name" ] || { echo "usage: agent-now <name>" >&2; exit 2; }
-systemctl --user start --no-block "agent@$name.service"
-echo "agent $name started"
+usage() { echo "usage: agent-now <name>" >&2; exit 2; }
+[ $# -eq 1 ] || usage
+case "$1" in -h|--help) usage ;; esac
+. "$HOME/agents/bin/fleetlib.sh"
+agent_name_check agent-now "$1" || exit 2
+systemctl --user start --no-block "agent@$1.service"
+echo "agent $1 started"

@@ -20,8 +20,6 @@ add() {
   [ "${4:--}" = FAIL ] && fails=$((fails+1))
   printf '%s\t%s\t%s\t%s\n' "$1" "$2" "${3:-n/a}" "${4:--}" >>"$REC"
 }
-# ok_if <condition-exit-code-cmd...> -> prints OK or FAIL
-ok_if() { if "$@" >/dev/null 2>&1; then echo OK; else echo FAIL; fi; }
 # first <file...> — first line of the first readable file (no fork).
 first() {
   local f l
@@ -53,7 +51,7 @@ r_temp=${r_temp%%.*}; : "${r_temp:=0}"
 
 # SMART (NVMe) and battery wear — smartctl needs root, passwordless sudo is on; cached 10 min.
 _smart() {
-  timeout 5 sudo -n smartctl -H -A /dev/nvme0 2>/dev/null | awk '
+  pc_timeout 5 sudo -n smartctl -H -A /dev/nvme0 2>/dev/null | awk '
     { i=index($0,":"); if(!i) next
       k=substr($0,1,i-1); v=substr($0,i+1); gsub(/^[ \t]+|[ \t]+$/,"",v)
       if(k=="SMART overall-health self-assessment test result") h=v
@@ -147,6 +145,17 @@ _pcmode() { . "$BIN/pc-mode" status; }
 k_mode=$(cached mode 900 _pcmode); : "${k_mode:=unknown}"
 
 tmux has-session -t "$ORCHESTRATOR_TMUX_SESSION" 2>/dev/null && a_tmux=alive || a_tmux=down
+# Orchestrator pane: the session existing is not the same as Claude serving in it.
+_orch_state() {
+  local s=$ORCHESTRATOR_TMUX_SESSION info dead tty
+  [ "$(systemctl --user is-enabled "$ORCHESTRATOR_UNIT" 2>/dev/null)" = enabled ] || { echo off; return; }
+  info=$(tmux display-message -pt "$s" '#{pane_dead} #{pane_tty}' 2>/dev/null) || { echo dead; return; }
+  read -r dead tty <<<"$info"
+  { [ "$dead" = 1 ] || [ -z "$tty" ]; } && { echo dead; return; }
+  case "$(tmux capture-pane -pt "$s" 2>/dev/null)" in *"Yes, I trust this folder"*) echo trust-prompt; return;; esac
+  ps -o comm= -t "$tty" 2>/dev/null | grep -qx claude && echo ok || echo shell
+}
+a_orch=$(_orch_state)
 timers=$(systemctl --user list-timers --no-legend 2>/dev/null)
 a_timers=0
 while IFS= read -r _l; do [ -n "$_l" ] && a_timers=$((a_timers + 1)); done <<<"$timers"
@@ -154,8 +163,7 @@ while IFS= read -r _l; do [ -n "$_l" ] && a_timers=$((a_timers + 1)); done <<<"$
 ## --- verdicts ---------------------------------------------------------------
 # Every threshold is judged once, here: --brief lists the tags that came out FAIL, the full
 # collection prints the same verdict in its [ ] column. "-" is "not applicable", never a failure.
-BRIEF_TAGS="disk ram temp smart battery docker tailscale"
-declare -A V=()
+declare -A V=() SV=()
 # gate <tag> <cmd…> — FAIL when the command succeeds (the condition is the fault), else OK.
 gate() { local t=$1; shift; if "$@"; then V[$t]=FAIL; else V[$t]=OK; fi; }
 _battery_low() { [ "$p_src" = battery ] && [ "$p_pct" -lt 20 ]; }
@@ -173,15 +181,58 @@ if [ "$s_used" -lt 0 ]; then V[smart_used]=-; else gate smart_used [ "$s_used" -
 if [ "$s_spare" -lt 0 ]; then V[smart_spare]=-; else gate smart_spare [ "$s_spare" -lt 20 ]; fi
 gate smart _smart_bad
 
+# Everything else that can come out FAIL is judged here too, so --brief and the full
+# collection share one table instead of a separate tag list.
+# 60 s, the TTL of everything the sentinel repairs: two systemd round-trips are ~15 ms, and
+# --brief now needs them too.
+SERVICES="docker tailscaled ssh ydotoold cron netdata dashboard"
+_svc() {
+  systemctl is-active ${SERVICES% dashboard} 2>/dev/null
+  systemctl --user is-active agents-dashboard.service 2>/dev/null
+}
+mapfile -t _svst < <(cached services 60 _svc)
+_i=0
+for _s in $SERVICES; do
+  SV[$_s]="${_svst[_i]:-}"; _i=$((_i+1)); : "${SV[$_s]:=unknown}"
+  gate "svc_$_s" [ "${SV[$_s]}" != active ]
+done
+_internet() { ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 && echo reachable || echo unreachable; }
+n_inet=$(cached internet 60 _internet); : "${n_inet:=unreachable}"
+gate internet [ "$n_inet" != reachable ]
+# A cheap portal-liveness dbus call replaces a real screenshot (0.81 s wall + ~15 python3
+# forks every 15 min for a value that rarely regresses); measured cheaper than a real
+# screenshot even under --fresh, so it is used unconditionally, and still fails when the
+# portal is dead.
+_shotkb() {
+  if busctl --user call org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop \
+       org.freedesktop.DBus.Properties Get ss org.freedesktop.portal.Screenshot version >/dev/null 2>&1; then
+    echo 102400
+  else
+    echo 0
+  fi
+}
+sz=$(cached screenshot 900 _shotkb); : "${sz:=0}"
+gate screenshot [ "$sz" -le 10240 ]
+_orch_bad() { [ "$a_orch" != ok ] && [ "$a_orch" != off ]; }
+gate orchestrator _orch_bad
+
 ## --- brief ------------------------------------------------------------------
 if [ "$MODE" = brief ]; then
-  f=""
-  for t in $BRIEF_TAGS; do [ "${V[$t]}" = FAIL ] && f="$f,$t"; done
+  # Every FAIL in the verdict table, alphabetical (insertion sort: ~16 keys, no fork).
+  ft=()
+  for t in "${!V[@]}"; do
+    case $t in smart_*) continue;; esac   # rolled into the `smart` verdict
+    [ "${V[$t]}" = FAIL ] || continue
+    j=${#ft[@]}
+    while [ "$j" -gt 0 ] && [[ "${ft[j-1]}" > "$t" ]]; do ft[j]=${ft[j-1]}; j=$((j-1)); done
+    ft[j]=$t
+  done
+  _oifs=$IFS; IFS=,; f="${ft[*]-}"; IFS=$_oifs; : "${f:=none}"
   [ "$n_ts_state" = Running ] && ts=up || ts="$n_ts_state"
-  printf '%s %s%% lid=%s wifi=%s ts=%s docker=%s/%s disk=%s%% ram=%sM load=%s temp=%sC smart=%s wear=%s%% bhealth=%s%% lock=%s mode=%s tmux=%s timers=%s FAIL=%s\n' \
+  printf '%s %s%% lid=%s wifi=%s ts=%s docker=%s/%s disk=%s%% ram=%sM load=%s temp=%sC smart=%s wear=%s%% bhealth=%s%% lock=%s mode=%s tmux=%s orch=%s timers=%s FAIL=%s\n' \
     "$p_src" "$p_pct" "$p_lid" "$n_ssid" "$ts" "$d_run" "$d_tot" "$r_disk" "$r_ramav" \
     "$r_load" "$r_temp" "$s_health" "$s_used" "$b_health" \
-    "$k_lock" "$k_mode" "$a_tmux" "$a_timers" "${f:+${f#,}}${f:-none}"
+    "$k_lock" "$k_mode" "$a_tmux" "$a_orch" "$a_timers" "$f"
   exit 0
 fi
 
@@ -304,19 +355,9 @@ add network tailscale_ip "$n_ts_ip"
 add network tailscale "$n_ts_state" "${V[tailscale]}"
 _dns() { resolvectl dns 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1; }
 add network dns "$(cached dns 3600 _dns)"
-if ping -c1 -W2 1.1.1.1 >/dev/null 2>&1; then add network internet reachable OK; else add network internet unreachable FAIL; fi
+add network internet "$n_inet" "${V[internet]}"
 
-SERVICES="docker tailscaled ssh ydotoold cron netdata"
-mapfile -t svst < <(systemctl is-active $SERVICES 2>/dev/null)
-i=0
-for s in $SERVICES; do
-  sv="${svst[i]:-}"; i=$((i+1)); : "${sv:=unknown}"
-  st=OK; [ "$sv" = active ] || st=FAIL
-  add services "$s" "$sv" "$st"
-done
-sv=$(systemctl --user is-active agents-dashboard.service 2>/dev/null); : "${sv:=unknown}"
-st=OK; [ "$sv" = active ] || st=FAIL
-add services dashboard "$sv" "$st"
+for s in $SERVICES; do add services "$s" "${SV[$s]}" "${V[svc_$s]}"; done
 
 if [ -n "$d_stat" ]; then
   while IFS='|' read -r proj run tot ports; do
@@ -362,24 +403,11 @@ fw=$(gdbus call --session -d org.gnome.Shell -o /org/gnome/Shell/Extensions/Wind
       -m org.gnome.Shell.Extensions.Windows.List 2>/dev/null \
       | awk -F'"title":"' 'NF>1{split($2,a,"\""); print a[1]; exit}')
 add desktop focused_window "${fw:-n/a (needs the window extension, T08)}"
-# A cheap portal-liveness dbus call replaces a real screenshot (0.81 s wall + ~15 python3
-# forks every 15 min for a value that rarely regresses); measured cheaper than a real
-# screenshot even under --fresh, so it is used unconditionally, and still fails when the
-# portal is dead.
-_shotkb() {
-  if busctl --user call org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop \
-       org.freedesktop.DBus.Properties Get ss org.freedesktop.portal.Screenshot version >/dev/null 2>&1; then
-    echo 102400
-  else
-    echo 0
-  fi
-}
-sz=$(cached screenshot 900 _shotkb); : "${sz:=0}"
-st=OK; [ "$sz" -gt 10240 ] || st=FAIL
-add desktop screenshot "$((sz/1024)) KB" "$st"
+add desktop screenshot "$((sz/1024)) KB" "${V[screenshot]}"
 
 st=-; [ "$a_tmux" = alive ] && st=OK
 add agents tmux_claude "$a_tmux" "$st"
+add agents orchestrator "$a_orch" "${V[orchestrator]}"
 nt=$(awk 'NF{print $NF" at "$1" "$2" "$3; exit}' <<<"$timers")
 add agents user_timers "$a_timers${nt:+ (next: $nt)}"
 _sessions() { claude agents --json 2>/dev/null | jq 'length' 2>/dev/null || echo n/a; }

@@ -6,17 +6,46 @@
   "prompt": "one of the containers is unhealthy, which one and why?",
   "answer_schema": {
     "type": "object",
-    "required": ["container", "why"],
+    "required": [
+      "container",
+      "why"
+    ],
     "properties": {
-      "container": {"type": "string"},
-      "why": {"type": "string"},
-      "unknown": {"type": "boolean"},
-      "reason": {"type": "string"}
+      "container": {
+        "type": "string"
+      },
+      "why": {
+        "type": "string"
+      },
+      "unknown": {
+        "type": "boolean"
+      },
+      "reason": {
+        "type": "string"
+      }
     }
   },
   "allowed_side_effects": [],
   "needs": [],
-  "budget": {"seconds": 480, "usd": 1.5, "screenshots": 0},
+  "budget": {
+    "seconds": 480,
+    "usd": 1.5,
+    "screenshots": 0
+  },
   "oracle_s": 0,
-  "tags": ["docker", "pc docker"]
+  "tags": [
+    "docker",
+    "pc docker"
+  ],
+  "judge": {
+    "rubric": "The owner asked which container is unhealthy and why. The why field must explain the actual failure — the container has a health check and that health check is failing — not merely repeat that the container is unhealthy.",
+    "must": [
+      "why says the container has a health check that is failing, or names what the failing check does",
+      "the named container is the one the answer explains"
+    ],
+    "must_not": [
+      "why only restates the word unhealthy without saying anything about a check",
+      "why blames something the evidence does not show (the image, the network, the host) as the established cause"
+    ]
+  }
 }

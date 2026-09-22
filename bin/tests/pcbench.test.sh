@@ -84,6 +84,112 @@ if grep -q 'fixture.sh clean' "$PB" &&
    ! grep -B2 'fixture.sh clean' "$PB" | grep -q 'tier..\s*==\s*.safety'; then ok
 else no "the fixture.sh clean call in pcbench is still conditional on a safety tier"; fi
 
+# --- 3c. PB03 arm builder, against a fixture source tree (never the real arms) ---
+SRC=$(mktemp -d); ARMS=$(mktemp -d)
+mkdir -p "$SRC/bin" "$SRC/KB" "$SRC/skills/desktop"
+printf '#!/bin/sh\necho status\n' > "$SRC/bin/pc-status"      # kept by build-old.sh
+printf '#!/bin/sh\necho power\n'  > "$SRC/bin/pc-power"       # dropped by build-old.sh
+chmod +x "$SRC/bin/pc-status" "$SRC/bin/pc-power"
+printf '# toolbox\n| kernel | x |\n'  > "$SRC/KB/toolbox.md"
+printf '# pc-cli\n'                   > "$SRC/KB/pc-cli.md"
+printf '# skill\n'                    > "$SRC/skills/desktop/SKILL.md"
+printf '# readme\n'                   > "$SRC/README-pc-control.md"
+pbf() { PCBENCH_SRC="$SRC" PCBENCH_SRC_SKILL="$SRC/skills/desktop" PCBENCH_ARMS="$ARMS" "$PB" "$@"; }
+
+t "arm build --arm both builds from the fixture tree"
+out=$(pbf arm build --arm both 2>&1)
+{ [ -x "$ARMS/new/bin/pc-status" ] && [ -x "$ARMS/old/bin/pc-status" ] &&
+  [ ! -e "$ARMS/old/bin/pc-power" ] && [ -e "$ARMS/new/bin/pc-power" ]; } &&
+  ok || no "$(echo "$out" | tr '\n' ' ')"
+
+t "both arms record the same tree hash"
+h1=$(jq -r .tree_hash "$ARMS/new/ARM.json" 2>/dev/null)
+h2=$(jq -r .tree_hash "$ARMS/old/ARM.json" 2>/dev/null)
+{ [ -n "$h1" ] && [ "$h1" = "$h2" ]; } && ok || no "new=$h1 old=$h2"
+
+t "arm status: up to date right after a build"
+case $(pbf arm status 2>&1) in *"up to date with the tree ($h1)"*) ok;; *) no "$(pbf arm status 2>&1 | tr '\n' ' ')";; esac
+
+t "a changed source file changes the tree hash"
+printf 'new line\n' >> "$SRC/KB/toolbox.md"
+case $(pbf arm status 2>&1) in *"was built from tree $h1"*) ok;; *) no "$(pbf arm status 2>&1 | tr '\n' ' ')";; esac
+
+t "run refuses a stale arm (exit 3)"
+rout=$(pbf run --task D01 --arm both --dry-run --force 2>&1); rc=$?
+{ [ "$rc" = 3 ] && case $rout in *"refusing to run: arm"*"rebuild it"*) true;; *) false;; esac; } &&
+  ok || no "rc=$rc $(echo "$rout" | tr '\n' ' ')"
+
+t "--allow-stale-arm passes the staleness gate"
+# proven by what it dies of next: the run lock, held here, not the stale arm.
+exec 9>"$HOME/agents/bench/.lock"
+if flock -n 9; then
+  lout=$(pbf run --task D01 --arm new --dry-run --force --allow-stale-arm 2>&1)
+  flock -u 9
+  case $lout in *"another pcbench run holds"*) ok;; *) no "$(echo "$lout" | tr '\n' ' ')";; esac
+else
+  no "could not take bench/.lock for the test"
+fi
+exec 9>&-
+
+t "rebuilding clears the staleness"
+pbf arm build --arm both >/dev/null 2>&1
+h3=$(jq -r .tree_hash "$ARMS/new/ARM.json")
+{ [ "$h3" != "$h1" ] && case $(pbf arm status 2>&1) in *"up to date with the tree ($h3)"*) true;; *) false;; esac; } &&
+  ok || no "hash $h1 -> $h3"
+
+t "pcbench-weekly rebuilds both arms before the A/B"
+grep -q 'pcbench arm build --arm both' "$BIN/pcbench-weekly" && ok || no "no arm build in pcbench-weekly"
+rm -rf "$SRC" "$ARMS"
+
+# --- 3c-bis. TSP-019: tree_hash() never opens a special file ----------------
+SSRC=$(mktemp -d)
+mkdir -p "$SSRC/bin" "$SSRC/KB" "$SSRC/skills/desktop"
+printf 'regular\n' > "$SSRC/bin/plain"
+mkfifo "$SSRC/bin/pipe-target"                      # never written to: a read would block
+ln -s "$SSRC/bin/pipe-target" "$SSRC/bin/link-to-fifo"
+ln -s "$SSRC/bin/nowhere" "$SSRC/bin/broken-link"
+printf '# kb\n' > "$SSRC/KB/toolbox.md"
+printf '# skill\n' > "$SSRC/skills/desktop/SKILL.md"
+printf '# readme\n' > "$SSRC/README-pc-control.md"
+th() { PCBENCH_SRC="$SSRC" PCBENCH_SRC_SKILL="$SSRC/skills/desktop" timeout 5 python3 -c "
+from importlib.machinery import SourceFileLoader
+print(SourceFileLoader('pcbench_mod', '$PB').load_module().tree_hash())
+" 2>/dev/null; }
+t "tree_hash over a fifo + broken link returns fast"
+sh1=$(th); rc=$?
+{ [ "$rc" = 0 ] && [ -n "$sh1" ]; } && ok || no "rc=$rc hash='$sh1'"
+
+t "a changed link target changes the hash"
+rm "$SSRC/bin/broken-link"; ln -s "$SSRC/bin/elsewhere" "$SSRC/bin/broken-link"
+sh2=$(th)
+{ [ -n "$sh2" ] && [ "$sh1" != "$sh2" ]; } && ok || no "$sh1 -> $sh2"
+rm -rf "$SSRC"
+
+# --- 3d. residue() excludes the pcbench-weekly pair (fingerprint.sh parity) ---
+t "residue() ignores pcbench-weekly units"
+RSTUB=$(mktemp -d)
+cat > "$RSTUB/systemctl" <<'EOF'
+#!/bin/sh
+if [ "$1" = "--user" ] && [ "$2" = "list-units" ]; then
+  cat <<'UNITS'
+pcbench-weekly.service                loaded active running pcbench weekly
+pcbench-weekly.timer                  loaded active waiting pcbench weekly timer
+UNITS
+fi
+EOF
+chmod +x "$RSTUB/systemctl"
+printf '#!/bin/sh\nexit 0\n' > "$RSTUB/pactl"; chmod +x "$RSTUB/pactl"
+printf '#!/bin/sh\nexit 0\n' > "$RSTUB/docker"; chmod +x "$RSTUB/docker"
+printf '#!/bin/sh\necho "[]"\n' > "$RSTUB/pc"; chmod +x "$RSTUB/pc"
+res=$(PATH="$RSTUB:$PATH" python3 -c "
+from importlib.machinery import SourceFileLoader
+loader = SourceFileLoader('pcbench_mod', '$PB')
+m = loader.load_module()
+print(m.residue()[0])
+")
+rm -rf "$RSTUB"
+eq res "$res" '0'
+
 # --- 4. end to end with a fake claude --------------------------------------
 if command -v systemd-run >/dev/null && systemctl --user is-system-running >/dev/null 2>&1; then
   TMPBIN=$(mktemp -d)   # not under ~/agents/bin: the arm bind-mount would hide it
@@ -96,7 +202,8 @@ if command -v systemd-run >/dev/null && systemctl --user is-system-running >/dev
   export PCBENCH_IGNORE_FP=docker
   export PCBENCH_PATH="$TMPBIN:$HOME/.local/bin:$HOME/agents/bin:/usr/local/bin:/usr/bin:/bin"
   before=$(bash "$BIN/pcbench.d/fingerprint.sh")
-  run=$(PATH="$TMPBIN:$PATH" "$PB" run --task D01 -n 1 --arm new --model fake --force 2>/dev/null | tail -1)
+  # --allow-stale-arm: this trial only needs the arm to exist, not to match the live tree.
+  run=$(PATH="$TMPBIN:$PATH" "$PB" run --task D01 -n 1 --arm new --model fake --force --allow-stale-arm 2>/dev/null | tail -1)
   after=$(bash "$BIN/pcbench.d/fingerprint.sh")
   row="$run/rows.jsonl"
   t "end-to-end row exists"; [ -s "$row" ] && ok || no "no rows at $row"

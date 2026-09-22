@@ -86,6 +86,8 @@ ac_online() { local f; for f in "$PC_SYS"/class/power_supply/A[CD]*/online; do [
 CPU0="$PC_SYS/devices/system/cpu/cpu0/cpufreq"
 PSTATE="$PC_SYS/devices/system/cpu/intel_pstate"
 ppd_get() { cached ppd 60 pc_cmd powerprofilesctl get; }
+# Entries pc_apply drops after a power mutation (pc-status caches the profile for 60 s).
+export PC_CACHE_KEYS='ppd power_profile'
 turbo_state() { [ "$(rd "$PSTATE/no_turbo" 0)" = 0 ] && printf on || printf off; }
 
 ## --- mutations --------------------------------------------------------------

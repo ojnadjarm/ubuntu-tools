@@ -4,7 +4,7 @@
 set -uo pipefail
 export LC_ALL=C
 
-ROOT="$HOME/moodle-envs"
+ROOT="${MOODLE_ENVS_DIR:-$HOME/moodle-envs}"
 BACKUPS="$HOME/agents/backups/moodle"
 KEEP=14
 WEEKLY=0

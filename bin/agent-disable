@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Disable and stop one agent's timer.
 set -euo pipefail
-name="${1:-}"
-[ -n "$name" ] || { echo "usage: agent-disable <name>" >&2; exit 2; }
-systemctl --user disable --now "agent@$name.timer" 2>/dev/null || true
-echo "agent $name disabled"
+usage() { echo "usage: agent-disable <name>" >&2; exit 2; }
+[ $# -eq 1 ] || usage
+case "$1" in -h|--help) usage ;; esac
+. "$HOME/agents/bin/fleetlib.sh"
+agent_name_check agent-disable "$1" || exit 2
+systemctl --user disable --now "agent@$1.timer" 2>/dev/null || true
+echo "agent $1 disabled"

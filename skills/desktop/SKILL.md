@@ -49,13 +49,6 @@ pc spotify status|play|pause|toggle|next|prev|vol N|seek S|open URI|output SINK|
 pc status [--brief|--json|--check]   machine health      pc selftest   PASS/FAIL end-to-end (~20 s)
 ```
 
-Below the screen: `pc mutter outputs|workspaces|windows|idle|shell|extensions` (compositor state,
-read-only) and `pc dbus`/`pc input` reach further than `pc win`/`pc tree` do — geometry, focus and
-idle time without a screenshot; kernel/session/services layers (`pc top|io|power|thermal|trace|
-kernel|net|hw|audio|bt|units|journal|docker`) and `pc explain <thing>` (ranked KB lookup) are the
-full family, one row each with usage and bench time in `~/agents/KB/pc-cli.md`
-(`pc help --md > ~/agents/KB/pc-cli.md`).
-
 ## Spotify
 **Never screenshot Spotify** — it is Electron with no AT-SPI tree; every control goes through `pc spotify`
 (MPRIS + PipeWire): `status [--json]`, `play|pause|toggle|next|prev`, `vol 0-100`, `seek <s|+s|-s>`,
@@ -77,7 +70,6 @@ starting a specific URI need the Web API — without `~/agents/secrets/spotify.e
 - **Typing into an editor:** `pc open <scratch file>`, never bare `gnome-text-editor` — it restores the owner's
   tabs and your `pc type` lands in their buffer.
 - **`killall <name>`, never `pkill -f`** (it kills your session). **Never touch the tmux session `claude`**; never reboot unasked.
-- **Mutations need `--apply`** (else `would: <before> → <after>`, exit 0); `pc undo <id>|--last [--apply]` reverts a ledgered change; `pc doctor [--quick]` is the night-safe health check (no window, no sound, no TV).
 - **OCR is the last resort.** `pc find "x" --all --json` lists every match; click one with `pc click-text "x"
   --index N`. Matching is fuzzy, so read document text from `pc see` (`ui:`), not `pc find`.
 - **`warn: <app> not answering AT-SPI`** in `pc see` means that application was dropped from the tree because it

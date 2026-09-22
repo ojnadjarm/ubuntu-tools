@@ -5,6 +5,8 @@ export LC_ALL=C
 BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 . "$BIN/pclib.sh"
 SELF="$(readlink -f "$0")"
+# No pc-status entry caches audio state today, so an audio mutation invalidates nothing.
+export PC_CACHE_KEYS=''
 
 pc_usage 'usage: pc audio [graph] [--json]
        pc audio sinks|sources|streams|links|devices [--json]
@@ -40,7 +42,7 @@ LOGLEVEL=$(meta_val settings log.level); : "${LOGLEVEL:=2}"
 
 resolve_sink_alias() {
   case "$1" in
-    earbuds) printf '%s' 'bluez_output.AC_80_0A_27_65_6C.1';;
+    earbuds) local m="${BUDS_MAC:-$HARNESS_BUDS_MAC}"; printf 'bluez_output.%s.1' "${m//:/_}";;
     tv)      printf '%s' 'alsa_output.pci-0000_00_1f.3.hdmi-stereo';;
     *)       printf '%s' "$1";;
   esac

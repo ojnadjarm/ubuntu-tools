@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """pcbench — run a task pack against a toolbox arm, classify the trajectory, report the A/B.
 
-Subcommands: list · validate · arm · parse · run · away · report.  Design: PLAN-PCBENCH §2, corrected
-by bench/spike/SPIKE.md (no --max-turns; budget = --max-budget-usd + timeout; `< /dev/null`;
+Subcommands: list · validate · arm (status|build) · parse · run · away · report.  Design: PLAN-PCBENCH §2, corrected
+by bench/spike/SPIKE.md (no --max-turns; no spend cap, the timeout is the only bound; `< /dev/null`;
 --setting-sources user; --disallowedTools Agent).  Task schema: bench/SCHEMA.md.
 """
-import argparse, fcntl, json, os, re, shutil, statistics, subprocess, sys, time
+import argparse, fcntl, hashlib, json, os, re, shutil, stat, statistics, subprocess, sys, time
 from collections import Counter
 from datetime import datetime, timezone
 
 HOME = os.path.expanduser("~")
 BENCH = os.path.join(HOME, "agents", "bench")
 TASKS = os.path.join(BENCH, "tasks")
-ARMS = os.path.join(BENCH, "arms")
+ARMS = os.environ.get("PCBENCH_ARMS", os.path.join(BENCH, "arms"))
+ARM_SCRIPTS = os.path.join(BENCH, "arms")   # build-*.sh / exec.sh live with the bench, not the arm
 RUNS = os.path.join(BENCH, "runs")
 HELPERS = os.path.join(HOME, "agents", "bin", "pcbench.d")
 LOCK = os.path.join(BENCH, ".lock")
@@ -106,7 +107,7 @@ def validate_task(tid):
         if f not in FP_FIELDS:
             bad.append("allowed_side_effects %r is not a fingerprint field" % f)
     b = t.get("budget") or {}
-    for k in ("seconds", "usd", "screenshots"):
+    for k in ("seconds", "screenshots"):
         if k not in b:
             bad.append("budget missing " + k)
     if "turns" in b:
@@ -119,6 +120,17 @@ def validate_task(tid):
         bad.append("answer_schema needs an escape channel: unknown|did_it plus reason")
     if re.search(r"\bpc [a-z]|--apply|systemctl|pactl|docker ", t.get("prompt", "")):
         bad.append("prompt mentions tools; it must be the owner's words")
+    j = t.get("judge")
+    if j is not None:
+        if not isinstance(j, dict) or not j.get("rubric"):
+            bad.append("judge must be an object with a non-empty rubric")
+        else:
+            for k in ("must", "must_not"):
+                v = j.get(k, [])
+                if not isinstance(v, list) or any(not isinstance(x, str) for x in v):
+                    bad.append("judge.%s must be a list of strings" % k)
+    if t.get("judge_only") and not j:
+        bad.append("judge_only without a judge rubric")
     return bad
 
 
@@ -173,10 +185,115 @@ def run_checker(d, answer, stream, env):
     return out
 
 
+def run_judge(d, answer, env):
+    """PB10: grade the answer against task.json's `judge` rubric. {} when there is none."""
+    p = subprocess.run(["bash", "%s/judge.sh" % HELPERS, d, answer], capture_output=True,
+                       text=True, cwd=d, env=env)
+    out = {"judge_pass": 0, "judge_reasons": ["judge produced no JSON"]}
+    for line in reversed(p.stdout.strip().splitlines()):
+        try:
+            j = json.loads(line)
+        except Exception:
+            continue
+        if j.get("skipped"):
+            return {}
+        out = {"judge_pass": int(bool(j.get("pass"))),
+               "judge_reasons": [str(r) for r in (j.get("reasons") or [])]}
+        break
+    return out
+
+
 # --------------------------------------------------------------------------- arms
 
 def arm_dir(arm):
     return os.path.join(ARMS, arm)
+
+
+def src_roots():
+    """The live paths both build scripts copy from — the arm's source tree."""
+    src = os.environ.get("PCBENCH_SRC", os.path.join(HOME, "agents"))
+    skill = os.environ.get("PCBENCH_SRC_SKILL",
+                           os.path.join(HOME, ".claude", "skills", "desktop"))
+    return [os.path.join(src, "bin"), os.path.join(src, "KB"), skill,
+            os.path.join(src, "README-pc-control.md")]
+
+
+def tree_hash():
+    """sha256 over the source tree's paths + contents; the arm records it at build time."""
+    h = hashlib.sha256()
+    for root in src_roots():
+        if os.path.isfile(root):
+            files = [(os.path.basename(root), root)]
+        else:
+            files = []
+            for d, subs, names in os.walk(root):
+                subs[:] = sorted(x for x in subs if x != "__pycache__")
+                for n in sorted(names):
+                    if n.endswith(".pyc"):
+                        continue
+                    f = os.path.join(d, n)
+                    files.append((os.path.relpath(f, root), f))
+            files.sort()
+        for rel, f in files:
+            h.update(rel.encode() + b"\0")
+            if os.path.islink(f):
+                h.update(b"->" + os.readlink(f).encode() + b"\0")
+                continue
+            try:
+                if not stat.S_ISREG(os.lstat(f).st_mode):
+                    h.update(b"<special>\0")
+                    continue
+            except OSError:
+                h.update(b"<unreadable>\0")
+                continue
+            try:
+                with open(f, "rb") as fh:
+                    for chunk in iter(lambda: fh.read(1 << 16), b""):
+                        h.update(chunk)
+            except OSError:
+                h.update(b"<unreadable>")
+            h.update(b"\0")
+    return h.hexdigest()[:16]
+
+
+def arm_meta(arm):
+    try:
+        with open(os.path.join(arm_dir(arm), "ARM.json")) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def arm_stale(arm, tree=None):
+    """None when the arm was built from the current tree, else why it is out of date."""
+    m = arm_meta(arm)
+    if not m:
+        return "arm '%s' has no ARM.json — rebuild it (pcbench arm build --arm %s)" % (arm, arm)
+    tree = tree or tree_hash()
+    if m.get("tree_hash") != tree:
+        return ("arm '%s' was built from tree %s, the tree is now %s (built %s) — rebuild it "
+                "(pcbench arm build --arm %s)" % (arm, m.get("tree_hash"), tree,
+                                                  m.get("built", "?"), arm))
+    return None
+
+
+def build_arm(arm, verbose=False):
+    """Run build-<arm>.sh against the live tree and record the tree hash in the arm."""
+    script = os.path.join(ARM_SCRIPTS, "build-%s.sh" % arm)
+    if not os.path.exists(script):
+        die("no build script at %s" % script)
+    d = arm_dir(arm)
+    os.makedirs(os.path.dirname(d) or ".", exist_ok=True)
+    p = subprocess.run(["bash", script, d], capture_output=True, text=True)
+    if p.returncode != 0:
+        die("build-%s.sh failed: %s" % (arm, (p.stderr or p.stdout).strip()[:400]), 3)
+    meta = {"arm": arm, "built": now(), "tree_hash": tree_hash(),
+            "sources": src_roots(), "script": script}
+    with open(os.path.join(d, "ARM.json"), "w") as f:
+        json.dump(meta, f, indent=1)
+    print(p.stdout.strip())
+    print("  tree %s at %s" % (meta["tree_hash"], meta["built"]))
+    return 0
 
 
 def arm_verbs(arm):
@@ -333,7 +450,7 @@ def residue():
     except Exception:
         pass
     for cmd, what in (
-            ("systemctl --user list-units 'pcbench-*' --all --no-legend | wc -l", "unit(s)"),
+            ("systemctl --user list-units 'pcbench-*' --all --no-legend | grep -v pcbench-weekly | wc -l", "unit(s)"),
             ("pactl list modules short 2>/dev/null | grep -ci pcbench || true", "sink module(s)"),
             ("docker ps -a --filter name=pcbench --format '{{.Names}}' 2>/dev/null | wc -l",
              "container(s)")):
@@ -414,7 +531,7 @@ def real_dark_eye():
 def selftest_ok(arms, verbose=False):
     """arms/exec.sh --selftest must pass for every arm before a safety trial may run."""
     for arm in arms:
-        p = subprocess.run(["bash", os.path.join(ARMS, "exec.sh"), "--selftest", arm],
+        p = subprocess.run(["bash", os.path.join(ARM_SCRIPTS, "exec.sh"), "--selftest", arm],
                            capture_output=True, text=True)
         if verbose or p.returncode != 0:
             print(p.stdout + p.stderr, file=sys.stderr)
@@ -459,12 +576,12 @@ def build_cmd(task, arm, trial_dir, model, seconds, usd, name):
     path = "%s/.local/bin:%s/agents/bin:/usr/local/bin:/usr/bin:/bin" % (HOME, HOME)
     path = os.environ.get("PCBENCH_PATH", os.environ.get("PATH", path))
     parts = [
-        "timeout", str(int(seconds)), q("%s/exec.sh" % ARMS), arm, "--",
+        "timeout", str(int(seconds)), q("%s/exec.sh" % ARM_SCRIPTS), arm, "--",
         "env", "PATH=" + q(path), "claude", "-p", q(task["prompt"]),
         "--model", q(model), "--permission-mode", "bypassPermissions",
         "--disallowedTools", "Agent", "--setting-sources", "user",
         "--append-system-prompt", q(preamble), "--json-schema", q(schema),
-        "--max-budget-usd", str(usd), "--output-format", "stream-json", "--verbose",
+        "--output-format", "stream-json", "--verbose",
         "--name", q(name),
         ">", q(os.path.join(trial_dir, "stream.jsonl")),
         "2>", q(os.path.join(trial_dir, "stderr.log")), "<", "/dev/null",
@@ -517,7 +634,7 @@ def run_trial(task, arm, i, run_dir, run_id, model, dry_run, verbose, owner_go=N
         else:
             name = "pcbench-%s-%s-%d" % (tid, arm, i)
             cmd = build_cmd(task, arm, trial_dir, model,
-                            task["budget"]["seconds"], task["budget"]["usd"], name)
+                            task["budget"]["seconds"], task["budget"].get("usd", 0), name)
             open(os.path.join(trial_dir, "cmd.sh"), "w").write(cmd + "\n")
             p = subprocess.run(cmd, shell=True, env=env, cwd=trial_dir)
             row["timed_out"] = p.returncode == 124
@@ -549,6 +666,15 @@ def run_trial(task, arm, i, run_dir, run_id, model, dry_run, verbose, owner_go=N
     row["pass"] = verdict["pass"]
     row["checker_exit"] = verdict["exit"]
     row["reason"] = verdict.get("reason", "")
+    if task.get("judge"):
+        j = run_judge(d, answer_path, env)
+        row.update(j)
+        if j:
+            checker_ok = 1 if task.get("judge_only") else verdict["pass"]
+            row["pass"] = 1 if (checker_ok and j["judge_pass"]) else 0
+            if not j["judge_pass"]:
+                row["reason"] = (row["reason"] + " | judge: " +
+                                 "; ".join(j["judge_reasons"]))[:400]
     row["fingerprint_diff"] = diff
     row["side_effect"] = bool(diff)
     row["disturb"] = bool(metrics["disturb"]) and task["set"] == "night"
@@ -762,6 +888,12 @@ def cmd_validate(args):
 
 
 def cmd_arm(args):
+    if args.what == "build":
+        arms = ["old", "new"] if args.arm == "both" else [args.arm]
+        for arm in arms:
+            build_arm(arm, args.verbose)
+        return 0
+    tree = tree_hash()
     for arm in ("old", "new"):
         d = arm_dir(arm)
         if not os.path.isdir(os.path.join(d, "bin")):
@@ -771,6 +903,8 @@ def cmd_arm(args):
         print("%-3s %2d pc verbs, KB %s, built %s" %
               (arm, len(verbs), "yes" if os.path.isdir(os.path.join(d, "KB")) else "NO",
                datetime.fromtimestamp(os.path.getmtime(d)).strftime("%Y-%m-%d %H:%M")))
+        why = arm_stale(arm, tree)
+        print("    %s" % (why if why else "up to date with the tree (%s)" % tree))
         if args.verbose:
             print("    " + " ".join(verbs))
     return 0
@@ -792,6 +926,13 @@ def cmd_run(args):
         die("no tasks selected")
     if any(t["set"] == "day" for t in tasks) and not args.owner_go:
         die("day-set tasks need --owner-go \"<his words>\"")
+    arms_used = ["old", "new"] if args.arm == "both" else [args.arm]
+    if not args.allow_stale_arm:
+        tree = tree_hash()
+        for arm in arms_used:
+            why = arm_stale(arm, tree)
+            if why:
+                die("refusing to run: %s (--allow-stale-arm overrides)" % why, 3)
     lock = open(LOCK, "w")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -801,7 +942,6 @@ def cmd_run(args):
         why = guard_start(args)
         if why:
             die("refusing to start: %s (--force overrides)" % why, 3)
-    arms_used = ["old", "new"] if args.arm == "both" else [args.arm]
     if any(t["tier"] == "safety" for t in tasks):
         why = selftest_ok(arms_used, args.verbose)
         if why:
@@ -843,9 +983,6 @@ def cmd_run(args):
                                    (de_before, de_now))
                         die("~/the-dark-eye moved during the run (%s -> %s) — the owner's "
                             "repo must be untouchable" % (de_before, de_now), 5)
-                    if total_cost > args.max_budget_usd_total:
-                        prog.write("ABORT: run budget $%.2f exceeded\n" % args.max_budget_usd_total)
-                        die("run budget exceeded ($%.2f)" % total_cost, 4)
     if real_dark_eye() != de_before:
         die("~/the-dark-eye moved during the run — the owner's repo must be untouchable", 5)
     # arms/exec.sh builds the fixture on *every* trial, so clean it after every run.
@@ -871,8 +1008,10 @@ def main():
     a.add_argument("--oracle", action="store_true", help="also run solve.sh and a wrong answer")
     a.set_defaults(fn=cmd_validate)
 
-    a = sub.add_parser("arm", help="arm status", parents=[common])
-    a.add_argument("what", nargs="?", default="status", choices=["status"])
+    a = sub.add_parser("arm", help="arm status · arm build", parents=[common])
+    a.add_argument("what", nargs="?", default="status", choices=["status", "build"])
+    a.add_argument("--arm", default="both", choices=["old", "new", "both"],
+                   help="which arm to build (build only)")
     a.set_defaults(fn=cmd_arm)
 
     a = sub.add_parser("parse", help="stream.jsonl → metrics", parents=[common])
@@ -890,9 +1029,10 @@ def main():
     a.add_argument("--dry-run", action="store_true", help="setup/solve/check/teardown, no model")
     a.add_argument("--owner-go", default="")
     a.add_argument("--force", action="store_true", help="skip the fleet/timer start guard")
+    a.add_argument("--allow-stale-arm", action="store_true",
+                   help="run even when an arm is older than the tree it was built from")
     a.add_argument("--require-away", action="store_true",
                    help="exit 0 without running when the owner is at the machine")
-    a.add_argument("--max-budget-usd-total", type=float, default=150.0)
     a.set_defaults(fn=cmd_run)
 
     a = sub.add_parser("away", help="is the owner away from the machine?", parents=[common])

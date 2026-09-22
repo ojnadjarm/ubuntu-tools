@@ -7,6 +7,7 @@
 # API — one line per function:
 #   fleet_path              export the hermetic fleet PATH (a systemd user shell inherits almost none)
 #   fleet_lock <file> <fd>  exclusive non-blocking flock on <file> through <fd>; 1 when another run holds it
+#   agent_name_check <cli> <name>  2 unless <name> is an existing ~/agents/<name>/BRIEF.md
 # shellcheck source=/dev/null
 [ -n "${HARNESS_ENV_LOADED:-}" ] || . "$HOME/agents/bin/env.sh"
 
@@ -21,4 +22,15 @@ fleet_lock() {
   case "${2:-}" in ''|*[!0-9]*) echo "fleet_lock: <fd> must be a number" >&2; return 2 ;; esac
   eval "exec $2>\"\$1\"" || return 2
   flock -n "$2"
+}
+
+# agent_name_check <cli> <name> — reject an option, a path or an unknown agent before any
+# systemd or filesystem action; the caller exits 2 on a non-zero return.
+agent_name_check() {
+  local cli="$1" name="${2:-}"
+  case "$name" in
+    ''|-*|*/*|.|..) echo "$cli: expected an agent name, got '${name}'" >&2; return 2 ;;
+  esac
+  [ -r "$HARNESS_HOME/$name/BRIEF.md" ] ||
+    { echo "$cli: no $HARNESS_HOME/$name/BRIEF.md" >&2; return 2; }
 }

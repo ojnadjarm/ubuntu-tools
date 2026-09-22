@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""Long-polls each brain's Eye bus into an append-only spool while an eye-channel holds that brain's lock."""
+import fcntl
+import http.client
+import json
+import os
+import signal
+import sys
+import threading
+
+STATE = os.environ.get("EYE_RELAY_STATE", os.path.expanduser("~/agents/eye-relay/state"))
+CONFIG = os.environ.get("DARK_EYE_CONFIG") or os.path.join(
+    os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "dark-eye/config.json")
+POLL_MS = int(os.environ.get("EYE_RELAY_POLL_MS", "50000"))
+stop = threading.Event()
+
+
+def subscribed(lock_path):
+    """True while an eye-channel holds the brain's lock."""
+    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return False
+    except BlockingIOError:
+        return True
+    finally:
+        os.close(fd)
+
+
+def append(spool, text):
+    """One durable spool line."""
+    with open(spool, "a", encoding="utf-8") as f:
+        f.write(text.replace("\n", " ") + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def line(d):
+    """A listen payload as the line `eye listen-loop` prints for it, or None."""
+    t, e = d.get("transcript"), d.get("event")
+    if t:
+        return "VOICE%s: %s" % (" [remote]" if d.get("source") == "remote" else "", t)
+    if e:
+        return "EVENT: " + e + (" — " + d["detail"] if d.get("detail") else "")
+    return None
+
+
+def relay(brain):
+    """One brain's ear: finishes its in-flight poll before honouring a stop."""
+    spool, lock = f"{STATE}/{brain}.spool", f"{STATE}/{brain}.lock"
+    query = "" if brain == "main" else f"&brain={brain}"
+    up = True
+    while not stop.is_set():
+        if not subscribed(lock):
+            stop.wait(1)
+            continue
+        try:
+            with open(CONFIG, encoding="utf-8") as f:
+                cfg = json.load(f)
+            conn = http.client.HTTPConnection("127.0.0.1", cfg.get("port", 8642), timeout=POLL_MS / 1000 + 10)
+            try:
+                conn.request("GET", f"/bridge/listen?timeoutMs={POLL_MS}{query}", headers={"x-dark-eye-key": cfg["secret"]})
+                r = conn.getresponse()
+                if r.status != 200:
+                    raise OSError(f"bridge answered {r.status}")
+                d = json.load(r)
+            finally:
+                conn.close()
+        except (OSError, ValueError, KeyError):
+            if up:
+                append(spool, "EYE OFFLINE (bridge unreachable)")
+                up = False
+            stop.wait(5)
+            continue
+        if not up:
+            append(spool, "EYE BACK (bridge reachable again)")
+            up = True
+        s = line(d)
+        if s:
+            append(spool, s)
+
+
+def main():
+    os.makedirs(STATE, mode=0o700, exist_ok=True)
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, lambda *_: stop.set())
+    threads = [threading.Thread(target=relay, args=(b,)) for b in (sys.argv[1:] or ["main"])]
+    for t in threads:
+        t.start()
+    while any(t.is_alive() for t in threads):
+        for t in threads:
+            t.join(1)
+
+
+if __name__ == "__main__":
+    main()

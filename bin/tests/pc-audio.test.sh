@@ -11,15 +11,15 @@ nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
 is()  { [ "$2" = "$3" ] && ok "$1" || nok "$1" "expected '$3', got '$2'"; }
 
 # fx <args…> — pc audio against the recorded pw-dump (buds connected).
-fx() { PC_FIXTURE="$FIX" XDG_RUNTIME_DIR="$WORK" PC_LEDGER="$WORK/l.jsonl" "$BIN/pc-audio" "$@"; }
+fx() { BUDS_MAC=00:00:5E:00:53:01 PC_FIXTURE="$FIX" XDG_RUNTIME_DIR="$WORK" PC_LEDGER="$WORK/l.jsonl" "$BIN/pc-audio" "$@"; }
 
 ## --- 1. fixture: buds connected -------------------------------------------------
 J=$(fx --json)
 [ -n "$J" ] && ok 'fixture graph produces JSON' || nok 'fixture graph produces JSON' empty
 is 'buds sink is present' \
-  "$(jq -r '.sinks[]|select(.name=="bluez_output.AC_80_0A_27_65_6C.1")|.name' <<<"$J")" \
-  'bluez_output.AC_80_0A_27_65_6C.1'
-is 'buds sink is default'    "$(jq -r '.default.sink' <<<"$J")" 'bluez_output.AC_80_0A_27_65_6C.1'
+  "$(jq -r '.sinks[]|select(.name=="bluez_output.00_00_5E_00_53_01.1")|.name' <<<"$J")" \
+  'bluez_output.00_00_5E_00_53_01.1'
+is 'buds sink is default'    "$(jq -r '.default.sink' <<<"$J")" 'bluez_output.00_00_5E_00_53_01.1'
 is 'bt card profile parsed'  "$(jq -r '.devices[]|select(.api=="bluez5")|.active_profile' <<<"$J")" 'a2dp-sink'
 is 'log level from metadata' "$(jq .log_level <<<"$J")" 2
 is 'xruns total from pw-top' "$(fx xruns --json | jq .total)" 2

@@ -25,6 +25,7 @@ mkproc() {
 sync_uptime() { echo "$(( $(date +%s) - BOOT )).00 0.00" >"$PROC/uptime"; }
 setcgroup() { echo "0::/user.slice/dark-eye.service" >"$PROC/$1/cgroup"; }
 setcwd() { ln -sf "$2" "$PROC/$1/cwd"; }
+setenviron() { local pid="$1"; shift; printf '%s\0' "$@" >"$PROC/$pid/environ"; }
 setfd() { ln -sf "$3" "$PROC/$1/fd/$2"; }
 
 bad=0
@@ -93,6 +94,56 @@ check        "rule3: hand-run eye-render killed"        "would kill pid 301 (rul
 check_absent "rule3: dark-eye.service eye-render spared" "would kill pid 302"
 check        "rule3: hand-run main.js killed"           "would kill pid 303 (rule3"
 check_absent "rule3: unrelated node script spared"      "would kill pid 304"
+
+# TSP-016: Node >= 23 renames its main thread, so comm is "MainThread", not "node".
+PROC="$WORK/proc3b"; TMP="$WORK/tmp3b"; mkdir -p "$PROC" "$TMP"
+BOOT=$(( $(date +%s) - UPTIME )); sync_uptime
+mkproc 4242 MainThread 8000 5 2000 node $HOME/the-dark-eye/body/src/main.js
+mkproc 4243 MainThread 8000 5 2000 node /x/other/index.js
+run
+check        "rule3: MainThread comm matched via argv[0]" "would kill pid 4242 (rule3"
+check_absent "rule3: MainThread non-body spared"          "would kill pid 4243"
+
+# TSP-016: a body that carries DARK_EYE_SANDBOX is reaped as a whole sandbox, not one pid.
+PROC="$WORK/proc3c"; TMP="$WORK/tmp3c"; mkdir -p "$PROC" "$TMP"
+BOOT=$(( $(date +%s) - UPTIME )); sync_uptime
+mkproc 4244 MainThread 8000 5 2000 node $HOME/the-dark-eye/body/src/main.js
+setenviron 4244 "HOME=$HOME" "DARK_EYE_SANDBOX=t1"
+run
+check        "rule3: sandbox body reaped by name"   "would take down sandbox t1 (rule3"
+check_absent "rule3: sandbox body not killed pid-wise" "would kill pid 4244"
+
+# TSP-016 live path: a stub body-sandbox on PATH, a pid number the kernel cannot allocate,
+# and a selftest proving no real process carries it before the run (FLEET §5.6).
+PROC="$WORK/proc3d"; TMP="$WORK/tmp3d"; mkdir -p "$PROC" "$TMP"
+BOOT=$(( $(date +%s) - UPTIME )); sync_uptime
+NOPID=$(( $(cat /proc/sys/kernel/pid_max) + 7 ))
+if [ -e "/proc/$NOPID" ] || kill -0 "$NOPID" 2>/dev/null; then
+  echo "FAIL selftest: pid $NOPID exists, refusing the live-path case"; bad=$((bad+1))
+else
+  echo "PASS selftest: pid $NOPID cannot exist, live path is safe"
+  mkdir -p "$WORK/stub"
+  cat >"$WORK/stub/body-sandbox" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$STUB_CALLS"
+STUB
+  chmod +x "$WORK/stub/body-sandbox"
+  mkproc "$NOPID" MainThread 8000 5 2000 node $HOME/the-dark-eye/body/src/main.js
+  setenviron "$NOPID" "DARK_EYE_SANDBOX=t1"
+  rm -rf "$WORK/state"; mkdir -p "$WORK/state"; : >"$WORK/calls"
+  sync_uptime
+  PATH="$WORK/stub:$PATH" STUB_CALLS="$WORK/calls" \
+  AGENT_SCRATCH_GLOBS="$DEFAULT_GLOBS" \
+  SENTINEL_STATE_DIR="$WORK/state" SENTINEL_RUNAWAY_PROC="$PROC" SENTINEL_RUNAWAY_TMPROOT="$TMP" \
+    "$SCRIPT" >/dev/null 2>&1
+  if grep -qx -- "down --name t1" "$WORK/calls"; then
+    echo "PASS rule3 live: body-sandbox down --name t1 called once"
+  else
+    echo "FAIL rule3 live: stub not called with 'down --name t1'"; bad=$((bad+1))
+  fi
+  [ "$(wc -l <"$WORK/calls")" = 1 ] || { echo "FAIL rule3 live: stub called $(wc -l <"$WORK/calls") times"; bad=$((bad+1)); }
+  check_absent "rule3 live: no pid killed" "killed pid"
+fi
 
 # ---------- Rule 4: portal helper hot (CPU strikes) or fat (RSS), restart not kill ----------
 PROC="$WORK/proc4"; TMP="$WORK/tmp4"; mkdir -p "$PROC" "$TMP"

@@ -81,6 +81,12 @@ w=$(sed -n 's/.*would run: //p' "$W/o2")
   case "$w" in *"--arm both"*"-n 3"*"--model opus"*"--require-away"*) [[ $w != *--tier* ]];; *) false;; esac
 } && ok || no "rc=$rc cmd='$w'"
 
+t "the idle row is sampled after the gate, never on a dry run"
+{ grep -q 'pc idle --seconds 60 --tsv >>"$BENCH/BASELINE-IDLE.tsv"' "$RUNNER" &&
+  ! grep -q 'BASELINE-IDLE' "$W/o2" &&
+  [ "$(sed -n '2s/^#//p' "$BIN/../bench/BASELINE-IDLE.tsv" | awk -F'\t' '{print NF}')" = 10 ]
+} && ok || no "idle line missing, sampled on --dry-run, or the header is not 9 columns"
+
 t "the weekly selection includes the confirming C02/C04 re-run"
 sel=$("$BIN/pcbench" list --set night | awk '{print $1}' | tr '\n' ' ')
 case "$sel" in *C02*) case "$sel" in *C04*) ok;; *) no "C04 missing from $sel";; esac;;
@@ -91,11 +97,11 @@ t "away run resets the streak file only on success"
 rm -rf "$W"
 
 # --- 4. registration -------------------------------------------------------
-t "roster row in ~/CLAUDE.md"
-grep -q '`pcbench-weekly.timer`' "$HOME/CLAUDE.md" && ok || no "no roster row"
+t "roster row in KB/orchestrator.md"
+grep -q '`pcbench-weekly.timer`' "$HOME/agents/KB/orchestrator.md" && ok || no "no roster row"
 
 t "agents-start would re-enable it from the roster"
-u=$(grep 'pcbench-weekly.timer' "$HOME/CLAUDE.md" | head -1 | awk -F'|' '{print $3}' |
+u=$(grep 'pcbench-weekly.timer' "$HOME/agents/KB/orchestrator.md" | head -1 | awk -F'|' '{print $3}' |
     grep -o '`[^`]*`' | head -1 | tr -d '`')
 [ "$u" = pcbench-weekly.timer ] && ok || no "agents-start would parse '$u'"
 

@@ -90,7 +90,7 @@ is enough. Do not do part of it, and never a near-equivalent that reaches the sa
   (`agent@*`, `sentinel-check`, `moodle-keep-weekly`), kills background agent runs and pushes
   once. Timers are stopped, not disabled; `agents-start` (= `agents-stop --resume`) re-enables
   exactly the roster in `~/CLAUDE.md`. The interactive tmux session is never touched.
-- Roster and schedules: `~/CLAUDE.md`. Runner details: `~/agents/README.md`.
+- Roster and schedules: `~/agents/KB/orchestrator.md`. Runner details: `~/agents/README.md`.
 
 ## 7. Known gaps
 

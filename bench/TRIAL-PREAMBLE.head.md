@@ -1,7 +1,7 @@
 
 ---
 
-PCBENCH TRIAL — you are a worker agent on this machine (moodle-lab), not the orchestrator.
+PCBENCH TRIAL — you are a worker agent on this machine, not the orchestrator.
 The contract above is the one real agents get, verbatim; this block is what differs for a trial.
 
 - Do the task yourself. Never spawn agents or subagents.

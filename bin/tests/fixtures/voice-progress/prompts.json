@@ -1,0 +1,14 @@
+{
+ "prompts": [
+  {"id": "p01", "group": "commands", "text": "Run pc status.", "len": "short"},
+  {"id": "d01", "group": "drill", "pattern": "final-consonant", "day": 1,
+   "text": "Start the tests.",
+   "targets": [{"word": "Start"}, {"word": "tests"}]},
+  {"id": "d02", "group": "drill", "pattern": "final-consonant", "day": 2,
+   "text": "He closed the tab.",
+   "targets": [{"word": "closed"}, {"word": "tab"}]},
+  {"id": "d09", "group": "drill", "pattern": "v-b", "day": 1,
+   "text": "The vault and the voice.",
+   "targets": [{"word": "vault"}, {"word": "voice"}]}
+ ]
+}

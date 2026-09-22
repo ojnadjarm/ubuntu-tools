@@ -26,9 +26,9 @@ KEEP = ['git status --porcelain', 'ls ~/agents/secrets', 'pc status --json']
 # TSP-006: tools with no `command` field must not crash and must get a useful op.
 SUMMARY_CASES = [
     ('Bash', {'command': 'pc status --json'}, 'pc status', 'pc status --json'),
-    ('Read', {'file_path': '/home/x/agents/hooks/audit-log.py'},
-     'Read audit-log.py', '/home/x/agents/hooks/audit-log.py'),
-    ('Grep', {'pattern': 'matcher', 'path': '/home/x/agents'}, 'Grep matcher', 'matcher'),
+    ('Read', {'file_path': '/srv/x/agents/hooks/audit-log.py'},
+     'Read audit-log.py', '/srv/x/agents/hooks/audit-log.py'),
+    ('Grep', {'pattern': 'matcher', 'path': '/srv/x/agents'}, 'Grep matcher', 'matcher'),
     ('Glob', {'pattern': '**/*.py'}, 'Glob **/*.py', '**/*.py'),
     ('WebSearch', {'query': 'systemd timer OnCalendar syntax'},
      'WebSearch systemd timer OnCalendar syntax', 'systemd timer OnCalendar syntax'),
@@ -38,6 +38,14 @@ SUMMARY_CASES = [
     ('Task', {'description': 'check timers', 'prompt': 'go'}, 'Task check timers',
      'check timers'),
     ('TodoWrite', {}, 'TodoWrite', ''),
+]
+
+# TSP-017: op skips `cd ... &&` prefixes and never keeps a trailing `;`.
+OP_CASES = [
+    ('cd /x && pc status', 'pc status'),
+    ('eye health; pgrep -f eye', 'eye health'),
+    ('export A=1; docker ps', 'docker ps'),
+    ('cd /x', 'cd /x'),
 ]
 
 bad = 0
@@ -55,6 +63,11 @@ for tool, ti, want_op, want_sum in SUMMARY_CASES:
     ok = (op, summary) == (want_op, want_sum)
     bad += not ok
     print(('PASS ' if ok else 'FAIL ') + 'summarise %s -> %r / %r' % (tool, op, summary))
+for cmd, want_op in OP_CASES:
+    op, _ = m.summarise('Bash', {'command': cmd})
+    ok = op == want_op
+    bad += not ok
+    print(('PASS ' if ok else 'FAIL ') + 'op %r -> %r' % (cmd, op))
 op, _ = m.summarise('Task', {'prompt': 'token=sk-live-1234567890123456'})
 ok = 'sk-live' not in op
 bad += not ok
@@ -64,6 +77,6 @@ ok = len(op) <= 60
 bad += not ok
 print(('PASS ' if ok else 'FAIL ') + 'op truncated to %d chars' % len(op))
 
-n = len(CASES) + len(KEEP) + len(SUMMARY_CASES) + 2
+n = len(CASES) + len(KEEP) + len(SUMMARY_CASES) + len(OP_CASES) + 2
 print(('all %d cases pass' % n) if not bad else ('%d FAILURES' % bad))
 sys.exit(1 if bad else 0)

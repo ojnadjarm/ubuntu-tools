@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#000000">
+<title>Voice training</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23000'/%3E%3Cpath d='M4 4h8v2H6v6H4zM20 4h8v8h-2V6h-6zM4 20h2v6h6v2H4zM26 20h2v8h-8v-2h6z' fill='%234dffa0'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%234dffa0'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/eye.css">
+<link rel="stylesheet" href="/static/css/voice.css">
+<link rel="modulepreload" href="/static/js/voice/common.js">
+<link rel="modulepreload" href="/static/js/voice/recorder.js">
+</head>
+<body class="pg-voice">
+<header class="top"><a href="/">&larr; panel</a><span class="seg"><b>Prompts</b><a href="/pronunciation" data-sec="training">Voice training</a></span><button class="btn ghost" id="openSheet">session</button></header>
+
+<section class="prompt short" id="prompt" data-rs="idle">
+  <div class="meta"><span class="pos" id="pos">…</span><span class="grp" id="grp"></span><span class="pill dim" id="len"></span></div>
+  <p class="say" id="say">loading prompts…</p>
+  <div class="status" id="status"><i class="dot"></i><span class="txt" id="stateText">loading</span><span class="timer" id="timer"></span></div>
+  <div class="meter"><i id="meter"></i></div>
+</section>
+
+<section class="alert" id="alert" role="alert" hidden></section>
+
+<section class="takes">
+  <h2>Takes of this prompt <s id="takeCount"></s></h2>
+  <div id="takeList"></div>
+  <div class="legend" id="legend" hidden><i class="gold">gold</i> = you said it, it missed or changed it &middot; <i class="vio">violet</i> = it heard a word you did not say</div>
+</section>
+
+<footer class="bar" role="toolbar" aria-label="Recording">
+  <button class="btn ghost l" id="back">&lsaquo; back</button>
+  <button class="rec" id="rec" aria-pressed="false" disabled><i></i><span id="recLabel">record</span></button>
+  <button class="btn ghost r" id="next">next &rsaquo;</button>
+</footer>
+
+<div class="sheet" id="sheet" hidden>
+  <header class="top"><button class="btn ghost" id="closeSheet">&larr; back to prompt</button><span class="title">your session</span></header>
+  <div class="sum"><div><b id="sRec">0</b><em>recorded</em></div><div><b class="gold" id="sBad">0</b><em>need a redo</em></div><div><b class="dim" id="sTodo">0</b><em>to go</em></div></div>
+  <div class="hint" id="sHint"></div>
+  <div class="list" id="list"></div>
+</div>
+
+<script type="module" src="/static/js/voice/voice.js"></script>
+</body>
+</html>

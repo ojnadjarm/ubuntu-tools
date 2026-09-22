@@ -10,7 +10,7 @@ pc_usage 'usage: pc doctor [--quick] [--json]
 
 Night-safe complement to `pc selftest` (which opens a calculator): doctor never opens a window,
 never makes a sound, never touches the TV, restarts nothing and runs no verb that needs --apply.
-One row per check — `OK|FAIL|SKIP <name> <detail> <ms>` — then `PASS n/m in X s` (exit 0) or
+One row per check — `OK|WARN|FAIL|SKIP <name> <detail> <ms>` — then `PASS n/m in X s` (exit 0) or
 `FAIL n/m …` (exit 1).
 
   --quick   the <= 2 s subset: no subcommand sweep, no trace, no stats
@@ -33,17 +33,18 @@ row() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >>"$WORK/rows"; }
 ms_since() { local a=${1/./} b=${EPOCHREALTIME/./}; printf '%d' $(( (10#$b - 10#$a) / 1000 )); }
 # check <name> <budget-ms> <cmd…> — OK when the command exits 0 inside its budget; its last
 # line of stdout becomes the detail.
+# Checks whose exit 2 is a WARN — a pattern worth reporting, never a broken machine.
+WARN_CHECKS=' browsers '
 check() {
   local name=$1 budget=$2 t out rc ms; shift 2
   t=$EPOCHREALTIME
-  # No blanket `timeout` wrapper: this box ships the Rust coreutils, whose `timeout` costs a
-  # flat ~100 ms (12 ms direct vs 104 ms wrapped) — 20 checks would spend 2 s on the wrapper
-  # alone. Every probe that could genuinely hang carries its own `timeout` inside its command;
-  # the rest are bounded by their budget.
+  # No blanket timeout wrapper: every probe that could genuinely hang carries its own
+  # pc_timeout/$PC_TIMEOUT_BIN inside its command; the rest are bounded by their budget.
   out=$("$@" 2>&1); rc=$?
   ms=$(ms_since "$t")
   out=${out##*$'\n'}; out=${out//$'\t'/ }
-  if [ "$rc" != 0 ]; then row FAIL "$name" "exit $rc: ${out:0:120}" "$ms"
+  if [ "$rc" = 2 ] && [[ $WARN_CHECKS == *" $name "* ]]; then row WARN "$name" "${out:0:120}" "$ms"
+  elif [ "$rc" != 0 ]; then row FAIL "$name" "exit $rc: ${out:0:120}" "$ms"
   elif [ "$ms" -gt "$budget" ]; then row FAIL "$name" "${out:0:100} (over budget ${budget}ms)" "$ms"
   else row OK "$name" "${out:0:120}" "$ms"; fi
 }
@@ -77,11 +78,11 @@ env_sweep() {
   [ -z "$miss" ]
 }
 check env 300 env_sweep
-check sudo 500 bash -c 'timeout 2 sudo -n true && echo "sudo -n answers"'
+check sudo 500 bash -c '"$PC_TIMEOUT_BIN" 2 sudo -n true && echo "sudo -n answers"'
 check ydotoold 500 bash -c 's=$(systemctl is-active ydotoold); echo "ydotoold $s"; [ "$s" = active ]'
 # The EF09 stand-in for a screenshot: the portal answers Ping without capturing a pixel.
-check portal 1500 bash -c 'timeout 3 busctl --user call org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop org.freedesktop.DBus.Peer Ping >/dev/null && echo "xdg-desktop-portal answers Ping"'
-check a11y 1500 bash -c 'a=$(timeout 3 busctl --user call org.a11y.Bus /org/a11y/bus org.a11y.Bus GetAddress 2>/dev/null); [ -n "$a" ] && a=${a#s \"}; echo "a11y bus at ${a%\"}"'
+check portal 1500 bash -c '"$PC_TIMEOUT_BIN" 3 busctl --user call org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop org.freedesktop.DBus.Peer Ping >/dev/null && echo "xdg-desktop-portal answers Ping"'
+check a11y 1500 bash -c 'a=$("$PC_TIMEOUT_BIN" 3 busctl --user call org.a11y.Bus /org/a11y/bus org.a11y.Bus GetAddress 2>/dev/null); [ -n "$a" ] && a=${a#s \"}; echo "a11y bus at ${a%\"}"'
 check window-calls 1500 bash -c '
   j=$("'"$BIN"'/pc" mutter extensions --json 2>/dev/null) || exit 1
   s=$(jq -r ".[]|select(.uuid|test(\"window-calls\"))|.state" <<<"$j")
@@ -152,12 +153,47 @@ residue() {
 }
 check residue 2000 residue
 
+# A browser tree left behind by a finished task: the Playwright MCP server and its headless
+# Chrome outlive the session that opened them (TSP-020). Read-only — it never signals a pid.
+browsers() {
+  local d cmd name line start rss age warn=0 detail= k btime clk now args
+  declare -A sum age_s
+  clk=$(getconf CLK_TCK 2>/dev/null) || clk=100
+  printf -v now '%(%s)T' -1
+  while read -r k v _; do [ "$k" = btime ] && { btime=$v; break; }; done <"$PC_PROC/stat"
+  for d in "$PC_PROC"/[0-9]*; do
+    mapfile -d '' args <"$d/cmdline" 2>/dev/null || continue
+    cmd="${args[*]}"
+    case $cmd in
+      *playwright-mcp*) name=playwright-mcp;;
+      *headless_shell*) name=chrome-headless;;
+      *--headless*) case $cmd in *chrom*) name=chrome-headless;; *) continue;; esac;;
+      *) continue;;
+    esac
+    read -r line <"$d/stat" 2>/dev/null || continue
+    read -r _ rss _ <"$d/statm" 2>/dev/null || continue
+    # after "pid (comm) " the remaining fields start at 3, so starttime (22) is $20.
+    line=${line#*') '}; set -- $line; start=${20:-0}
+    age=$(( now - (btime + start / clk) ))
+    sum[$name]=$(( ${sum[$name]:-0} + rss * 4096 / 1048576 ))
+    [ "$age" -gt "${age_s[$name]:-0}" ] && age_s[$name]=$age
+  done
+  for k in "${!sum[@]}"; do
+    age=${age_s[$k]}
+    detail="$detail${detail:+ · }$k $((age * 10 / 86400 / 10)).$((age * 10 / 86400 % 10)) d ${sum[$k]} MB"
+    { [ "$age" -gt 86400 ] || [ "${sum[$k]}" -gt 1024 ]; } && warn=1
+  done
+  printf '%s\n' "${detail:-no playwright-mcp or headless chrome tree}"
+  [ "$warn" = 0 ] || return 2
+}
+check browsers 600 browsers
+
 ## --- 6. the layers each pc-* sits on ----------------------------------------
 if [ "$QUICK" = 0 ]; then
-  check pipewire 1000 bash -c 'n=$(timeout 3 pw-dump 2>/dev/null | jq length) && echo "pw-dump parses, $n objects" && [ "$n" -gt 0 ]'
-  check bluez 1500 bash -c 'p=$(timeout 3 busctl --system get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Powered 2>/dev/null); echo "adapter hci0 Powered=${p#b }"; [ "$p" = "b true" ]'
-  check docker 1500 bash -c 'n=$(timeout 3 docker ps -q 2>/dev/null | wc -l) && echo "docker socket answers, $n running" && timeout 3 docker info --format "{{.ServerVersion}}" >/dev/null'
-  check tailscale 2000 bash -c 's=$(timeout 3 tailscale status --json 2>/dev/null | jq -r .BackendState); echo "tailscale $s"; [ "$s" = Running ]'
+  check pipewire 1000 bash -c 'n=$("$PC_TIMEOUT_BIN" 3 pw-dump 2>/dev/null | jq length) && echo "pw-dump parses, $n objects" && [ "$n" -gt 0 ]'
+  check bluez 1500 bash -c 'p=$("$PC_TIMEOUT_BIN" 3 busctl --system get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Powered 2>/dev/null); echo "adapter hci0 Powered=${p#b }"; [ "$p" = "b true" ]'
+  check docker 1500 bash -c 'n=$("$PC_TIMEOUT_BIN" 3 docker ps -q 2>/dev/null | wc -l) && echo "docker socket answers, $n running" && "$PC_TIMEOUT_BIN" 3 docker info --format "{{.ServerVersion}}" >/dev/null'
+  check tailscale 2000 bash -c 's=$("$PC_TIMEOUT_BIN" 3 tailscale status --json 2>/dev/null | jq -r .BackendState); echo "tailscale $s"; [ "$s" = Running ]'
   check trace-deps 500 bash -c '
     m=; for b in bpftrace perf; do command -v $b >/dev/null || m="$m $b"; done
     python3 -c "import bcc" 2>/dev/null || m="$m python3-bcc"
@@ -170,7 +206,7 @@ if [ "$QUICK" = 0 ]; then
   sub_probe() {
     local name=$1 budget=$2; shift 2
     local t=$EPOCHREALTIME out rc ms
-    out=$(timeout 8 "$BIN/pc" "$@" --json 2>&1); rc=$?
+    out=$(pc_timeout 8 "$BIN/pc" "$@" --json 2>&1); rc=$?
     ms=$(ms_since "$t")
     if [ "$rc" != 0 ]; then printf 'FAIL\tsub:%s\texit %s: %s\t%s\n' "$name" "$rc" "${out##*$'\n'}" "$ms"
     elif ! jq -e . >/dev/null 2>&1 <<<"$out"; then printf 'FAIL\tsub:%s\t--json does not parse\t%s\n' "$name" "$ms"
@@ -197,6 +233,8 @@ fi
 ## --- report -----------------------------------------------------------------
 TOTAL_MS=$(ms_since "$T0")
 n_ok=$(grep -c '^OK' "$WORK/rows"); n_all=$(wc -l <"$WORK/rows"); n_bad=$(grep -c '^FAIL' "$WORK/rows")
+n_warn=$(grep -c '^WARN' "$WORK/rows")
+WARNS=$([ "$n_warn" != 0 ] && printf ' — %s WARN: %s' "$n_warn" "$(awk -F'\t' '$1=="WARN"{printf "%s ",$2}' "$WORK/rows")")
 
 if [ "$JSON" = 1 ]; then
   jq -R -s -c 'split("\n")|map(select(length>0)|split("\t")|{status:.[0],name:.[1],detail:.[2],ms:(.[3]|tonumber)})' "$WORK/rows"
@@ -205,7 +243,7 @@ else
     printf '%-4s %-14s %-72s %5s ms\n' "$st" "$name" "$detail" "$ms"
   done <"$WORK/rows"
   printf -- '---\n'
-  if [ "$n_bad" = 0 ]; then printf 'PASS %s/%s in %s.%03d s%s\n' "$n_ok" "$n_all" "$((TOTAL_MS / 1000))" "$((TOTAL_MS % 1000))" "$([ "$QUICK" = 1 ] && echo ' (--quick)')"
-  else printf 'FAIL %s/%s in %s.%03d s — %s\n' "$n_ok" "$n_all" "$((TOTAL_MS / 1000))" "$((TOTAL_MS % 1000))" "$(awk -F'\t' '$1=="FAIL"{printf "%s ",$2}' "$WORK/rows")"; fi
+  if [ "$n_bad" = 0 ]; then printf 'PASS %s/%s in %s.%03d s%s%s\n' "$n_ok" "$n_all" "$((TOTAL_MS / 1000))" "$((TOTAL_MS % 1000))" "$([ "$QUICK" = 1 ] && echo ' (--quick)')" "$WARNS"
+  else printf 'FAIL %s/%s in %s.%03d s — %s%s\n' "$n_ok" "$n_all" "$((TOTAL_MS / 1000))" "$((TOTAL_MS % 1000))" "$(awk -F'\t' '$1=="FAIL"{printf "%s ",$2}' "$WORK/rows")" "$WARNS"; fi
 fi
 [ "$n_bad" = 0 ]

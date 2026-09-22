@@ -1,0 +1,28 @@
+[Unit]
+Description=The notes brain — persistent Claude session in tmux "notes"
+After=dark-eye.service graphical-session.target
+
+[Service]
+Type=forking
+Environment=PATH=%h/.local/bin:%h/agents/bin:/usr/local/bin:/usr/bin:/bin
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus
+WorkingDirectory=%h/agents/notes
+# agent.env is sourced by sh (EnvironmentFile= would not expand $HOME). A conversation to
+# continue exists only after the first run, hence the fallback without --continue.
+ExecStart=/bin/sh -c 'set -a; . %h/agents/notes/agent.env; set +a; tmux has-session -t notes 2>/dev/null || exec tmux new-session -d -s notes -c %h/agents/notes "claude --continue --no-chrome --name notes --model claude-sonnet-5 --append-system-prompt-file BRIEF.md --tools Monitor,Bash,Read --permission-mode dontAsk --strict-mcp-config --mcp-config %h/agents/eye-relay/mcp-notes.json --dangerously-load-development-channels server:eye-notes --add-dir %h/obsidian-vault --allowedTools \\"Bash(eye:*),Bash(notes-file:*),Bash(sleep:*)\\" --disallowedTools \\"Bash(eye tv:*),Bash(eye talk-to:*),Bash(eye mic:*),Bash(eye show:*)\\" || claude --no-chrome --name notes --model claude-sonnet-5 --append-system-prompt-file BRIEF.md --tools Monitor,Bash,Read --permission-mode dontAsk --strict-mcp-config --mcp-config %h/agents/eye-relay/mcp-notes.json --dangerously-load-development-channels server:eye-notes --add-dir %h/obsidian-vault --allowedTools \\"Bash(eye:*),Bash(notes-file:*),Bash(sleep:*)\\" --disallowedTools \\"Bash(eye tv:*),Bash(eye talk-to:*),Bash(eye mic:*),Bash(eye show:*)\\""'
+ExecStartPost=%h/agents/bin/eye-channel-accept notes
+# The first turn: typed into the pane once the prompt box is stable, submitted only once the
+# prompt line echoes it whole, then verified against `eye brains` and retried. A pane without
+# the box (the trust dialog) is left alone.
+# The arming script caps its own worst case (`notes-brain-arm --budget`, 181 s by default) well
+# under this timeout: if systemd killed it, Restart=on-failure would loop every RestartSec and
+# the owner notification would die with the process.
+ExecStartPost=%h/agents/bin/notes-brain-arm
+TimeoutStartSec=300
+ExecStop=/usr/bin/tmux kill-session -t notes
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

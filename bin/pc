@@ -24,8 +24,8 @@ if [ "$sub" = help ] || [ "$sub" = --help ] || [ "$sub" = -h ]; then
     [scroll]=desktop [see]=desktop [selftest]=desktop [shot]=desktop [spotify]=desktop
     [status]=desktop [tree]=desktop [type]=desktop [wait]=desktop [wait-for]=desktop [win]=desktop
     [hw]=kernel [io]=kernel [kernel]=kernel [net]=kernel [power]=kernel [thermal]=kernel
-    [top]=kernel [trace]=kernel
-    [audio]=session [bt]=session [dbus]=session [input]=session [mutter]=session
+    [top]=kernel [trace]=kernel [idle]=kernel
+    [audio]=session [bt]=session [dbus]=session [input]=session [lid]=session [mutter]=session
     [docker]=services [journal]=services [units]=services
     [bench]=safety [doctor]=safety [explain]=safety [undo]=safety
   )
@@ -82,7 +82,7 @@ trace` is the declared exception (bpftrace floor 0.4 s + the window, always unde
 ## Guard list (`pclib.sh`, FLEET §5)
 
 A guarded verb exits 3 with the FLEET §5 line, `--apply` or not: `DisplayConfig.Apply*` /
-`SetBacklight` (monitor config); `login1` Reboot/PowerOff/Suspend/Hibernate/HybridSleep (power
+`SetBacklight` (monitor config); `PowerSaveMode` outside `pc lid`; `login1` Reboot/PowerOff/Suspend/Hibernate/HybridSleep (power
 state); a `systemctl`/D-Bus stop or restart on `ssh*`/`ufw`/`tailscaled` (a second access
 path); `org.gnome.Shell.Eval` (arbitrary code in the shell); `SessionManager`
 Logout/Reboot/Shutdown; `ScreenSaver.SetActive true` (locking the screen); edits under

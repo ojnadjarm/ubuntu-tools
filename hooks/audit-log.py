@@ -23,11 +23,25 @@ ARG_KEYS = ('pattern', 'query', 'url', 'file_path', 'notebook_path', 'path',
             'description', 'prompt', 'command')
 
 
+SETUP_VERBS = ('cd', 'export', 'set', 'source', 'eval', '.')
+SEGMENT = re.compile(r'&&|\|\||;|\|')
+
+
+def first_segment(cmd):
+    """The first segment of a command line that is not a `cd`/`export`-style prefix."""
+    segs = [s.strip() for s in SEGMENT.split(cmd)]
+    segs = [s for s in segs if s]
+    for seg in segs:
+        if os.path.basename(seg.split()[0]) not in SETUP_VERBS:
+            return seg
+    return segs[0] if segs else ''
+
+
 def summarise(tool, ti):
     """(op, summary) for one tool call: op is the searchable verb, summary the redacted detail."""
     if tool == 'Bash':
         cmd = redact(str(ti.get('command', '')))
-        toks = cmd.split()
+        toks = first_segment(cmd).split()
         op = ' '.join(t for t in (os.path.basename(toks[0]) if toks else '',
                                   toks[1] if len(toks) > 1 else '') if t)[:40]
         return op, cmd[:500]

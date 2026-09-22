@@ -1,0 +1,43 @@
+#!/bin/sh
+# Confirms Claude Code's launch dialogs in a tmux pane: workspace trust ("Yes, I trust this folder") and "Loading development channels".
+# Usage: eye-channel-accept <tmux-target> [wait_seconds]; TMUX_SOCKET=<name> selects a tmux -L server; ACCEPT_GRACE=<s> waits for trust after channels.
+set -u
+T=${1:?usage: eye-channel-accept <tmux-target> [wait_seconds]}
+WAIT=${2:-60}
+GRACE=${ACCEPT_GRACE:-3}
+tm() { if [ -n "${TMUX_SOCKET:-}" ]; then tmux -L "$TMUX_SOCKET" "$@"; else tmux "$@"; fi; }
+pane() { tm capture-pane -pt "$T" 2>/dev/null; }
+has() { pane | grep -q "$1"; }
+trust() {
+  n=0
+  until has '❯ Yes, I trust this folder'; do
+    [ "$n" -ge 3 ] && { echo "eye-channel-accept: could not select 'Yes, I trust this folder'"; exit 1; }
+    tm send-keys -t "$T" Down; sleep 0.5; n=$((n + 1))
+  done
+  tm send-keys -t "$T" Enter
+  sleep 2
+  has 'Yes, I trust this folder' && { echo "eye-channel-accept: trust dialog still up after Enter"; exit 1; }
+  echo "eye-channel-accept: workspace trusted"
+}
+channels() {
+  has '❯ 1\. I am using this for local development' || tm send-keys -t "$T" Up
+  tm send-keys -t "$T" Enter
+  sleep 2
+  has 'Loading development channels' && { echo "eye-channel-accept: dialog still up after Enter"; exit 1; }
+  echo "eye-channel-accept: development channels confirmed"
+}
+t=0 c=0 i=0 end=$WAIT
+while [ "$i" -lt "$end" ]; do
+  if [ "$t" = 0 ] && has 'Yes, I trust this folder'; then
+    trust; t=1
+    [ "$c" = 1 ] && exit 0
+  elif [ "$c" = 0 ] && has 'Loading development channels'; then
+    channels; c=1
+    [ "$t" = 1 ] && exit 0
+    i=0 end=$GRACE
+    continue
+  fi
+  sleep 1; i=$((i + 1))
+done
+[ "$c" = 0 ] && echo "eye-channel-accept: no channels dialog in ${WAIT}s"
+exit 0

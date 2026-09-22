@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+"""voice-progress — how the pronunciation drills are going, from the ASR corpus on disk."""
+import json
+import os
+import re
+import sys
+from collections import Counter, defaultdict
+from datetime import date
+
+USAGE = """usage: voice-progress [--json]
+
+Reads every take in ~/agents/asr-corpus/*.json, keeps the drill prompts (d01-d30) from
+~/agents/dashboard/voice_prompts.json and reports, per pronunciation pattern, how many
+target words the recogniser missed — as errors per 100 target words, overall and by drill
+day, so a trend is visible. The week-0 baseline from Q6-his-voice.md is printed alongside
+so today is comparable to the start. Read-only: nothing is written.
+
+Paths can be overridden with VOICE_CORPUS, VOICE_PROMPTS and VOICE_STATE (used by the test)."""
+
+HOME = os.path.expanduser("~")
+CORPUS = os.environ.get("VOICE_CORPUS", HOME + "/agents/asr-corpus")
+PROMPTS = os.environ.get("VOICE_PROMPTS", HOME + "/agents/dashboard/voice_prompts.json")
+STATE = os.environ.get("VOICE_STATE", HOME + "/agents/dashboard/state/pronunciation.json")
+
+# Target words in the full drill set, per pattern (Q6/T30 plan §6).
+FULL = {"final-consonant": 29, "v-b": 25, "ch-sh": 24, "vowel": 22}
+# Week-0 word error from ~/agents/research/2026-09-22/Q6-his-voice.md.
+BASELINE = {"all": 15.6, "no_spelling": 13.4, "no_names": 10.7, "takes": 59, "words": 1678}
+
+WORD = re.compile(r"[a-z0-9']+")
+
+
+def words(text):
+    return WORD.findall(text.lower().replace("-", " "))
+
+
+def load_prompts():
+    with open(PROMPTS) as fh:
+        data = json.load(fh)
+    out = {}
+    for p in data.get("prompts", []):
+        if p.get("group") == "drill" and p.get("targets"):
+            out[p["id"]] = p
+    return out
+
+
+def load_takes():
+    out = []
+    try:
+        names = sorted(os.listdir(CORPUS))
+    except OSError:
+        return out
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(CORPUS, name)) as fh:
+                out.append(json.load(fh))
+        except (OSError, ValueError):
+            continue
+    return out
+
+
+def score(prompt, transcript):
+    """Target words of the prompt not found in the transcript."""
+    heard = Counter(words(transcript))
+    errors = []
+    for t in prompt["targets"]:
+        w = t["word"].lower()
+        if heard[w] > 0:
+            heard[w] -= 1
+        else:
+            errors.append(t["word"])
+    return errors
+
+
+def collect():
+    prompts = load_prompts()
+    rows = defaultdict(lambda: {"takes": 0, "targets": 0, "errors": 0, "words": []})
+    days = defaultdict(lambda: {"targets": 0, "errors": 0})
+    for take in load_takes():
+        prompt = prompts.get(take.get("prompt_id"))
+        if not prompt:
+            continue
+        errors = score(prompt, take.get("transcript", ""))
+        key = prompt["pattern"]
+        r = rows[key]
+        r["takes"] += 1
+        r["targets"] += len(prompt["targets"])
+        r["errors"] += len(errors)
+        r["words"] += errors
+        d = days[(key, prompt["day"])]
+        d["targets"] += len(prompt["targets"])
+        d["errors"] += len(errors)
+    return prompts, rows, days
+
+
+def rate(errors, targets):
+    return round(errors * 100.0 / targets, 1) if targets else None
+
+
+def main():
+    argv = sys.argv[1:]
+    if "-h" in argv or "--help" in argv:
+        print(USAGE)
+        return 0
+    as_json = "--json" in argv
+    for a in argv:
+        if a not in ("--json",):
+            sys.stderr.write("voice-progress: unknown option %s\n\n%s\n" % (a, USAGE))
+            return 2
+
+    prompts, rows, days = collect()
+    try:
+        with open(STATE) as fh:
+            done = sorted(json.load(fh))
+    except (OSError, ValueError):
+        done = []
+
+    patterns = sorted(FULL)
+    all_days = sorted({d for _, d in days} | {p["day"] for p in prompts.values()})
+    summary = {}
+    for pat in patterns:
+        r = rows.get(pat, {"takes": 0, "targets": 0, "errors": 0, "words": []})
+        summary[pat] = {
+            "takes": r["takes"],
+            "targets_heard": r["targets"],
+            "targets_total": FULL[pat],
+            "errors": r["errors"],
+            "err_per_100": rate(r["errors"], r["targets"]),
+            "missed": sorted(set(r["words"])),
+            "by_day": {
+                str(d): rate(days[(pat, d)]["errors"], days[(pat, d)]["targets"])
+                for d in all_days if (pat, d) in days
+            },
+        }
+    total_t = sum(s["targets_heard"] for s in summary.values())
+    total_e = sum(s["errors"] for s in summary.values())
+
+    if as_json:
+        print(json.dumps({
+            "date": date.today().isoformat(),
+            "drill_takes": sum(s["takes"] for s in summary.values()),
+            "prompts_done": done,
+            "patterns": summary,
+            "overall": {"targets_heard": total_t, "errors": total_e,
+                        "err_per_100": rate(total_e, total_t)},
+            "baseline_week0": BASELINE,
+        }, indent=1))
+        return 0
+
+    takes = sum(s["takes"] for s in summary.values())
+    print("voice-progress  %s  %d drill take%s, %d of %d drill prompts recorded"
+          % (date.today().isoformat(), takes, "" if takes == 1 else "s",
+             len(done), len(prompts)))
+    print()
+    print("%-17s %6s %8s %7s %8s" % ("pattern", "takes", "targets", "errors", "err/100"))
+    for pat in patterns:
+        s = summary[pat]
+        r = "-" if s["err_per_100"] is None else "%.1f" % s["err_per_100"]
+        print("%-17s %6d %8s %7d %8s"
+              % (pat, s["takes"], "%d/%d" % (s["targets_heard"], s["targets_total"]),
+                 s["errors"], r))
+    r = "-" if rate(total_e, total_t) is None else "%.1f" % rate(total_e, total_t)
+    print("%-17s %6d %8s %7d %8s" % ("overall", takes, total_t, total_e, r))
+
+    print()
+    print("by drill day (errors per 100 target words)")
+    print("%-17s %s" % ("pattern", " ".join("%6s" % ("d%d" % d) for d in all_days)))
+    for pat in patterns:
+        cells = []
+        for d in all_days:
+            v = summary[pat]["by_day"].get(str(d))
+            cells.append("%6s" % ("-" if v is None else "%.1f" % v))
+        print("%-17s %s" % (pat, " ".join(cells)))
+
+    missed = [w for pat in patterns for w in summary[pat]["missed"]]
+    if missed:
+        print()
+        print("missed so far: %s" % ", ".join(missed))
+
+    print()
+    print("week-0 baseline (%d takes, %d words): %.1f %% word error, %.1f %% without "
+          "spelling-only, %.1f %% without unknown names"
+          % (BASELINE["takes"], BASELINE["words"], BASELINE["all"],
+             BASELINE["no_spelling"], BASELINE["no_names"]))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

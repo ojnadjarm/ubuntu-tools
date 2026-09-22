@@ -6,17 +6,50 @@
   "prompt": "which output is the sound going to right now?",
   "answer_schema": {
     "type": "object",
-    "required": ["sink", "is_buds"],
+    "required": [
+      "sink",
+      "is_buds"
+    ],
     "properties": {
-      "sink": {"type": "string", "description": "the raw PipeWire/PulseAudio sink name exactly as `pactl get-default-sink` or `pc audio --json .default_sink` prints it, e.g. alsa_output.pci-0000_00_1f.3.analog-stereo", "pattern": "^[a-z0-9_.:-]+$"},
-      "is_buds": {"type": "boolean"},
-      "unknown": {"type": "boolean"},
-      "reason": {"type": "string"}
+      "sink": {
+        "type": "string",
+        "description": "the raw PipeWire/PulseAudio sink name exactly as `pactl get-default-sink` or `pc audio --json .default_sink` prints it, e.g. alsa_output.pci-0000_00_1f.3.analog-stereo",
+        "pattern": "^[a-z0-9_.:-]+$"
+      },
+      "is_buds": {
+        "type": "boolean"
+      },
+      "unknown": {
+        "type": "boolean"
+      },
+      "reason": {
+        "type": "string"
+      }
     }
   },
   "allowed_side_effects": [],
   "needs": [],
-  "budget": {"seconds": 240, "usd": 1.0, "screenshots": 0},
+  "budget": {
+    "seconds": 240,
+    "usd": 1.0,
+    "screenshots": 0
+  },
   "oracle_s": 0,
-  "tags": ["audio", "pc audio", "night-safe"]
+  "tags": [
+    "audio",
+    "pc audio",
+    "night-safe"
+  ],
+  "judge": {
+    "rubric": "The answer must identify the output the sound is going to right now, as a real device on this machine, and its is_buds flag must agree with the device it names. The sink field must be the raw sink name the audio server prints, not a human description of it.",
+    "must": [
+      "sink is a raw sink identifier (a dotted device name such as alsa_output.* or bluez_output.*), not a prose description like \"Built-in Audio HDMI\"",
+      "is_buds is true only if the named sink is a bluetooth device",
+      "the answer commits to one output rather than listing several as possible"
+    ],
+    "must_not": [
+      "the answer describes the output only in words a person would say, with no raw sink name anywhere",
+      "the answer guesses or infers the output from something other than the audio server state (a screenshot, the TV, assumption)"
+    ]
+  }
 }

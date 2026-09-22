@@ -34,7 +34,7 @@ dark-eye-ptt owns the buds: while it is active, connect/disconnect/profile on th
 stop the sidecar or pass --force --why "<reason>". `power off` is refused while a device is
 connected. Scan windows are bounded (1..60 s) and always send StopDiscovery.' "$@"
 
-BUDS_MAC="${BUDS_MAC:-AC:80:0A:27:65:6C}"
+BUDS_MAC="${BUDS_MAC:-$HARNESS_BUDS_MAC}"
 SIDECAR_UNIT=dark-eye-ptt
 FORCE=0; WHY=""; ARGV=()
 while [ $# -gt 0 ]; do
@@ -90,7 +90,7 @@ devices() { tree | jq -c "$DEVICES"; }
 resolve_dev() {
   local sel=$1 out
   [ -n "$sel" ] || die 'need a device (MAC, name substring or `buds`)' 2
-  [ "$sel" = buds ] && sel=$BUDS_MAC
+  [ "$sel" = buds ] && { [ -n "$BUDS_MAC" ] || die "set HARNESS_BUDS_MAC in config.env" 2; sel=$BUDS_MAC; }
   out=$(devices | jq -r --arg s "${sel,,}" '
     map(select((.mac|ascii_downcase) == $s or (.name|ascii_downcase|contains($s)) or (.alias|ascii_downcase|contains($s))))
     | if length == 0 then "" elif length > 1 then "!\([.[].name]|join(", "))" else [.[0].mac,.[0].path,.[0].name]|@tsv end')

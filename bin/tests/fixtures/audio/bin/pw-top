@@ -3,6 +3,6 @@ cat <<'EOF'
 S   ID  QUANT   RATE    WAIT    BUSY   W/Q   B/Q  ERR FORMAT           NAME
 C   69      0      0    ---     ---   ---   ---     0                  speech-dispatcher-dummy
 C  105      0      0    ---     ---   ---   ---     0                  alsa_output.pci-0000_00_1f.3.hdmi-stereo
-C  200      0      0    ---     ---   ---   ---     2                  bluez_output.AC_80_0A_27_65_6C.1
+C  200      0      0    ---     ---   ---   ---     2                  bluez_output.00_00_5E_00_53_01.1
 C   71      0      0    ---     ---   ---   ---     0                  alsa_input.pci-0000_00_1f.3.analog-stereo
 EOF

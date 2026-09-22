@@ -50,6 +50,12 @@ t "audit counts raw tools and pc verbs per session"
   .audit.pc_verbs.status]')" = '[6,3,1,1,1]' ] &&
   ok || no "$(printf '%s' "$J" | jq -c '.audit|{raw_total,pc_total,raw_by_tool,pc_verbs}')"
 
+t "audit.raw_map pairs each raw tool with the pc verb that covers it"
+[ "$(printf '%s' "$J" | jq -c '[(.audit.raw_map|length),.audit.raw_coverable,.audit.raw_gaps,
+  (.audit.raw_map[]|select(.raw=="docker restart")|[.pc,.count,.sessions])]')" \
+  = '[6,6,[],["pc docker restart",1,1]]' ] &&
+  ok || no "$(printf '%s' "$J" | jq -c '.audit|{raw_map,raw_coverable,raw_gaps}')"
+
 t "audit per-session stats match agents-log --stats shape"
 [ "$(printf '%s' "$J" | jq -r '.audit.sessions.aaaa1111.pc')" = 2 ] &&
   ok || no "$(printf '%s' "$J" | jq -c '.audit.sessions')"
@@ -89,6 +95,12 @@ t "tokens: per-agent per-run in/out where the columns exist"
   .tokens.agents.alpha.in_per_run,.tokens.agents.alpha.out_per_run,
   (.tokens.agents|has("beta"))]')" = '[true,2,1000,600,false]' ] &&
   ok || no "$(printf '%s' "$J" | jq -c .tokens)"
+
+t "tokens: cache_r, tool calls and the histogram, legacy short rows still counted"
+[ "$(printf '%s' "$J" | jq -c '[.tokens.agents.alpha.cache_r_per_run,
+  .tokens.agents.alpha.tool_calls,.tokens.agents.alpha.tool_histogram.Bash,
+  .tokens.agents.alpha.tool_histogram.Read]')" = '[2000,8,5,3]' ] &&
+  ok || no "$(printf '%s' "$J" | jq -c .tokens.agents.alpha)"
 
 t "the window actually filters"
 [ "$(run --since 1s 2>/dev/null | jq -c '[.audit.lines,.changes.window,(.tokens.agents|length)]')" \

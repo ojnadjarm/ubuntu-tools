@@ -17,8 +17,17 @@ RAW = {
     'pactl': r'\bpactl\b', 'powerprofilesctl': r'\bpowerprofilesctl\b', 'wpctl': r'\bwpctl\b',
     'docker restart': r'\bdocker\s+restart\b', 'tailscale': r'\btailscale\b',
     'systemctl stop': r'\bsystemctl\b[^;|&]*\bstop\b', 'systemctl restart': r'\bsystemctl\b[^;|&]*\brestart\b',
+    'nmcli': r'\bnmcli\b', 'brightnessctl': r'\bbrightnessctl\b',
 }
 RAW_RE = {k: re.compile(v) for k, v in RAW.items()}
+# The pc verb covering each raw tool; None = no verb yet (a toolbox gap).
+# Mirrors RAW_MAP in bin/agents-log, which is the source of truth for the table.
+RAW_PC = {
+    'pactl': 'pc audio', 'wpctl': 'pc audio', 'powerprofilesctl': 'pc power profile',
+    'systemctl stop': 'pc units', 'systemctl restart': 'pc units',
+    'docker restart': 'pc docker restart', 'tailscale': 'pc net tailscale',
+    'nmcli': None, 'brightnessctl': None,
+}
 PC_RE = re.compile(r'\bpc ([a-z][a-z0-9-]*)')
 
 
@@ -130,7 +139,7 @@ def sec_audit(since, cut):
     path = os.path.join(ROOT, 'log', 'actions.jsonl')
     rows = [r for r in read_jsonl(path) if ts_epoch(r.get('ts', '')) >= cut]
     per_session, raw_by_tool, pc_verbs = {}, Counter(), Counter()
-    raw_by_session, pc_by_session = Counter(), Counter()
+    raw_by_session, pc_by_session, raw_sessions = Counter(), Counter(), {}
     for r in rows:
         sess = r.get('session', '')
         per_session.setdefault(sess, Counter())[(r.get('op') or '').split(' ')[0]] += 1
@@ -142,12 +151,19 @@ def sec_audit(since, cut):
             if n:
                 raw_by_tool[tool] += n
                 raw_by_session[sess] += n
+                raw_sessions.setdefault(tool, set()).add(sess)
         for verb in PC_RE.findall(blob):
             pc_verbs[verb] += 1
             pc_by_session[sess] += 1
     offenders = [{'session': s, 'raw': n, 'pc': pc_by_session.get(s, 0)}
                  for s, n in raw_by_session.most_common(5)]
+    raw_map = [{'raw': t, 'pc': RAW_PC.get(t), 'count': n,
+                'sessions': len(raw_sessions.get(t, ()))}
+               for t, n in raw_by_tool.most_common()]
+    coverable = sum(r['count'] for r in raw_map if r['pc'])
     return {
+        'raw_map': raw_map, 'raw_coverable': coverable,
+        'raw_gaps': [r['raw'] for r in raw_map if not r['pc']],
         'present': os.path.exists(path), 'since': since, 'lines': len(rows),
         'sessions': {s: dict(c.most_common(10)) for s, c in per_session.items()},
         'raw_total': sum(raw_by_tool.values()), 'raw_by_tool': dict(raw_by_tool.most_common()),
@@ -257,6 +273,13 @@ def sec_idle():
             'wakers': wakers}
 
 
+def cell_int(fields, i):
+    """One TSV cell as an int; missing or non-numeric is 0."""
+    if i is None or len(fields) <= i or not fields[i].isdigit():
+        return 0
+    return int(fields[i])
+
+
 def sec_tokens(cut):
     agents, seen_cols = {}, False
     try:
@@ -275,7 +298,11 @@ def sec_tokens(cut):
             if ci is None and co is None:
                 continue
             seen_cols = True
-            runs = tin = tout = 0
+            cr = idx.get('cache_r')
+            ct = idx.get('tool_calls')
+            ch = idx.get('histogram')
+            runs = tin = tout = tcache = tcalls = 0
+            hist = {}
             for line in fh:
                 f = line.rstrip('\n').split('\t')
                 if len(f) <= max(x for x in (ci, co) if x is not None):
@@ -283,11 +310,23 @@ def sec_tokens(cut):
                 if 'start' in idx and ts_epoch(f[idx['start']]) < cut:
                     continue
                 runs += 1
-                tin += int(f[ci]) if ci is not None and f[ci].isdigit() else 0
-                tout += int(f[co]) if co is not None and f[co].isdigit() else 0
+                tin += cell_int(f, ci)
+                tout += cell_int(f, co)
+                tcache += cell_int(f, cr)
+                tcalls += cell_int(f, ct)
+                if ch is not None and len(f) > ch:
+                    for pair in f[ch].split(','):
+                        k, _, v = pair.partition('=')
+                        if k and v.isdigit():
+                            hist[k] = hist.get(k, 0) + int(v)
             if runs:
-                agents[name] = {'runs': runs, 'in': tin, 'out': tout,
-                                'in_per_run': round(tin / runs), 'out_per_run': round(tout / runs)}
+                agents[name] = {'runs': runs, 'in': tin, 'out': tout, 'cache_r': tcache,
+                                'in_per_run': round(tin / runs), 'out_per_run': round(tout / runs),
+                                'cache_r_per_run': round(tcache / runs),
+                                'tool_calls': tcalls,
+                                'tool_calls_per_run': round(tcalls / runs),
+                                'tool_histogram': dict(sorted(hist.items(),
+                                                             key=lambda kv: -kv[1]))}
     return {'columns_present': seen_cols, 'agents': agents,
             'note': None if seen_cols else 'no token columns in */logs/index.tsv yet'}
 
@@ -331,8 +370,14 @@ def md(d):
           '- wakers: ' + (', '.join(f"{w['comm']}({w['wake']}/s)" for w in i['wakers']) or 'none'), '']
     t = d['tokens']
     L += ['## tokens',
-          '- ' + (', '.join(f"{k}: {v['in_per_run']} in / {v['out_per_run']} out per run"
+          '- ' + (', '.join(f"{k}: {v['in_per_run']} in / {v['out_per_run']} out / "
+                            f"{v['cache_r_per_run']} cache_r per run, "
+                            f"{v['tool_calls_per_run']} tool calls"
                             for k, v in t['agents'].items()) or (t['note'] or 'none')), '']
+    tops = {k: ', '.join(f"{n}={c}" for n, c in list(v['tool_histogram'].items())[:5])
+            for k, v in t['agents'].items() if v['tool_histogram']}
+    if tops:
+        L += ['- tools: ' + '; '.join(f"{k}: {v}" for k, v in tops.items()), '']
     return '\n'.join(L)
 
 

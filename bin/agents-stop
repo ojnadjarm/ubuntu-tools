@@ -18,15 +18,31 @@ stop_if_running() {
   stopped="$stopped ${1%.*}"
 }
 
-for u in $(units 'agent@*.service') sentinel-check.service moodle-keep-weekly.service pcbench-weekly.service; do
+for u in $(units 'agent@*.service') sentinel-check.service moodle-keep-weekly.service pcbench-weekly.service notes-brain.service; do
   stop_if_running "$u"
 done
 for u in $(units 'agent@*.timer') sentinel-check.timer moodle-keep-weekly.timer pcbench-weekly.timer; do
   stop_if_running "$u"
 done
 
+# Every run writes its child pid to <name>/state/pid (agent-exec --pid-file), so the kill
+# switch does not depend on the agent CLI's own bookkeeping.
+killed=" "
+kill_pid() {
+  case "$1" in ''|*[!0-9]*) return 0 ;; esac
+  case "$killed" in *" $1 "*) return 0 ;; esac
+  killed="$killed$1 "
+  kill "$1" 2>/dev/null && stopped="$stopped pid:$1"
+}
+
+for f in "$HARNESS_HOME"/*/state/pid; do
+  [ -r "$f" ] || continue
+  kill_pid "$(cat "$f" 2>/dev/null)"
+done
+
+# Fallback: background runs the agent CLI knows about and no pid file covers.
 pids="$(claude agents --json 2>/dev/null | jq -r '.[] | select(.kind=="background") | .pid' 2>/dev/null)"
-for p in $pids; do kill "$p" 2>/dev/null && stopped="$stopped pid:$p"; done
+for p in $pids; do kill_pid "$p"; done
 
 notify-owner -p high -t agents-stop "kill switch: stopped${stopped:- nothing}" || true
 echo "agents-stop:${stopped:- nothing}"

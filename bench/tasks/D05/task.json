@@ -6,16 +6,44 @@
   "prompt": "a user service failed tonight, which one?",
   "answer_schema": {
     "type": "object",
-    "required": ["unit", "reason"],
+    "required": [
+      "unit",
+      "reason"
+    ],
     "properties": {
-      "unit": {"type": "string"},
-      "reason": {"type": "string"},
-      "unknown": {"type": "boolean"}
+      "unit": {
+        "type": "string"
+      },
+      "reason": {
+        "type": "string"
+      },
+      "unknown": {
+        "type": "boolean"
+      }
     }
   },
   "allowed_side_effects": [],
   "needs": [],
-  "budget": {"seconds": 480, "usd": 1.5, "screenshots": 0},
+  "budget": {
+    "seconds": 480,
+    "usd": 1.5,
+    "screenshots": 0
+  },
   "oracle_s": 0,
-  "tags": ["units", "pc units", "journal"]
+  "tags": [
+    "units",
+    "pc units",
+    "journal"
+  ],
+  "judge": {
+    "rubric": "The owner asked which unit failed and why. The reason must give the units actual failure — the exit status it died with, or the message it printed — not a guess.",
+    "must": [
+      "reason states the exit status the unit failed with, or quotes the message it logged",
+      "reason is about the unit named in the unit field"
+    ],
+    "must_not": [
+      "reason is a guess or a generic phrase such as \"it crashed\" or \"a configuration error\" with no status or message",
+      "the answer claims it fixed, restarted or reset the unit"
+    ]
+  }
 }

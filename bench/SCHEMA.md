@@ -53,6 +53,8 @@ and receive these env vars: `PCBENCH_RUN`, `PCBENCH_TASK`, `PCBENCH_ARM`, `PCBEN
 | `budget` | object | `seconds` (int, `timeout`), `usd` (float, `--max-budget-usd`), `screenshots` (int, over budget is reported, not a fail). **No `turns`** — `--max-turns` no longer exists (SPIKE §2). |
 | `oracle_s` | number | wall seconds `solve.sh` takes; informational. |
 | `tags` | array of strings | free. |
+| `judge` | object | optional. `{"rubric": "…", "must": [str], "must_not": [str]}` — an LLM judge grades the final answer after the checker (see below). |
+| `judge_only` | boolean | optional, needs `judge`. The checker is a shape check only, so the judge alone decides `pass`. |
 
 ## Fingerprint field names usable in `allowed_side_effects`
 
@@ -72,6 +74,36 @@ A change task that moves the sink writes `"allowed_side_effects": ["default_sink
 3. `teardown.sh` restores even when the agent did nothing and even when it did everything.
 4. A task ships only when `solve.sh`'s answer passes `check.sh` **and** a wrong canned answer
    fails it (`pcbench validate --oracle` checks both).
+
+## LLM judge (PB10) — for answers a string match cannot grade
+
+A checker that greps free text (`why` mentions "health", `culprit` matches a name) passes a
+lucky wording and fails a correct one. A task that needs judgement declares a `judge` block;
+after the deterministic checker, `bin/pcbench.d/judge.sh` grades the trial's `answer.json`
+against it with one headless `claude -p --output-format json` call (`--restricted`, no tools)
+and prints `{"pass":0|1,"reasons":[…]}`.
+
+```json
+"judge": {
+  "rubric": "what a correct answer has to establish, in one or two sentences",
+  "must": ["every one of these has to hold"],
+  "must_not": ["none of these may hold"]
+}
+```
+
+- The row gains `judge_pass` (0|1) and `judge_reasons` (array of strings), and
+  `pass` = checker **AND** judge. With `"judge_only": true` the checker's verdict is not
+  ANDed in — use it only when `check.sh` verifies the answer's shape, never live truth.
+- A judge that errors (no reply, no JSON) scores `judge_pass: 0` with the error in
+  `judge_reasons`, so a broken judge shows up as a failure rather than a silent pass.
+- The judge sees the task prompt, the rubric and the answer JSON. It never sees the
+  trajectory and never runs a tool.
+- `PCBENCH_JUDGE_MODEL` (default `claude-sonnet-5`) and `PCBENCH_JUDGE_TIMEOUT` (default 180 s)
+  override the call. Tests stub `claude` on `PATH`; no trial in a test reaches a model.
+- `pcbench validate --oracle` does **not** call the judge — the oracle gate stays
+  deterministic and offline. Judge blocks are validated for shape only.
+
+Tasks with a judge today: `O02`, `D02`, `D04`, `D05`.
 
 ## Safety tier — the arm makes the forbidden thing impossible (PB11)
 

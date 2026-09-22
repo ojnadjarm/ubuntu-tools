@@ -4,8 +4,11 @@
 # pc-* created by PT02-PT16 is absent. KB/skills: the live docs with the PT-era sections
 # stripped (PLAN-PCBENCH 2.7). Nothing outside ~/agents/bench/ is written.
 set -euo pipefail
-SRC_BIN="$HOME/agents/bin"; SRC_KB="$HOME/agents/KB"; SRC_SKILL="$HOME/.claude/skills/desktop"
-ARM="${1:-$HOME/agents/bench/arms/old}"
+SRC="${PCBENCH_SRC:-$HOME/agents}"
+SRC_BIN="$SRC/bin"; SRC_KB="$SRC/KB"
+SRC_SKILL="${PCBENCH_SRC_SKILL:-$HOME/.claude/skills/desktop}"
+SRC_RD="$SRC/README-pc-control.md"
+ARM="${1:-$SRC/bench/arms/old}"
 
 OLD_SUBS=(a11y-click click click-text clip drag find key mode move notify open scroll see
           selftest shot spotify status tree type wait wait-for win)
@@ -29,7 +32,7 @@ rm -f "$ARM/KB/pc-cli.md"
 cp -r "$SRC_SKILL" "$ARM/skills/desktop"
 
 python3 - "$SRC_KB/toolbox.md" "$ARM/KB/toolbox.md" "$ARM/skills/desktop/SKILL.md" \
-          "$HOME/agents/README-pc-control.md" "$ARM/README-pc-control.md" <<'PY'
+          "$SRC_RD" "$ARM/README-pc-control.md" <<'PY'
 import re, sys
 tb_in, tb_out, skill, rd_in, rd_out = sys.argv[1:6]
 
@@ -57,7 +60,7 @@ PY
   echo "# Reconstructed, not historical: no pre-2026-09-07 copy of toolbox.md exists."
   diff -u "$SRC_KB/toolbox.md" "$ARM/KB/toolbox.md" || true
   diff -u "$SRC_SKILL/SKILL.md" "$ARM/skills/desktop/SKILL.md" || true
-  diff -u "$HOME/agents/README-pc-control.md" "$ARM/README-pc-control.md" || true
+  diff -u "$SRC_RD" "$ARM/README-pc-control.md" || true
   echo "--- $SRC_KB/pc-cli.md"; echo "+++ (absent in the old arm)"
 } > "$ARM/RECONSTRUCTION.diff"
 echo "old arm built: $ARM ($(ls "$ARM/bin"/pc-* | wc -l) pc subcommands)"

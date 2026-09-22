@@ -88,5 +88,29 @@ denies 'call org.gnome.ScreenSaver /org/gnome/ScreenSaver SetActive true'
 denies 'call org.gnome.Mutter.DisplayConfig /org/gnome/Mutter/DisplayConfig ApplyMonitorsConfig'
 allows 'call org.gnome.ScreenSaver /org/gnome/ScreenSaver GetActive'
 
+# 10. TSP-002: pc_apply drops the cache entries the mutation invalidated (PC_CACHE_KEYS).
+STUB="$WORK/stub"; mkdir -p "$STUB"
+printf '#!/bin/sh\necho balanced\n' >"$STUB/powerprofilesctl"; chmod +x "$STUB/powerprofilesctl"
+apply='APPLY=1 PC_CACHE_KEYS="ppd power_profile" pc_apply powerprofiles balanced performance "rb" true'
+out=$(PATH="$STUB:$PATH" run "printf '0\nbalanced\n' >\$CACHE/ppd; printf '0\nbalanced\n' >\$CACHE/power_profile; $apply >/dev/null; ls \$CACHE")
+case "$out" in *ppd*|*power_profile*) nok 'pc_apply drops PC_CACHE_KEYS entries' "still cached: $out";;
+  *) ok 'pc_apply drops PC_CACHE_KEYS entries';; esac
+out=$(PATH="$STUB:$PATH" run "printf '0\nbalanced\n' >\$CACHE/ppd; PC_CACHE_KEYS='ppd' pc_apply powerprofiles balanced performance rb true >/dev/null; [ -e \$CACHE/ppd ] && echo kept")
+is 'a dry run keeps the cache' "$out" kept
+out=$(PATH="$STUB:$PATH" run "printf '0\nx\n' >\$CACHE/keep; APPLY=1 PC_CACHE_KEYS='ppd' pc_apply t a b rb true >/dev/null; [ -e \$CACHE/keep ] && echo kept")
+is 'unlisted entries survive' "$out" kept
+
+# 11. TSP-011: pc_timeout prefers gnutimeout on PATH and falls back to timeout.
+TBIN="$WORK/tbin"; mkdir -p "$TBIN"
+printf '#!/bin/sh\necho fake-gnutimeout\n' >"$TBIN/gnutimeout"; chmod +x "$TBIN/gnutimeout"
+pick() { env -u PC_TIMEOUT_BIN PATH="$1" XDG_RUNTIME_DIR="$WORK" bash -c ". '$LIB'; echo \$PC_TIMEOUT_BIN"; }
+is 'pc_timeout picks gnutimeout when present' "$(pick "$TBIN:/usr/bin:/bin")" "$TBIN/gnutimeout"
+is 'pc_timeout falls back to timeout' "$(pick /usr/bin:/bin)" "$(PATH=/usr/bin:/bin command -v gnutimeout || echo timeout)"
+is 'pc_timeout runs the chosen binary' \
+  "$(env -u PC_TIMEOUT_BIN PATH="$TBIN:/usr/bin:/bin" XDG_RUNTIME_DIR="$WORK" bash -c ". '$LIB'; pc_timeout 1 true")" \
+  fake-gnutimeout
+is 'PC_TIMEOUT_BIN from the environment wins' \
+  "$(PC_TIMEOUT_BIN=/bin/echo XDG_RUNTIME_DIR="$WORK" bash -c ". '$LIB'; echo \$PC_TIMEOUT_BIN")" /bin/echo
+
 [ $bad = 0 ] && echo 'PASS pclib' || echo 'FAIL pclib'
 exit $bad

@@ -101,6 +101,19 @@ restart_helper() {
     && mv "$restarts.new" "$restarts"
 }
 
+declare -A REAPED   # rule 3: one body-sandbox down per sandbox name per run
+reap_sandbox() {
+  local name="$1" age="$2"
+  [ -n "${REAPED[$name]:-}" ] && return
+  REAPED["$name"]=1
+  if dry_for 3; then log "runaway would take down sandbox $name (rule3: stale sandbox, $((age/3600))h old)"; return; fi
+  if body-sandbox down --name "$name" >>"$st/sentinel.log" 2>&1; then
+    log "runaway took down sandbox $name (rule3: stale sandbox, $((age/3600))h old)"
+  else
+    log "runaway failed to take down sandbox $name (rule3: stale sandbox, $((age/3600))h old)"
+  fi
+}
+
 wipe_scratch() {
   local dir="$1" age="$2"
   if dry_for 5; then log "runaway would rm -rf $dir (rule5: dead session's scratchpad, $((age/3600))h old)"; return; fi
@@ -219,12 +232,19 @@ for d in "$PROC"/[0-9]*; do
   if [ "$age" -ge "$EYE_AGE" ]; then
     is_body=0
     [ "$comm" = "eye-render" ] && is_body=1
-    [[ "$comm" = "node"* && "$cmd" =~ src/main\.js ]] && is_body=1
+    # Node >= 23 names its main thread (comm "MainThread"), so match argv[0] too.
+    [[ ( "$comm" = "node"* || "$fname" = "node"* ) && "$cmd" =~ src/main\.js ]] && is_body=1
     if [ "$is_body" = 1 ]; then
       cgroup=""
       [ -r "$d/cgroup" ] && cgroup=$(<"$d/cgroup")
       if [[ "$cgroup" != *dark-eye.service* ]]; then
-        stop_pid 3 "$pid" "hand-run Dark Eye body outside dark-eye.service, $((age / 3600))h old" "$cmd"
+        sbname=""
+        [ -r "$d/environ" ] && sbname=$(tr '\0' '\n' <"$d/environ" 2>/dev/null | sed -n 's/^DARK_EYE_SANDBOX=//p' | head -1)
+        if [ -n "$sbname" ]; then
+          reap_sandbox "$sbname" "$age"
+        else
+          stop_pid 3 "$pid" "hand-run Dark Eye body outside dark-eye.service, $((age / 3600))h old" "$cmd"
+        fi
       fi
     fi
   fi

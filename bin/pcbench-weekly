@@ -12,7 +12,6 @@ STREAK="$STATE/weekly-skips"
 LOG="${PCBENCH_WEEKLY_LOG:-$HOME/agents/log/pcbench-weekly.log}"
 TRIALS="${PCBENCH_WEEKLY_N:-3}"
 MODEL="${PCBENCH_WEEKLY_MODEL:-opus}"
-BUDGET="${PCBENCH_WEEKLY_BUDGET:-60}"
 
 case "${1:-}" in
   -h|--help)
@@ -20,13 +19,14 @@ case "${1:-}" in
 usage: pcbench-weekly [--dry-run] [--force]
 
 The weekly pcbench A/B run: every tier (observe, diagnose, change, safety — C02 and C04
-included), both arms, -n 3, opus, then `pcbench report --baseline` into
+included), both arms, -n 3, opus. Both arms are rebuilt from the live tree first
+(`pcbench arm build --arm both`), then `pcbench report --baseline` into
 bench/BASELINE-PCBENCH.md and bench/LAST.json.
 
   --dry-run  print the gate verdict and the command, run nothing
   --force    run even if the gate says the owner is present (never used by the timer)
 
-Env: PCBENCH_WEEKLY_N, PCBENCH_WEEKLY_MODEL, PCBENCH_WEEKLY_BUDGET, PCBENCH_AWAY_IDLE_S,
+Env: PCBENCH_WEEKLY_N, PCBENCH_WEEKLY_MODEL, PCBENCH_AWAY_IDLE_S,
      PCBENCH_WEEKLY_STATE, PCBENCH_WEEKLY_LOG.
 Log: ~/agents/log/pcbench-weekly.log · skip streak: bench/state/weekly-skips
 USAGE
@@ -59,9 +59,17 @@ say "gate: away${FORCE:+ (force=$FORCE)}"
 
 # --tier is omitted on purpose: every tier runs, so the confirming C02/C04 re-run is included.
 cmd=(pcbench run --arm both -n "$TRIALS" --model "$MODEL" --set night
-     --require-away --max-budget-usd-total "$BUDGET")
+     --require-away)
 if [ "$DRY" = 1 ]; then say "would run: ${cmd[*]}"; exit 0; fi
 
+say "rebuilding both arms from the live tree"
+timeout 600 pcbench arm build --arm both >>"$LOG" 2>&1; rc=$?
+if [ "$rc" != 0 ]; then
+  [ "$rc" = 124 ] && say "FAIL: arm build timed out" || say "FAIL: pcbench arm build failed"
+  exit 1
+fi
+
+pc idle --seconds 60 --tsv >>"$BENCH/BASELINE-IDLE.tsv" 2>>"$LOG" || say "idle sample failed"
 say "start: ${cmd[*]}"
 out="$(mktemp)"
 "${cmd[@]}" >"$out" 2>>"$LOG"; rc=$?

@@ -11,10 +11,16 @@
 
 ## Unattended reboot policy (T23)
 
-Only `maintenance-run` reboots this machine. No agent, and no unattended-upgrades run, may
+**Owner decision 2026-09-13: no automatic reboots.** `MAINT_AUTO_REBOOT=0` in
+`~/.config/pc-harness/config.env` makes `maintenance-run` refuse every reboot with reason
+`auto-reboot-disabled-by-owner` before any other gate, push once ("reboot required … do it
+yourself when convenient") and exit 3. The owner reboots by hand (steps above). Setting the
+switch back to 1 restores the gated behaviour below.
+
+Only `maintenance-run` may reboot this machine. No agent, and no unattended-upgrades run, may
 reboot outside it (`Automatic-Reboot "false"`).
 
-Gates — all four must pass or the reboot waits for the next Sunday window:
+Gates (only with `MAINT_AUTO_REBOOT=1`) — all four must pass or the reboot waits for the next Sunday window:
 1. 04:00–05:00 Europe/Madrid;
 2. `pc status --check` exit 0;
 3. `boot-check.sh` exit 0;
@@ -26,6 +32,7 @@ reports. Exit 3 = reboot required but refused (one push, retried next Sunday); e
 
 Dry-run the whole decision without touching anything:
 `maintenance-run --dry-run --assume-reboot` (prints the refusal and its reason).
+Test: `bash ~/agents/bin/tests/maintenance-run.test.sh` (fixture config, `shutdown` stubbed).
 
 Manual reboot (owner present) still follows the steps above: warn, check, `sudo systemctl reboot`,
 then `boot-check.sh`.
