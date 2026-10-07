@@ -1,0 +1,1000 @@
+#!/usr/bin/env python3
+"""code-review — the deterministic half of the weekly code-review swarm (T74): roots, policy, evidence, backups, retire, report."""
+import argparse
+import datetime as dt
+import fcntl
+import glob
+import gzip
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+
+REAL_HOME = os.path.expanduser('~')
+HOME = os.path.abspath(os.environ.get('CR_HOME') or REAL_HOME)
+FIXTURE = HOME != REAL_HOME
+AGENTS = os.path.join(HOME, 'agents')
+SKILLS = os.path.join(HOME, '.claude', 'skills')
+ME = os.path.join(AGENTS, 'code-review')
+STATE = os.path.join(ME, 'state')
+BACKUPS = os.path.join(AGENTS, 'backups', 'code-review')
+RETIRED = os.path.join(AGENTS, 'backups', 'retired')
+CLAIMS = os.path.join(AGENTS, 'FILE-CLAIMS.md')
+QUEUE = os.path.join(AGENTS, 'improve', 'queue')
+AUDIT = os.path.join(AGENTS, 'log', 'actions.jsonl')
+SWARM = os.path.join(REAL_HOME, 'agents', 'code-review', 'swarm.js')
+RULES = os.path.join(REAL_HOME, 'agents', 'code-review', 'LANES.md')
+DATE = os.environ.get('CR_DATE') or dt.date.today().isoformat()
+NOW = float(os.environ.get('CR_NOW') or time.time())
+UNUSED_DAYS = 28
+TOOLSMITH_CAP = 3
+RETIRE_WHY = ('broken', 'duplicate', 'superseded', 'obsolete')
+
+AREAS = [  # key, paths under HOME, test commands (run from HOME)
+    ('bin', ['agents/bin'], ['bash agents/bin/tests/run.sh']),
+    ('dashboard', ['agents/dashboard'],
+     ['cd agents/dashboard && python3 -m pytest tests -q', 'cd agents/dashboard && node tests/test_pronunciation_page.js']),
+    ('plumbing', ['agents/hooks', 'agents/eye-relay', 'agents/adapters', 'agents/units'], ['bash agents/bin/tests/run.sh']),
+    ('skills', ['.claude/skills'], ['code-review lint skills']),
+    ('guides', ['agents/KB/guides'], ['code-review lint guides']),
+]
+LENSES = [
+    ('data', 'CODE VS REAL DATA (the T73 method): compare what the code assumes (timings, formats, paths, counts, '
+             'ordering) with real logs, transcripts, `agents-log`, index.tsv rows and state files. Cite the log line or number.'),
+    ('correctness', 'CORRECTNESS AND EDGE CASES: wrong results, races, unhandled errors that lose data, bad quoting, '
+                    'wrong exit codes, missing files, empty input, clock and timezone, concurrency.'),
+    ('perf', 'PERF AND IDLE COST: work done every call or every tick that could be cached or skipped, forks in hot '
+             'paths, polling loops, large reads, resident processes. Measure before you claim (time, strace -c, counts).'),
+    ('value', 'USEFULNESS AND DUPLICATION (judge by usefulness, never by how often it is used): tools, skills, '
+              'functions or docs that are NOT USEFUL, and helpers copied between files that should be one. Usage counts and '
+              'last-used dates are never a reason on their own; a rarely used restore script or runbook can be among the most '
+              'valuable. kind not-useful needs retire_reason = broken (beyond a reasonable fix), duplicate (another item does '
+              'the same job at least as well; name it in replacement), superseded (a better existing package, every caller '
+              'migrated) or obsolete (the problem it solves no longer exists; show why), argued in evidence. A useful item '
+              'that is rarely used because nobody finds it is kind discoverability (fix: guide INDEX line, trigger words, '
+              'skill description), never not-useful. Check callers everywhere: `code-review refs`, units, timers, cron, docs.'),
+    ('replace', 'REPLACE: an existing package, CLI, MCP server or skill on this machine that now does the job at least '
+                'as well as the fleet-made item. Name it and where it is, run both side by side on the same inputs and cite '
+                'the result (outputs, exit codes, timings); a replacement whose output differs or is worse is not a finding. '
+                'List what every caller would change.'),
+]
+REVIEW_ONLY_ROOTS = ['the-dark-eye', 'moodle-harness', 'moodle-envs', 'projects']
+# The swarm's own containment and evidence: never edited by a lane (the sandbox mounts them read-only too).
+CONTAINMENT = ['agents/bin/code-review', 'agents/bin/code-review-sandbox', 'agents/bin/code-review-netproxy',
+               'agents/bin/guards', 'agents/bin/agent-exec', 'agents/bin/agent-run', 'agents/bin/fleetlib.sh',
+               'agents/adapters/claude', 'agents/code-review/BRIEF.md', 'agents/code-review/LANES.md',
+               'agents/code-review/swarm.js', 'agents/code-review/agent.env', 'agents/code-review/selftest',
+               'agents/code-review/state', 'agents/bin/tests/code-review.test.sh', 'agents/bin/tests/fixtures/code-review',
+               'agents/log', 'agents/FILE-CLAIMS.md', 'agents/.git']
+WRITTEN_BY_CLI = ('agents/code-review/state', 'agents/log', 'agents/FILE-CLAIMS.md')  # forbidden to lanes, written by the CLI/hooks
+FORBIDDEN = ['agents/backups', 'agents/secrets', 'agents/asr-corpus', 'agents/research', 'agents/AGENTS.md',
+             'agents/FLEET.md', '.claude/CLAUDE.md', '.claude/settings.json', 'CLAUDE.md'] + CONTAINMENT
+REF_DIRS = ['agents/briefs', 'agents/KB', 'agents/units', 'agents/bin', 'agents/hooks', 'agents/adapters',
+            'agents/eye-relay', 'agents/dashboard', 'agents/README.md', 'agents/RUNNER.md', 'agents/Makefile',
+            'agents/install.sh', 'CLAUDE.md', '.claude/skills', '.claude/settings.json', '.config/systemd/user']
+REF_SKIP = re.compile(r'/(state|logs|__pycache__|node_modules|\.git|plans|mockups)/')
+
+
+def die(msg, rc=1):
+    print(f'code-review: {msg}', file=sys.stderr)
+    sys.exit(rc)
+
+
+def rel(p):
+    p = os.path.abspath(os.path.expanduser(p) if p.startswith('~') and not FIXTURE else p)
+    return os.path.relpath(p, HOME)
+
+
+def absp(p):
+    if p.startswith('~/'):
+        p = os.path.join(HOME, p[2:])
+    return os.path.abspath(p if os.path.isabs(p) else os.path.join(HOME, p))
+
+
+def harness_skills():
+    return set(os.listdir(os.path.join(HOME, 'moodle-harness', 'skills'))) \
+        if os.path.isdir(os.path.join(HOME, 'moodle-harness', 'skills')) else set()
+
+
+def installed_skills():
+    """Third-party skills: a same-named SKILL.md exists in a research skills-src checkout."""
+    out = set()
+    for f in glob.glob(os.path.join(AGENTS, 'research', '*', '*', 'skills-src', '**', 'SKILL.md'), recursive=True):
+        out.add(os.path.basename(os.path.dirname(f)))
+    return out
+
+
+def skill_policy(name):
+    if name == 'synced' or name in harness_skills():
+        return 'review-only'
+    if name in installed_skills():
+        return 'retire-only'
+    return 'edit'
+
+
+def policy(path):
+    """edit | retire-only | review-only | forbidden for one path."""
+    r = rel(absp(path))
+    if r.startswith('..'):
+        return 'forbidden'
+    under = lambda root: r == root or r.startswith(root + '/')
+    if any(under(f) for f in FORBIDDEN):
+        return 'forbidden'
+    if any(under(f) for f in REVIEW_ONLY_ROOTS):
+        return 'review-only'
+    if under('.claude/skills'):
+        parts = r.split('/')
+        return skill_policy(parts[2]) if len(parts) > 2 else 'review-only'
+    if under('agents'):
+        return 'edit'
+    return 'review-only'
+
+
+def policy_rules():
+    """Longest-prefix rules for swarm.js: [[absolute prefix, policy], ...]."""
+    rules = [[os.path.join(HOME, 'agents'), 'edit']]
+    rules += [[os.path.join(HOME, f), 'forbidden'] for f in FORBIDDEN]
+    rules += [[os.path.join(HOME, f), 'review-only'] for f in REVIEW_ONLY_ROOTS]
+    if os.path.isdir(SKILLS):
+        rules.append([SKILLS, 'review-only'])
+        rules += [[os.path.join(SKILLS, s), skill_policy(s)] for s in sorted(os.listdir(SKILLS))]
+    return rules
+
+
+# ---- audit log -----------------------------------------------------------------------------------
+def audit_lines():
+    for f in sorted(glob.glob(AUDIT + '*')):
+        opener = gzip.open if f.endswith('.gz') else open
+        try:
+            with opener(f, 'rt', errors='replace') as fh:
+                yield from fh
+        except OSError:
+            continue
+
+
+def ts_of(line):
+    m = re.search(r'"ts":\s*"([^"]+)"', line)
+    if not m:
+        return None
+    try:
+        return dt.datetime.strptime(m.group(1), '%Y-%m-%dT%H:%M:%S%z').timestamp()
+    except ValueError:
+        return None
+
+
+def usage(names, days=UNUSED_DAYS):
+    """Uses of each name in the audit log inside the window, last use, and how many days the log covers."""
+    cut = NOW - days * 86400
+    pats = {n: re.compile(r'(?<![\w.-])' + re.escape(n) + r'(?![\w-])') for n in names}
+    res = {n: {'uses': 0, 'last': None} for n in names}
+    oldest = None
+    for line in audit_lines():
+        t = ts_of(line)
+        if t is None:
+            continue
+        oldest = t if oldest is None else min(oldest, t)
+        for n, rx in pats.items():
+            if rx.search(line):
+                if t >= cut:
+                    res[n]['uses'] += 1
+                if not res[n]['last'] or t > res[n]['last']:
+                    res[n]['last'] = t
+    cover = 0 if oldest is None else round((NOW - oldest) / 86400, 1)
+    for n in res:
+        if res[n]['last']:
+            res[n]['last'] = dt.datetime.fromtimestamp(res[n]['last']).isoformat(timespec='seconds')
+    return {'window_days': days, 'coverage_days': cover, 'names': res}
+
+
+def refs(path):
+    """Files outside the item that mention its name (briefs, KB, units, tests, bin, skills, dashboard, settings)."""
+    target = absp(path)
+    name = os.path.basename(target.rstrip('/'))
+    rx = re.compile(r'(?<![\w.-])' + re.escape(name) + r'(?![\w-])')
+    hits = []
+    extra = [os.path.relpath(f, HOME) for f in glob.glob(os.path.join(AGENTS, '*', 'BRIEF.md'))
+             + glob.glob(os.path.join(AGENTS, '*', 'agent.env')) + glob.glob(os.path.join(AGENTS, '*.md'))]
+    for d in REF_DIRS + extra:
+        root = os.path.join(HOME, d)
+        files = [root] if os.path.isfile(root) else \
+            [os.path.join(a, f) for a, _, fs in os.walk(root) for f in fs] if os.path.isdir(root) else []
+        for f in files:
+            if f == target or f.startswith(target.rstrip('/') + '/') or REF_SKIP.search('/' + os.path.relpath(f, HOME)):
+                continue
+            try:
+                if not os.path.isfile(f) or os.path.getsize(f) > 2_000_000:
+                    continue
+                with open(f, errors='replace') as fh:
+                    for i, line in enumerate(fh, 1):
+                        if rx.search(line):
+                            hits.append(f'{rel(f)}:{i}')
+                            break
+            except (OSError, UnicodeDecodeError):
+                continue
+    return sorted(set(hits))
+
+
+# ---- claims ----------------------------------------------------------------------------------------
+def claims_rows():
+    try:
+        return [l.rstrip('\n') for l in open(CLAIMS) if l.startswith('- ')]
+    except OSError:
+        return []
+
+
+def claim_path(p):
+    """A board path as absolute: ~/x and /x as given, anything else relative to ~/agents."""
+    p = p.split(' (')[0].strip().rstrip('*').rstrip('/')
+    if not p:
+        return ''
+    if p.startswith('~') or p.startswith('/'):
+        return absp(p)
+    return os.path.abspath(os.path.join(AGENTS, p))
+
+
+def claimed_by_others(me):
+    out = []
+    for row in claims_rows():
+        cells = [c.strip() for c in row[2:].split('·')]
+        if len(cells) < 2 or cells[0] == me:
+            continue
+        for p in re.split(r',\s*', cells[1]):
+            p = claim_path(p)
+            if p:
+                out.append((cells[0], p))
+    return out
+
+
+def covers(claim, t):
+    """A claim on x covers x, everything under x/, and x.<ext> (a row may name a file without its extension)."""
+    return t == claim or t.startswith(claim + '/') or claim.startswith(t + '/') or \
+        (t.startswith(claim + '.') and '/' not in t[len(claim):])
+
+
+def locked(path, fn):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + '.lock', 'w') as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        return fn()
+
+
+def cmd_claim(a):
+    who = f'code-review-{a.id}'
+    targets = [absp(p) for p in a.paths]
+
+    def check_and_add():
+        for owner, p in claimed_by_others(who):
+            for t in targets:
+                if covers(p, t):
+                    return f'{rel(t)} is claimed by {owner}'
+        with open(CLAIMS, 'a') as fh:
+            fh.write(f'- {who} · {", ".join("~/" + rel(t) for t in targets)} · {DATE}\n')
+        return ''
+    why = locked(CLAIMS, check_and_add)
+    if why:
+        die(why, 3)
+    print(f'claimed {len(targets)} path(s) as {who}')
+
+
+def drop_rows(match):
+    """Remove matching rows; re-read before the write so a row added meanwhile (e.g. by the Edit tool) survives."""
+    def drop():
+        for _ in range(5):
+            try:
+                text = open(CLAIMS).read()
+            except OSError:
+                return 0
+            lines = text.splitlines(keepends=True)
+            keep = [l for l in lines if not match(l)]
+            tmp = CLAIMS + '.cr-tmp'
+            with open(tmp, 'w') as fh:
+                fh.writelines(keep)
+            if open(CLAIMS).read() == text:
+                os.replace(tmp, CLAIMS)
+                return len(lines) - len(keep)
+        os.unlink(tmp)
+        return 0
+    return locked(CLAIMS, drop)
+
+
+def cmd_unclaim(a):
+    who = f'code-review-{a.id}'
+    print(f'unclaimed {drop_rows(lambda l: l.startswith(f"- {who} ·"))} row(s)')
+
+
+# ---- run id ---------------------------------------------------------------------------------------
+def current_run():
+    """The run id prep chose (date-HHMMSS): backups and run dirs are keyed by it, so a same-day rerun never collides."""
+    if os.environ.get('CR_RUN'):
+        return os.environ['CR_RUN']
+    try:
+        return open(os.path.join(STATE, 'current-run')).read().strip() or DATE
+    except OSError:
+        return DATE
+
+
+def run_dir(run=None):
+    return os.path.join(STATE, 'runs', run or current_run())
+
+
+# ---- backup / restore -----------------------------------------------------------------------------
+def area_roots():
+    return [os.path.join(HOME, p) for _, ps, _ in AREAS for p in ps] + [AGENTS, SKILLS, HOME]
+
+
+def backup_refusal(src):
+    if policy(src) != 'edit':
+        return f'{rel(src)} is {policy(src)}; not backed up'
+    if os.path.isdir(src) and not os.path.islink(src):
+        if any(src == r or r.startswith(src.rstrip('/') + '/') for r in area_roots()):
+            return f'{rel(src)} is an area root or above; back up the files you touch'
+        files = [os.path.join(a, f) for a, _, fs in os.walk(src) for f in fs]
+        if len(files) > 300:
+            return f'{rel(src)} holds {len(files)} files; back up the files you touch'
+        bad = [f for f in files if policy(f) != 'edit']
+        if bad:
+            return f'{rel(bad[0])} inside {rel(src)} is {policy(bad[0])}'
+    return ''
+
+
+def cmd_backup(a):
+    """Copy every path a fix will touch (absent ones are recorded, so restore moves away what the fix created)."""
+    run = current_run()
+    base = os.path.join(BACKUPS, run, a.id)
+    if os.path.exists(base):
+        die(f'backup {rel(base)} exists; a finding id is backed up once per run', 2)
+    srcs = [absp(p) for p in a.paths]
+    for src in srcs:
+        why = backup_refusal(src)
+        if why:
+            die(why, 3)
+    rows = []
+    for src in srcs:
+        dst = os.path.join(base, 'files', rel(src))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        if os.path.isdir(src) and not os.path.islink(src):
+            shutil.copytree(src, dst, symlinks=True)
+            rows.append(f'dir\t{rel(src)}')
+        elif os.path.lexists(src):
+            shutil.copy2(src, dst, follow_symlinks=False)
+            rows.append(f'file\t{rel(src)}')
+        else:
+            rows.append(f'absent\t{rel(src)}')
+    with open(os.path.join(base, 'MANIFEST.tsv'), 'w') as fh:
+        fh.write('\n'.join(rows) + '\n')
+    print(f'backup {rel(base)} ({len(rows)} path(s)) · restore: code-review restore {run} {a.id}')
+
+
+def manifest(base):
+    out = []
+    for line in open(os.path.join(base, 'MANIFEST.tsv')):
+        if '\t' in line:
+            out.append(line.rstrip('\n').split('\t', 1))
+    return out
+
+
+def displace(dst, base):
+    """Move the live item out of the way without deleting it: rename beside it, then into the backup's displaced/."""
+    side = f'{dst}.cr-displaced-{os.getpid()}'
+    os.rename(dst, side)
+    keep = os.path.join(base, 'displaced', rel(dst))
+    os.makedirs(os.path.dirname(keep), exist_ok=True)
+    try:
+        shutil.move(side, keep)
+    except OSError as e:
+        print(f'code-review: left {rel(side)} beside the item ({e})', file=sys.stderr)
+    return side
+
+
+def retired_now(r):
+    """True when HOME-relative path r was removed by code-review retire and not brought back."""
+    return not os.path.lexists(os.path.join(HOME, r)) and bool(glob.glob(os.path.join(glob.escape(RETIRED), '*', r)))
+
+
+def restore(run, fid, auto=False):
+    base = os.path.join(BACKUPS, run, fid)
+    if not os.path.isfile(os.path.join(base, 'MANIFEST.tsv')):
+        die(f'no backup at {rel(base)}', 2)
+    if os.path.exists(os.path.join(base, 'RESTORED')):
+        die(f'{rel(base)} was already restored', 2)
+    n = 0
+    for kind, r in manifest(base):
+        dst = os.path.join(HOME, r)
+        if auto and retired_now(r):
+            continue
+        if kind == 'absent':
+            if os.path.lexists(dst):
+                displace(dst, base)
+        else:
+            src = os.path.join(base, 'files', r)
+            tmp = f'{dst}.cr-restore-{os.getpid()}'
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            if kind == 'dir':
+                shutil.copytree(src, tmp, symlinks=True)
+            else:
+                shutil.copy2(src, tmp, follow_symlinks=False)
+            if os.path.lexists(dst):
+                displace(dst, base)
+            os.rename(tmp, dst)
+        n += 1
+    open(os.path.join(base, 'RESTORED'), 'w').write(f'{dt.datetime.now().isoformat(timespec="seconds")}\n')
+    return n
+
+
+def cmd_restore(a):
+    n = restore(a.run, a.id)
+    print(f'restored {n} path(s) from {rel(os.path.join(BACKUPS, a.run, a.id))}; what the fix left is in its displaced/')
+
+
+# ---- tests ----------------------------------------------------------------------------------------
+def areas_of(paths):
+    keys = []
+    for p in paths:
+        for key, roots, _ in AREAS:
+            if any(p == os.path.join(HOME, r) or p.startswith(os.path.join(HOME, r) + '/') for r in roots) \
+                    and key not in keys:
+                keys.append(key)
+    return keys
+
+
+def area_tests(keys):
+    cmds = []
+    for key, _, tests in AREAS:
+        if key in keys:
+            cmds += [t for t in tests if t not in cmds and test_exists(t)]
+    return cmds
+
+
+def test_exists(t):
+    m = re.search(r'(agents/[^\s&]+)', t)
+    return not m or os.path.exists(os.path.join(HOME, m.group(1)))
+
+
+def fail_lines(out):
+    """Failing-test lines, with numbers masked so timings do not count as new failures."""
+    return sorted({re.sub(r'\d+(\.\d+)?', '#', l.strip())[:160] for l in out.splitlines()
+                   if re.search(r'\bFAIL|\bERROR\b|Error:|Traceback', l)})
+
+
+def run_tests(cmds):
+    me = f'{sys.executable} {os.path.abspath(__file__)} '
+    out, rc = [], 0
+    for c in cmds:
+        c = me + c[len('code-review '):] if c.startswith('code-review ') else c
+        try:
+            r = subprocess.run(['bash', '-c', c], cwd=HOME, capture_output=True, text=True, timeout=1200)
+            out.append(f'$ {c}\n{r.stdout}{r.stderr}rc={r.returncode}\n')
+            rc = rc or r.returncode
+        except subprocess.TimeoutExpired:
+            out.append(f'$ {c}\nFAIL timeout after 1200 s\n')
+            rc = rc or 124
+    return rc, ''.join(out)
+
+
+def cmd_tests(a):
+    """Run the area tests for a backed-up finding, serialized across lanes; `after` marks the backup VERIFIED or not."""
+    base = os.path.join(BACKUPS, current_run(), a.id)
+    if not os.path.isfile(os.path.join(base, 'MANIFEST.tsv')):
+        die(f'no backup at {rel(base)}: run code-review backup {a.id} <paths> first', 2)
+    rows = manifest(base)
+    cmds = area_tests(areas_of([os.path.join(HOME, r) for _, r in rows]))
+    rc, out = locked(os.path.join(STATE, 'tests'), lambda: run_tests(cmds))
+    open(os.path.join(base, f'tests.{a.phase}.log'), 'w').write(out)
+    fails = fail_lines(out)
+    json.dump({'rc': rc, 'fails': fails, 'cmds': cmds}, open(os.path.join(base, f'tests.{a.phase}.json'), 'w'))
+    if a.phase == 'before':
+        print(f'baseline: rc {rc}, {len(fails)} failing line(s) · {len(cmds)} command(s)')
+        return
+    try:
+        before = json.load(open(os.path.join(base, 'tests.before.json')))
+    except (OSError, ValueError):
+        die(f'no baseline: run code-review tests {a.id} before, before the fix', 2)
+    new = [f for f in fails if f not in before['fails']]
+    if rc and not before['rc'] and not new:
+        new = [f'rc {rc} (baseline rc 0)']
+    gone = [r for k, r in rows if k in ('file', 'dir') and not os.path.lexists(os.path.join(HOME, r)) and not retired_now(r)]
+    why = [f'new failure: {f}' for f in new] + [f'deleted {r}: removal goes through code-review retire' for r in gone]
+    mark = os.path.join(base, 'VERIFIED')
+    if why:
+        if os.path.exists(mark):
+            os.unlink(mark)
+        print('NOT verified\n' + '\n'.join(why[:10]))
+        sys.exit(5)
+    open(mark, 'w').write(f'{dt.datetime.now().isoformat(timespec="seconds")}\n')
+    print(f'verified: no new failures ({len(fails)} failing line(s) at baseline and after), nothing deleted outside code-review retire')
+
+
+def cmd_lint(a):
+    """Checks for areas without a test suite: skills need name+description frontmatter; guide INDEX slugs need a file."""
+    bad = []
+    if a.what == 'skills' and os.path.isdir(SKILLS):
+        for d in sorted(os.listdir(SKILLS)):
+            if skill_policy(d) != 'edit' or not os.path.isdir(os.path.join(SKILLS, d)):
+                continue
+            f = os.path.join(SKILLS, d, 'SKILL.md')
+            try:
+                m = re.match(r'---\n(.*?)\n---', open(f, errors='replace').read(), re.S)
+            except OSError:
+                bad.append(f'FAIL skill {d}: no SKILL.md')
+                continue
+            if not m or not re.search(r'^name:\s*\S', m.group(1), re.M) or \
+                    not re.search(r'^description:\s*\S', m.group(1), re.M):
+                bad.append(f'FAIL skill {d}: frontmatter needs name and description')
+    elif a.what == 'guides':
+        g = os.path.join(AGENTS, 'KB', 'guides')
+        try:
+            for line in open(os.path.join(g, 'INDEX.md')):
+                m = re.match(r'- ([\w.-]+) — ', line)
+                if m and not os.path.isfile(os.path.join(g, m.group(1) + '.md')):
+                    bad.append(f'FAIL guide index: {m.group(1)}.md does not exist')
+        except OSError:
+            pass
+    print('\n'.join(bad) if bad else f'lint {a.what}: ok')
+    sys.exit(1 if bad else 0)
+
+
+# ---- cleanup (after the session, also on timeout) --------------------------------------------------
+def cmd_cleanup(a):
+    """Drop leftover code-review claim rows and restore every backup of this run that was never verified."""
+    n = drop_rows(lambda l: l.startswith('- code-review-'))
+    run = current_run()
+    done = []
+    for base in sorted(glob.glob(os.path.join(BACKUPS, run, '*'))):
+        if not os.path.isfile(os.path.join(base, 'MANIFEST.tsv')):
+            continue
+        if os.path.exists(os.path.join(base, 'VERIFIED')) or os.path.exists(os.path.join(base, 'RESTORED')):
+            continue
+        mine = {r for _, r in manifest(base)}
+        later = [o for o in glob.glob(os.path.join(BACKUPS, run, '*', 'VERIFIED'))
+                 if os.path.getmtime(os.path.dirname(o)) > os.path.getmtime(base)
+                 and mine & {r for _, r in manifest(os.path.dirname(o))}]
+        if later:
+            print(f'cleanup: kept {os.path.basename(base)}: a later verified fix covers the same path(s)')
+            continue
+        restore(run, os.path.basename(base), auto=True)
+        done.append(os.path.basename(base))
+    print(f'cleanup: {n} stale claim row(s) dropped · {len(done)} unverified backup(s) restored'
+          + (f' ({", ".join(done)})' if done else ''))
+    rdir = run_dir(run)
+    if os.path.isfile(os.path.join(rdir, 'args.json')) and not os.path.isfile(os.path.join(rdir, 'result.json')):
+        kept = len(glob.glob(os.path.join(BACKUPS, run, '*', 'VERIFIED')))
+        json.dump({'found': 0, 'items': [], 'error': f'the session ended before the swarm returned (timeout or crash); '
+                   f'{len(done)} unverified edit(s) restored, {kept} verified fix(es) kept'},
+                  open(os.path.join(rdir, 'result.json'), 'w'))
+        cmd_finish(argparse.Namespace(run=run))
+
+
+# ---- retire ---------------------------------------------------------------------------------------
+def retire_gates(target, why, by, proof):
+    """Reasons the item may not be retired; empty list = allowed. Usage counts are never a gate (usefulness rule)."""
+    out = []
+    pol = policy(target)
+    if pol not in ('edit', 'retire-only'):
+        out.append(f'policy {pol}')
+    if not os.path.lexists(target):
+        out.append('does not exist')
+    if why not in RETIRE_WHY:
+        out.append(f'--why must be one of {", ".join(RETIRE_WHY)} (low use is never a reason)')
+    if why in ('duplicate', 'superseded'):
+        if not by:
+            out.append(f'--why {why} needs --by <the item that does the job at least as well>')
+        elif '/' in by and not os.path.lexists(absp(by)):
+            out.append(f'--by {by} does not exist')
+        elif '/' not in by and not shutil.which(by) and not os.path.isdir(os.path.join(SKILLS, by)):
+            out.append(f'--by {by} is not installed (no command or skill of that name)')
+        if not proof or not os.path.isfile(absp(proof)) or os.path.getsize(absp(proof)) == 0:
+            out.append('--proof <file> must hold the side-by-side run showing the replacement does the job at least as well')
+    r = refs(target)
+    if r:
+        out.append(f'{len(r)} reference(s) still point at it (migrate them first): {", ".join(r[:5])}')
+    for owner, p in claimed_by_others(''):
+        if covers(p, target):
+            out.append(f'claimed by {owner}')
+    return out
+
+
+def cmd_retire(a):
+    target = absp(a.path)
+    why = retire_gates(target, a.why, a.by, a.proof)
+    if why:
+        print(f'kept {rel(target)}: ' + '; '.join(why))
+        sys.exit(4)
+    if a.check:
+        print(f'retirable {rel(target)} ({a.why})')
+        return
+    dst = os.path.join(RETIRED, DATE, rel(target))
+    if os.path.lexists(dst):
+        die(f'{rel(dst)} already exists', 2)
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    if os.path.isdir(target) and not os.path.islink(target):
+        shutil.copytree(target, dst, symlinks=True)
+    else:
+        shutil.copy2(target, dst, follow_symlinks=False)
+    side = f'{target}.cr-retiring-{os.getpid()}'
+    os.rename(target, side)
+    try:
+        shutil.rmtree(side) if os.path.isdir(side) and not os.path.islink(side) else os.unlink(side)
+    except OSError as e:
+        print(f'code-review: copy is in {rel(dst)}; could not clear {rel(side)} ({e})', file=sys.stderr)
+    home = '~' if not FIXTURE else HOME
+    restore = f'mv {home}/{rel(dst)} {home}/{rel(target)}'
+    reason = f'{a.why}' + (f' by {a.by}' if a.by else '')
+    with open(os.path.join(RETIRED, DATE, 'MANIFEST.tsv'), 'a') as fh:
+        fh.write(f'{rel(target)}\t{a.id or "-"}\t{restore}\t{reason}\n')
+    print(f'retired {rel(target)} ({reason}) → {rel(dst)} · restore: {restore}')
+
+
+# ---- queue ----------------------------------------------------------------------------------------
+def cmd_queue_new(a):
+    """Reserve the next CR-NNN in improve/queue with the improve-gate skeleton; print its path."""
+    def make():
+        os.makedirs(QUEUE, exist_ok=True)
+        nums = [int(m.group(1)) for f in os.listdir(QUEUE) for m in [re.match(r'CR-(\d+)\.md$', f)] if m]
+        n = max(nums, default=0) + 1
+        p = os.path.join(QUEUE, f'CR-{n:03d}.md')
+        with open(p, 'x') as fh:
+            fh.write(f'# CR-{n:03d} — {a.title}\n\nclass: {a.cls}\nrollback: \nstatus: proposed\n'
+                     f'source: code-review {DATE}\n\n## Problem\n\n## Evidence\n\n## Proposed change\n\n'
+                     '## Success check\n- metric: \n- before: \n- target: \n- measured by: \n\n## Class\n'
+                     f'{a.cls}\n')
+        return p
+    print(locked(os.path.join(QUEUE, '.cr'), make))
+
+
+# ---- prep -----------------------------------------------------------------------------------------
+def load_seen():
+    out = {}
+    try:
+        for line in open(os.path.join(STATE, 'seen.jsonl')):
+            try:
+                r = json.loads(line)
+                out[r['key']] = r
+            except (ValueError, KeyError):
+                continue
+    except OSError:
+        pass
+    return out
+
+
+def open_items():
+    titles = []
+    for f in sorted(glob.glob(os.path.join(QUEUE, '*.md'))):
+        try:
+            text = open(f).read()
+        except OSError:
+            continue
+        if re.search(r'^status:\s*(proposed|building|built|measuring)', text, re.M):
+            titles.append(text.splitlines()[0].lstrip('# ').strip())
+    bl = os.path.join(AGENTS, 'toolsmith', 'BACKLOG.md')
+    if os.path.isfile(bl):
+        for line in open(bl):
+            c = [x.strip() for x in line.split('|')]
+            if len(c) > 6 and re.fullmatch(r'TSP-\d+', c[2]) and c[5] in ('proposed', 'go', 'measuring'):
+                titles.append(f'{c[2]} — {c[3]}')
+    return titles
+
+
+def toolsmith_backlog():
+    """Open auto-ok toolsmith proposals for the toolsmith lane: status proposed, lowest rank first, at most TOOLSMITH_CAP."""
+    rows = []
+    try:
+        lines = open(os.path.join(AGENTS, 'toolsmith', 'BACKLOG.md')).readlines()
+    except OSError:
+        return []
+    for line in lines:
+        c = [x.strip() for x in line.split('|')]
+        if len(c) > 6 and c[1].isdigit() and re.fullmatch(r'TSP-\d+', c[2]) and c[4] == 'auto-ok' and c[5] == 'proposed':
+            p = os.path.join(AGENTS, 'toolsmith', 'proposals', c[2] + '.md')
+            if os.path.isfile(p):
+                accept = re.findall(r'^- measured by:\s*(.+)$', open(p, errors='replace').read(), re.M)
+                rows.append({'id': c[2], 'rank': int(c[1]), 'title': c[3], 'path': p, 'accept': accept[-1] if accept else ''})
+    return sorted(rows, key=lambda r: r['rank'])[:TOOLSMITH_CAP]
+
+
+def cmd_prep(a):
+    run = base = f'{DATE}-{dt.datetime.now().strftime("%H%M%S")}'
+    n = 1
+    while os.path.exists(run_dir(run)) or os.path.exists(os.path.join(BACKUPS, run)):
+        n += 1
+        run = f'{base}-{n}'
+    os.makedirs(STATE, exist_ok=True)
+    open(os.path.join(STATE, 'current-run'), 'w').write(run + '\n')
+    rdir = run_dir(run)
+    os.makedirs(rdir, exist_ok=True)
+    areas = []
+    for key, paths, tests in AREAS:
+        ps = [os.path.join(HOME, p) for p in paths if os.path.exists(os.path.join(HOME, p))]
+        if ps:
+            areas.append({'key': key, 'paths': ps, 'tests': [t for t in tests if test_exists(t)]})
+    seen = load_seen()
+    args = {
+        'date': DATE, 'run': run, 'mode': 'fixture' if FIXTURE else 'real', 'home': HOME, 'run_dir': rdir,
+        'rules': RULES, 'swarm': SWARM, 'cli': 'code-review', 'areas': areas,
+        'lenses': [{'key': k, 'ask': q} for k, q in LENSES],
+        'policy': policy_rules(),
+        'skip_verdicts': list(SKIP_VERDICTS),
+        'seen': [{'key': k, 'verdict': v.get('verdict'), 'date': v.get('date'), 'title': v.get('title'),
+                  'file': v.get('file')} for k, v in seen.items()],
+        'claimed': [p for _, p in claimed_by_others('')],
+        'open_items': open_items(),
+        'toolsmith_backlog': toolsmith_backlog(),
+        'audit': {'coverage_days': usage([])['coverage_days'], 'logs': sorted(glob.glob(AUDIT + '*'))},
+        'fix_cap_per_area': int(os.environ.get('CR_FIX_CAP', '8')),
+    }
+    p = os.path.join(rdir, 'args.json')
+    with open(p, 'w') as fh:
+        json.dump(args, fh, indent=1)
+    print(p)
+
+
+# ---- finish ---------------------------------------------------------------------------------------
+# Verdicts that keep a finding out of later weeks; deferred (skipped, capped, reverted, failed, unverified) comes back.
+SKIP_VERDICTS = ('refuted', 'queued', 'staged', 'reported', 'retired', 'kept')
+SEEN_VERDICT = {'fixed': 'fixed', 'retired': 'retired', 'queued': 'queued', 'staged': 'staged', 'kept': 'kept',
+                'left': 'reported'}
+SECRET = re.compile(r'(sk-ant-[\w-]{8,}|gh[pousr]_\w{20,}|xox[abprs]-[\w-]{10,}|AKIA[0-9A-Z]{16}|eyJ[\w-]{20,}\.[\w.-]+'
+                    r'|(?i:(?:token|secret|password|passwd|api[_-]?key|topic)\s*[:=]\s*)["\']?[^\s"\',;]{6,})')
+
+
+def redact(text):
+    return SECRET.sub(lambda m: (m.group(0).split('=')[0].split(':')[0] + '=[redacted]')
+                      if re.match(r'(?i)(token|secret|pass|api|topic)', m.group(0)) else '[redacted]', text)
+
+
+def read_or_none(p):
+    try:
+        return open(p, errors='replace').read()
+    except OSError:
+        return None
+
+
+def toolsmith_tamper(tid, run):
+    """Why a toolsmith lane broke append-only ('' if not): the proposal keeps its earlier lines, BACKLOG.md only status words."""
+    old_dir = os.path.join(BACKUPS, run, tid, 'files', 'agents', 'toolsmith')
+    live_dir = os.path.join(AGENTS, 'toolsmith')
+    old, new = (read_or_none(os.path.join(d, 'proposals', tid + '.md')) for d in (old_dir, live_dir))
+    if old is None or new is None or not new.startswith(old):
+        return 'earlier lines of the proposal changed (or it was not backed up)'
+    old, new = (read_or_none(os.path.join(d, 'BACKLOG.md')) for d in (old_dir, live_dir))
+    cells = lambda line: [c for k, c in enumerate(line.split('|')) if k != 5]
+    if old is None or new is None or len(old.splitlines()) != len(new.splitlines()) or \
+            any(cells(a) != cells(b) for a, b in zip(old.splitlines(), new.splitlines())):
+        return 'BACKLOG.md changed beyond a status word (or it was not backed up)'
+    return ''
+
+
+def enforce(items, run):
+    """A 'fixed' item counts only with a VERIFIED backup (and, for a toolsmith item, append-only edits); else restored."""
+    for i in items:
+        if i.get('merged_into') or i.get('verdict') != 'confirmed':
+            continue
+        base = os.path.join(BACKUPS, run, str(i.get('id')))
+        why = ''
+        if i.get('status') == 'fixed':
+            if not os.path.exists(os.path.join(base, 'VERIFIED')):
+                why = f'no verified test record (code-review tests {i.get("id")} after)'
+            elif i.get('kind') == 'toolsmith':
+                why = toolsmith_tamper(str(i.get('id')), run)
+        if why:
+            restored = ''
+            if os.path.isfile(os.path.join(base, 'MANIFEST.tsv')) and not os.path.exists(os.path.join(base, 'RESTORED')):
+                restore(run, str(i.get('id')), auto=True)
+                restored = '; its backup was restored'
+            i['status'] = 'unverified'
+            i['note'] = f'finish: {why}{restored}. ' + str(i.get('note') or '')
+        if i.get('status') == 'already-fixed' and i.get('file') and not os.path.lexists(absp(i['file'])):
+            i['status'] = 'deferred'
+            i['note'] = 'the item was retired or moved before this fix ran; restoring it brings the defect back. ' + \
+                str(i.get('note') or '')
+    keeper = {i.get('id'): i for i in items if not i.get('merged_into')}
+    for i in items:
+        k = keeper.get(i.get('merged_into'))
+        if k:
+            i['status'], i['verdict'] = k.get('status'), k.get('verdict')
+
+
+def cmd_finish(a):
+    run = current_run() if not a.run else a.run
+    rdir = run_dir(run)
+    try:
+        res = json.load(open(os.path.join(rdir, 'result.json')))
+        items = res['items']
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        die(f'result.json unreadable in {rel(rdir)}: {e}', 2)
+    enforce(items, run)
+    main = [i for i in items if not i.get('merged_into')]
+    found = int(res.get('found', len(main)))
+    confirmed = [i for i in main if i.get('verdict') == 'confirmed']
+    fixed = [i for i in confirmed if i.get('status') in ('fixed', 'already-fixed')]
+    retired = [i for i in confirmed if i.get('status') == 'retired']
+    left = [i for i in confirmed if i not in fixed and i not in retired]
+    with open(os.path.join(STATE, 'seen.jsonl'), 'a') as fh:
+        for i in items:
+            st = i.get('status')
+            v = 'refuted' if i.get('verdict') != 'confirmed' else \
+                'fixed' if st == 'already-fixed' else SEEN_VERDICT.get(st, 'deferred')
+            fh.write(json.dumps({'key': i.get('key'), 'date': DATE, 'run': run, 'verdict': v,
+                                 'title': i.get('title'), 'file': i.get('file')}) + '\n')
+    by = {}
+    for i in left:
+        by[i.get('status') or 'left'] = by.get(i.get('status') or 'left', 0) + 1
+    md = [f'# Code review — {run}', '',
+          f'Found {found} · confirmed {len(confirmed)} · fixed {len(fixed)} · retired {len(retired)} · left {len(left)}', '']
+    if res.get('error'):
+        md += [f'**Run error:** {res["error"]}', '']
+
+    def section(title, rows):
+        if not rows:
+            return
+        md.extend([f'## {title}', ''])
+        for i in rows:
+            md.append(f'- **{i.get("title")}** — `{rel(absp(i.get("file", "?")))}` · {i.get("kind")} · '
+                      f'votes {i.get("votes", "?")}' + (f' · {i.get("status")}' if i.get('status') else ''))
+            for k in ('note', 'test', 'restore', 'queue'):
+                if i.get(k):
+                    md.append(f'  - {k}: {i[k]}')
+        md.append('')
+    section('Fixed', fixed)
+    section('Retired', retired)
+    section('Left for the owner or next week', left)
+    section('Refuted', [i for i in main if i.get('verdict') != 'confirmed'])
+    section('Duplicate reports merged into the findings above', [i for i in items if i.get('merged_into')])
+    doc = os.path.join(rdir, 'findings.md')
+    open(doc, 'w').write(redact('\n'.join(md) + '\n'))
+    lines = [f'found {found}', f'confirmed {len(confirmed)}', f'fixed {len(fixed)}', f'retired {len(retired)}',
+             f'left {len(left)}' + (' (' + ', '.join(f'{k} {v}' for k, v in sorted(by.items())) + ')' if by else '')]
+    with open(os.path.join(ME, 'REPORT.md'), 'w') as fh:
+        fh.write('\n'.join(lines) + '\n')
+    msg = (f'code-review: found {found}, confirmed {len(confirmed)}, fixed {len(fixed)}, retired {len(retired)}, '
+           f'left {len(left)}' + (' (run error)' if res.get('error') else ''))
+    json.dump({'doc': doc, 'msg': msg, 'at': time.time()}, open(os.path.join(rdir, 'outbox.json'), 'w'))
+    print('\n'.join(lines + ['publish and push: code-review deliver (run by the sandbox wrapper after the session)']))
+
+
+def cmd_deliver(a):
+    """Publish the findings doc and send the one weekly push; runs outside the sandbox, after the session."""
+    rdir = run_dir()
+    try:
+        box = json.load(open(os.path.join(rdir, 'outbox.json')))
+    except (OSError, ValueError):
+        print(f'deliver: nothing to deliver in {rel(rdir)}')
+        return
+    mark = os.path.join(rdir, 'delivered')
+    if os.path.exists(mark) and os.path.getmtime(mark) >= box.get('at', 0):
+        print('deliver: already delivered')
+        return
+    link = publish(box['doc'])
+    sent = os.path.join(rdir, 'pushed')
+    if os.path.exists(sent):
+        print(f'deliver: doc republished at {link}; push already sent for this run')
+    else:
+        notify(f'{box["msg"]} {link}'[:200])
+        open(sent, 'w').write(box['msg'] + '\n')
+        print(f'deliver: published {link} · one push sent')
+    open(mark, 'w').write(link + '\n')
+
+
+def publish(doc):
+    if FIXTURE:
+        out = os.path.join(STATE, 'outbox')
+        os.makedirs(out, exist_ok=True)
+        shutil.copy(doc, os.path.join(out, 'published.md'))
+        return f'https://fixture.invalid:8498/plans/code-review-{DATE}/'
+    r = subprocess.run(['plan-publish', '--kind', 'report', '--slug', 'code-review', doc],
+                       capture_output=True, text=True)
+    url = (r.stdout.strip().splitlines() or [''])[-1]
+    return re.sub(r'^http://([^/:]+):19998', r'https://\1:8498', url)
+
+
+def notify(msg):
+    if FIXTURE:
+        os.makedirs(os.path.join(STATE, 'outbox'), exist_ok=True)
+        with open(os.path.join(STATE, 'outbox', 'notify.log'), 'a') as fh:
+            fh.write(msg + '\n')
+        return
+    subprocess.run(['notify-owner', '-t', 'code-review', msg], check=False)
+
+
+# ---- snapshot -------------------------------------------------------------------------------------
+SNAP_SKIP = re.compile(r'/(logs|state|__pycache__|node_modules|\.pytest_cache)(/|$)|\.lock$|/log/|/plans/|'
+                       r'/research/|/asr-corpus/|/bench/runs/|FILE-CLAIMS\.md$|/drop/|/browser/profile')
+
+
+def snapshot(roots):
+    out = {}
+    for root in roots:
+        for a, ds, fs in os.walk(root):
+            ds[:] = [d for d in ds if not SNAP_SKIP.search(os.path.join(a, d) + '/')]
+            for f in fs:
+                p = os.path.join(a, f)
+                if SNAP_SKIP.search(p) or os.path.islink(p):
+                    continue
+                try:
+                    out[p] = hashlib.sha256(open(p, 'rb').read()).hexdigest()
+                except OSError:
+                    continue
+    return out
+
+
+def cmd_snapshot(a):
+    json.dump(snapshot(a.roots), open(a.out, 'w'))
+    print(a.out)
+
+
+def cmd_snapdiff(a):
+    x, y = json.load(open(a.a)), json.load(open(a.b))
+    diff = sorted(set(k for k in set(x) | set(y) if x.get(k) != y.get(k)))
+    for k in diff:
+        print(('changed ' if k in x and k in y else 'added   ' if k in y else 'removed ') + k)
+    print(f'{len(diff)} difference(s) over {len(x)} file(s)')
+    sys.exit(1 if diff else 0)
+
+
+def main():
+    ap = argparse.ArgumentParser(prog='code-review', description=__doc__)
+    sub = ap.add_subparsers(dest='cmd', required=True)
+    sub.add_parser('prep', help='pick the run id; write state/runs/<run>/args.json for swarm.js; print its path')
+    p = sub.add_parser('policy', help='print edit|retire-only|review-only|forbidden per path')
+    p.add_argument('paths', nargs='+')
+    p = sub.add_parser('usage', help='audit-log uses per name in the last N days, and log coverage')
+    p.add_argument('names', nargs='+')
+    p.add_argument('--days', type=int, default=UNUSED_DAYS)
+    p = sub.add_parser('refs', help='files that reference an item (outside the item)')
+    p.add_argument('path')
+    p = sub.add_parser('claim', help='claim paths in FILE-CLAIMS.md for a finding; rc 3 if another ticket holds one')
+    p.add_argument('id')
+    p.add_argument('paths', nargs='+')
+    p = sub.add_parser('unclaim', help='drop the claim rows of a finding')
+    p.add_argument('id')
+    p = sub.add_parser('backup', help='back up the paths a fix will touch (absent ones too)')
+    p.add_argument('id')
+    p.add_argument('paths', nargs='+')
+    p = sub.add_parser('restore', help='restore a backup without deleting anything: code-review restore <run> <id>')
+    p.add_argument('run')
+    p.add_argument('id')
+    p = sub.add_parser('tests', help='run the area tests of a backed-up finding (serialized); after = verify; rc 5 = not verified')
+    p.add_argument('id')
+    p.add_argument('phase', choices=['before', 'after'])
+    p = sub.add_parser('lint', help='checks for areas without tests: skills frontmatter, guide INDEX slugs')
+    p.add_argument('what', choices=['skills', 'guides'])
+    p = sub.add_parser('cleanup', help='after a session: drop stale code-review claims, restore unverified backups')
+    p = sub.add_parser('deliver', help='publish the findings doc and send the one weekly push (outside the sandbox)')
+    p = sub.add_parser('retire', help='move a NOT USEFUL item to backups/retired/<date>/ after the gates; rc 4 = kept')
+    p.add_argument('path')
+    p.add_argument('--id', default='')
+    p.add_argument('--why', default='', help='broken | duplicate | superseded | obsolete (low use is never a reason)')
+    p.add_argument('--by', default='', help='duplicate/superseded: the item that does the job at least as well')
+    p.add_argument('--proof', default='', help='duplicate/superseded: file with the side-by-side run')
+    p.add_argument('--check', action='store_true', help='only evaluate the gates')
+    p = sub.add_parser('queue-new', help='reserve improve/queue/CR-NNN.md; print its path')
+    p.add_argument('title')
+    p.add_argument('--cls', default='owner-go', choices=['auto', 'owner-go', 'owner-reboot'])
+    p = sub.add_parser('finish', help='seen.jsonl, findings.md, REPORT.md, outbox for deliver')
+    p.add_argument('--run', default='')
+    sub.add_parser('containment', help='absolute paths the sandbox mounts read-only because the swarm must not change itself')
+    p = sub.add_parser('snapshot', help='sha256 of every file under roots → JSON')
+    p.add_argument('out')
+    p.add_argument('roots', nargs='+')
+    p = sub.add_parser('snapdiff', help='compare two snapshots; rc 1 on any difference')
+    p.add_argument('a')
+    p.add_argument('b')
+    a = ap.parse_args()
+    if a.cmd == 'policy':
+        for x in a.paths:
+            print(f'{policy(x)}\t{x}')
+    elif a.cmd == 'usage':
+        print(json.dumps(usage(a.names, a.days), indent=1))
+    elif a.cmd == 'containment':
+        print('\n'.join(os.path.join(REAL_HOME, c) for c in CONTAINMENT if c not in WRITTEN_BY_CLI))
+    elif a.cmd == 'refs':
+        r = refs(a.path)
+        print('\n'.join(r) if r else 'no references')
+    else:
+        globals()['cmd_' + a.cmd.replace('-', '_')](a)
+
+
+main()

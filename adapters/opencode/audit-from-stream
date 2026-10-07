@@ -27,18 +27,18 @@ for line in sys.stdin:
         continue
     try:
         ev = json.loads(line)
-    except ValueError:
+        part = ev.get('part') or {}
+        if part.get('type') != 'tool':
+            continue
+        state = part.get('state') or {}
+        if state.get('status') not in ('completed', 'error'):
+            continue
+        args = dict(state.get('input') or {})
+        if 'filePath' in args:
+            args.setdefault('file_path', args['filePath'])
+        name = part.get('tool') or '?'
+        core.record(NAMES.get(name, name), args,
+                    args.get('workdir') or CWD,
+                    ev.get('sessionID') or SESSION)
+    except Exception:
         continue
-    part = ev.get('part') or {}
-    if part.get('type') != 'tool':
-        continue
-    state = part.get('state') or {}
-    if state.get('status') not in ('completed', 'error'):
-        continue
-    args = dict(state.get('input') or {})
-    if 'filePath' in args:
-        args.setdefault('file_path', args['filePath'])
-    name = part.get('tool') or '?'
-    core.record(NAMES.get(name, name), args,
-                args.get('workdir') or CWD,
-                ev.get('sessionID') or SESSION)

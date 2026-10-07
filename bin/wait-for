@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# wait-for — wait on a job instead of a hand-written sleep loop; registered so the sentinel and dashboard see it.
+set -uo pipefail
+
+usage() {
+  cat <<'EOF'
+usage: wait-for [--label L] [--every S] --pid PID
+       wait-for [--label L] [--every S] --file F --match REGEX [--job PID]
+       wait-for [--label L] [--every S] --until 'SHELL CONDITION' [--job PID]
+       wait-for --list [--json]
+exit 0 condition met · 3 job died, or (--file without --job) file unchanged 15 min with no writer · 2 usage
+EOF
+}
+
+DIR=${WAIT_FOR_DIR:-${XDG_RUNTIME_DIR:-/tmp}/agent-waits}
+STALL=${WAIT_FOR_STALL:-900}
+
+alive() {
+  local s
+  s=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
+  s=${s##*) }
+  [ "${s%% *}" != Z ]
+}
+
+list() {
+  local f pid now
+  now=$(date +%s)
+  shopt -s nullglob
+  for f in "$DIR"/*.json; do
+    pid=$(basename "$f" .json)
+    alive "$pid" || { rm -f "$f"; continue; }
+    if [ "${1:-}" = --json ]; then cat "$f"; else
+      jq -r --argjson now "$now" \
+        '"\(.pid)\t\((($now - .start) / 60 | floor))m\t\(.label)\t\(.kind) \(.target)\(if .match != "" then " =~ " + .match else "" end)\(if .job != "" then " (job " + .job + ")" else "" end)"' "$f"
+    fi
+  done | { if [ "${1:-}" = --json ]; then jq -s .; else cat; fi; }
+}
+
+label="" every=10 kind="" target="" match="" job=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --list) list "${2:-}"; exit 0 ;;
+    --label) label=$2; shift ;;
+    --every) every=$2; shift ;;
+    --pid|--file|--until) kind=${1#--}; target=$2; shift ;;
+    --match) match=$2; shift ;;
+    --job) job=$2; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+  shift
+done
+[ -n "$kind" ] && [ -n "$target" ] || { usage >&2; exit 2; }
+[ "$kind" != file ] || [ -n "$match" ] || { usage >&2; exit 2; }
+[ "$kind" = file ] && target=$(realpath -m -- "$target")
+label=${label:-$kind $target}
+
+met() {
+  case "$kind" in
+    pid) ! alive "$target" ;;
+    file) grep -qE -- "$match" "$target" 2>/dev/null ;;
+    until) bash -c "$target" >/dev/null 2>&1 ;;
+  esac
+}
+
+# True when the polled file exists, is unchanged for STALL seconds and no process has it open for writing.
+stalled() {
+  local mtime fd flags
+  mtime=$(stat -c %Y -- "$target" 2>/dev/null) || return 1
+  [ $(( $(date +%s) - mtime )) -ge "$STALL" ] || return 1
+  while read -r fd; do
+    flags=$(sed -n 's/^flags:\s*//p' "${fd/\/fd\//\/fdinfo\/}" 2>/dev/null)
+    [ -n "$flags" ] && (( 8#$flags & 3 )) && return 1
+  done < <(find /proc/[0-9]*/fd -maxdepth 1 -lname "$target" 2>/dev/null)
+  return 0
+}
+
+finish() { echo "wait-for: $label: $2"; exit "$1"; }
+
+mkdir -p "$DIR"
+reg="$DIR/$$.json"
+out=$(readlink /proc/$$/fd/1 2>/dev/null)
+task=""; [[ "$out" == */tasks/*.output ]] && { task=${out##*/}; task=${task%.output}; }
+jq -n --argjson pid $$ --argjson start "$(date +%s)" --arg label "$label" --arg kind "$kind" \
+  --arg target "$target" --arg match "$match" --arg job "$job" --arg cwd "$PWD" \
+  --arg session "${CLAUDE_CODE_SESSION_ID:-}" --arg claude_pid "${CLAUDE_PID:-}" --arg task "$task" \
+  '{pid:$pid,start:$start,label:$label,kind:$kind,target:$target,match:$match,job:$job,cwd:$cwd,session:$session,claude_pid:$claude_pid,task:$task}' >"$reg"
+trap 'rm -f "$reg"' EXIT
+trap 'kill $! 2>/dev/null; exit 143' TERM INT HUP
+
+while :; do
+  met && finish 0 "done"
+  if [ -n "$job" ] && ! alive "$job"; then
+    met && finish 0 "done"
+    finish 3 "job $job died"
+  fi
+  [ "$kind" = file ] && [ -z "$job" ] && stalled && finish 3 "stalled: $target unchanged $((STALL / 60)) min, no writer"
+  sleep "$every" & wait $!
+done

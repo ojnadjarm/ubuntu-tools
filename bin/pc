@@ -27,7 +27,7 @@ if [ "$sub" = help ] || [ "$sub" = --help ] || [ "$sub" = -h ]; then
     [top]=kernel [trace]=kernel [idle]=kernel
     [audio]=session [bt]=session [dbus]=session [input]=session [lid]=session [mutter]=session
     [docker]=services [journal]=services [units]=services
-    [bench]=safety [doctor]=safety [explain]=safety [undo]=safety
+    [bench]=safety [doctor]=safety [explain]=safety [need]=safety [undo]=safety
   )
   LAYERS=(desktop kernel session services safety)
   declare -A TITLE=(

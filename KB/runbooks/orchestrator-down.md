@@ -1,11 +1,33 @@
 # Runbook: orchestrator pane not serving (pc status shows orch= not ok)
 
-**Retired 2026-09-13 (owner decision):** `claude-orchestrator.service` is disabled. The owner runs
-the orchestrator himself (`claude --continue` in his own terminal, outside tmux); the unit's
-`claude --remote-control $HARNESS_HOST` session showed up as a duplicate host entry in the Claude
-app. While the unit is disabled `pc status` reports `orch=off`, which is healthy (`--check` passes)
-and `sentinel-check` never repairs or pushes for it. To bring the tmux session back:
-`systemctl --user enable --now claude-orchestrator.service` — the states below apply again.
+`claude-orchestrator.service` is **enabled** (owner rule 2026-09-27: the session always comes back after a
+reboot; the 09-13 "retired" note was a misunderstanding). While it is disabled `pc status` reports `orch=off`
+and `sentinel-check` leaves it alone.
+
+## Boot path (T117, 2026-09-27)
+
+- Linger starts `user@1000` at boot (13.8 s this boot); `default.target` wants the unit. `After=graphical-session.target`
+  only orders: with GDM autologin the unit waits for it (15.4 s), without a graphical login it starts anyway.
+- Root cause of the pre-09-13 boots with no session: the unit ran `claude --remote-control` in `~`, where the trust
+  dialog shows on **every** launch and nothing answered it, so Remote Control never registered (`tmux=alive`, no host
+  in the app). Fixed since T45 by `ExecStartPost=eye-channel-accept claude` (trust + channels dialogs), with
+  `sentinel-check` as the second line.
+- T117 added `ExecStartPre=/usr/bin/nm-online -q -t 60`: Remote Control registers at launch, and Wi-Fi was online
+  only at 16.6 s this boot. No network in 60 s fails the start and `Restart=on-failure` retries every 10 s.
+  `TimeoutStartSec=180` covers the 60 s network wait plus the 60 s dialog wait.
+- Proof without a reboot: `bash ~/agents/bin/tests/orchestrator-boot.test.sh` boots a private `systemd --user`
+  (stock targets only) with a copy of the unit enabled into `default.target` (stub claude, private tmux socket).
+  Not provable without a reboot: the real claude's first launch after boot (Remote Control registering, which
+  conversation `--continue` picks) and the autologin race.
+- One Remote Control host: only the unit's session passes `--remote-control "DarkSaddler Command Center"`. A
+  hand-run `claude --continue` with `/remote-control` on is a second host; hand over instead (below).
+
+## Handover from a hand-run session
+
+`orchestrator-handover <pid>` (the hand-run `claude --continue`): it detaches into the transient unit
+`orchestrator-handover`, waits 20 s, SIGTERMs the pid, starts the unit only once the pid is gone (two `--continue`
+sessions fork the conversation), waits for `orch=ok` and pushes the result. Log:
+`journalctl --user -u orchestrator-handover`. Abort inside the 20 s: `systemctl --user stop orchestrator-handover`.
 
 `tmux=alive` only says the session exists; `orch=` says what its pane is doing
 (`ok` = Claude running and no dialog, `trust-prompt`, `shell`, `dead`). Remote Control on the

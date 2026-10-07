@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Fixture pcbench: away verdict from FIX_AWAY.
+[ "$1" = away ] && echo "{\"away\": ${FIX_AWAY:-false}}"

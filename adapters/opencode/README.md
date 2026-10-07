@@ -18,7 +18,7 @@ then `~/.opencode/bin/opencode`). `opencode` ships free models that need no cred
 
 | File | What |
 |---|---|
-| `run` | the `agent-exec` contract → `opencode run --format json --auto`; writes `cost_usd`/`tokens` to `$META_OUT` and audits every tool call |
+| `run` | the `agent-exec` contract → `opencode run --format json --auto`; writes `cost_usd`/`tokens`/`tool_calls`/`tool_histogram` to `$META_OUT` and audits every tool call |
 | `install` | symlinks `skills/*` into `~/.config/opencode/skills/`, adds `AGENTS.md` to `instructions` in `~/.config/opencode/opencode.json` |
 | `uninstall` | reverses exactly those two |
 | `audit-from-stream` | maps opencode's JSON events onto `hooks/audit-log.py`'s generic record; sits in `run`'s pipe |
@@ -29,8 +29,10 @@ then `~/.opencode/bin/opencode`). `opencode` ships free models that need no cred
 the analogue of Claude's `--permission-mode bypassPermissions`), `--model provider/model`,
 `--title agent-<n>`, and the message as a positional after `--`.
 
-Result text = every `part.type == "text"` event joined; `cost` and `tokens` come from
-`part.type == "step-finish"`; tool calls are `part.type == "tool"` with
+Result text = every `part.type == "text"` event joined; `cost` and `tokens` are summed over every
+`part.type == "step-finish"` and written in Claude's usage key names (`input_tokens`, `output_tokens`
+incl. reasoning, `cache_read_input_tokens`, `cache_creation_input_tokens`) so `agent-run` indexes
+them; tool calls are `part.type == "tool"` with
 `part.tool` (lowercase) and `part.state.input`.
 
 ## Where the contract and the skills come from
@@ -46,7 +48,6 @@ config entry is what makes it work from any directory. Skills are read from
 | Claude | opencode | Effect |
 |---|---|---|
 | `--append-system-prompt` | none | the system file (`AGENT-PREAMBLE.md`) is prepended to the message with a separator |
-| `--max-budget-usd` | none | `BUDGET_USD` is ignored; the `--timeout` in `agent-exec` is the only cap |
 | `--model opus` | `provider/model` | a bare model name in `agent.env` is ignored and opencode's default is used; set `OPENCODE_MODEL=provider/model` to pin one |
 | `claude agents --json` | none | background runs are found through `<agent>/state/pid`, which `agent-exec` writes |
 | PostToolUse hook | JSON event stream | auditing is a pipe in `run`, not a hook, so it only covers `agent-run` sessions — not an interactive `opencode` TUI |

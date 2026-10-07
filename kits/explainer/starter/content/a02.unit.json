@@ -1,0 +1,62 @@
+{
+  "id": "a02-bias",
+  "title": "Bias: the dial with no input",
+  "voice": { "engine": "kokoro-82M-fp32", "voice": "af_heart", "speed": 0.92 },
+  "introduces": [
+    { "id": "input", "word": "input", "gloss": "the number that flows in from the left tube", "namedCue": "input" },
+    { "id": "weight", "word": "weight", "gloss": "a dial that scales its input", "namedCue": "weight" },
+    { "id": "output", "word": "output", "gloss": "the number the gauge reads", "namedCue": "gauge" },
+    { "id": "bias", "word": "bias", "gloss": "a dial fed by an always-full tube; it shifts every output", "namedCue": "bias" }
+  ],
+  "chapters": [
+    { "id": "machine", "numeral": "I", "title": "The machine", "clips": ["w1"] },
+    { "id": "empty", "numeral": "II", "title": "No input", "clips": ["w2"] },
+    { "id": "bias", "numeral": "III", "title": "The bias", "clips": ["w3"] },
+    { "id": "recap", "numeral": "IV", "title": "Recap", "clips": ["w4"] },
+    { "id": "turn", "numeral": "V", "title": "Your turn", "beat": "drive" },
+    { "id": "puzzle", "numeral": "VI", "title": "Puzzle", "beat": "ex" }
+  ],
+  "parts": [
+    { "id": "tube", "n": 1, "name": "Input tube", "term": "input" },
+    { "id": "dialW", "n": 2, "name": "Weight dial", "term": "weight" },
+    { "id": "source", "n": 3, "name": "Constant source", "term": "bias" },
+    { "id": "dialB", "n": 4, "name": "Bias dial", "term": "bias" },
+    { "id": "gauge", "n": 6, "name": "Gauge", "term": "output" }
+  ],
+  "clips": [
+    { "id": "w1", "beat": "watch", "focus": "machine", "sentences": [
+      "{machine}Here is a neuron again, drawn in section.",
+      "{input}An input flows in from the left, {weight}through its weight dial, {gauge}and the gauge reads the output."
+    ]},
+    { "id": "w2", "beat": "watch", "focus": "input", "sentences": [
+      "{empty}Now empty the input.",
+      "{zero}Zero, times any weight, is still zero.",
+      "{stuck}Turn the weight dial all you like. The needle will not move."
+    ]},
+    { "id": "w3", "beat": "watch", "focus": "bias", "sentences": [
+      "{source}So a neuron has a second dial, {full}fed from a tube that is always full.",
+      "{bias}This dial is called the bias.|",
+      "{shift}It adds the same amount to the output, {always}whatever the input is."
+    ]},
+    { "id": "w4", "beat": "watch", "focus": "gauge", "sentences": [
+      "{recap}The weight scales the input. {recap2}The bias shifts the result.",
+      "{mark}Together, they can put the needle on any mark."
+    ]},
+    { "id": "d1", "beat": "drive", "sentences": ["Your turn. The input is empty. Turn the weight dial two clicks to the right."] },
+    { "id": "d1ok", "beat": "drive", "sentences": ["The needle stayed at zero. With no input, the weight has nothing to scale."] },
+    { "id": "d2", "beat": "drive", "sentences": ["Now turn the bias dial, until the needle sits on the brass mark."] },
+    { "id": "d2hint", "beat": "drive", "sentences": ["The bias dial adds its setting straight to the output. Turn it to the right."] },
+    { "id": "d2ok", "beat": "drive", "sentences": ["On the mark, with no input at all. That is what a bias is for."] },
+    { "id": "r1", "beat": "ex", "sentences": [
+      "Now a puzzle. The input is two, and the mark is at three.",
+      "Reach it in six clicks or fewer. The punched holes count your clicks."
+    ]},
+    { "id": "r1ok", "beat": "ex", "sentences": ["On the mark. The weight and the bias shared the work."] },
+    { "id": "r1miss", "beat": "ex", "sentences": ["Out of clicks. The dials go back to zero."] },
+    { "id": "r1hint", "beat": "ex", "sentences": ["Each click is half a unit. The weight counts twice here, because the input is two."] },
+    { "id": "r2", "beat": "ex", "sentences": ["Last one. The input is one, and the mark is at minus two. Four clicks."] },
+    { "id": "r2ok", "beat": "ex", "sentences": ["Below zero, on the mark. Weight and bias can both pull the output down."] },
+    { "id": "r2miss", "beat": "ex", "sentences": ["Out of clicks. The dials go back to zero."] },
+    { "id": "r2hint", "beat": "ex", "sentences": ["With an input of one, a click on either dial moves the needle half a unit. Turn them to the left."] }
+  ]
+}

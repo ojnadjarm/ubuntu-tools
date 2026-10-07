@@ -30,6 +30,13 @@ class Search(unittest.TestCase):
         self.assertLessEqual(len(top["snippets"]), 3)
         self.assertTrue(any("<mark>alpha</mark>" in s.lower() for s in top["snippets"]))
 
+    def test_snippet_marks_do_not_nest(self):
+        from dash.services.search import snippets
+        e = {"body": "the market & <b> amp"}
+        self.assertEqual(snippets(e, ["market", "a"]),
+                         ["the <mark>market</mark> &amp; &lt;b> <mark>a</mark>mp"])
+        self.assertEqual(snippets(e, ["amp"]), ["the market &amp; &lt;b> <mark>amp</mark>"])
+
     def test_accent(self):
         self.assertEqual(self.paths("revision"), ["Projects/beta.md"])
 

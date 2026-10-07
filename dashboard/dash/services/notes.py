@@ -99,10 +99,10 @@ _index = (None, None)
 
 
 def vault_index(v=None):
-    """Per-note links, status, tags, headings, tasks and words; rebuilt only when the tree's newest mtime moves."""
+    """Per-note links, status, tags, headings, tasks and words; rebuilt when the note count, paths or newest mtime change."""
     global _index
     v = v or cached("vault", TTL, vault)
-    key = (v["count"], max([n["mtime"] for n in v["notes"]] or [0]))
+    key = (v["count"], max([n["mtime"] for n in v["notes"]] or [0]), hash(tuple(n["path"] for n in v["notes"])))
     if _index[0] == key:
         return _index[1]
     maps = link_maps(v["notes"])
@@ -230,7 +230,7 @@ def notes_today():
     daily, template = "Daily/%s.md" % day, "Process/daily-note-template.md"
     cut = time.time() - 30 * 86400
     recent = [{"path": e["path"], "title": e["title"], "mtime": e["mtime"], "ctime": e["ctime"], "line": first_para(e["body"])}
-              for e in sorted(idx.values(), key=lambda e: -e["ctime"])[:5]]
+              for e in sorted(idx.values(), key=lambda e: -e["mtime"])[:5]]
     live = [e for e in sorted(idx.values(), key=lambda e: -e["mtime"])
             if "template" not in e["path"].lower() and (e["status"] == "active" or e["mtime"] >= cut)]
     tasks = [{"path": e["path"], "title": e["title"], "line": t["line"], "text": t["text"]} for e in live for t in e["tasks"]]

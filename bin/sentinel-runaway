@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Runaway-process check: kills stateless helpers pegged at >=90% of a core over two sentinel
-# runs, restarts fat/hot desktop portal helpers, and cleans up agent residue (orphan shell
-# loops, unread capture pipes, hand-run Dark Eye bodies, dead sessions' scratchpads).
+# runs, restarts fat/hot desktop portal helpers, closes hot Chrome trees no Playwright call drives,
+# and cleans up agent residue (orphan shell loops, unread capture pipes, hand-run Dark Eye bodies,
+# dead sessions' scratchpads).
 # Reads /proc directly (one pass, no per-process forks) so a quiet box costs ~nothing.
 set -uo pipefail
 # shellcheck source=/dev/null
@@ -10,11 +11,14 @@ st="${SENTINEL_STATE_DIR:-$HOME/agents/sentinel/state}"
 mkdir -p "$st"
 state="$st/runaway.tsv"
 restarts="$st/runaway-restarts.tsv"
+browsers="$st/runaway-browsers.tsv"
+ACTIONS="${SENTINEL_RUNAWAY_ACTIONS:-$HOME/agents/log/actions.jsonl}"
 DRY=0; [ "${1:-}" = --dry-run ] && DRY=1
 DRYRULES="${SENTINEL_RUNAWAY_DRYRULES:-}"   # e.g. "1,3" forces those rules to log-only
 
 PROC="${SENTINEL_RUNAWAY_PROC:-/proc}"
 TMPROOT="${SENTINEL_RUNAWAY_TMPROOT:-/tmp}"
+PROJECTS="${SENTINEL_RUNAWAY_PROJECTS:-$HOME/.claude/projects}"   # rule 5: session transcripts <uuid>.jsonl
 
 # Scratch directories agents write into, from $AGENT_SCRATCH_GLOBS (config.env). Rules 1 and 5
 # both work off this list: rule 5 expands the globs, rule 1 matches paths against them. A glob
@@ -35,6 +39,42 @@ in_scratch() {
   done
   return 1
 }
+# session_of <text> — the session id of the first scratch dir named in text (its parent dir's name).
+session_of() {
+  local r m
+  for r in ${SCRATCH_RES[@]+"${SCRATCH_RES[@]}"} '[^/[:space:]]+/scratchpad'; do
+    if [[ "$1" =~ ($r)(/|[[:space:]]|$) ]]; then m=${BASH_REMATCH[1]%/*}; echo "${m##*/}"; return; fi
+  done
+}
+# chrome_bin <name> — true for a Chrome/Chromium executable name (argv[0] basename).
+chrome_bin() {
+  case "$1" in
+    chrome|chromium|chromium-browser|headless_shell|chrome-headless-shell) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+# last_playwright — epoch of the newest Playwright tool call in $ACTIONS, 0 when there is none.
+last_playwright() {
+  local line
+  line=$(tac "$ACTIONS" 2>/dev/null | grep -m1 -F '"tool": "mcp__playwright__')
+  if [[ "$line" =~ \"ts\":\ *\"([^\"]+)\" ]]; then date -d "${BASH_REMATCH[1]}" +%s 2>/dev/null || echo 0; else echo 0; fi
+}
+# owner_live <pid> <session> — true when a claude process is an ancestor of pid or names the session.
+owner_live() {
+  local p=${PARENT[$1]:-} c
+  for _ in 1 2 3 4 5; do
+    [ -n "$p" ] || break
+    [ -n "${CLAUDE_CMD[$p]+x}" ] && return 0
+    p=${PARENT[$p]:-}
+  done
+  [ -n "$2" ] || return 1
+  for c in "${!CLAUDE_CMD[@]}"; do
+    [[ "${CLAUDE_CMD[$c]}" == *"$2"* ]] && return 0
+    find "$PROC/$c/fd" -maxdepth 1 -lname "*$2*" 2>/dev/null | grep -q . && return 0
+  done
+  return 1
+}
+LOOP_RE='(^|[^[:alnum:]_-])(until|while)[[:space:]].*[^[:alnum:]_-]sleep[[:space:]]'
 
 PCT_MIN=90        # % of one core, legacy + rule 4 CPU condition
 STRIKES_MIN=2     # consecutive sentinel runs above PCT_MIN (~30 min at 15-min ticks)
@@ -43,6 +83,8 @@ SHELL_AGE=3600    # rule 1: shell loop under a scratchpad, seconds
 EYE_AGE=7200      # rule 3: hand-run eye-render/main.js outside dark-eye.service, seconds
 SCRATCH_AGE=86400 # rule 5: scratchpad of a dead session, seconds
 RSS_MIN_KB=307200 # rule 4: portal helper RSS, 300 MB
+BROWSER_PCT_MIN=50  # rule 6: whole Chrome tree, % of one core (the 09-26 leak ran 100-165%, idle ~0-2%)
+BROWSER_IDLE=1800   # rule 6: seconds since the last Playwright tool call in $ACTIONS
 
 log() { printf '%s %s\n' "$(date -Is)" "$*" >>"$st/sentinel.log"; }
 
@@ -80,14 +122,25 @@ stop_pid() {
   log "runaway killed pid $pid (rule$rule: $why): $cmd"
 }
 
+# unit_of <pid> — the user service the pid runs in (last *.service under user@N.service), or nothing.
+unit_of() {
+  local cg seg segs unit=""
+  cg=$(grep -m1 '^0::' "$PROC/$1/cgroup" 2>/dev/null)
+  [[ "$cg" == */user@*.service/* ]] || return 0
+  IFS=/ read -ra segs <<<"${cg#*/user@*.service/}"
+  for seg in "${segs[@]}"; do [[ "$seg" == *.service ]] && unit=$seg; done
+  echo "$unit"
+}
+
 restart_helper() {
   local pid="$1" comm="$2" why="$3" unit
-  unit="${comm}.service"
+  unit=$(unit_of "$pid")
+  if [ -z "$unit" ]; then stop_pid 4 "$pid" "$why, in no user unit, killed instead" "$comm"; return; fi
   if dry_for 4; then log "runaway would restart $unit (pid $pid, rule4: $why)"; return; fi
   if systemctl --user restart "$unit" >>"$st/sentinel.log" 2>&1; then
     log "runaway restarted $unit (pid $pid was $why)"
   else
-    stop_pid 4 "$pid" "$why, no such unit $unit, killed instead" "$comm"
+    log "runaway could not restart $unit (pid $pid, rule4: $why), left running"
     return
   fi
   local now_e last=0
@@ -102,15 +155,23 @@ restart_helper() {
 }
 
 declare -A REAPED   # rule 3: one body-sandbox down per sandbox name per run
+# reap_sandbox <name> <age> <pid> <cmd> — `down` the sandbox once, then read each body pid back:
+# `down` exits 0 on a pid it cannot see (an orphaned eye-render, a removed sandbox dir), so a
+# survivor is logged as a failed takedown and killed by pid.
 reap_sandbox() {
-  local name="$1" age="$2"
-  [ -n "${REAPED[$name]:-}" ] && return
-  REAPED["$name"]=1
-  if dry_for 3; then log "runaway would take down sandbox $name (rule3: stale sandbox, $((age/3600))h old)"; return; fi
-  if body-sandbox down --name "$name" >>"$st/sentinel.log" 2>&1; then
-    log "runaway took down sandbox $name (rule3: stale sandbox, $((age/3600))h old)"
-  else
-    log "runaway failed to take down sandbox $name (rule3: stale sandbox, $((age/3600))h old)"
+  local name="$1" age="$2" pid="$3" cmd="$4" first="" rc=0 why
+  why="rule3: stale sandbox, $((age/3600))h old"
+  if [ -z "${REAPED[$name]:-}" ]; then
+    REAPED["$name"]=1; first=1
+    if dry_for 3; then log "runaway would take down sandbox $name ($why)"; return; fi
+    body-sandbox down --name "$name" >>"$st/sentinel.log" 2>&1 || rc=$?
+  fi
+  dry_for 3 && return
+  if [ -d "$PROC/$pid" ]; then
+    log "runaway failed to take down sandbox $name: pid $pid survived body-sandbox down (rc $rc, $why)"
+    stop_pid 3 "$pid" "sandbox $name body left running by body-sandbox down, $((age/3600))h old" "$cmd"
+  elif [ -n "$first" ]; then
+    log "runaway took down sandbox $name ($why)"
   fi
 }
 
@@ -121,7 +182,7 @@ wipe_scratch() {
   log "runaway removed $dir (rule5: dead session's scratchpad, $((age/3600))h old)"
 }
 
-now=$(date +%s)
+now="${SENTINEL_RUNAWAY_NOW:-$(date +%s)}"   # fixtures pin the clock
 read -r uptime_s _ <"$PROC/uptime" 2>/dev/null || uptime_s=0
 boot_epoch=$((now - ${uptime_s%.*}))
 HZ=100
@@ -135,6 +196,7 @@ fi
 new=$(mktemp)
 CMD_ALL=()
 CLAUDE_PIDS=()
+declare -A PARENT CLAUDE_CMD R1_CMD R1_AGE R1_SID CH_PCT BR_CMD BR_KEY BR_PREV
 
 for d in "$PROC"/[0-9]*; do
   pid=${d##*/}
@@ -144,7 +206,7 @@ for d in "$PROC"/[0-9]*; do
   comm="${rest%\)*}"
   after="${rest##*\) }"
   # state ppid pgrp session tty tpgid flags minflt cminflt majflt cmajflt utime stime cutime cstime priority nice nthreads itrealvalue starttime vsize rss...
-  read -r _ _ _ _ _ _ _ _ _ _ _ utime stime _ _ _ _ _ _ starttime _ rss_pages _ <<<"$after" || continue
+  read -r _ ppid _ _ _ _ _ _ _ _ _ utime stime _ _ _ _ _ _ starttime _ rss_pages _ <<<"$after" || continue
   [ -n "${starttime:-}" ] || continue
   cpu=$(( (utime + stime) / HZ ))
   start=$(( boot_epoch + starttime / HZ ))
@@ -159,7 +221,8 @@ for d in "$PROC"/[0-9]*; do
   fi
   [ -n "$cmd" ] || cmd="$comm"
   CMD_ALL+=("$cmd")
-  [ "$comm" = "claude" ] && CLAUDE_PIDS+=("$pid")
+  [ "$comm" = "claude" ] && { CLAUDE_PIDS+=("$pid"); CLAUDE_CMD[$pid]="$cmd"; }
+  PARENT[$pid]="$ppid"
   # /proc/*/stat truncates comm to 15 chars ("xdg-desktop-por"), too short to match or to
   # restart by; prefer argv[0]'s basename, which carries the full executable name.
   fname="$comm"
@@ -195,11 +258,21 @@ for d in "$PROC"/[0-9]*; do
   fi
   printf '%s\t%s\t%s\t%s\t%s\n' "$pid" "$start" "$cpu" "$now" "$strikes" >>"$new"
 
-  # --- rule 1: shell loop whose cwd or argv is under an agent scratchpad, > 60 min ---
-  if [ "$age" -ge "$SHELL_AGE" ] && [[ "$comm" =~ ^(bash|sh)$ ]]; then
+  # --- rule 6: Chrome processes; the browser root is the one without --type=, judged after the pass ---
+  if chrome_bin "$fname"; then
+    CH_PCT[$pid]=$pct
+    if [[ "$cmd" != *" --type="* ]]; then
+      udd=""; for a in "${argv[@]}"; do [[ "$a" == --user-data-dir=* ]] && udd=" $a"; done
+      BR_CMD[$pid]="$fname$udd"; BR_KEY[$pid]="$key"
+      [ -n "${PREV[$key]:-}" ] && BR_PREV[$pid]=1
+    fi
+  fi
+
+  # --- rule 1: until/while-sleep loop under an agent scratchpad, > 60 min, not wait-for; judged after the pass ---
+  if [ "$age" -ge "$SHELL_AGE" ] && [[ "$comm" =~ ^(bash|sh)$ ]] && [[ "$cmd" != *wait-for* ]] && [[ "$cmd" =~ $LOOP_RE ]]; then
     cwd=$(readlink "$d/cwd" 2>/dev/null)
     if [[ "$cmd" == *"/scratchpad"*/* ]] || in_scratch "$cmd" || in_scratch "$cwd"; then
-      stop_pid 1 "$pid" "shell loop under a scratchpad, $((age / 60)) min old" "$cmd"
+      R1_CMD[$pid]="$cmd"; R1_AGE[$pid]="$age"; R1_SID[$pid]=$(session_of "$cmd $cwd")
     fi
   fi
 
@@ -241,7 +314,7 @@ for d in "$PROC"/[0-9]*; do
         sbname=""
         [ -r "$d/environ" ] && sbname=$(tr '\0' '\n' <"$d/environ" 2>/dev/null | sed -n 's/^DARK_EYE_SANDBOX=//p' | head -1)
         if [ -n "$sbname" ]; then
-          reap_sandbox "$sbname" "$age"
+          reap_sandbox "$sbname" "$age" "$pid" "$cmd"
         else
           stop_pid 3 "$pid" "hand-run Dark Eye body outside dark-eye.service, $((age / 3600))h old" "$cmd"
         fi
@@ -252,18 +325,63 @@ done
 
 if [ "$DRY" = 1 ]; then rm -f "$new"; else mv "$new" "$state"; fi
 
+# --- rule 1 verdict: only loops whose owner session is gone ---
+for pid in "${!R1_CMD[@]}"; do
+  owner_live "$pid" "${R1_SID[$pid]}" && continue
+  stop_pid 1 "$pid" "shell loop under a scratchpad, owner gone, $((R1_AGE[$pid] / 60)) min old" "${R1_CMD[$pid]}"
+done
+
+# --- rule 6 verdict: a Chrome tree hot over STRIKES_MIN runs, with no Playwright call for BROWSER_IDLE ---
+declare -A BR_PCT BR_STRIKES
+if [ -n "${BR_CMD[*]+x}" ]; then
+  if [ -r "$browsers" ]; then
+    while IFS=$'\t' read -r k s; do BR_STRIKES["$k"]=$s; done <"$browsers"
+  fi
+  for pid in "${!CH_PCT[@]}"; do
+    p=$pid
+    for _ in 1 2 3 4 5 6; do
+      if [ -n "${BR_CMD[$p]+x}" ]; then BR_PCT[$p]=$(( ${BR_PCT[$p]:-0} + CH_PCT[$pid] )); break; fi
+      p=${PARENT[$p]:-}; [ -n "$p" ] || break
+    done
+  done
+  pw_last=""
+  bnew=$(mktemp)
+  for pid in "${!BR_CMD[@]}"; do
+    k=${BR_KEY[$pid]} tpct=${BR_PCT[$pid]:-0} s=0
+    if [ -n "${BR_PREV[$pid]:-}" ] && [ "$tpct" -ge "$BROWSER_PCT_MIN" ]; then s=$(( ${BR_STRIKES[$k]:-0} + 1 )); fi
+    if [ "$s" -ge "$STRIKES_MIN" ]; then
+      [ -n "$pw_last" ] || pw_last=$(last_playwright)
+      idle=$(( now - pw_last ))
+      if [ "$idle" -ge "$BROWSER_IDLE" ]; then
+        [ "$pw_last" = 0 ] && idle_txt="no Playwright call in the log" || idle_txt="no Playwright call for $((idle / 60)) min"
+        stop_pid 6 "$pid" "Chrome tree at ${tpct}% of a core over $s runs, $idle_txt" "${BR_CMD[$pid]}"
+        s=0
+      fi
+    fi
+    printf '%s\t%s\n' "$k" "$s" >>"$bnew"
+  done
+  if [ "$DRY" = 1 ]; then rm -f "$bnew"; else mv "$bnew" "$browsers"; fi
+elif [ "$DRY" = 0 ]; then
+  rm -f "$browsers"
+fi
+
 # --- rule 5: scratchpads of sessions whose agent process is gone, > 24 h ---
 shopt -s nullglob
 # Unquoted on purpose: this is where the patterns expand into directories.
 # shellcheck disable=SC2068
 for scratch in ${SCRATCH_GLOBS[@]+${SCRATCH_GLOBS[@]}}; do
   [ -d "$scratch" ] || continue
-  mtime=$(stat -c %Y "$scratch" 2>/dev/null) || continue
-  age=$(( now - mtime ))
+  mtime=$(find "$scratch" -printf '%T@\n' 2>/dev/null | sort -n | tail -1)
+  [ -n "$mtime" ] || continue
+  age=$(( now - ${mtime%.*} ))
   [ "$age" -ge "$SCRATCH_AGE" ] || continue
   uuid_dir="${scratch%/*}"          # the session directory, whatever the glob's last segment is called
   uuid="${uuid_dir##*/}"
   live=0
+  for t in "$PROJECTS"/*/"$uuid".jsonl; do
+    tm=$(stat -c %Y "$t" 2>/dev/null) || continue
+    [ $(( now - tm )) -lt "$SCRATCH_AGE" ] && { live=1; break; }
+  done
   for c in "${CMD_ALL[@]:-}"; do
     [[ "$c" == *"$uuid"* ]] && { live=1; break; }
   done

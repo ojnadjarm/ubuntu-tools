@@ -91,6 +91,14 @@ Alone: everything inside `~/agents/toolsmith/`. Everything else is a proposal ca
   touching sound, TV, monitors or network, `ufw` / `sshd` / `sudoers`, `AGENTS.md` (a change to its
   §5 is additionally flagged `contract-§5`), or `~/.claude/CLAUDE.md`.
 
+## Owner hold
+
+- A `BACKLOG.md` row with status `hold` is the owner's veto: no toolsmith run or swarm lane edits it (any cell but
+  rank), re-queues, spawns, drops or re-proposes it. Only the owner changes it.
+- Step a also runs `toolsmith-inputs --check`; a changed hold row it prints goes in the report, never reverted. At
+  the end of the run, save the collector's `hold.rows` as `hold` in `state/last-seen.json`.
+- A hold new since that snapshot shows once in the digest (`REPORT.md`, Monday push) as "held by owner: TSP-nnn".
+
 ## Flow after a go
 
 Owner says `go TSP-007` → the orchestrator spawns one implementer (Opus for `bin/` and bench work,

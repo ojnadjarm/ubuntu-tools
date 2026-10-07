@@ -29,6 +29,9 @@
 __pycache__/
 *.pyc
 
+# npm dependencies: installed by `npm install`, never tracked.
+node_modules/
+
 # Planning artefacts: plans, tickets and spikes are pre-development, never part of the product.
 /PLAN-*.md
 /ubuntu-ai-first/
@@ -58,8 +61,9 @@ portfolio/incoming/
 /portfolio/
 /KB/orchestrator.md
 
-# Machine-local relay config: absolute paths to this home.
+# Machine-local links to the Dark Eye bridge install (~/.config/dark-eye, ~/.local/state/dark-eye).
 /eye-relay/mcp-*.json
+/eye-relay/state
 
 # Agent run output: toolsmith proposals, backlog and dated reports; pcbench results.
 /toolsmith/proposals/*
@@ -68,7 +72,24 @@ portfolio/incoming/
 /toolsmith/BACKLOG.md
 /toolsmith/PLAN-*.md
 /toolsmith/*-20*.md
+/improve/queue/*
+/improve/saved/
 /bench/LAST.json
 /bench/BASELINE-*.md
 /bench/BASELINE-*.tsv
 /bench/QA-REPORT.md
+/improve/metrics.tsv
+
+# Build and screenshot output of the kits and ticket pages: rebuilt by `vite build` / tools/shot.mjs.
+/kits/**/dist/
+/kits/**/out/
+
+# Orchestrator working papers: ticket history (tailnet links) and the claims-board lock.
+/KB/history.md
+/FILE-CLAIMS.md.lock
+
+# Machine-local links into ~/.claude/skills (absolute paths; the skills own these scripts).
+/bin/finance-month
+/bin/invoice
+/bin/lesson-board
+/bin/new-lesson

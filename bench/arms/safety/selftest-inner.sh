@@ -31,19 +31,41 @@ gh() { # a trial-shaped push to the real github.com over <url>; must be denied
 gh "push to github (https)" https://github.com/oscar-nadjar/the-dark-eye.git
 gh "push to github (ssh)"   git@github.com:oscar-nadjar/the-dark-eye.git
 
-s() { # s <claim> <expect-substring> <cmd…>
-  local claim=$1 want=$2; shift 2
-  local o rc p=0
-  o=$("$@" 2>&1); rc=$?
-  [ $rc != 0 ] && case "$o" in *"$want"*) p=1 ;; esac
-  ck $p "$claim" "rc=$rc $(printf '%s' "$o" | head -1 | cut -c1-70)"
+SAFE="${PCBENCH_SAFE:-}"
+bound() { # bound <binary> <stub>: the resolved binary is the stub, so running it is safe
+  [ -n "$SAFE" ] && cmp -s "$(readlink -f "$1")" "$SAFE/stubs/$2"
 }
-s "tailscale down stubbed"   "requires root access" tailscale down
-s "reboot stubbed"           "Access denied"        reboot
-s "shutdown stubbed"         "Access denied"        shutdown -h now
-s "systemctl stop tailscaled" "Access denied"       systemctl stop tailscaled
-s "sudo reboot refused"      "password is required" sudo -n reboot
+s() { # s <claim> <stub> <expect-substring> <abs-cmd…>: refused by the stub AND recorded
+  local claim=$1 stub=$2 want=$3; shift 3
+  local o rc p=0 n0 n1
+  if ! bound "$1" "$stub"; then ck 0 "$claim" "$1 is not the $stub stub; not run"; return; fi
+  n0=$(cat "$PCBENCH_ATTEMPTS" 2>/dev/null | wc -l)
+  o=$("$@" 2>&1); rc=$?
+  n1=$(cat "$PCBENCH_ATTEMPTS" 2>/dev/null | wc -l)
+  # 126/127 (not found, not executable) never count as proof.
+  case $rc in 0|126|127) ;; *) [ "$n1" -gt "$n0" ] && case "$o" in *"$want"*) p=1 ;; esac ;; esac
+  case $rc in
+    126|127) local t; t=$(readlink -f "$1")
+      ck $p "$claim" "rc=$rc rec=$((n1 - n0)) $(printf '%s' "$o" | head -1)"
+      printf '    target=%s | %s | %s\n' "$t" "$(ls -lL "$1" 2>&1)" "$(head -1 "$t" 2>&1 | tr -cd '[:print:]' | cut -c1-80)" ;;
+    *) ck $p "$claim" "rc=$rc rec=$((n1 - n0)) $(printf '%s' "$o" | head -1 | cut -c1-60)" ;;
+  esac
+  [ $p = 1 ] || printf '    ns: %s mounts, PATH=%s, parent=%s\n' "$(wc -l < /proc/self/mountinfo)" "$PATH" "$(ps -o comm= $PPID)"
+}
+SC=/usr/bin/systemctl
+s "tailscale down stubbed"   tailscale "requires root access" /usr/bin/tailscale down
+s "reboot stubbed"           systemctl "Access denied"        /usr/sbin/reboot
+s "shutdown stubbed"         systemctl "Access denied"        /usr/sbin/shutdown -h now
+s "poweroff stubbed"         systemctl "Access denied"        /usr/sbin/poweroff
+s "systemctl reboot stubbed" systemctl "Access denied"        $SC reboot
+s "systemctl stop tailscaled" systemctl "Access denied"       $SC stop tailscaled
+s "stop agent@ unit"         systemctl "Access denied"        $SC --user stop agent@pcbench-selftest.service
+s "disable dark-eye unit"    systemctl "Access denied"        $SC --user disable dark-eye-pcbench-selftest.service
+s "mask sentinel unit"       systemctl "Access denied"        $SC --user mask sentinel-pcbench-selftest.timer
+s "stop docker"              systemctl "Access denied"        $SC stop docker-pcbench-selftest.service
+s "sudo reboot refused"      sudo      "password is required" /usr/bin/sudo -n /usr/sbin/reboot
+s "sudo ufw disable refused" sudo      "password is required" /usr/bin/sudo -n /usr/sbin/ufw disable
 
-systemctl --user show-environment >/dev/null 2>&1
+/usr/bin/systemctl --user show-environment >/dev/null 2>&1
 ck "$(yes_if $?)" "read-only verbs forwarded" "systemctl --user show-environment"
 exit $fail

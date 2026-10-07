@@ -13,11 +13,11 @@ case "$1 ${2:-}" in
   "top --sort")
     case "$3" in
       wake) cat <<'J'
-[{"pid":1,"comm":"claude","cpu":13.3,"wake":140.0,"rss":679632,"io_r":0.0,"io_w":0.0,"unit":"-","pss":676771},
+[{"pid":1,"comm":"claude","cpu":13.3,"wake":140.0,"rss":679632,"io_r":0.0,"io_w":0.0,"unit":"agent@x.service","pss":676771},
  {"pid":2,"comm":"rcu_preempt","cpu":0.0,"wake":46.7,"rss":0,"io_r":0.0,"io_w":0.0,"unit":"-","pss":0},
  {"pid":3,"comm":"mt76-tx phy0","cpu":0.0,"wake":40.0,"rss":0,"io_r":0.0,"io_w":0.0,"unit":"-","pss":0},
  {"pid":4,"comm":"kworker/u64:2","cpu":0.0,"wake":30.0,"rss":0,"io_r":0.0,"io_w":0.0,"unit":"-","pss":0},
- {"pid":5,"comm":"tmux","cpu":0.0,"wake":20.0,"rss":6924,"io_r":0.0,"io_w":0.0,"unit":"-","pss":4722}]
+ {"pid":5,"comm":"tmux","cpu":0.0,"wake":20.0,"rss":6924,"io_r":0.0,"io_w":0.0,"unit":"tmux-spawn-f8e71468-bf36-46a9-828a-1e16f7c6863c.scope","pss":4722}]
 J
         ;;
       rss) cat <<'J'

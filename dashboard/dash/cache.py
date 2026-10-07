@@ -59,7 +59,7 @@ def swr(blocks):
     if missing:
         fill(missing)
     with lock:
-        return {k: _cache[k]["val"] for k in blocks}
+        return {k: _cache[k]["val"] if k in _cache else blocks[k][1] for k in blocks}
 
 
 def cache_meta(keys):

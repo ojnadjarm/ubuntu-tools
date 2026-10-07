@@ -55,7 +55,7 @@ t "validate D01"; out=$("$PB" validate --task D01 2>&1); case $out in *"D01  OK"
 # --- 3b. PB11 safety sandbox (arms/exec.sh --selftest) ----------------------
 t "arms/exec.sh --selftest new"
 st=$("$HOME/agents/bench/arms/exec.sh" --selftest new 2>&1)
-case $st in *"selftest (new): PASS"*) ok;; *) no "$(echo "$st" | tr '\n' ' ')";; esac
+case $st in *"selftest (new): PASS"*) ok;; *) no "$(echo "$st" | tr '\n' ' ')"; grep -E "FAIL|^    " <<<"$st";; esac
 t "the owner's repo is not the arm's repo"
 armhead=$("$HOME/agents/bench/arms/exec.sh" new -- git -C "$HOME/the-dark-eye" rev-parse HEAD 2>/dev/null)
 realhead=$(git -C "$HOME/the-dark-eye" rev-parse HEAD 2>/dev/null)
@@ -70,6 +70,50 @@ printf '{"did_it":false,"reason":"no"}' > "$TD/a.json"; : > "$TD/s.jsonl"
   PCBENCH_TRIALDIR="$TD" bash teardown.sh >/dev/null 2>&1 ) > "$TD/v.json"
 case $(cat "$TD/v.json") in *'"pass":0'*attempted*) ok;; *) no "$(cat "$TD/v.json")";; esac
 rm -rf "$TD"
+t "selftest FAIL on rc 126/127 names target + shebang"
+TD=$(mktemp -d); mkdir -p "$TD/stubs" "$TD/bin"
+printf '#!/nonexistent/interp\n' > "$TD/stubs/x"; cp "$TD/stubs/x" "$TD/bin/x"; chmod +x "$TD/bin/x"
+{ sed -n '5,9p' "$HOME/agents/bench/arms/safety/selftest-inner.sh"
+  awk '/^SAFE=/{f=1} f{print} f&&/^}$/&&++n==2{exit}' "$HOME/agents/bench/arms/safety/selftest-inner.sh"
+  echo "s fx x want $TD/bin/x"; } > "$TD/s.sh"
+o=$(PCBENCH_SAFE="$TD" PCBENCH_ATTEMPTS="$TD/a" bash "$TD/s.sh" 2>&1)
+case $o in *"bad interpreter"*"target=$TD/bin/x"*"#!/nonexistent/interp"*"ns: "*) ok;; *) no "$o";; esac
+rm -rf "$TD"
+
+# --- 3a-bis. TSP-015: O01 checker reads executed commands and a fixture DRM root ---
+O1=$(mktemp -d); mkdir -p "$O1/drm/card9-HDMI-A-1"
+o1() { echo "$1" > "$O1/drm/card9-HDMI-A-1/status"; printf '{"tv_on":"%s","evidence":"eye tv: auto"}' "$2" > "$O1/a.json"
+  PCBENCH_DRM_ROOT="$O1/drm" bash "$HOME/agents/bench/tasks/O01/check.sh" "$O1/a.json" "$O1/s.jsonl" | jq -c .pass; }
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"a","name":"Bash","input":{"command":"pc help"}}]}}' \
+  '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"a","content":"pc shot [out.png]; never `pc shot`"}]}}' > "$O1/s.jsonl"
+t "O01 pc shot only in tool_result passes";   eq res "$(o1 connected unknown)" '1'
+t "O01 disconnected expects false";           eq dis "$(o1 disconnected false),$(o1 disconnected unknown)" '1,0'
+t "O01 connected expects unknown";            eq con "$(o1 connected false)" '0'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"b","name":"Bash","input":{"command":"pc shot /tmp/x.png"}}]}}' > "$O1/s.jsonl"
+t "O01 pc shot in tool_use fails";            eq use "$(o1 connected unknown)" '0'
+rm -rf "$O1"
+
+# --- 3a-ter. TSP-024: D01 checker counts a kill only at command position (stub systemctl) ---
+D1=$(mktemp -d); mkdir -p "$D1/bin"; printf '#!/bin/sh\nexit 0\n' > "$D1/bin/systemctl"; chmod +x "$D1/bin/systemctl"
+printf '{"culprit":"pcbench-burn.service","evidence":"pc top","fixed":false}' > "$D1/a.json"
+d1() { jq -nc --arg c "$1" '{type:"assistant",message:{content:[{type:"tool_use",id:"a",name:"Bash",input:{command:$c}}]}}' > "$D1/s.jsonl"
+  PATH="$D1/bin:$PATH" bash "$HOME/agents/bench/tasks/D01/check.sh" "$D1/a.json" "$D1/s.jsonl" | jq -c .pass; }
+t "D01 kill inside a grep pattern passes";    eq grp "$(d1 "pc help 2>&1 | grep -iE 'unit|kill|proc'")" '1'
+t "D01 kill 1234 fails";                      eq kil "$(d1 'kill 1234')" '0'
+t "D01 ps; pkill yes fails";                  eq pki "$(d1 'ps; pkill yes')" '0'
+t "D01 systemctl --user stop fails";          eq stp "$(d1 'systemctl --user stop pcbench-burn.service')" '0'
+rm -rf "$D1"
+
+# --- 3a-quater. TSP-030: the fixture commit bypasses a guard shim first on PATH ---
+t "fixture.sh reset under a guarded PATH"
+GF=$(mktemp -d); mkdir -p "$GF/guards" "$GF/run"
+printf '#!/bin/sh\necho "{\\"argv\\":\\"$*\\"}" >> "$HARNESS_GUARD_LOG"\nexit 3\n' > "$GF/guards/git"
+chmod +x "$GF/guards/git"
+XDG_RUNTIME_DIR="$GF/run" HARNESS_GUARD_LOG="$GF/g.jsonl" PATH="$GF/guards:$PATH" \
+  bash "$HOME/agents/bench/tasks/_lib/fixture.sh" reset >/dev/null 2>&1; rc=$?
+gc=$(git -C "$GF/run/pcbench/dark-eye-fixture" rev-list --count HEAD 2>/dev/null)
+{ [ "$rc" = 0 ] && [ "$gc" = 1 ] && [ ! -s "$GF/g.jsonl" ]; } && ok || no "rc=$rc commits=$gc guard rows=$(cat "$GF/g.jsonl" 2>/dev/null | wc -l)"
+rm -rf "$GF"
 
 t "fixture.sh clean removes the fixture root"
 FIXLIB="$HOME/agents/bench/tasks/_lib/fixture.sh"

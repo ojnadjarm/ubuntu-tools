@@ -51,9 +51,63 @@ case "$rc" in
 esac
 grep -q 'shutdown' "$CALLS" && nok 'switch=1 dry-run never calls shutdown' "$(cat "$CALLS")" || ok 'switch=1 dry-run never calls shutdown'
 
-# 3. Unset: defaults to 1 (behaviour before the switch existed).
+# 3. Unset: fails safe to 0, a missing switch never reboots (T116).
 printf 'HARNESS_HOST=fixture\n' >"$WORK/config.env"
 out=$(HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" --assume-reboot --dry-run 2>&1)
-grep -q 'auto-reboot-disabled-by-owner' <<<"$out" && nok 'unset defaults to auto-reboot on' "$out" || ok 'unset defaults to auto-reboot on'
+has 'unset defaults to auto-reboot off' "$out" 'REBOOT REFUSED: auto-reboot-disabled-by-owner'
+
+# 4. Real run under a fake HOME: the upgrade count is this run's "Setting up" lines, printed once.
+FH="$WORK/home"; mkdir -p "$FH/agents/bin" "$FH/agents/maintenance/state"
+cp "$BIN/fleetlib.sh" "$BIN/env.sh" "$FH/agents/bin/"
+printf 'Setting up old-run (1)\nSetting up old-run (2)\n' >"$FH/agents/maintenance/state/last-apt.log"
+printf '#!/bin/sh\necho "sudo $*" >>"%s"\ncase "$*" in *full-upgrade*) printf "Unpacking a\\nSetting up a (1)\\nSetting up b (2)\\nSetting up c (3)\\n" ;; esac\nexit 0\n' \
+  "$CALLS" >"$WORK/stub/sudo"
+printf 'HARNESS_HOST=fixture\nMAINT_AUTO_REBOOT=0\n' >"$WORK/config.env"
+out=$(HOME="$FH" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" 2>&1)
+is 'real run counts this run only, once' "$(grep '^upgraded\|package operations' <<<"$out")" 'upgraded: 3 package operations'
+grep -q 'shutdown' "$CALLS" && nok 'real run with switch=0 never calls shutdown' "$(cat "$CALLS")" || ok 'real run with switch=0 never calls shutdown'
+
+# 4b. A failing apt step (held dpkg lock) is reported, pushed and exits 1.
+printf '#!/bin/sh\necho "sudo $*" >>"%s"\ncase "$*" in *apt-get*) echo "E: Could not get lock /var/lib/dpkg/lock-frontend"; exit 100 ;; esac\nexit 0\n' \
+  "$CALLS" >"$WORK/stub/sudo"
+: >"$CALLS"
+out=$(HOME="$FH" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" 2>&1); rc=$?
+is 'apt failure exits 1' "$rc" 1
+has 'apt failure in the summary' "$out" 'apt FAILED (rc 100)'
+has 'apt failure pushed' "$(cat "$CALLS")" 'notify-owner -t maintenance apt FAILED (rc 100)'
+
+# 5-6. The unit's chain (T116): env -i with agent@.service's environment, a parent that sources
+# fleetlib.sh like agent-run, then maintenance-run as a child, not dry, with a reboot pending.
+# bwrap binds a fixture /run/reboot-required and the stub over the real systemctl (= shutdown) and sudo.
+UH="$WORK/unit-home"; mkdir -p "$UH/agents/bin" "$UH/agents/maintenance/state" "$UH/.config/pc-harness"
+cp "$BIN/fleetlib.sh" "$BIN/env.sh" "$UH/agents/bin/"
+echo 'linux-image-fixture' >"$WORK/reboot-required"
+printf '#!/bin/sh\necho "sudo $*" >>"%s"\nexit 0\n' "$CALLS" >"$WORK/stub/sudo"
+printf '#!/bin/sh\necho "real-path $0 $*" >>"%s"\nexit 0\n' "$CALLS" >"$WORK/stub/real"; chmod +x "$WORK/stub/real"
+unit_mr() { # <config.env body> -> output; rc in $?
+  printf '%s' "$1" >"$UH/.config/pc-harness/config.env"; shift
+  env -i HOME="$UH" USER="$USER" PATH="$UH/.local/bin:$UH/agents/bin:/usr/local/bin:/usr/bin:/bin" \
+    XDG_RUNTIME_DIR="/run/user/$(id -u)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus" \
+    bwrap --dev-bind / / --tmpfs /run --ro-bind "$WORK/reboot-required" /run/reboot-required \
+      --bind "$WORK/stub" "$WORK/stub" \
+      --ro-bind "$WORK/stub/real" "$(readlink -f /usr/sbin/shutdown)" \
+      --ro-bind "$WORK/stub/real" "$(readlink -f /usr/bin/sudo)" \
+      bash -c ". \"\$HOME/agents/bin/fleetlib.sh\"; fleet_path; export PATH=\"$WORK/stub:\$PATH\"; \"\$@\"" _ "$@" 2>&1
+}
+: >"$CALLS"
+unit_mr '' /usr/sbin/shutdown -r +5 >/dev/null; unit_mr '' /usr/bin/sudo shutdown -r +5 >/dev/null
+is 'selftest: real shutdown and sudo paths are the stub in the sandbox' "$(grep -c '^real-path' "$CALLS")" 2
+: >"$CALLS"
+out=$(unit_mr $'HARNESS_HOST=fixture\nMAINT_AUTO_REBOOT=0\n' bash "$BIN/maintenance-run"); rc=$?
+is 'unit chain switch=0 exits 3' "$rc" 3
+has 'unit chain switch=0 refused by the switch' "$out" 'REBOOT REFUSED: auto-reboot-disabled-by-owner'
+has 'unit chain switch=0 pushes' "$(cat "$CALLS")" 'notify-owner -t maintenance reboot required on fixture'
+grep -q 'shutdown\|^real-path' "$CALLS" && nok 'unit chain switch=0 never calls shutdown' "$(cat "$CALLS")" || ok 'unit chain switch=0 never calls shutdown'
+printf 'unit chain switch=0 calls:\n%s\n' "$(sed 's/^/  /' "$CALLS")"
+: >"$CALLS"
+out=$(unit_mr $'HARNESS_HOST=fixture\n' bash "$BIN/maintenance-run"); rc=$?
+is 'unit chain switch removed exits 3' "$rc" 3
+has 'unit chain switch removed refused by the switch' "$out" 'REBOOT REFUSED: auto-reboot-disabled-by-owner'
+grep -q 'shutdown\|^real-path' "$CALLS" && nok 'unit chain switch removed never calls shutdown' "$(cat "$CALLS")" || ok 'unit chain switch removed never calls shutdown'
 
 exit $bad

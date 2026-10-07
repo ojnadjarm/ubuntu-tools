@@ -32,38 +32,56 @@ row() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >>"$WORK/rows"; }
 # ms_since <EPOCHREALTIME sample> — integer milliseconds, no fork.
 ms_since() { local a=${1/./} b=${EPOCHREALTIME/./}; printf '%d' $(( (10#$b - 10#$a) / 1000 )); }
 # check <name> <budget-ms> <cmd…> — OK when the command exits 0 inside its budget; its last
-# line of stdout becomes the detail.
+# line of stdout becomes the detail. A run over budget is retried up to twice and the fastest
+# kept, so one cold or loaded sample is not a FAIL (TSP-023).
 # Checks whose exit 2 is a WARN — a pattern worth reporting, never a broken machine.
-WARN_CHECKS=' browsers '
+WARN_CHECKS=' browsers usage '
 check() {
-  local name=$1 budget=$2 t out rc ms; shift 2
+  local name=$1 budget=$2 t out rc ms first n=1 o r m load note=; shift 2
   t=$EPOCHREALTIME
   # No blanket timeout wrapper: every probe that could genuinely hang carries its own
   # pc_timeout/$PC_TIMEOUT_BIN inside its command; the rest are bounded by their budget.
   out=$("$@" 2>&1); rc=$?
-  ms=$(ms_since "$t")
+  ms=$(ms_since "$t"); first=$ms
+  while [ "$rc" = 0 ] && [ "$ms" -gt "$budget" ] && [ "$n" -lt 3 ]; do
+    n=$((n + 1)); t=$EPOCHREALTIME
+    o=$("$@" 2>&1); r=$?; m=$(ms_since "$t")
+    [ "$m" -lt "$ms" ] && { out=$o; rc=$r; ms=$m; }
+  done
+  if [ "$n" -gt 1 ]; then read -r load _ </proc/loadavg; note=" (best of $n, first ${first}ms, load $load)"; fi
   out=${out##*$'\n'}; out=${out//$'\t'/ }
-  if [ "$rc" = 2 ] && [[ $WARN_CHECKS == *" $name "* ]]; then row WARN "$name" "${out:0:120}" "$ms"
-  elif [ "$rc" != 0 ]; then row FAIL "$name" "exit $rc: ${out:0:120}" "$ms"
-  elif [ "$ms" -gt "$budget" ]; then row FAIL "$name" "${out:0:100} (over budget ${budget}ms)" "$ms"
-  else row OK "$name" "${out:0:120}" "$ms"; fi
+  if [ "$rc" = 2 ] && [[ $WARN_CHECKS == *" $name "* ]]; then row WARN "$name" "${out:0:120}$note" "$ms"
+  elif [ "$rc" != 0 ]; then row FAIL "$name" "exit $rc: ${out:0:120}$note" "$ms"
+  elif [ "$ms" -gt "$budget" ]; then row FAIL "$name" "${out:0:100} (over budget ${budget}ms)$note" "$ms"
+  else row OK "$name" "${out:0:120}$note" "$ms"; fi
 }
 
 ## --- 1. the scripts themselves ----------------------------------------------
+# A script over 100 ms is timed twice more and judged on its fastest run: FAIL only when even
+# that is over, WARN when only a loaded or cold sample was (TSP-023).
 usage_sweep() {
-  local f n=0 slow= worst=0 t ms bad=
+  local f n=0 slow= worst=0 wmax=0 t ms min max load bad="" warn=""
   for f in "$BIN"/pc-*; do
     [ -x "$f" ] || { bad="$bad ${f##*/}:not-exec"; continue; }
     case ${f##*/} in pc-bt) continue;; esac   # PT12 still being written by another agent
     n=$((n + 1))
     t=$EPOCHREALTIME
-    "$f" -h >/dev/null 2>&1 || bad="$bad ${f##*/}:-h=$?"
-    ms=$(ms_since "$t")
-    [ "$ms" -gt "$worst" ] && { worst=$ms; slow=${f##*/}; }
-    [ "$ms" -gt 100 ] && bad="$bad ${f##*/}:${ms}ms"
+    "$f" -h >/dev/null 2>&1 || { bad="$bad ${f##*/}:-h=$?"; continue; }
+    min=$(ms_since "$t"); max=$min
+    for _ in 2 3; do
+      [ "$min" -gt 100 ] || break
+      t=$EPOCHREALTIME; "$f" -h >/dev/null 2>&1; ms=$(ms_since "$t")
+      [ "$ms" -lt "$min" ] && min=$ms; [ "$ms" -gt "$max" ] && max=$ms
+    done
+    [ "$min" -gt "$worst" ] && { worst=$min; wmax=$max; slow=${f##*/}; }
+    if [ "$min" -gt 100 ]; then bad="$bad ${f##*/}:${min}ms"
+    elif [ "$max" -gt 100 ]; then warn="$warn ${f##*/}:${max}/${min}ms"; fi
   done
-  printf '%d scripts, slowest -h %s %dms%s\n' "$n" "$slow" "$worst" "${bad:+ — BAD:$bad}"
-  [ -z "$bad" ]
+  read -r load _ </proc/loadavg
+  printf '%d scripts, slowest -h %s min %d/max %dms, load %s%s%s\n' "$n" "$slow" "$worst" "$wmax" "$load" \
+    "${bad:+ — BAD:$bad}" "${warn:+ — SLOW ONCE:$warn}"
+  [ -n "$bad" ] && return 1
+  [ -z "$warn" ] || return 2
 }
 check usage 3000 usage_sweep
 check pclib 300 bash -c '. "'"$BIN"'/pclib.sh" && echo "sources; guard+ledger+cache loaded"'
@@ -153,11 +171,12 @@ residue() {
 }
 check residue 2000 residue
 
-# A browser tree left behind by a finished task: the Playwright MCP server and its headless
-# Chrome outlive the session that opened them (TSP-020). Read-only — it never signals a pid.
+# A browser tree left behind by a finished task: a headless Chrome whose playwright-mcp ancestor
+# is gone, or older than 24 h (TSP-020, TSP-032); the server's age is information only.
+# Read-only — it never signals a pid.
 browsers() {
-  local d cmd name line start rss age warn=0 detail= k btime clk now args
-  declare -A sum age_s
+  local d cmd name line start rss age warn=0 detail= k btime clk now args pid p n orphan=0
+  declare -A sum age_s fam ppid
   clk=$(getconf CLK_TCK 2>/dev/null) || clk=100
   printf -v now '%(%s)T' -1
   while read -r k v _; do [ "$k" = btime ] && { btime=$v; break; }; done <"$PC_PROC/stat"
@@ -175,14 +194,27 @@ browsers() {
     # after "pid (comm) " the remaining fields start at 3, so starttime (22) is $20.
     line=${line#*') '}; set -- $line; start=${20:-0}
     age=$(( now - (btime + start / clk) ))
+    pid=${d##*/}; fam[$pid]=$name; ppid[$pid]=$2
     sum[$name]=$(( ${sum[$name]:-0} + rss * 4096 / 1048576 ))
     [ "$age" -gt "${age_s[$name]:-0}" ] && age_s[$name]=$age
+  done
+  # A Chrome root (parent not Chrome) is orphaned when no playwright-mcp ancestor is left.
+  for pid in "${!fam[@]}"; do
+    [ "${fam[$pid]}" = chrome-headless ] && [ "${fam[${ppid[$pid]}]:-}" != chrome-headless ] || continue
+    p=${ppid[$pid]} n=0
+    while [ "${p:-0}" -gt 1 ] && [ "${fam[$p]:-}" != playwright-mcp ] && [ $((n += 1)) -lt 64 ]; do
+      read -r line <"$PC_PROC/$p/stat" 2>/dev/null || { p=0; break; }
+      line=${line#*') '}; set -- $line; p=$2
+    done
+    [ "${fam[$p]:-}" = playwright-mcp ] || orphan=$((orphan + 1))
   done
   for k in "${!sum[@]}"; do
     age=${age_s[$k]}
     detail="$detail${detail:+ · }$k $((age * 10 / 86400 / 10)).$((age * 10 / 86400 % 10)) d ${sum[$k]} MB"
-    { [ "$age" -gt 86400 ] || [ "${sum[$k]}" -gt 1024 ]; } && warn=1
+    { { [ "$k" = chrome-headless ] && [ "$age" -gt 86400 ]; } || [ "${sum[$k]}" -gt 1024 ]; } && warn=1
   done
+  [ -n "${sum[chrome-headless]:-}" ] && detail="$detail · orphan $orphan"
+  [ "$orphan" = 0 ] || warn=1
   printf '%s\n' "${detail:-no playwright-mcp or headless chrome tree}"
   [ "$warn" = 0 ] || return 2
 }

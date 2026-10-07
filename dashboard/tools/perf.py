@@ -18,8 +18,8 @@ PATHS = [
     "/api/notes/audio",
     "/api/notes/search?q=moodle",
     "/",
-    "/voice",
-    "/pronunciation",
+    "/api/agents",
+    "/classic",
     "/static/eye.css",
     "/static/machine.html",
 ]

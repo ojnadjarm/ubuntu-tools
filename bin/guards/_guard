@@ -29,9 +29,25 @@ GUARD_ARGV="$*"
 # Fleet units and access paths that must never be stopped, disabled or masked (FLEET.md §5.3).
 fleet_unit() { case "${1%.service}" in tailscaled|sshd|ssh|dark-eye*|docker*|sentinel*|agent@*) return 0 ;; esac; return 1; }
 
+# power_check <what> — reboots and shutdowns need the owner switch on (unset = off) and the 04:00-05:00 window.
+power_check() {
+  local hour
+  if [ "${MAINT_AUTO_REBOOT:-0}" != 1 ]; then
+    refuse "FLEET.md §5.2 — no $1: auto-reboot is off (MAINT_AUTO_REBOOT=${MAINT_AUTO_REBOOT:-unset}), only the owner reboots" \
+           "reported that a reboot is pending" \
+           "the owner, by hand"
+  fi
+  hour=${GUARD_NOW_HOUR:-$(TZ=Europe/Madrid date +%-H)}
+  if [ "$hour" -lt 4 ] || [ "$hour" -ge 5 ]; then
+    refuse "FLEET.md §5.2 — no $1 outside the 04:00-05:00 window (now ${hour}h)" \
+           "reported that a reboot is pending; \`maintenance-run\` takes it in the window" \
+           "the owner, by hand"
+  fi
+}
+
 # guard_check <name> [args…] — the refusal rules for one command name.
 guard_check() {
-  local me verb skip a hour n i sub unit
+  local me verb skip a n i sub unit
   me=$1; shift
   case "$me" in
   git)
@@ -48,12 +64,7 @@ guard_check() {
              "the owner, by hand" ;;
     esac ;;
   reboot|poweroff|halt|shutdown)
-    hour=${GUARD_NOW_HOUR:-$(TZ=Europe/Madrid date +%-H)}
-    if [ "$hour" -lt 4 ] || [ "$hour" -ge 5 ]; then
-      refuse "FLEET.md §5.2 — no $me outside the 04:00-05:00 window (now ${hour}h)" \
-             "reported that a reboot is pending; \`maintenance-run\` takes it in the window" \
-             "the owner, by hand"
-    fi ;;
+    power_check "$me" ;;
   tailscale)
     for a in "$@"; do case "$a" in -*) continue ;;
       down|logout) refuse "FLEET.md §5.3 — tailscale stays up: it is the owner's way in" \
@@ -65,6 +76,7 @@ guard_check() {
     for a in "$@"; do case "$a" in -*) continue ;;
       *) [ -z "$verb" ] && { verb=$a; continue; }; unit=$a; break ;; esac
     done
+    case "$verb" in reboot|poweroff|halt|kexec|soft-reboot) power_check "systemctl $verb" ;; esac
     case "$verb" in stop|disable|mask)
       fleet_unit "$unit" && \
         refuse "FLEET.md §5.3 — \`systemctl $verb $unit\` would close a fleet unit or the owner's way in" \

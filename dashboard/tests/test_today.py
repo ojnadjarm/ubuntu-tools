@@ -16,6 +16,16 @@ class Today(unittest.TestCase):
         r = server.notes_today()["recent"]
         self.assertEqual([x["mtime"] for x in r], sorted([x["mtime"] for x in r], reverse=True))
 
+    def test_recent_ignores_shared_ctime(self):
+        idx = {"n%d.md" % i: {"path": "n%d.md" % i, "title": "n%d" % i, "mtime": 100 + i, "ctime": 900 - i, "body": "",
+                              "status": "", "tasks": []} for i in range(1, 8)}
+        real, server.notes.vault_index = server.notes.vault_index, lambda v=None: {"notes": idx}
+        try:
+            r = server.notes_today()["recent"]
+        finally:
+            server.notes.vault_index = real
+        self.assertEqual([x["path"] for x in r], ["n7.md", "n6.md", "n5.md", "n4.md", "n3.md"])
+
     def test_unresolved_and_daily(self):
         self.assertEqual(server.notes_api()["unresolved"], [{"target": "Missing", "from": "Projects/beta.md"}])
         self.assertIsNone(server.notes_today()["daily"])

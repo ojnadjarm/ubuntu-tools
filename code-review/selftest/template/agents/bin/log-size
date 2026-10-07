@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+"""log-size — size of every *.log file in a directory, largest first."""
+import glob
+import os
+import sys
+
+
+def human_size(n):
+    """Bytes as B, KB, MB, GB with one decimal."""
+    for unit in ('B', 'KB', 'MB', 'GB'):
+        if n < 1024 or unit == 'GB':
+            return f'{n:.1f} {unit}' if unit != 'B' else f'{int(n)} B'
+        n /= 1024
+
+
+def main():
+    if len(sys.argv) != 2:
+        print('usage: log-size <dir>', file=sys.stderr)
+        return 2
+    rows = sorted(((os.path.getsize(p), p) for p in glob.glob(os.path.join(sys.argv[1], '*.log'))), reverse=True)
+    for size, p in rows:
+        print(f'{human_size(size)}\t{os.path.basename(p)}')
+    return 0
+
+
+sys.exit(main())

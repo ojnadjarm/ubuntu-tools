@@ -2,6 +2,8 @@
 # 15-min health check: bash fixes for known faults, Claude (agent-run sentinel) only if they fail.
 set -uo pipefail
 export PATH="$HOME/.local/bin:$HOME/agents/bin:$PATH"
+# shellcheck source=/dev/null
+[ -n "${HARNESS_ENV_LOADED:-}" ] || . "$HOME/agents/bin/env.sh"
 st="$HOME/agents/sentinel/state"
 mkdir -p "$st"
 exec 9>"$st/.lock"; flock -n 9 || exit 0
@@ -9,7 +11,14 @@ exec 9>"$st/.lock"; flock -n 9 || exit 0
 log() { printf '%s %s\n' "$(date -Is)" "$*" >>"$st/sentinel.log"; }
 # snapshot [--fresh] — pc status JSON; --fresh bypasses the 60 s probe cache (used
 # after a repair, where a cached docker/tailscale value would hide the fix).
-snapshot() { ${SENTINEL_STATUS_CMD:-pc status --json} "$@" 2>/dev/null; }
+# Output without a .sections key (probe crashed or printed nothing) becomes a status.probe FAIL.
+snapshot() {
+  local out
+  out=$(${SENTINEL_STATUS_CMD:-pc status --json} "$@" 2>/dev/null)
+  if jq -e .sections >/dev/null 2>&1 <<<"$out"; then printf '%s\n' "$out"; return; fi
+  log "status probe failed"
+  echo '{"sections":{"status":{"probe":{"state":"FAIL","value":"no valid JSON"}}}}'
+}
 failures() {
   jq -r '.sections|to_entries[]|.key as $s|.value|to_entries[]
          |select(.value.state=="FAIL")|"\($s).\(.key)\t\(.value.value)"' <<<"$1" 2>/dev/null
@@ -20,15 +29,38 @@ failures() {
 FAULTS=(
   'services.docker    sudo systemctl start docker'
   'services.ydotoold  sudo systemctl restart ydotoold'
-  'network.tailscale  sudo tailscale up --timeout 30s'
-  'docker.*           fix_stack'
+  'network.tailscale  fix_tailscale'
+  'docker.*           bounded fix_stack'
+  'keepalive.*        bounded fix_keepalive'
   'agents.orchestrator fix_orch'
 )
+# `tailscale up` refuses unless every non-default pref is restated (hostname, operator, ssh).
+fix_tailscale() { sudo tailscale up --timeout=30s --hostname="$HARNESS_HOST" --operator="$USER" --ssh; }
+compose_file() { grep -l "^name: $1\$" "$HOME"/moodle-envs/*/docker-compose.yml 2>/dev/null | head -1; }
 # Bring the compose stack named by $key (docker.<project>) back up.
 fix_stack() {
-  local cf
-  cf=$(grep -l "^name: ${key#docker.}\$" "$HOME"/moodle-envs/*/docker-compose.yml 2>/dev/null | head -1)
+  local cf; cf=$(compose_file "${key#docker.}")
   [ -n "$cf" ] && docker compose -f "$cf" up -d
+}
+# keepalive.<unit>: restart the user unit; keepalive.http-<project>: restart that compose stack.
+fix_keepalive() {
+  local k=${key#keepalive.} cf
+  case $k in
+    http-*) cf=$(compose_file "${k#http-}"); [ -n "$cf" ] && docker compose -f "$cf" restart;;
+    *) systemctl --user restart "$k";;
+  esac
+}
+# bounded <fix…>: at most SENTINEL_TRIES repairs in a row per $key, then one push and no more until it clears.
+bounded() {
+  local f="$st/tries/$key" n max=${SENTINEL_TRIES:-3}
+  n=$(cat "$f" 2>/dev/null || echo 0)
+  if [ "$n" -ge "$max" ]; then
+    [ "$n" -eq "$max" ] && notify-owner -p high -t sentinel \
+      "sentinel: $key still down after $max repairs ($val); bash repair paused until it recovers" && echo $((n + 1)) >"$f"
+    return 0
+  fi
+  echo $((n + 1)) >"$f"
+  "$@"
 }
 
 # Orchestrator pane not serving ($val = trust-prompt|shell|dead): one repair per episode.
@@ -49,6 +81,7 @@ fix_orch() {
 }
 
 sentinel-runaway || true
+sentinel-waits || true
 
 # pipewire log.level creeps up from debug tools left running; keep it at the default (2).
 pw_lvl=$(pw-metadata -n settings 0 log.level 2>/dev/null | sed -n "s/.*value:'\([0-9]*\)'.*/\1/p")
@@ -57,20 +90,36 @@ if [ -n "$pw_lvl" ] && [ "$pw_lvl" -gt 2 ] 2>/dev/null; then
   log "pipewire log.level was $pw_lvl, reset to 2"
 fi
 
+# Orbiters whose subagent died without a SubagentStop go out here.
+orbit=${ORBIT_HOOK:-$HOME/agents/bin/orbit-hook}
+[ -x "$orbit" ] && "$orbit" sweep </dev/null
+
 json="$(snapshot)"; fails="$(failures "$json")"
-grep -q '^agents.orchestrator' <<<"$fails" || rm -f "$st/orch-repaired" "$st/orch-notified"
+mkdir -p "$st/tries"
+for f in "$st"/tries/*; do
+  [ -e "$f" ] && ! grep -q "^${f##*/}"$'\t' <<<"$fails" && rm -f "$f"
+done
+grep -qE '^(agents.orchestrator|status.probe)' <<<"$fails" || rm -f "$st/orch-repaired" "$st/orch-notified"
 if [ -z "$fails" ]; then date -Is >"$st/last-ok"; exit 0; fi
 log "FAIL: $(tr '\n' ';' <<<"$fails")"
 
+unmatched=""
 while IFS=$'\t' read -r key val; do
+  fixed=""
   for row in "${FAULTS[@]}"; do
     # shellcheck disable=SC2086  # deliberate: the row splits into pattern + fix words
     set -- $row
     # shellcheck disable=SC2254  # deliberate: $1 is the row's glob
-    case "$key" in $1) shift; "$@"; break ;; esac
+    case "$key" in $1) shift; "$@"; fixed=1; break ;; esac
   done
+  [ -n "$fixed" ] || unmatched+="$key;"
 done <<<"$fails" >>"$st/sentinel.log" 2>&1
 
+# A fault with no bash fix gets time to clear on its own (e.g. wifi reassociating) before Claude.
+if [ -n "$unmatched" ]; then
+  log "no bash fix for $unmatched re-checking in ${SENTINEL_SETTLE:-30} s"
+  sleep "${SENTINEL_SETTLE:-30}"
+fi
 json="$(snapshot --fresh)"; left="$(failures "$json")"
 orch=$(awk -F'\t' '$1=="agents.orchestrator"{print $2}' <<<"$left")
 if [ -n "$orch" ]; then
@@ -82,7 +131,7 @@ if [ -n "$orch" ]; then
   left=$(grep -v '^agents.orchestrator' <<<"$left")
   [ -z "$left" ] && exit 0
 fi
-if [ -z "$left" ]; then log "fixed by bash"; date -Is >"$st/last-ok"; exit 0; fi
+if [ -z "$left" ]; then log "$([ -n "$unmatched" ] && echo cleared on re-check || echo fixed by bash)"; date -Is >"$st/last-ok"; exit 0; fi
 
 # Cool-down: the same failure signature escalates to Claude at most once every COOLDOWN seconds.
 COOLDOWN=21600

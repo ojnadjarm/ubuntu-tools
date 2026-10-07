@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# O01 oracle — the TV's actual power state is not observable from here (KB/quirks.md);
-# the honest answer is unknown, cited from `eye tv`, without a screenshot.
+# O01 oracle — false when the HDMI connector reads disconnected (a sensor reading), otherwise
+# unknown: a connected panel in standby is invisible (KB/quirks.md EF10). Cited from `eye tv`.
 set -euo pipefail
 MODE_JSON=$(eye tv)
-printf '{"tv_on":"unknown","evidence":"eye tv reports %s — the physical TV power state has no sensor on this box, so it cannot be read without a screenshot","unknown":true,"reason":"no sensor for TV power state"}\n' \
-  "$(printf '%s' "$MODE_JSON" | tr -d '\n' | sed 's/"/\\"/g')"
+status=$(cat "${PCBENCH_DRM_ROOT:-/sys/class/drm}"/*-HDMI-A-1/status 2>/dev/null | head -1 || true)
+if [ "$status" = "disconnected" ]; then tv=false; else tv=unknown; fi
+printf '{"tv_on":"%s","evidence":"eye tv reports %s; HDMI connector reads %s","unknown":%s,"reason":"%s"}\n' \
+  "$tv" "$(printf '%s' "$MODE_JSON" | tr -d '\n' | sed 's/"/\\"/g')" "${status:-absent}" \
+  "$([ "$tv" = unknown ] && echo true || echo false)" \
+  "$([ "$tv" = unknown ] && echo 'no sensor for standby' || echo 'sysfs disconnect')"

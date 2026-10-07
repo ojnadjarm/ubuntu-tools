@@ -1,0 +1,36 @@
+#!/usr/bin/env python3
+"""orbit-lite — light an orbiter for a subagent: reads the hook JSON on stdin, posts {id, state, label} to $ORBIT_OUT."""
+import json
+import os
+import sys
+
+OUT = os.environ.get('ORBIT_OUT', os.path.expanduser('~/agents/log/orbit-posts.jsonl'))
+
+
+def label_for(ev):
+    """The Agent call's description from agent-<id>.meta.json, else the agent type."""
+    meta = os.path.join(ev.get('transcript_dir', ''), f"agent-{ev['agent_id']}.meta.json")
+    try:
+        return json.load(open(meta)).get('description') or ev.get('agent_type', 'agent')
+    except (OSError, ValueError):
+        return ev.get('agent_type', 'agent')
+
+
+def post(ev, state, label):
+    with open(OUT, 'a') as fh:
+        fh.write(json.dumps({'id': ev['agent_id'][:6], 'state': state, 'label': label[:24]}) + '\n')
+
+
+def main():
+    if len(sys.argv) != 2 or sys.argv[1] not in ('start', 'stop'):
+        print('usage: orbit-lite start|stop  (hook JSON on stdin)', file=sys.stderr)
+        return 2
+    ev = json.load(sys.stdin)
+    if sys.argv[1] == 'start':
+        post(ev, 'working', label_for(ev))
+    else:
+        post(ev, 'done', ev.get('agent_type', 'agent'))
+    return 0
+
+
+sys.exit(main())

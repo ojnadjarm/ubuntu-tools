@@ -1,0 +1,274 @@
+#!/usr/bin/env python3
+"""Stuck-wait reaper: kills wait loops (wait-for or hand-written) whose job or owner agent is gone.
+
+usage: sentinel-waits [--dry-run]    (called by sentinel-check every 15 min; design: research/2026-09-23/T67/design.md)
+"""
+import datetime
+import glob
+import importlib.util
+import os
+import re
+import signal
+import subprocess
+import sys
+import time
+
+HOME = os.path.expanduser("~")
+MIN_AGE = int(os.environ.get("WAITS_MIN_AGE") or 1200)
+STALL = int(os.environ.get("WAITS_STALL") or 900)
+OWNER_IDLE = 1800
+HANDBACK_IDLE = 120
+REG = os.environ.get("WAIT_FOR_DIR") or os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "agent-waits")
+PROJECTS = os.environ.get("CLAUDE_PROJECTS_DIR") or os.path.join(HOME, ".claude", "projects")
+ST = os.environ.get("SENTINEL_STATE_DIR") or os.path.join(HOME, "agents", "sentinel", "state")
+AUDIT = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks", "audit-log.py")
+DRY = "--dry-run" in sys.argv[1:]
+SHELLS = {"bash", "sh", "dash", "zsh"}
+TOOL_SHELL = "/.claude/shell-snapshots/snapshot-"
+LOOP = re.compile(r"\b(until|while)\b")
+PIDREF = re.compile(r"(?:kill -0|ps -p|/proc/|--pid[= ])\s*(\d+)")
+PATHREF = re.compile(r"""(?:^|[\s'"=<>;|&(])((?:~|/|\.{1,2}/|[\w.-]+/)?[\w.@%+-][\w.@%+/-]*\.[A-Za-z0-9]+)""")
+HZ = os.sysconf("SC_CLK_TCK")
+
+
+def snapshot():
+    """{pid: {comm, ppid, state, cpu, age, start, cmd}} from one pass over /proc."""
+    up = float(open("/proc/uptime").read().split()[0])
+    procs = {}
+    for d in glob.glob("/proc/[0-9]*"):
+        try:
+            stat = open(d + "/stat").read()
+            argv = open(d + "/cmdline", "rb").read().split(b"\0")
+        except OSError:
+            continue
+        comm = stat[stat.index("(") + 1:stat.rindex(")")]
+        f = stat[stat.rindex(")") + 2:].split()
+        procs[int(d[6:])] = {
+            "comm": comm, "ppid": int(f[1]), "state": f[0],
+            "cpu": (int(f[11]) + int(f[12])) / HZ, "age": up - int(f[19]) / HZ, "start": f[19],
+            "cmd": " ".join(a.decode(errors="replace") for a in argv if a) or comm,
+        }
+    return procs
+
+
+def alive(procs, pid):
+    return pid in procs and procs[pid]["state"] != "Z"
+
+
+def children(procs, pid):
+    return [p for p, v in procs.items() if v["ppid"] == pid]
+
+
+def tool_shell(procs, pid):
+    """The Claude Bash-tool shell at or above pid (≤ 4 levels), else None."""
+    for _ in range(5):
+        if pid not in procs:
+            return None
+        if TOOL_SHELL in procs[pid]["cmd"]:
+            return pid
+        pid = procs[pid]["ppid"]
+    return None
+
+
+def environ(pid, key):
+    try:
+        for kv in open(f"/proc/{pid}/environ", "rb").read().split(b"\0"):
+            if kv.startswith(key.encode() + b"="):
+                return kv.split(b"=", 1)[1].decode(errors="replace")
+    except OSError:
+        pass
+    return ""
+
+
+def transcript_ended(tx):
+    """An agent is gone once it handed back and idled HANDBACK_IDLE, or idled OWNER_IDLE (orbit-hook's rule)."""
+    idle = time.time() - os.path.getmtime(tx)
+    if idle >= OWNER_IDLE:
+        return True
+    with open(tx, "rb") as f:
+        f.seek(max(0, os.path.getsize(tx) - 65536))
+        tail = f.read().decode(errors="replace")
+    last = tail.splitlines()[-1] if tail else ""
+    return idle >= HANDBACK_IDLE and ('"name":"SubagentHandback"' in tail or '"stop_reason":"end_turn"' in last)
+
+
+def owner(procs, pid):
+    """(ended, who) for the agent that started pid; None when pid was not started by a Claude Bash tool."""
+    ts = tool_shell(procs, pid)
+    if ts is None:
+        return None
+    claude = procs[ts]["ppid"]
+    if procs.get(claude, {}).get("comm") != "claude":
+        return True, "session gone"
+    session = environ(ts, "CLAUDE_CODE_SESSION_ID")
+    try:
+        out = os.readlink(f"/proc/{ts}/fd/1")
+    except OSError:
+        out = ""
+    task = os.path.basename(out)[:-len(".output")] if "/tasks/" in out and out.endswith(".output") else ""
+    if session and task:
+        txs = glob.glob(os.path.join(PROJECTS, "*", session, "subagents", "**", "agent-*.jsonl"), recursive=True)
+        hit = subprocess.run(["grep", "-lF", task, *txs], capture_output=True, text=True).stdout.split() if txs else []
+        if hit:
+            aid = os.path.basename(hit[0])[len("agent-"):-len(".jsonl")][:6]
+            return transcript_ended(hit[0]), f"agent {aid}"
+    return False, f"session {session[:8] or claude}"
+
+
+_writers = None
+
+
+def writers():
+    """Paths some process holds open for writing (built once, only when a loop needs it)."""
+    global _writers
+    if _writers is None:
+        _writers = set()
+        for fd in glob.glob("/proc/[0-9]*/fd/*"):
+            try:
+                flags = int(re.search(r"flags:\s*(\d+)", open(fd.replace("/fd/", "/fdinfo/")).read()).group(1), 8)
+                if flags & 3:
+                    _writers.add(os.readlink(fd))
+            except (OSError, AttributeError):
+                pass
+    return _writers
+
+
+def polled_files(pid, cmd):
+    """Regular files the loop's text names, resolved against its cwd."""
+    try:
+        cwd = os.readlink(f"/proc/{pid}/cwd")
+    except OSError:
+        cwd = "/"
+    files = set()
+    for tok in PATHREF.findall(cmd):
+        if TOOL_SHELL in tok or tok.startswith(("/proc/", "/dev/", "/usr/", "/bin/")):
+            continue
+        p = os.path.normpath(os.path.join(cwd, os.path.expanduser(tok)))
+        if os.path.isfile(p):
+            files.add(p)
+    return files
+
+
+def stuck_reasons(procs, pid, owner_ended):
+    """Why an unregistered loop is stuck: (a) dead pids, (b) stalled files, (c) owner ended."""
+    cmd, why = procs[pid]["cmd"], []
+    pids = {int(p) for p in PIDREF.findall(cmd)}
+    if pids and not any(alive(procs, p) for p in pids):
+        why.append("waits on dead pid " + ",".join(map(str, sorted(pids))))
+    files = polled_files(pid, cmd)
+    now = time.time()
+    if files and all(now - os.path.getmtime(f) >= STALL and f not in writers() for f in files):
+        f = sorted(files)[0]
+        why.append(f"polls {os.path.basename(f)} unchanged {int((now - os.path.getmtime(f)) / 60)} min, no writer")
+    if owner_ended:
+        why.append("owner ended")
+    return why
+
+
+def is_loop(procs, pid, registered):
+    """A shell whose only work is sleeping in an until/while loop, older than MIN_AGE."""
+    v = procs[pid]
+    if v["comm"] not in SHELLS or v["age"] < MIN_AGE or v["cpu"] > 0.01 * v["age"]:
+        return False
+    if not (LOOP.search(v["cmd"]) and "sleep" in v["cmd"]):
+        return False
+    kids = children(procs, pid)
+    if any(procs[k]["comm"] == "wait-for" or k in registered for k in kids):
+        return False
+    return any(procs[k]["comm"] == "sleep" for k in kids)
+
+
+def log(line):
+    if DRY:
+        print(line)
+        return
+    os.makedirs(ST, exist_ok=True)
+    with open(os.path.join(ST, "sentinel.log"), "a") as f:
+        f.write(f"{datetime.datetime.now().astimezone().isoformat(timespec='seconds')} {line}\n")
+
+
+def audit(pid, why):
+    try:
+        spec = importlib.util.spec_from_file_location("audit_log", AUDIT)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mod.record("sentinel", {"command": f"kill {pid}  # stuck wait: {why}"}, ST, "sentinel")
+    except Exception:
+        pass
+
+
+def reap(procs, pid, why):
+    cmd = procs[pid]["cmd"]
+    cmd = " ".join(cmd.split("&& eval ", 1)[-1].split())[:200]
+    if DRY:
+        log(f"stuck-wait would kill pid {pid} ({why}): {cmd}")
+        return
+    targets = [pid] + [k for k in children(procs, pid) if procs[k]["comm"] == "sleep"]
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        for p in targets:
+            try:
+                os.kill(p, sig)
+            except OSError:
+                pass
+        deadline = time.time() + 3
+        while time.time() < deadline and any(_state(p) != "Z" for p in targets):
+            time.sleep(0.1)
+        if all(_state(p) == "Z" for p in targets):
+            break
+    log(f"stuck-wait killed pid {pid} ({why}): {cmd}")
+    audit(pid, why)
+
+
+def _state(pid):
+    try:
+        s = open(f"/proc/{pid}/stat").read()
+        return s[s.rindex(")") + 2]
+    except OSError:
+        return "Z"
+
+
+def main():
+    procs = snapshot()
+    registered = set()
+    for f in glob.glob(os.path.join(REG, "*.json")):
+        pid = int(os.path.basename(f)[:-5]) if os.path.basename(f)[:-5].isdigit() else -1
+        if not alive(procs, pid):
+            if not DRY:
+                os.remove(f)
+            continue
+        registered.add(pid)
+        own = owner(procs, pid)
+        if own and own[0]:
+            reap(procs, pid, f"registered wait, owner {own[1]} ended")
+
+    seen_path = os.path.join(ST, "waits-seen.tsv")
+    try:
+        seen = set(open(seen_path).read().split())
+    except OSError:
+        seen = set()
+    now_seen = set()
+    for pid in sorted(procs):
+        if not is_loop(procs, pid, registered):
+            continue
+        own = owner(procs, pid)
+        if own is None:
+            continue
+        ended, who = own
+        why = stuck_reasons(procs, pid, ended)
+        if not why:
+            continue
+        if ended:
+            reap(procs, pid, f"{'; '.join(why)}; owner {who}")
+            continue
+        key = f"{pid}:{procs[pid]['start']}"
+        now_seen.add(key)
+        if key not in seen:
+            log(f"stuck-wait seen pid {pid} ({'; '.join(why)}; owner {who} still running, left alone)")
+    if not DRY:
+        os.makedirs(ST, exist_ok=True)
+        with open(seen_path, "w") as f:
+            f.write("\n".join(sorted(now_seen)))
+
+
+if __name__ == "__main__":
+    main()

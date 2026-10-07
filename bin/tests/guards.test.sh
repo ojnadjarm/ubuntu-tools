@@ -35,12 +35,25 @@ out=$(git -C "$repo" status --porcelain 2>&1); is 'git status forwards' "$?" 0
 grep -q '^A  f' <<<"$out" && ok 'git status is the real answer' || nok 'git status is the real answer' "$out"
 out=$(git -C "$repo" rev-parse --is-inside-work-tree 2>&1); is 'git rev-parse forwards' "$out" true
 
-# 3. reboot / shutdown / poweroff / halt: refused outside 04-05h, forwarded inside.
+# 3. reboot / shutdown / poweroff / halt: with the owner switch at 0 (or unset) refused at any hour;
+#    with it at 1, refused outside 04-05h and forwarded inside.
 for n in reboot shutdown poweroff halt; do
-  out=$(GUARD_NOW_HOUR=13 "$n" 2>&1); rc=$?
-  [ "$rc" = 3 ] && grep -q '§5.2' <<<"$out" && ok "$n refused at 13h" || nok "$n refused at 13h" "$rc $out"
+  out=$(MAINT_AUTO_REBOOT=0 GUARD_NOW_HOUR=4 "$n" 2>&1); rc=$?
+  [ "$rc" = 3 ] && grep -q 'auto-reboot is off' <<<"$out" && ok "$n refused at 04:30 with the switch at 0" \
+    || nok "$n refused at 04:30 with the switch at 0" "$rc $out"
+  out=$(MAINT_AUTO_REBOOT=1 GUARD_NOW_HOUR=13 "$n" 2>&1); rc=$?
+  [ "$rc" = 3 ] && grep -q '§5.2' <<<"$out" && ok "$n refused at 13h with the switch at 1" || nok "$n refused at 13h with the switch at 1" "$rc $out"
 done
-out=$(GUARD_NOW_HOUR=4 reboot 2>&1); is 'reboot forwards inside the window' "$out" "REAL reboot "
+out=$(unset MAINT_AUTO_REBOOT; GUARD_NOW_HOUR=4 reboot 2>&1); rc=$?
+[ "$rc" = 3 ] && grep -q 'MAINT_AUTO_REBOOT=unset' <<<"$out" && ok 'reboot refused in the window with the switch unset' \
+  || nok 'reboot refused in the window with the switch unset' "$rc $out"
+out=$(MAINT_AUTO_REBOOT=1 GUARD_NOW_HOUR=4 reboot 2>&1); is 'reboot forwards inside the window with the switch at 1' "$out" "REAL reboot "
+for v in reboot poweroff halt kexec soft-reboot; do
+  out=$(MAINT_AUTO_REBOOT=0 GUARD_NOW_HOUR=4 sudo systemctl "$v" 2>&1); rc=$?
+  [ "$rc" = 3 ] && grep -q 'auto-reboot is off' <<<"$out" && ok "sudo systemctl $v refused with the switch at 0" \
+    || nok "sudo systemctl $v refused with the switch at 0" "$rc $out"
+done
+out=$(MAINT_AUTO_REBOOT=1 GUARD_NOW_HOUR=4 sudo systemctl reboot 2>&1); is 'sudo systemctl reboot forwards inside the window with the switch at 1' "$out" "REAL sudo systemctl reboot"
 
 # 4. tailscale down / logout refused, read-only verbs forwarded.
 out=$(tailscale down 2>&1); rc=$?
@@ -49,12 +62,12 @@ out=$(tailscale logout 2>&1); is 'tailscale logout exits 3' "$?" 3
 out=$(tailscale status 2>&1); is 'tailscale status forwards' "$out" "REAL tailscale status"
 
 # 5. sudo: the wrapped command meets the same rules (secure_path hole, TSP-001).
-out=$(GUARD_NOW_HOUR=13 sudo shutdown -r +5 2>&1); rc=$?
+out=$(MAINT_AUTO_REBOOT=1 GUARD_NOW_HOUR=13 sudo shutdown -r +5 2>&1); rc=$?
 [ "$rc" = 3 ] && grep -q '§5.2' <<<"$out" && ok 'sudo shutdown refused at 13h' || nok 'sudo shutdown refused at 13h' "$rc $out"
-out=$(GUARD_NOW_HOUR=13 sudo -n reboot 2>&1); is 'sudo -n reboot exits 3' "$?" 3
-out=$(GUARD_NOW_HOUR=13 sudo -u root -E poweroff 2>&1); is 'sudo -u root -E poweroff exits 3' "$?" 3
-out=$(GUARD_NOW_HOUR=13 sudo -- halt 2>&1); is 'sudo -- halt exits 3' "$?" 3
-out=$(GUARD_NOW_HOUR=13 sudo /sbin/shutdown -h now 2>&1); is 'sudo /sbin/shutdown exits 3' "$?" 3
+out=$(MAINT_AUTO_REBOOT=1 GUARD_NOW_HOUR=13 sudo -n reboot 2>&1); is 'sudo -n reboot exits 3' "$?" 3
+out=$(MAINT_AUTO_REBOOT=1 GUARD_NOW_HOUR=13 sudo -u root -E poweroff 2>&1); is 'sudo -u root -E poweroff exits 3' "$?" 3
+out=$(MAINT_AUTO_REBOOT=1 GUARD_NOW_HOUR=13 sudo -- halt 2>&1); is 'sudo -- halt exits 3' "$?" 3
+out=$(MAINT_AUTO_REBOOT=1 GUARD_NOW_HOUR=13 sudo /sbin/shutdown -h now 2>&1); is 'sudo /sbin/shutdown exits 3' "$?" 3
 out=$(sudo tailscale down 2>&1); rc=$?
 [ "$rc" = 3 ] && grep -q '§5.3' <<<"$out" && ok 'sudo tailscale down refused' || nok 'sudo tailscale down refused' "$rc $out"
 out=$(sudo systemctl stop tailscaled 2>&1); rc=$?
@@ -62,8 +75,12 @@ out=$(sudo systemctl stop tailscaled 2>&1); rc=$?
 out=$(sudo systemctl mask docker.service 2>&1); is 'sudo systemctl mask docker.service exits 3' "$?" 3
 out=$(sudo systemctl disable sentinel-check.timer 2>&1); is 'sudo systemctl disable sentinel-check exits 3' "$?" 3
 
-# maintenance-run's own reboot is exempt because it only fires inside the window.
-out=$(GUARD_NOW_HOUR=4 sudo shutdown -r +5 2>&1); is 'sudo shutdown forwards inside the window' "$out" "REAL sudo shutdown -r +5"
+out=$(MAINT_AUTO_REBOOT=0 GUARD_NOW_HOUR=4 sudo shutdown -r +5 2>&1); rc=$?
+[ "$rc" = 3 ] && grep -q 'auto-reboot is off' <<<"$out" && ok 'sudo shutdown refused in the window with the switch at 0' \
+  || nok 'sudo shutdown refused in the window with the switch at 0' "$rc $out"
+
+# maintenance-run's own reboot is exempt only with the owner switch at 1 and inside the window.
+out=$(MAINT_AUTO_REBOOT=1 GUARD_NOW_HOUR=4 sudo shutdown -r +5 2>&1); is 'sudo shutdown forwards inside the window with the switch at 1' "$out" "REAL sudo shutdown -r +5"
 out=$(sudo apt-get -y full-upgrade 2>&1); is 'sudo apt-get forwards' "$out" "REAL sudo apt-get -y full-upgrade"
 out=$(sudo systemctl restart tailscaled 2>&1); is 'sudo systemctl restart forwards' "$out" "REAL sudo systemctl restart tailscaled"
 out=$(sudo systemctl stop cups.service 2>&1); is 'sudo systemctl stop of a non-fleet unit forwards' "$out" "REAL sudo systemctl stop cups.service"
@@ -71,7 +88,7 @@ out=$(sudo -n systemctl status docker 2>&1); is 'sudo systemctl status forwards'
 out=$(sudo 2>&1); is 'bare sudo forwards' "$out" "REAL sudo "
 
 # 6. every refusal is one JSON line in the log.
-n=$(wc -l <"$HARNESS_GUARD_LOG"); [ "$n" -ge 19 ] && ok "log has $n refusals" || nok 'log has the refusals' "$n"
+n=$(wc -l <"$HARNESS_GUARD_LOG"); [ "$n" -ge 30 ] && ok "log has $n refusals" || nok 'log has the refusals' "$n"
 jq -e -s 'all(.refused == true and (.rule|length) > 0 and (.tool|length) > 0)' "$HARNESS_GUARD_LOG" >/dev/null \
   && ok 'every log line is a complete JSON record' || nok 'every log line is a complete JSON record' "$(tail -1 "$HARNESS_GUARD_LOG")"
 

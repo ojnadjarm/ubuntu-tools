@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# old-sweeper — delete *.tmp files older than 7 days under ~/agents/tmp (replaced by the maintenance run in 2026-08).
+set -euo pipefail
+find "$HOME/agents/tmp" -name '*.tmp' -mtime +7 -print -delete 2>/dev/null || true

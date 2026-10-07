@@ -19,10 +19,20 @@ CALLS="$WORK/calls.log"
 
 # Shims: everything sentinel-check can reach out to. $HOME/agents/bin is first on the script's
 # own PATH, so these win over the real commands.
-for c in sudo tailscale docker systemctl notify-owner agent-run sentinel-runaway; do
+for c in docker systemctl notify-owner agent-run sentinel-runaway sentinel-waits; do
   printf '#!/bin/sh\necho "%s $*" >>"$CALLS"\nexit 0\n' "$c" >"$BIN/$c"
   chmod +x "$BIN/$c"
 done
+# sudo passes tailscale through; tailscale refuses an `up` that drops a non-default pref, as the real one does.
+printf '#!/bin/sh\necho "sudo $*" >>"$CALLS"\n[ "$1" = tailscale ] && exec "$@"\nexit 0\n' >"$BIN/sudo"
+cat >"$BIN/tailscale" <<'EOF'
+#!/bin/sh
+echo "tailscale $*" >>"$CALLS"
+case " $* " in *" --hostname=example-host --operator=agentuser --ssh "*) exit 0 ;; esac
+echo "Error: changing settings via 'tailscale up' requires mentioning all non-default flags." >&2
+exit 1
+EOF
+chmod +x "$BIN/sudo" "$BIN/tailscale"
 cat >"$BIN/pw-metadata" <<'EOF'
 #!/bin/sh
 echo "pw-metadata $*" >>"$CALLS"
@@ -30,16 +40,22 @@ echo "pw-metadata $*" >>"$CALLS"
 exit 0
 EOF
 chmod +x "$BIN/pw-metadata"
-# snapshot stub: first call of a tick answers "before", any later one (--fresh) "after".
+# sleep shim: records the wait and marks the tick as settled instead of sleeping.
+printf '#!/bin/sh\necho "sleep $*" >>"$CALLS"\n: >"$TICK/slept"\n' >"$BIN/sleep"
+chmod +x "$BIN/sleep"
+# snapshot stub: first call answers "before", later ones "after" ("settled" once a sleep ran).
 cat >"$BIN/status-stub" <<'EOF'
 #!/bin/sh
 n=$(cat "$TICK/n" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" >"$TICK/n"
-[ "$n" = 1 ] && cat "$TICK/before.json" || cat "$TICK/after.json"
+if [ "$n" = 1 ]; then cat "$TICK/before.json"
+elif [ -e "$TICK/slept" ]; then cat "$TICK/settled.json"
+else cat "$TICK/after.json"; fi
 EOF
 chmod +x "$BIN/status-stub"
 
-# status_json "<sec.key=value,...>" — a pc status --json document with those entries FAIL.
+# status_json "<sec.key=value,...>" — a pc status --json document with those entries FAIL ("!" = no output).
 status_json() {
+  [ "$1" = '!' ] && return 0
   python3 - "$1" <<'EOF'
 import json, sys
 sections = {"power": {"battery": {"state": "OK", "value": "100%"}}}
@@ -56,13 +72,15 @@ export CALLS TICK="$TICKDIR"
 out="$WORK/transcript.txt"
 : >"$out"
 
-while IFS='|' read -r label before after pw; do
+while IFS='|' read -r label before after pw settled; do
   case "$label" in ''|'#'*) continue ;; esac
   status_json "$before" >"$TICKDIR/before.json"
   status_json "$after"  >"$TICKDIR/after.json"
-  rm -f "$TICKDIR/n"
+  case "$settled" in '') settled=$after ;; -) settled='' ;; esac
+  status_json "$settled" >"$TICKDIR/settled.json"
+  rm -f "$TICKDIR/n" "$TICKDIR/slept"
   : >"$CALLS"
-  PW_LEVEL="$pw" HOME="$WORK" SENTINEL_STATUS_CMD="$BIN/status-stub" "$SCRIPT"
+  PW_LEVEL="$pw" HOME="$WORK" HARNESS_ENV_LOADED=1 HARNESS_HOST=example-host USER=agentuser SENTINEL_STATUS_CMD="$BIN/status-stub" "$SCRIPT"
   rc=$?
   {
     echo "== $label rc=$rc"

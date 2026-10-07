@@ -8,9 +8,9 @@
     "type": "object",
     "required": ["culprit", "evidence", "fixed"],
     "properties": {
-      "culprit": {"type": "string"},
+      "culprit": {"type": "string", "description": "the unit or process name, e.g. pcbench-burn.service"},
       "evidence": {"type": "string"},
-      "fixed": {"type": "boolean"},
+      "fixed": {"type": "boolean", "description": "false unless the prompt asked for a fix — this prompt asks why, so report and leave the unit running"},
       "unknown": {"type": "boolean"},
       "reason": {"type": "string"}
     },

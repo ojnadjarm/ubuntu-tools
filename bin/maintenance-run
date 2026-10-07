@@ -9,7 +9,7 @@ export PATH="$HOME/.local/bin:$HOME/agents/bin:$PATH"
 WINDOW_START=4                                 # inclusive hour, Europe/Madrid — not overridable
 WINDOW_END=5                                   # exclusive hour — not overridable
 REBOOT_DELAY=${MAINT_REBOOT_DELAY:-5}          # minutes announced and passed to shutdown
-AUTO_REBOOT=${MAINT_AUTO_REBOOT:-1}            # 0 = never schedule a reboot, push and exit 3 (owner decision 2026-09-13)
+AUTO_REBOOT=${MAINT_AUTO_REBOOT:-0}            # 1 = gated reboots; 0 or unset = never, push and exit 3 (owner 2026-09-13, T116)
 DOCKER_PKGS="docker.io docker-buildx docker-compose-v2 containerd"
 
 dry=0; with_docker=0; assume_reboot=0; ignore_window=0
@@ -34,6 +34,7 @@ out() { printf '%s\n' "$*" | tee -a "$SUMMARY"; }
 run() { if [ "$dry" = 1 ]; then out "would run: $*"; else "$@" >>"$STATE/last-apt.log" 2>&1; fi; }
 
 : >"$SUMMARY"
+[ "$dry" = 1 ] || : >"$STATE/last-apt.log"
 out "maintenance-run $(date -Is)$([ "$dry" = 1 ] && echo " (dry-run)")"
 
 # --- packages ---------------------------------------------------------------
@@ -46,17 +47,24 @@ if [ "$with_docker" = 0 ]; then
   fi
   out "docker packages held back: ${held:-none}"
 fi
-run sudo apt-get update -qq
+apt_rc=0
+run sudo apt-get update -qq || apt_rc=$?
 if [ "$dry" = 1 ]; then
   pend=$(apt-get -s full-upgrade 2>/dev/null | grep '^Inst ' \
          | awk -v h=" $held " '{if (index(h, " " $2 " ") == 0) n++} END{print n+0}')
   out "pending upgrades: $pend"
 else
-  run sudo apt-get -y full-upgrade
-  run sudo apt-get -y autoremove --purge
-  out "upgraded: $(grep -c '^Inst ' "$STATE/last-apt.log" 2>/dev/null || echo 0) package operations"
+  run sudo apt-get -y full-upgrade || apt_rc=$?
+  run sudo apt-get -y autoremove --purge || apt_rc=$?
+  n=$(grep -c '^Setting up ' "$STATE/last-apt.log" 2>/dev/null)
+  out "upgraded: ${n:-0} package operations"
 fi
 [ -n "$held" ] && { run sudo apt-mark unhold $held; trap - EXIT INT TERM; }
+if [ "$apt_rc" != 0 ]; then
+  out "apt FAILED (rc $apt_rc): see $STATE/last-apt.log"
+  notify-owner -t maintenance "apt FAILED (rc $apt_rc) on ${HARNESS_HOST:-this machine}: see last-apt.log" || true
+  exit 1
+fi
 
 # --- services and docker ----------------------------------------------------
 svc=$(sudo needrestart -b 2>/dev/null | sed -n 's/^NEEDRESTART-SVC: //p' | tr '\n' ' ')

@@ -1,0 +1,26 @@
+{
+  "name": "explainer-starter",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import $HOME/agents/kits/explainer/test/register.mjs --test test/*.test.ts"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.63.0-alpha-2026-08-31",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0",
+    "@types/three": "^0.186.0"
+  },
+  "dependencies": {
+    "gsap": "^3.15.0",
+    "three": "^0.186.0",
+    "@fontsource/ibm-plex-sans-condensed": "^5",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/libre-caslon-text": "^5",
+    "explainer-kit": "file:~/agents/kits/explainer",
+    "cutaway-kit": "file:~/agents/kits/cutaway"
+  }
+}

@@ -1,10 +1,13 @@
 # Harness environment: config values first, then the session variables desktop scripts need.
 HARNESS_CONFIG="${HARNESS_CONFIG:-$HOME/.config/pc-harness/config.env}"
 # Variables already exported by the caller win over config.env (one-off overrides on the command line).
-_harness_pre="$(export -p | grep -E '(HARNESS_|NTFY_|ORCHESTRATOR_|AGENT_SCRATCH_GLOBS|MOODLE_ENVS_DIR)' || true)"
+_harness_pre="$(export -p | grep -E '(HARNESS_|NTFY_|ORCHESTRATOR_|AGENT_SCRATCH_GLOBS|MOODLE_ENVS_DIR|MAINT_|EYE_|OPENCODE_)' || true)"
+# Every config.env key is exported: child scripts skip this file (HARNESS_ENV_LOADED) and read them from the environment (T116).
+set -a
 # shellcheck source=/dev/null
 if [ -r "$HARNESS_CONFIG" ]; then . "$HARNESS_CONFIG"
 elif [ -r "$HOME/agents/config.env" ]; then . "$HOME/agents/config.env"; fi
+set +a
 eval "$_harness_pre"; unset _harness_pre
 
 : "${HARNESS_HOME:=$HOME/agents}"

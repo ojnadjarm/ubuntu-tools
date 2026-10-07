@@ -45,6 +45,7 @@ seed screenshot 0
 seed wifi none
 seed lock unlocked
 seed mode agent
+seed keepalive "$(printf 'vass-frontend.service failed\nhttp-moodle45 502')"
 
 run_fixture() { env PATH="$WORK/bin:$PATH" XDG_RUNTIME_DIR="$WORK" "$PCS" "$@"; }
 
@@ -64,6 +65,8 @@ has "brief lists the dashboard service"        "$fails" svc_dashboard
 has "brief lists internet"                     "$fails" internet
 has "brief lists screenshot"                   "$fails" screenshot
 has "brief still lists the old tags (disk)"    "$fails" disk
+has "brief lists a down keepalive unit"       "$fails" ka_vass-frontend.service
+has "brief lists a keepalive site not at 200"  "$fails" ka_http-moodle45
 
 # --- 2. the metric: how many tags can appear ---------------------------------
 n=$(tr ',' '\n' <<<"$fails" | grep -c .)
@@ -90,6 +93,27 @@ case "$brief" in
     ok "brief keeps its field order";;
   *) nok "brief keeps its field order" "$brief";;
 esac
+
+# --- 5b. F11: a 15-min-old look ratio is reused, not rebuilt every sentinel tick
+lr_ts=$(( $(date +%s) - 900 ))
+printf '%s\n%s\n' "$lr_ts" "TOTAL 1 2 0.42" >"$WORK/pc-status/look_ratio"
+ratio=$(run_fixture --json | jq -r '.pc_look_ratio_24h')
+{ [ "$ratio" = 0.42 ] && [ "$(head -1 "$WORK/pc-status/look_ratio")" = "$lr_ts" ]; } \
+  && ok "look_ratio cache survives a 15-min tick" || nok "look_ratio cache survives a 15-min tick" "ratio=$ratio"
+
+# --- 5c. F15: lock state comes from LockedHint alone; lockcheck.sh is not run
+mkdir -p "$WORK/lockbin"
+cat >"$WORK/lockbin/loginctl" <<'S'
+#!/bin/sh
+case "$*" in *LockedHint*) echo yes;; *show-user*) echo s1;; esac
+S
+printf '#!/bin/sh\ntouch "%s/gsettings.called"\n' "$WORK" >"$WORK/lockbin/gsettings"
+chmod +x "$WORK/lockbin"/*
+rm -f "$WORK/pc-status/lock"
+lb=$(env PATH="$WORK/lockbin:$WORK/bin:$PATH" XDG_RUNTIME_DIR="$WORK" "$PCS" --brief)
+[ -e "$WORK/gsettings.called" ] && nok "lock probe skips lockcheck.sh" "gsettings was called" \
+                                || ok "lock probe skips lockcheck.sh"
+has "lock state read from LockedHint" "$lb" " lock=locked "
 
 # --- 6. the fixture wrote only into its own cache dir ------------------------
 { [ "$(sed -n 2p "$WORK/pc-status/internet")" = unreachable ] \

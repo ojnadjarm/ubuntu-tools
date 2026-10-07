@@ -40,7 +40,7 @@ re-derive it. Deeper detail: `~/agents/KB/machine.md`, `~/agents/KB/quirks.md`,
 | kernel | `pc top`, `pc io`, `pc power`, `pc idle`, `pc thermal`, `pc trace`, `pc kernel`, `pc net`, `pc hw` | CPU/wake/IO, watts/RAPL/GPU, `pc idle` for the idle-power baseline (median package/psys watts, top wakers, fleet RSS; the weekly row lands in `bench/BASELINE-IDLE.tsv`), thermal zones, eBPF/perf one-liners, dmesg/sysctl/cgroups, sockets/tailscale/fw, PCI/USB/DMI — `pc mutter` replaces a screenshot for window/monitor geometry, `pc trace` replaces guessing who wakes the CPU or writes the disk |
 | session | `pc dbus`, `pc mutter`, `pc input`, `pc audio`, `pc bt` | the session/system bus, compositor state (read-only), evdev, PipeWire, bluez |
 | services | `pc units`, `pc journal`, `pc docker` | systemd units/timers, structured journal queries, compose stacks |
-| safety | `pc undo`, `pc explain <thing>`, `pc bench`, `pc doctor` | the change ledger and rollback, ranked KB lookup (`pc explain` before opening `toolbox.md`/`quirks.md` whole), timing table, night-safe PASS/FAIL |
+| safety | `pc undo`, `pc explain <thing>`, `pc bench`, `pc doctor` | the change ledger and rollback, ranked KB lookup (`pc explain` before opening `toolbox.md`/`quirks.md` whole; `guide <words>` ranks `KB/guides/` and the installed skills — how the fleet did it before), timing table, night-safe PASS/FAIL |
 
 Full reference, one row per command with its usage and warm bench time: `~/agents/KB/pc-cli.md`
 (generated — `pc help --md > ~/agents/KB/pc-cli.md`, never hand-edited). Every mutating verb is
@@ -59,12 +59,15 @@ read-only without `--apply`; the ledger, `pc undo` and the guard exits are in
 
 ## 3. The Eye (`~/the-dark-eye`)
 
-- `eye` = `~/.local/bin/eye` → `bridge/eye.sh`. `eye help`. Commands: `speak <text>`, `listen`,
+- `eye` = `~/.local/bin/eye` → `~/the-dark-eye/bridge/relay/eye-tap` → `bridge/eye.sh` (installed by `bridge/relay/install.sh`). `eye help`. Commands: `speak <text>`, `listen`,
   `listen-loop`, `mic [on|off]`, `status <id> working|done|error <label>`, `status` (list them),
+  `ack` (a voice line that needs no words: the page nods and plays a pre-rendered "Understood", T63),
   `show <title> <file|-> [--ask]`, `health`. **Orbiters are automatic**: the `SubagentStart` /
-  `SubagentStop` hooks (`~/agents/bin/orbit-hook`) light one per subagent and put it out when it
-  ends, and the body replays its persisted set on every renderer `ready` — never hand-send or
-  refresh them for agents; `eye status <id> working` is only for a ticket you want on the eye.
+  `SubagentStop` hooks (`~/agents/bin/orbit-hook`) light one per subagent, labelled with the Agent
+  call's description (start it with the ticket: "T58 …"), and put it out when it ends;
+  `sentinel-check` runs `orbit-hook sweep` every 15 min to put out any whose transcript has been
+  still for 30 min. The body replays its set on every renderer `ready` and pushes each change to
+  the phone page (≤ 0.2 s). Never hand-send `eye status` for agents: it doubles the orbiter.
   The `/eye` skill (in the agent CLI's skills dir) is how a session gets the owner's voice:
   `eye health`, then the **Monitor** tool running `eye listen-loop` persistently.
 - **The TV going off is never detected — say it**: `eye tv off` blanks the eye (0 render ticks,
@@ -184,12 +187,15 @@ read-only without `--apply`; the ledger, `pc undo` and the guard exits are in
   `~/agents/log/buds-capture/<ts>/`, then print a decoded summary. Run it **before** any recovery.
 - `buds-recover` — `bluetoothctl disconnect`/`connect` on the buds, reports what came back, then
   prints the case power-cycle instruction if the taps still fail. Destroys the failing state: capture first.
+- `sites publish <ailearning|portfolio>` / `sites status` / `sites check` — local GitHub Pages mirror (`sites.service`, caddy in bwrap, :8072 → https :8472), atomic snapshot swap into `~/sites`; guide `local-sites`.
 - Other helpers in `~/agents/bin`: `boot-check.sh` (post-boot OK/FAIL), `lockcheck.sh` (always-on desktop),
   `baseline.sh` (config tarball before changing user config), `maintenance-run`, `moodle-keep`,
   `pcbench-weekly` (Sunday 02:00 A/B run, gated on `pcbench away` — never starts while the owner
   is at the machine; `pcbench-weekly --dry-run` prints the verdict),
   `moodle-envs` (list Moodle envs), `moodle-login-check`, `power-profile-auto`, `sentinel-check`,
   `sentinel-runaway` (runaway-process killer, called by `sentinel-check`; `--dry-run` to preview),
+  `wait-for` (wait on a job: `--pid P` | `--file F --match RE [--job P]` | `--until CMD [--job P]`; exits when the job ends or dies; `--list` shows live waits) and
+  `sentinel-waits` (kills wait loops whose job or owner agent is gone, called by `sentinel-check`; `--dry-run` to preview),
   `playwright-mcp` (headless unless `PW_HEADED=1`, `PW_PROFILE=<name>`).
 - Skills: `/desktop` (pc), `/browser` + `/moodle-web` (Playwright MCP), `/eye`, `/moodle-ci`,
   `/moodle-docs` (offline moodledev.io mirror — never web-fetch it), `/moodle-guidelines`,
@@ -213,7 +219,7 @@ read-only without `--apply`; the ledger, `pc undo` and the guard exits are in
    share it; `killall electron` also kills the production `dark-eye.service`.
 7. **Never `git commit` or `git push` in a user repo.** Exceptions: `etckeeper` on `/etc`, `moodle-keep`'s
    weekly ff-only pull. Full forbidden list: `~/agents/FLEET.md` §5.
-8. **Moodle work ends with `/moodle-ci`.** Envs are `~/moodle-envs/<ver>` (5.2 on :8052, admin/Admin1234!).
+8. **Moodle work ends with `/moodle-ci`.** Envs are `~/moodle-envs/<ver>` (5.2 on :8052, admin / `$MOODLE_ADMIN_PASSWORD` from config.env).
 9. **Leave no residue.** Before reporting: hand-run processes killed by PID, temporary null sinks unloaded
    (`pactl unload-module`), test sockets under `$XDG_RUNTIME_DIR/dark-eye/` removed, downloads/profiler
    data/scratch profiles deleted from the scratchpad, screenshots not needed as evidence deleted. Evidence
@@ -226,7 +232,9 @@ read-only without `--apply`; the ledger, `pc undo` and the guard exits are in
     killed; (3) a hand-run `eye-render`/`node .../src/main.js` outside `dark-eye.service`'s
     cgroup, > 2 h → killed; (4) `xdg-desktop-portal*`/`gsd-*`/`gjs` at ≥ 90% CPU for 30 min or
     > 300 MB RSS → `systemctl --user restart`, pushed only if it repeats within 24 h; (5) a
-    scratchpad whose owning agent process is gone, > 24 h old → `rm -rf`. It reads `/proc`
+    scratchpad whose owning agent process is gone, > 24 h old → `rm -rf`; (6) a Chrome tree at
+    ≥ 50% of a core for 30 min with no Playwright tool call for 30 min → browser root killed,
+    `playwright-mcp` kept (guide `sentinel-runaway`). It reads `/proc`
     directly in one pass (no `ps`/`awk` fork per process) to stay under 0.3 s CPU on a quiet box.
 11. **Mutate through `--apply`, undo through `pc undo`.** Use the `rollback: pc undo <id>` line the
     command prints, don't hand-reconstruct the rollback (`README-pc-control.md` "The ledger").

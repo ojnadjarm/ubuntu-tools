@@ -1,9 +1,12 @@
-// Pronunciation page: a late answer never paints into another step, and redoing a cleared step
-// never moves the path forward or back. Run: node tests/test_pronunciation_page.js [page.js]
+// Pronunciation screen: a late answer never paints into another step, and redoing a cleared step
+// never moves the path forward or back. Run: node tests/test_pronunciation_page.js [screen.js]
 "use strict";
 const path = require("path"), assert = require("assert"), { pathToFileURL } = require("url");
 
-const PAGE = process.argv[2] || path.join(__dirname, "..", "static", "js", "voice", "pronunciation.js");
+const ROOT = path.join(__dirname, "..");
+const PAGE = process.argv[2] || path.join(ROOT, "static", "next", "js", "screens", "pron.js");
+// the screens import /static/... as the browser does; map those to the working tree
+require("module").registerHooks({ resolve: (spec, ctx, next) => next(spec.startsWith("/static/") ? pathToFileURL(path.join(ROOT, spec)).href : spec, ctx) });
 const PROMPTS = [
   { id: "d01", text: "one", pattern: "v-b", day: 1, len: "short", targets: [{ word: "very" }] },
   { id: "d02", text: "two", pattern: "v-b", day: 2, len: "short", targets: [{ word: "vote" }] },
@@ -25,7 +28,8 @@ function load(opts) {
   const posts = [];
   const doc = {
     getElementById: (id) => (els[id] = els[id] || element()),
-    addEventListener() {}, querySelector: () => null, querySelectorAll: () => []
+    addEventListener() {}, querySelector: () => null, querySelectorAll: () => [],
+    createElement: () => element(), head: { appendChild: (l) => l.onload && l.onload() }
   };
   const fetch = (url, o) => {
     if (o && o.method === "POST") posts.push(String(url));
@@ -53,7 +57,8 @@ function load(opts) {
   globalThis.window = globalThis;
   globalThis.__pron = undefined;
   // a fresh page module per load; its imports are stateless and shared
-  return import(pathToFileURL(PAGE).href + "?load=" + (++loads)).then(() => new Promise((r) => {
+  return import(pathToFileURL(PAGE).href + "?load=" + (++loads)).then((m) => new Promise((r) => {
+    m.enter();
     const ready = () => (globalThis.__pron && globalThis.__pron.state().ready
       ? r({ api: globalThis.__pron, els, posts }) : setTimeout(ready, 20));
     ready();

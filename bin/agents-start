@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Resume after the kill switch: enable+start exactly the units the roster in ~/CLAUDE.md lists.
+# Resume after the kill switch: enable+start exactly the units the roster in KB/orchestrator.md lists (else ~/CLAUDE.md).
 set -uo pipefail
 . "$HOME/agents/bin/fleetlib.sh"
 fleet_path
-roster="$HOME/CLAUDE.md"
-[ -r "$roster" ] || { echo "agents-start: no $roster" >&2; exit 2; }
+roster="$HARNESS_HOME/KB/orchestrator.md"
+[ -r "$roster" ] || roster="$HOME/CLAUDE.md"
+[ -r "$roster" ] || { echo "agents-start: no roster in $HARNESS_HOME/KB/orchestrator.md or $HOME/CLAUDE.md" >&2; exit 2; }
 
 started=""
 while IFS= read -r line; do
@@ -16,6 +17,6 @@ while IFS= read -r line; do
   systemctl --user enable --now "$unit" >/dev/null 2>&1 && started="$started ${unit%.timer}"
 done <"$roster"
 
-systemctl --user list-timers --no-pager 'agent@*' sentinel-check.timer moodle-keep-weekly.timer pcbench-weekly.timer
+systemctl --user list-timers --no-pager 'agent@*' sentinel-check.timer moodle-keep-weekly.timer pcbench-weekly.timer ailearning-ci-daily.timer orchestrator-pulse.timer
 systemctl --user list-units --no-pager --no-legend notes-brain.service
 echo "agents-start:${started:- nothing}"

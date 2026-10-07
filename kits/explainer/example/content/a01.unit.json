@@ -1,0 +1,56 @@
+{
+  "id": "a01-network",
+  "title": "What a neural network is",
+  "voice": { "engine": "kokoro-82M-fp32", "voice": "af_heart", "speed": 0.92 },
+  "introduces": [
+    { "id": "input", "word": "input", "gloss": "a number that goes into the machine", "namedCue": "input" },
+    { "id": "weight", "word": "weight", "gloss": "the setting of a dial: how much its input counts", "namedCue": "weight" },
+    { "id": "output", "word": "output", "gloss": "the number that comes out", "namedCue": "output" },
+    { "id": "target", "word": "target", "gloss": "the output we want for these inputs", "namedCue": "target" },
+    { "id": "neuron", "word": "neuron", "gloss": "inputs, weights, a sum, a valve, an output", "namedCue": "neuron" },
+    { "id": "network", "word": "neural network", "gloss": "many neurons wired together", "namedCue": "network" }
+  ],
+  "clips": [
+    { "id": "w1", "beat": "watch", "focus": "tubes", "sentences": [
+      "{machine}This is a machine that turns numbers into a number.",
+      "{tubes}Two numbers go in on the left, held as light in these glass tubes.",
+      "{input}Each one is called an input.|",
+      "{x1}This one holds two. {x2}This one holds one."
+    ]},
+    { "id": "w2", "beat": "watch", "focus": "dials", "sentences": [
+      "{dials}Each input flows through a dial.",
+      "{w1up}Turn a dial up, and its input counts for more.",
+      "{w2down}Turn it below zero, and its input pulls the total down.",
+      "{weight}The setting of a dial is called a weight.|"
+    ]},
+    { "id": "w3", "beat": "watch", "focus": "gauge", "sentences": [
+      "{chamber}In this chamber, everything that flows in is added up.",
+      "{valve}Then a one way valve. Below zero, nothing passes.",
+      "{gauge}What comes out, on this gauge, {output}is the output.|",
+      "{target}The brass mark is the output we want. The target.|"
+    ]},
+    { "id": "w4", "beat": "watch", "focus": "neuron", "sentences": [
+      "{recap}Inputs, weights, a sum, a valve, an output.",
+      "{neuron}This whole instrument is one neuron.|",
+      "{pull}Wire many neurons together, so the outputs of some become the inputs of others, {network}and you have a neural network.|",
+      "{billions}Large networks have billions of dials.",
+      "{tuned}Nobody sets them by hand. They are tuned, until the outputs meet their targets."
+    ]},
+    { "id": "d1", "beat": "drive", "sentences": ["Your turn. Take the first dial, and turn it two clicks to the right."] },
+    { "id": "d1ok", "beat": "drive", "sentences": ["The needle rose. The first input now counts."] },
+    { "id": "d2", "beat": "drive", "sentences": ["Now turn the second dial, until the needle sits on the brass mark."] },
+    { "id": "d2ok", "beat": "drive", "sentences": ["On the mark. That is tuning. Dials set, so the output meets the target."] },
+    { "id": "t0", "beat": "twist", "sentences": [
+      "One example is easy. Here are four, each with its own target.",
+      "A tuner that turns the dials by itself will race you, one small step every second.",
+      "The ember columns show how far the needles are from their marks. Pull the lever to start."
+    ]},
+    { "id": "twin", "beat": "twist", "sentences": ["All four needles on their marks, ahead of the tuner."] },
+    { "id": "tlose", "beat": "twist", "sentences": ["The tuner got there first. Each step, it turns every dial a little, toward a smaller miss."] },
+    { "id": "thint", "beat": "twist", "sentences": ["The second dial moves needles two and four the most."] },
+    { "id": "click", "beat": "click", "sentences": [
+      "To tune itself, a network needs one number that says how wrong it is.",
+      "That number is the next instrument."
+    ]}
+  ]
+}

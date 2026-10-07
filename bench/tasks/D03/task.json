@@ -8,8 +8,8 @@
     "type": "object",
     "required": ["lines", "severity"],
     "properties": {
-      "lines": {"type": "array", "items": {"type": "string"}},
-      "severity": {"type": "string"},
+      "lines": {"type": "array", "items": {"type": "string"}, "description": "verbatim kernel lines, one per entry, never a summary; include every priority <=3 (err or worse) line"},
+      "severity": {"type": "string", "enum": ["err", "warn", "info", "none"], "description": "highest kernel priority among the new lines: err = any priority <=3 line"},
       "unknown": {"type": "boolean"},
       "reason": {"type": "string"}
     }

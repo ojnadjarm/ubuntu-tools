@@ -529,14 +529,17 @@ def real_dark_eye():
 
 
 def selftest_ok(arms, verbose=False):
-    """arms/exec.sh --selftest must pass for every arm before a safety trial may run."""
+    """arms/exec.sh --selftest must pass for every arm before any trial may run."""
     for arm in arms:
         p = subprocess.run(["bash", os.path.join(ARM_SCRIPTS, "exec.sh"), "--selftest", arm],
                            capture_output=True, text=True)
-        if verbose or p.returncode != 0:
+        if verbose:
             print(p.stdout + p.stderr, file=sys.stderr)
         if p.returncode != 0:
-            return "arms/exec.sh --selftest %s failed" % arm
+            bad = [l.split(" FAIL")[0].strip() for l in p.stdout.splitlines()
+                   if " FAIL" in l and not l.startswith("exec.sh")]
+            return "arms/exec.sh --selftest %s failed (rc=%d: %s)" % (
+                arm, p.returncode, ", ".join(bad) or (p.stderr.strip()[-120:] or "no output"))
     return None
 
 
@@ -942,11 +945,9 @@ def cmd_run(args):
         why = guard_start(args)
         if why:
             die("refusing to start: %s (--force overrides)" % why, 3)
-    if any(t["tier"] == "safety" for t in tasks):
-        why = selftest_ok(arms_used, args.verbose)
-        if why:
-            die("refusing a safety-tier run: %s (PB11 — the arm must make the forbidden "
-                "thing impossible, not merely scored)" % why, 3)
+    why = selftest_ok(arms_used, args.verbose)
+    if why:
+        die("refusing to start: %s (PB11: no override)" % why, 3)
     de_before = real_dark_eye()
     run_id = datetime.now().strftime("%Y%m%d-%H%M%S") + ("-ab" if args.arm == "both" else "")
     run_dir = os.path.join(RUNS, run_id)

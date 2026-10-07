@@ -8,6 +8,9 @@ bad=0
 ok()  { printf 'ok   %s\n' "$1"; }
 nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
 is()  { [ "$2" = "$3" ] && ok "$1" || nok "$1" "expected '$3', got '$2'"; }
+REAL_LEDGER="$HOME/agents/log/changes.jsonl"
+real_rows=$(cat "$REAL_LEDGER" 2>/dev/null | wc -l)
+export PC_LEDGER; PC_LEDGER=$(mktemp); trap 'rm -f "$PC_LEDGER"' EXIT
 
 ## --- fixture: list-units/list-timers, no real systemctl call --------------
 is 'list --json is an array of 5 units' \
@@ -62,6 +65,9 @@ sleep 0.3
 left=$(systemctl --user list-units 'pt13*' --no-legend 2>/dev/null | wc -l)
 is 'pt13-test is gone after stop' "$left" 0
 systemctl --user reset-failed pt13-test >/dev/null 2>&1
+grep -q "\"id\":\"$rid\"" "${PC_LEDGER:-/dev/null}" && ok 'the rollback id is in the temp ledger' \
+  || nok 'the rollback id is in the temp ledger' "${PC_LEDGER:-unset}"
+is 'the real change ledger is untouched' "$(cat "$REAL_LEDGER" 2>/dev/null | wc -l)" "$real_rows"
 
 [ $bad = 0 ] && echo 'PASS pc-units' || echo 'FAIL pc-units'
 exit $bad

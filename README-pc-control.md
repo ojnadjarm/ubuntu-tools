@@ -189,10 +189,10 @@
   scan. The screenshot probe no longer takes a real screenshot in the health-check path at all — a
   `busctl` call to the portal's `Screenshot` interface stands in (still FAILs if the portal is
   dead), even under `--fresh`, because a real screenshot cost 0.81 s wall and ~15 `python3` forks
-  for a value that rarely regresses. `lockcheck.sh`/`pc-mode` are sourced instead of exec'd from
-  `pc-status`, and each folds its own `gsettings get` calls into one `gsettings
-  list-recursively` per schema (was 14 individual `get`s across both scripts, now 8 recursive
-  reads).
+  for a value that rarely regresses. `pc-mode` is sourced instead of exec'd from `pc-status`,
+  and folds its `gsettings get` calls into one `gsettings list-recursively` per schema. The
+  lock state comes from `loginctl show-session -p LockedHint` alone; `pc-status` does not run
+  `lockcheck.sh`.
 - Output is byte-identical to the pre-EF04 version in every mode (text, `--brief`, `--check`, `--json`,
   `--facts`); only the genuinely volatile values move between runs.
 

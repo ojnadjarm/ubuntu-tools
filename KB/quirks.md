@@ -23,6 +23,8 @@
   (`killall gnome-calculator` works; `killall gnome-calculato` is the one that says "no process found").
 - Scripts that touch the desktop must source `~/agents/bin/env.sh` (XDG_RUNTIME_DIR, WAYLAND_DISPLAY,
   DBUS_SESSION_BUS_ADDRESS, YDOTOOL_SOCKET); systemd/cron shells have none of it.
+- A child of a script that sourced `env.sh` skips it (`HARNESS_ENV_LOADED`) and sees only exported
+  variables, so `env.sh` exports every config.env key; a new key needs no export of its own (T116).
 - `nvm` puts node in `~/.nvm/versions/node/*/bin`, absent from non-login shells. Agent CLIs installed
   as a single binary (`~/.local/bin`, `~/.opencode/bin`) need no node; see
   `~/agents/adapters/<agent>/README.md`.

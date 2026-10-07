@@ -7,10 +7,10 @@
   `sudo systemctl start power-profile-auto.service`.
 - Agents keep working on battery, just slower. The sentinel alerts below 20 % (T05).
 - Charging stops at 80 % (`/sys/class/power_supply/BAT0/charge_control_end_threshold`,
-  persisted by `/etc/udev/rules.d/99-agents-battery-threshold.rules`). For a long trip on
+  persisted by `battery-charge-threshold.service` at boot and after resume, T258). For a long trip on
   battery, allow a full charge for one cycle:
-  `echo 100 | sudo tee /sys/class/power_supply/BAT0/charge_control_end_threshold`
-  (the rule restores 80 on the next boot).
+  `pc power charge-limit 100 --apply`
+  (the unit restores 80 on the next boot).
 - Never suspend/lid-close changes are in place (T02); the machine stays reachable while closed.
 
 ## Joining a new WiFi

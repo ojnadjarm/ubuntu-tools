@@ -2,8 +2,10 @@
 # ~/agents/sentinel/state/sentinel.log over the 7 days to 2026-09-07, plus the healthy tick,
 # the escalation-cooldown repeat and the pipewire log.level reset.
 # Columns, "|"-separated (not tab: tab is IFS whitespace, so empty columns would collapse):
-#   label | fails_before | fails_after | pipewire log.level
+#   label | fails_before | fails_after | pipewire log.level | fails_settled (optional)
 # fails_* are comma-separated "<section>.<key>=<value>"; empty means nothing failing.
+# fails_settled answers the re-check after a sleep; empty = fails_after, "-" = nothing failing.
+# fails_before/fails_after "!" = the status command printed nothing (crashed).
 healthy|||2
 pipewire-loud|||4
 docker-stack|docker.moodle-shared=3/4 up||2
@@ -13,4 +15,7 @@ screenshot|desktop.screenshot=0 KB|desktop.screenshot=0 KB|2
 tailscale|network.tailscale=Stopped|network.tailscale=Stopped|2
 tailscale-repeat|network.tailscale=Stopped|network.tailscale=Stopped|2
 tailscale-repeat2|network.tailscale=Stopped|network.tailscale=Stopped|2
+tailscale-fixed|network.tailscale=Stopped||2
 two-faults|services.docker=inactive,network.tailscale=Stopped|network.tailscale=Stopped|2
+internet-transient|network.internet=down|network.internet=down|2|-
+probe-crash|!|!|2

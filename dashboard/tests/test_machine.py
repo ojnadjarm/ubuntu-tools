@@ -31,8 +31,8 @@ class Machine(unittest.TestCase):
         self.assertIn(".html", server.MIME)
 
     def test_panel_links_to_it(self):
-        idx = open(os.path.join(HERE, "index.html"), encoding="utf-8").read()
-        self.assertEqual(idx.count('data-go="machine"'), 2)
+        js = open(os.path.join(HERE, "static", "js", "screens", "machine.js"), encoding="utf-8").read()
+        self.assertIn('href="/static/machine.html"', js)
 
 
 if __name__ == "__main__":

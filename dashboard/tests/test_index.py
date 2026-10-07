@@ -43,6 +43,14 @@ class Index(unittest.TestCase):
         n = {x["path"]: x for x in server.notes_api()["notes"]}
         self.assertEqual((n["Projects/alpha.md"]["links_in"], n["Projects/alpha.md"]["links_out"]), (3, 2))
 
+    def test_rename_rebuilds(self):
+        from dash.services import notes
+        v = {n["path"]: n for n in notes.vault()["notes"]}
+        a, b = dict(v["Projects/alpha.md"], mtime=1.0), dict(v["Projects/beta.md"], mtime=1.0)
+        self.assertIn("Projects/alpha.md", notes.vault_index({"count": 1, "notes": [a]})["notes"])
+        self.assertEqual(list(notes.vault_index({"count": 1, "notes": [b]})["notes"]), ["Projects/beta.md"])
+        notes._index = (None, None)
+
 
 if __name__ == "__main__":
     unittest.main()

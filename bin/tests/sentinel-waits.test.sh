@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# Fixtures for ~/agents/bin/sentinel-waits, run inside a bwrap PID namespace: real agents are invisible, so unkillable.
+set -uo pipefail
+SW="$HOME/agents/bin/sentinel-waits"
+WF="$HOME/agents/bin/wait-for"
+if [ -z "${IN_SANDBOX:-}" ]; then
+  # owner() with /proc stubbed: a workflow agent's transcript sits under subagents/workflows/wf_*/.
+  python3 - "$SW" <<'PY' || exit 1
+import importlib.machinery, os, sys, tempfile
+d = tempfile.mkdtemp(); os.environ["CLAUDE_PROJECTS_DIR"] = d
+m = importlib.machinery.SourceFileLoader("sw", sys.argv[1]).load_module()
+tx = os.path.join(d, "-proj", "S1", "subagents", "workflows", "wf_x", "agent-wfdone000000.jsonl")
+os.makedirs(os.path.dirname(tx))
+open(tx, "w").write('{"type":"assistant","message":{"content":[{"type":"tool_use","name":"SubagentHandback"}]}}\n{"id":"twf"}\n')
+os.utime(tx, (0, 0))
+m.tool_shell = lambda procs, pid: 2
+m.environ = lambda pid, key: "S1"
+os.readlink = lambda p: "/tmp/claude/-proj/S1/tasks/twf.output"
+got = m.owner({1: {"comm": "claude"}, 2: {"ppid": 1}}, 3)
+print(("PASS" if got == (True, "agent wfdone") else "FAIL") + f" workflow agent transcript is the owner (got {got})")
+sys.exit(got != (True, "agent wfdone"))
+PY
+  # reap() with kill stubbed: a multi-line loop logs as one line, stamped like `date -Is`.
+  python3 - "$SW" <<'PY' || exit 1
+import importlib.machinery, os, re, sys, tempfile
+m = importlib.machinery.SourceFileLoader("sw2", sys.argv[1]).load_module()
+m.DRY, m.ST = False, tempfile.mkdtemp()
+m.os.kill = lambda p, s: None
+m._state = lambda p: "Z"
+m.audit = lambda pid, why: None
+m.reap({9: {"comm": "bash", "ppid": 1, "cmd": "until x;\n  do\n\tsleep 1\ndone"}}, 9, "why")
+lines = open(os.path.join(m.ST, "sentinel.log")).read().splitlines()
+good = len(lines) == 1 and re.match(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d stuck-wait killed pid 9 \(why\): until x; do sleep 1 done$", lines[0])
+print(("PASS" if good else "FAIL") + f" stuck-wait log is one line with a date -Is stamp (got {lines})")
+sys.exit(not good)
+PY
+  exec bwrap --dev-bind / / --unshare-pid --proc /proc --die-with-parent \
+    env IN_SANDBOX=1 OUTSIDE_CLAUDE="$(pgrep -x claude | tr '\n' ' ')" bash "$0"
+fi
+
+bad=0
+ok() { if [ "$2" = "$3" ]; then echo "PASS $1"; else echo "FAIL $1 (want $2, got $3)"; bad=$((bad+1)); fi; }
+isalive() { [ -n "$1" ] && [ -e "/proc/$1" ] && [ "$(awk '{print $3}' "/proc/$1/stat")" != Z ] && echo alive || echo dead; }
+
+# Selftest: no process from outside the sandbox is visible, so none can be signalled.
+seen=0
+for p in $OUTSIDE_CLAUDE; do [ -e "/proc/$p" ] && grep -q '^claude$' "/proc/$p/comm" 2>/dev/null && seen=1; done
+ok "selftest: host claude processes invisible" 0 "$seen"
+ok "selftest: no claude in the sandbox yet" 0 "$(grep -lx claude /proc/[0-9]*/comm 2>/dev/null | wc -l)"
+
+WORK=$(mktemp -d)
+export WAIT_FOR_DIR="$WORK/waits" CLAUDE_PROJECTS_DIR="$WORK/projects" SENTINEL_STATE_DIR="$WORK/state" \
+  HARNESS_HOME="$WORK/h" WAITS_MIN_AGE=2 WAITS_STALL=60
+S=11111111-2222-3333-4444-555555555555
+TASKS="$WORK/tmp/-proj/$S/tasks"; SUB="$CLAUDE_PROJECTS_DIR/-proj/$S/subagents"
+mkdir -p "$TASKS" "$SUB" "$WORK/bin" "$WORK/.claude/shell-snapshots"
+cp /bin/bash "$WORK/bin/claude"
+SNAP="$WORK/.claude/shell-snapshots/snapshot-bash-1.sh"; : >"$SNAP"
+
+# Owners: agent "adone" handed back 10 min ago; agent "alive" wrote its transcript just now.
+tx() { printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"%s"}]}}\n{"id":"%s"}\n' "$2" "$3" >>"$SUB/agent-$1.jsonl"; }
+tx adone0000000 SubagentHandback tdead; tx adone0000000 SubagentHandback treg1; touch -d '-10 min' "$SUB/agent-adone0000000.jsonl"
+tx alive0000000 Bash tlive; tx alive0000000 Bash tseen; tx alive0000000 Bash treg2
+# Workflow agent "wfdone": transcript under subagents/workflows/wf_x/, handed back 10 min ago.
+WFTX="$SUB/workflows/wf_x/agent-wfdone000000.jsonl"; mkdir -p "${WFTX%/*}"
+printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"SubagentHandback"}]}}\n{"id":"twf"}\n' >"$WFTX"
+touch -d '-10 min' "$WFTX"
+
+# toolshell <task> <script>: what Claude Code's Bash tool starts in the background (run by a fake `claude`).
+toolshell() { echo "CLAUDE_CODE_SESSION_ID=$S bash -c \"source $SNAP 2>/dev/null || true && eval '$2'\" >$TASKS/$1.output 2>&1 &"; }
+
+STALE="$WORK/r-dia.log"; : >"$STALE"; touch -d '-1 hour' "$STALE"
+HELD="$WORK/held.log"; : >"$HELD"
+bash -c 'exec 3>>"$1"; sleep 300' _ "$HELD" & writer=$!
+sleep 0.2; touch -d '-1 hour' "$HELD"
+sleep 300 & livejob=$!
+sleep 300 & deadjob=$!; kill "$deadjob"; wait "$deadjob" 2>/dev/null
+
+cat >"$WORK/session1.sh" <<EOF
+$(toolshell tdead "until grep -q DONE $STALE; do sleep 1; done")
+echo \$! >$WORK/pid.dead
+$(toolshell tlive "until grep -q DONE $HELD; do sleep 1; done")
+echo \$! >$WORK/pid.live
+$(toolshell tseen "until grep -q DONE $STALE; do sleep 1; done; echo seen")
+echo \$! >$WORK/pid.seen
+$(toolshell twf "until grep -q DONE $HELD; do sleep 1; done")
+echo \$! >$WORK/pid.wf
+$(toolshell treg1 "$WF --label reg1 --pid $livejob --every 1")
+$(toolshell treg2 "$WF --label reg2 --pid $livejob --every 1")
+sleep 300
+EOF
+cat >"$WORK/session2.sh" <<EOF
+$(toolshell torph "until [ -e $WORK/never ]; do ps -p $deadjob >/dev/null; sleep 1; done")
+echo \$! >$WORK/pid.orph
+$(toolshell tbusy "until [ -e $WORK/never ]; do for i in \\\$(seq 300000); do :; done; sleep 0.05; done")
+echo \$! >$WORK/pid.busy
+EOF
+"$WORK/bin/claude" "$WORK/session1.sh" & sess1=$!
+"$WORK/bin/claude" "$WORK/session2.sh"   # exits at once: its shells are orphaned, like a finished headless run
+sleep 3
+reg1=$(jq -r 'select(.label=="reg1").pid' "$WAIT_FOR_DIR"/*.json); reg2=$(jq -r 'select(.label=="reg2").pid' "$WAIT_FOR_DIR"/*.json)
+
+"$SW" --dry-run >"$WORK/dry.txt"
+ok "dry run: kills nothing" alive "$(isalive "$(cat "$WORK/pid.dead")")"
+ok "dry run: lists 4 would-kills" 4 "$(grep -c 'would kill' "$WORK/dry.txt")"
+
+"$SW"
+LOG="$SENTINEL_STATE_DIR/sentinel.log"
+ok "dead job + finished agent: loop killed"        dead  "$(isalive "$(cat "$WORK/pid.dead")")"
+ok "  logged with its reason" 1 "$(grep -c "killed pid $(cat "$WORK/pid.dead") (polls r-dia.log unchanged 60 min, no writer; owner ended; owner agent adone0" "$LOG")"
+ok "orphaned session, dead pid: loop killed"       dead  "$(isalive "$(cat "$WORK/pid.orph")")"
+ok "  logged with its reason" 1 "$(grep -c "killed pid $(cat "$WORK/pid.orph") (waits on dead pid $deadjob; owner ended; owner session gone" "$LOG")"
+ok "workflow agent finished: loop killed"         dead  "$(isalive "$(cat "$WORK/pid.wf")")"
+ok "  logged with its owner" 1 "$(grep -c "killed pid $(cat "$WORK/pid.wf") .*owner agent wfdone" "$LOG")"
+ok "live job holding its file: loop kept"          alive "$(isalive "$(cat "$WORK/pid.live")")"
+ok "stuck loop of a running agent: kept"           alive "$(isalive "$(cat "$WORK/pid.seen")")"
+ok "  logged once as seen" 1 "$(grep -c "seen pid $(cat "$WORK/pid.seen") .*owner agent alive0 still running" "$LOG")"
+ok "busy long job, owner gone: kept"               alive "$(isalive "$(cat "$WORK/pid.busy")")"
+ok "registered wait, finished agent: killed"       dead  "$(isalive "$reg1")"
+ok "  registry entry removed" 0 "$(grep -l '"reg1"' "$WAIT_FOR_DIR"/*.json 2>/dev/null | wc -l)"
+ok "registered wait, running agent: kept"          alive "$(isalive "$reg2")"
+ok "each kill in the audit log" 4 "$(grep -c '"op": "sentinel kill ' "$HARNESS_HOME/log/actions.jsonl")"
+
+"$SW"
+ok "second tick: no new lines" 5 "$(grep -c stuck-wait "$LOG")"
+
+kill "$(cat "$WORK/pid.busy")" "$(cat "$WORK/pid.live")" "$(cat "$WORK/pid.seen")" "$reg2" "$sess1" "$writer" "$livejob" 2>/dev/null
+rm -rf "$WORK"
+[ "$bad" = 0 ] && echo "all sentinel-waits fixtures pass"
+exit "$bad"

@@ -1,0 +1,23 @@
+{
+  "name": "cutaway-starter",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import $HOME/agents/kits/explainer/test/register.mjs --test test/*.test.ts"
+  },
+  "dependencies": {
+    "three": "^0.186.0",
+    "gsap": "^3.15.0",
+    "cutaway-kit": "file:~/agents/kits/cutaway",
+    "explainer-kit": "file:~/agents/kits/explainer"
+  },
+  "devDependencies": {
+    "vite": "^8.3.0",
+    "typescript": "^7.0.2",
+    "@types/three": "^0.186.0",
+    "playwright-core": "^1.63.0-alpha-2026-08-31"
+  }
+}

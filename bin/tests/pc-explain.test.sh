@@ -57,4 +57,14 @@ fi
 missing=$(comm -23 <(ls "$BIN"/pc-* | sed 's#.*/pc-##' | sort) <(grep -oE '`pc [a-z0-9-]+`' "$HOME/agents/KB/pc-cli.md" | sed -e 's/`pc //' -e 's/`//' | sort -u))
 is 'every pc-<sub> script has a pc-cli.md row' "$missing" ""
 
+# 8. every `pc <sub>` line in a code block of the desktop skill carries every flag of the generated usage.
+drift=$(awk '/^```/{f=!f; next} f && /^pc [a-z0-9-]+/' "$HOME/agents/skills/desktop/SKILL.md" | while IFS= read -r line; do
+  sub=$(awk '{print $2}' <<<"$line")
+  usage=$(grep -F "| \`pc $sub\` |" "$HOME/agents/KB/pc-cli.md")
+  for flag in $(grep -oE -- '--[a-z-]+' <<<"$usage" | sort -u); do
+    grep -qF -- "$flag" <<<"$line" || printf 'pc %s %s; ' "$sub" "$flag"
+  done
+done)
+is 'desktop SKILL.md pc usage lines match KB/pc-cli.md' "$drift" ""
+
 exit $bad

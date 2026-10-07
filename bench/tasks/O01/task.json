@@ -8,7 +8,7 @@
     "type": "object",
     "required": ["tv_on", "evidence"],
     "properties": {
-      "tv_on": {"type": "string", "enum": ["true", "false", "unknown"]},
+      "tv_on": {"type": "string", "enum": ["true", "false", "unknown"], "description": "false only when `eye tv` reports a sysfs disconnect; a connected panel in standby is unknown"},
       "evidence": {"type": "string"},
       "unknown": {"type": "boolean"},
       "reason": {"type": "string"}

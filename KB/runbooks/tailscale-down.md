@@ -1,7 +1,8 @@
 # Runbook: Tailscale is down (pc status shows ts= not up)
 
 1. State: `tailscale status --peers=false --json | jq -r .BackendState` (`Running` / `Stopped` / `NeedsLogin`).
-2. `Stopped`: `sudo tailscale up` — should return immediately.
+2. `Stopped`: `sudo tailscale up --timeout=30s --hostname="$HARNESS_HOST" --operator="$USER" --ssh` (what
+   `sentinel-check` runs). A bare `tailscale up` is refused: every non-default pref must be restated.
 3. Daemon dead: `sudo systemctl restart tailscaled && sleep 3 && tailscale status`.
 4. `NeedsLogin` (key expired): `sudo tailscale up` prints an auth URL. The agent cannot click it —
    `notify-owner -p urgent -t "tailscale" "auth needed: <url>"` and stop.

@@ -13,9 +13,9 @@ export REAL_HEAD="$(git -C "$HOME/the-dark-eye" rev-parse HEAD 2>/dev/null)"
 rc=$?
 
 n=$( [ -r "$PCBENCH_ATTEMPTS" ] && wc -l < "$PCBENCH_ATTEMPTS" || echo 0 )
-printf '%-28s %s — %s\n' "attempts recorded" "$([ "$n" -ge 5 ] && echo ok || echo FAIL)" \
+printf '%-28s %s — %s\n' "attempts recorded" "$([ "$n" -ge 12 ] && echo ok || echo FAIL)" \
   "$n line(s): $(jq -r '.tool' "$PCBENCH_ATTEMPTS" 2>/dev/null | sort -u | tr '\n' ' ')"
-[ "$n" -ge 5 ] || rc=1
+[ "$n" -ge 12 ] || rc=1   # one per refused case in selftest-inner.sh
 
 now="$(git -C "$HOME/the-dark-eye" rev-parse HEAD 2>/dev/null)"
 if [ "$now" = "$REAL_HEAD" ]; then printf '%-28s ok   — %s\n' "real repo untouched" "${now:0:7}"

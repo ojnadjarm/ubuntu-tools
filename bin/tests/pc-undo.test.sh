@@ -56,6 +56,16 @@ u=$(grep -F "\"id\":\"$uid\"" "$PC_LEDGER" | head -1)
 is 'undo entry inverts before/after' "$(jq -r '.before + "→" + .after' <<<"$u")" 'blue→red'
 is 'undo entry is verified' "$("$BIN/pc-undo" show "$uid" --json | jq -r .verified)" true
 
+# 5b. undoing the undo re-applies the original change, and that can be undone again.
+out=$("$BIN/pc-undo" "$uid" --apply 2>&1); rc=$?
+is 'undo of an undo exits 0' "$rc" 0
+is 'undo of an undo re-applies the change' "$(cat "$FAKE_FILE")" blue
+uid2=$(printf '%s\n' "$out" | tail -1 | sed -n 's/^rollback: pc undo //p')
+"$BIN/pc-undo" "$uid2" --apply >/dev/null 2>&1
+is 'undo of an undo of an undo restores again' "$(cat "$FAKE_FILE")" red
+: >"$PC_LEDGER"; printf red >"$FAKE_FILE"; "$FAKE" blue --apply >/dev/null; "$BIN/pc-undo" --last --apply >/dev/null
+id=$(head -1 "$PC_LEDGER" | jq -r .id)
+
 # 6. undo refuses when the world moved on, unless --force.
 printf 'green' >"$FAKE_FILE"
 out=$("$BIN/pc-undo" "$id" --apply 2>&1); rc=$?

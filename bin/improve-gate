@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+"""Class gate for the improve queue: derive a proposal's class, validate queue items, import toolsmith TSPs."""
+import argparse, os, re, sys
+
+HOME = os.path.expanduser('~')
+AGENTS = os.environ.get('AGENTS_HOME', os.path.join(HOME, 'agents'))
+CLASSES = ['auto', 'owner-go', 'owner-reboot', 'refused']
+STATUSES = {'proposed', 'building', 'built', 'measuring', 'kept', 'rolled-back', 'no-effect', 'dropped'}
+SECTIONS = ['Problem', 'Evidence', 'Proposed change', 'Success check', 'Class']
+
+RULES = [  # (class, reason, regex over the lowercased "Proposed change" text)
+    ('refused', '§5.1 git commit/push', r'\bgit\s+(-\S+\s+)*(commit|push)\b'),
+    ('refused', '§5.3 stops a fleet unit or access path',
+     r'\b(systemctl|service)\b[^\n`]*\b(stop|disable|mask|kill)\b[^\n`]*\b(tailscaled|sshd|ssh|dark-eye|docker|sentinel|agent@)'),
+    ('refused', '§5.3 tailscale down', r'\btailscale\s+(down|logout)\b'),
+    ('refused', '§5.3 sshd/ufw/sudoers', r'sshd_config|\bsudoers\b|/etc/ufw|\bufw\s+(allow|deny|disable|delete|reset|reject|limit)\b'),
+    ('refused', '§5.4 deletes or moves owner data',
+     r'\b(rm|mv|shred|rsync\s+--delete)\s+(-\S+\s+)*\S*(moodle-envs|agents/backups|documents)'),
+    ('owner-reboot', 'kernel/boot/driver/firmware',
+     r'\bgrub|modprobe\.d|module_blacklist|initramfs|\bfwupd|\bfirmware\b|/boot/|linux-image|\bhwe\b'
+     r'|kernel\s+(cmdline|command line|parameter|version|upgrade|package)|\bi915\.\w+=|\bxe\b\s+driver|driver swap'
+     r'|\b(needs?|requires?|takes effect (on|after))\s+(a\s+)?reboot|\breboot\s+(is\s+)?(required|needed)|\bdkms\b'),
+    ('owner-go', 'unit/timer/resident process',
+     r'\bsystemctl\s+(--user\s+)?(enable|disable|start|stop|restart|mask|daemon-reload|edit|link|reload)\b'
+     r'|oncalendar|\b(unit|timer|service) file\b|\b(new|add|adds|install|create|creates)\s+(an?\s+)?(\S+\s+){0,3}(unit|timer|daemon)\b'
+     r'|\bresident (process|daemon|service)\b'),
+    ('owner-go', 'package install', r'\b(apt(-get)?|snap|flatpak)\s+install\b|\bpip3?\s+install\b|\bnpm\s+(i|install)\s+-g\b'),
+    ('owner-go', 'sound/TV/network/input or raw tunable',
+     r'\bpactl\s+(set-|load-module|unload-module|move-)|\bwpctl\s+set-|\bamixer\s+s?set\b'
+     r'|\bnmcli\s+(\S+\s+)*(up|down|modify|delete|radio|disconnect|set)\b|\bcec-ctl\b[^\n`]*--(standby|image-view-on|to)\b'
+     r'|\bddcutil\s+setvcp\b|\bxrandr\s+--output\b|\bip\s+(link|route|addr)\s+(set|add|del|flush)\b'
+     r'|\bsysctl\s+-w\b|>\s*/sys/|\bpc\s+(audio|sound|volume|sink|tv|display|monitor|brightness|net|wifi|bt|input)\b[^\n`]*--apply'),
+    ('owner-go', 'agent CLI config or contract', r'~/\.claude\b|\bsettings\.json\b|\bagents\.md\b|\bfleet\.md\b'),
+    ('owner-go', 'Dark Eye code', r'the-dark-eye'),
+]
+PATH_IGNORE = ('/proc', '/dev', '/tmp', '/run/user')
+
+
+def rank(c):
+    return CLASSES.index(c)
+
+
+def section(text, name):
+    m = re.search(r'^## ' + re.escape(name) + r'\s*\n(.*?)(?=^## |\Z)', text, re.S | re.M)
+    return m.group(1) if m else None
+
+
+def touched_paths(change):
+    """Backticked spans that are a single path token, `:line` suffixes stripped."""
+    out = []
+    for span in re.findall(r'`([^`\n]+)`', change):
+        span = re.sub(r':[\w,-]+$', '', span.strip())
+        if ' ' in span or '/' not in span or span.startswith('$') or span.startswith('@'):
+            continue
+        out.append(span)
+    return list(dict.fromkeys(out))
+
+
+def path_class(p):
+    if p.startswith(PATH_IGNORE):
+        return 'auto', ''
+    full = os.path.expanduser(p) if p.startswith('~') else p if p.startswith('/') else os.path.join(AGENTS, p)
+    full = os.path.normpath(full)
+    if re.search(r'sshd_config|sudoers|/etc/ufw', full):
+        return 'refused', f'§5.3 {p}'
+    if re.search(r'/boot/|/etc/default/grub|/etc/grub\.d|/etc/modprobe\.d|/etc/initramfs', full):
+        return 'owner-reboot', f'boot path {p}'
+    if full == os.path.join(HOME, 'CLAUDE.md') or full == AGENTS or full.startswith(AGENTS + '/'):
+        if os.path.basename(full) in ('AGENTS.md', 'FLEET.md'):
+            return 'owner-go', f'contract {p}'
+        return 'auto', ''
+    return 'owner-go', f'outside ~/agents: {p}'
+
+
+def classify(text):
+    """Return (class, reasons) for one proposal's text; the strictest signal wins."""
+    change = section(text, 'Proposed change')
+    if change is None:
+        return 'owner-go', ['no Proposed change section']
+    cls, why = 'auto', []
+
+    def bump(c, r):
+        nonlocal cls
+        if rank(c) > rank(cls):
+            cls = c
+        if rank(c) > 0:
+            why.append(f'{c}: {r}')
+
+    low = change.lower()
+    for c, r, rx in RULES:
+        if re.search(rx, low):
+            bump(c, r)
+    for p in touched_paths(change):
+        bump(*path_class(p))
+    res = re.search(r'resident:\s*(.+)', section(text, 'Effort') or '')
+    if res and not re.match(r'none\b', res.group(1).strip(), re.I):
+        bump('owner-go', f'resident {res.group(1).strip()}')
+    stated = (section(text, 'Class') or '').strip().splitlines()
+    stated = stated[0] if stated else ''
+    if re.search(r'owner-go|contract-§', stated):
+        bump('owner-go', f'declared "{stated}"')
+    if 'owner-reboot' in stated:
+        bump('owner-reboot', 'declared owner-reboot')
+    return cls, why
+
+
+def header(text, key):
+    m = re.search(r'^' + key + r':[ \t]*(.*)$', text, re.M)
+    return m.group(1).strip() if m else None
+
+
+def check(path):
+    """Validation errors for one queue item."""
+    text = open(path).read()
+    errs = []
+    if not re.match(r'# [A-Z]+-\d+ — ', text):
+        errs.append('title is not "# <ID> — <title>"')
+    for s in SECTIONS:
+        if section(text, s) is None:
+            errs.append(f'missing section {s}')
+    sc = section(text, 'Success check') or ''
+    if not (re.search(r'before:.*\d', sc) and re.search(r'target:.*\d', sc)):
+        errs.append('Success check lacks a before/target number')
+    declared, rb, st = header(text, 'class'), header(text, 'rollback'), header(text, 'status')
+    derived, why = classify(text)
+    if declared not in CLASSES:
+        errs.append(f'class "{declared}" not one of {CLASSES}')
+    elif rank(declared) < rank(derived):
+        errs.append(f'class {declared} understates derived {derived} ({"; ".join(why)})')
+    if declared == 'refused' or derived == 'refused':
+        errs.append('refused work cannot be queued (AGENTS.md §5)')
+    if not rb:
+        errs.append('rollback line missing or empty')
+    if st not in STATUSES:
+        errs.append(f'status "{st}" invalid')
+    return errs
+
+
+def rollback_for(cls, paths):
+    files = ', '.join(p for p in paths if not p.startswith(PATH_IGNORE)) or 'the touched files'
+    if cls == 'owner-reboot':
+        return f'boot the stock GRUB entry; restore improve/saved/<id>/ over {files}; update-initramfs -u if modprobe.d changed'
+    base = f'restore improve/saved/<id>/ over {files}; delete files the change created'
+    return base + ('; disable and remove any unit it added' if cls == 'owner-go' else '')
+
+
+def do_import(src, backlog, dest):
+    """Copy open TSPs (backlog status proposed/go) into the queue with class, rollback and status."""
+    os.makedirs(dest, exist_ok=True)
+    n = 0
+    for line in open(backlog):
+        cells = [c.strip() for c in line.split('|')]
+        if len(cells) < 7 or not re.fullmatch(r'TSP-0*[1-9]\d*', cells[2]) or cells[5] not in ('proposed', 'go'):
+            continue
+        tid = cells[2]
+        text = open(os.path.join(src, tid + '.md')).read()
+        cls, why = classify(text)
+        if cls == 'refused':
+            print(f'{tid}\trefused\tnot queued: {"; ".join(why)}')
+            continue
+        rb = rollback_for(cls, touched_paths(section(text, 'Proposed change') or '')).replace('<id>', tid)
+        title, rest = text.split('\n', 1)
+        meta = (f'class: {cls}\nrollback: {rb}\nstatus: proposed\n'
+                f'source: toolsmith/proposals/{tid}.md\n')
+        open(os.path.join(dest, tid + '.md'), 'w').write(f'{title}\n\n{meta}{rest}')
+        print(f'{tid}\t{cls}\t{"; ".join(why) or "all paths under ~/agents"}')
+        n += 1
+    return n
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    sub = ap.add_subparsers(dest='cmd', required=True)
+    c = sub.add_parser('class', help='print "<file>\\t<class>\\t<reasons>" per proposal')
+    c.add_argument('files', nargs='+')
+    k = sub.add_parser('check', help='validate queue items; rc 1 on any error')
+    k.add_argument('files', nargs='*')
+    i = sub.add_parser('import', help='import open toolsmith TSPs into the queue')
+    i.add_argument('--from', dest='src', default=os.path.join(AGENTS, 'toolsmith/proposals'))
+    i.add_argument('--backlog', default=os.path.join(AGENTS, 'toolsmith/BACKLOG.md'))
+    i.add_argument('--to', dest='dest', default=os.path.join(AGENTS, 'improve/queue'))
+    a = ap.parse_args()
+    if a.cmd == 'class':
+        for f in a.files:
+            cls, why = classify(open(f).read())
+            print(f'{f}\t{cls}\t{"; ".join(why)}')
+    elif a.cmd == 'check':
+        files = a.files or sorted(os.path.join(AGENTS, 'improve/queue', f)
+                                  for f in os.listdir(os.path.join(AGENTS, 'improve/queue')) if f.endswith('.md'))
+        bad = 0
+        for f in files:
+            errs = check(f)
+            bad += bool(errs)
+            print(f'{"ok  " if not errs else "FAIL"} {f}' + ''.join(f'\n     {e}' for e in errs))
+        print(f'{len(files) - bad}/{len(files)} valid')
+        sys.exit(1 if bad else 0)
+    else:
+        print(f'imported {do_import(a.src, a.backlog, a.dest)}')
+
+
+main()

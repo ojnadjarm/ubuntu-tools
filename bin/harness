@@ -83,7 +83,9 @@ if brief:
     machine_ctx = (
         f"Machine now: {brief}. Run `pc status` (or `pc status --json`) for detail; "
         "never ask the owner about machine state you can read. "
-        "Facts and runbooks: ~/agents/KB/."
+        "Facts and runbooks: ~/agents/KB/. "
+        "Before a task, run `guide <words>`: it ranks how the fleet did it before (KB/guides) and the "
+        "installed skills; load any `→ invoke /<name>` skill it prints with the Skill tool."
     )
 
 if as_json:

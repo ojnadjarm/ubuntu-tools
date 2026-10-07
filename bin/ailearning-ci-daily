@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# ailearning-ci-daily — the once-a-day full ailearning suite (`npm run ci`) on a throwaway copy, headless and muted (T140).
+set -uo pipefail
+. "$HOME/agents/bin/env.sh"
+
+REPO="${AILEARNING_REPO:-$HOME/projects/personal/ailearning}"
+LOG="${AILEARNING_CI_LOG:-$HOME/agents/log/ailearning-ci.log}"
+RESULTS="$HOME/agents/log/ailearning-ci.jsonl"
+
+case "${1:-}" in -h|--help)
+  echo "usage: ailearning-ci-daily   (copies $REPO with cp -a, runs npm run ci there; log $LOG, one row per run in $RESULTS)"
+  exit 0;;
+esac
+
+WORK="$(mktemp -d /var/tmp/ailearning-ci.XXXXXX)"
+T0=$(date +%s); RC=1; STEP=setup; SENT=0
+finish() {
+  local s=$(( $(date +%s) - T0 )) last
+  last="$(grep -E '^(e2e:|── .*FAIL|npm error|ℹ fail|✖)' "$LOG" 2>/dev/null | tail -1 | cut -c1-90)"
+  printf '{"ts":"%s","rc":%d,"step":"%s","seconds":%d,"last":"%s"}\n' "$(date -Is)" "$RC" "$STEP" "$s" "${last//\"/\'}" >> "$RESULTS"
+  if [ "$RC" -ne 0 ] && [ "$SENT" -eq 0 ]; then
+    SENT=1
+    "$HOME/agents/bin/notify-owner" -p high -t ailearning "ailearning daily ci failed at $STEP (rc $RC): ${last:-see log} · ~/agents/log/ailearning-ci.log" || true
+  fi
+  rm -rf "$WORK"
+}
+trap finish EXIT
+trap 'RC=143; exit 143' TERM INT
+
+exec >"$LOG" 2>&1
+echo "ailearning-ci-daily $(date -Is) copy=$WORK"
+
+cp -a "$REPO/." "$WORK/" || exit
+STEP=mute
+BR="$WORK/tests/lib/browser.mjs"
+grep -q -- '--mute-audio' "$BR" || sed -i "s|const ARGS = \[|const ARGS = ['--mute-audio', |" "$BR"
+grep -q -- '--mute-audio' "$BR" || { echo "could not add --mute-audio to $BR"; exit 1; }
+
+STEP=node
+export NVM_DIR="$HOME/.nvm"
+. "$NVM_DIR/nvm.sh" && nvm use --silent default || exit
+unset DISPLAY WAYLAND_DISPLAY
+
+STEP=ci
+cd "$WORK" && npm run ci
+RC=$?
+[ "$RC" -eq 0 ] && STEP=done
+exit "$RC"

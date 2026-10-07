@@ -3,9 +3,6 @@ import json, os, shutil, sys, tempfile, unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import server
 
-CORPUS = os.path.expanduser("~/agents/asr-corpus")
-
-
 def prompt(pid):
     return [p for p in server.prompts() if p["id"] == pid][0]
 
@@ -48,10 +45,15 @@ class Verdict(unittest.TestCase):
 
     def test_real_sidecars_are_unchanged_and_verdict_free(self):
         tmp = tempfile.mkdtemp()
-        names = sorted(f for f in os.listdir(CORPUS) if f.endswith(".json"))[:5]
+        plain = [p for p in server.prompts() if not p["id"].startswith("d")][:5]
+        names = []
+        for i, p in enumerate(plain):
+            side = {"id": f"20260920-10000{i}-fx{i:02d}", "prompt_id": p["id"], "prompt": p["text"],
+                    "transcript": p["text"], "seconds": 2}
+            names.append(side["id"] + ".json")
+            json.dump(side, open(os.path.join(tmp, names[-1]), "w"))
         self.assertEqual(len(names), 5)
-        for n in names:
-            shutil.copy(os.path.join(CORPUS, n), os.path.join(tmp, n))
+        before = {n: open(os.path.join(tmp, n)).read() for n in names}
         old, server.CORPUS = server.CORPUS, tmp
         try:
             st = server.corpus_stats()
@@ -62,7 +64,7 @@ class Verdict(unittest.TestCase):
             for m in takes:
                 self.assertNotIn("verdict", m)
         for n in names:
-            self.assertEqual(open(os.path.join(tmp, n)).read(), open(os.path.join(CORPUS, n)).read())
+            self.assertEqual(open(os.path.join(tmp, n)).read(), before[n])
         shutil.rmtree(tmp)
 
     def test_drill_sidecar_gets_a_verdict_through_stats(self):

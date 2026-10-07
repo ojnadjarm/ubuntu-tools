@@ -18,7 +18,9 @@ the other adapters are measured against it.
 ## Flags `run` uses
 
 `-p <prompt>`, `--model`, `--permission-mode bypassPermissions`, `--name agent-<n>`,
-`--append-system-prompt <AGENT-PREAMBLE.md>`, `--output-format json`, `--max-budget-usd`.
+`--append-system-prompt <AGENT-PREAMBLE.md>`, `--output-format stream-json --verbose`,
+`--strict-mcp-config`, `--tools $AGENT_TOOLS` (default `Bash,Read,Edit,Write`; set per agent in `agent.env`),
+`--settings {"claudeMdExcludes":["$HOME/CLAUDE.md"]}`, env `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (TSP-013).
 Cost comes from `.total_cost_usd`, tokens from `.usage`, the result text from `.result`.
 
 ## What `install` writes

@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# pc need [list|resolve <id|text>] --fixed NOTE [--apply] [--json] — the dashboard "need you" pushes; resolve one as a ledgered, undoable ack.
+set -uo pipefail
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+SELF="$BIN/pc-need"
+. "$BIN/pclib.sh"
+
+pc_usage 'usage: pc need [list] [--json]
+       pc need resolve <id|text> --fixed "<what fixed it>" [--apply]
+
+list     the open pushes on the dashboard "need you" list (high-priority or asking, last 24 h): id, time, kind, text
+resolve  mark every open push whose id equals, or whose text contains (any case), the argument as resolved;
+         one ledgered change per push, each printing "rollback: pc undo <id>"; any agent may run it the moment
+         it fixes the cause, no owner approval; the line records the note and who ($AGENT_NAME, else the session)
+The resolved ledger is ~/agents/log/notify-resolved.jsonl (append-only, latest line per key wins);
+notify.log is never edited. A new push, even with the same text, has a new id and shows again.' "$@"
+
+PC_SUB='pc need'; PC_EXTRA_FLAGS=(--fixed:)
+pc_opt "$@"; ARGS=(${PC_ARGS[@]+"${PC_ARGS[@]}"})
+FIXED=${PC_OPT[--fixed]-}
+BY=${AGENT_NAME:-${CLAUDE_SESSION_ID:-$USER}}
+RES="$HOME/agents/log/notify-resolved.jsonl"
+
+# open_json — the push items of verdict()'s needs list, as JSON, from the dashboard's own code.
+open_json() {
+  python3 - "$BIN/../dashboard" <<'EOF'
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from dash.services import system
+needs = system.verdict({}, [], system.since_24h())["needs"]
+print(json.dumps([n for n in needs if "id" in n]))
+EOF
+}
+
+case "${ARGS[0]:-list}" in
+  list)
+    if [ "$JSON" = 1 ]; then open_json; exit 0; fi
+    open_json | jq -r '.[] | [.id, .t, .kind, (.text | split("\n")[0] | .[0:90])] | @tsv'
+    ;;
+  state)
+    [ -r "$RES" ] || { echo open; exit 0; }
+    jq -rs --arg k "${ARGS[1]:?pc need state: need an id}" \
+      '[.[] | select(.key == $k)] | last | .state // "open"' "$RES"
+    ;;
+  mark)
+    printf -v ts '%(%Y-%m-%dT%H:%M:%S%z)T' -1
+    pc_json '{ts:$ts,key:$k,state:$s,fixed:$f,by:$b}' -c --arg ts "$ts" --arg k "${ARGS[1]:?id}" \
+      --arg s "${ARGS[2]:?state}" --arg f "${ARGS[3]-}" --arg b "${ARGS[4]-}" >>"$RES"
+    ;;
+  resolve)
+    q=${ARGS[1]:-}; [ -n "$q" ] || { echo "pc need resolve: need an id or text" >&2; exit 2; }
+    [ -n "$FIXED" ] || { echo 'pc need resolve: need --fixed "<what fixed it>"' >&2; exit 2; }
+    mapfile -t ids < <(open_json | jq -r --arg q "$q" \
+      '.[] | select(.id == $q or (.text | ascii_downcase | contains($q | ascii_downcase))) | .id')
+    [ ${#ids[@]} -gt 0 ] || { echo "pc need: no open push matches '$q'" >&2; exit 1; }
+    for id in "${ids[@]}"; do
+      PC_READ_CMD="$SELF state $id" PC_REDO="$(printf '%q ' "$SELF" mark "$id" resolved "$FIXED" "$BY")" \
+        pc_apply "need:$id" open resolved "$(printf '%q ' "$SELF" mark "$id" open "undo" "$BY")" \
+        "$SELF" mark "$id" resolved "$FIXED" "$BY"
+    done
+    ;;
+  *) printf '%s\n' "$PC_USAGE" >&2; exit 2;;
+esac

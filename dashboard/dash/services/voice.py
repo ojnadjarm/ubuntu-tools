@@ -64,16 +64,23 @@ def spoken_numbers(toks):
     """'eighty seventy one' and '8071' become the same key; a homophone keeps its spelling but scores as its twin."""
     out, i = [], 0
     while i < len(toks):
-        j, digits = i, ""
+        j, digits, tc = i, "", None
         while j < len(toks) and (toks[j] in NUM or toks[j] in TENS or toks[j] in ("hundred", "thousand") and digits):
             w = toks[j]
             if w in ("hundred", "thousand"):
-                digits = str(int(digits) * (100 if w == "hundred" else 1000))
-            elif w in TENS and j + 1 < len(toks) and toks[j + 1] in NUM and 0 < NUM[toks[j + 1]] < 10:
-                digits += str(TENS[w] + NUM[toks[j + 1]])
-                j += 1
+                t, c = tc or (0, int(digits))
+                tc = (t, c * 100) if w == "hundred" else (t + c * 1000, 0)
             else:
-                digits += str(TENS.get(w, NUM.get(w)))
+                v = TENS.get(w, NUM.get(w))
+                if w in TENS and j + 1 < len(toks) and toks[j + 1] in NUM and 0 < NUM[toks[j + 1]] < 10:
+                    v += NUM[toks[j + 1]]
+                    j += 1
+                if tc:
+                    tc = (tc[0], tc[1] + v)
+                else:
+                    digits += str(v)
+            if tc:
+                digits = str(sum(tc))
             j += 1
         if digits:
             out.append((" ".join(toks[i:j]), digits))

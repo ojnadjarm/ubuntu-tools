@@ -3,17 +3,19 @@
 # stdout = the run's result text · $RAW_OUT = claude's own result JSON · $META_OUT = cost/tokens/tools.
 set -uo pipefail
 
-cmd=(claude -p "$(cat "$PROMPT_FILE")" --model "$MODEL" --permission-mode bypassPermissions)
+# TSP-013: headless runs load no MCP servers, no auto-memory, only $AGENT_TOOLS, and skip the
+# orchestrator's ~/CLAUDE.md; the fleet contract arrives once, through $SYSTEM_FILE.
+export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
+cmd=(claude -p "$(cat "$PROMPT_FILE")" --model "$MODEL" --permission-mode bypassPermissions
+     --strict-mcp-config --tools "${AGENT_TOOLS:-Bash,Read,Edit,Write}"
+     --settings "{\"claudeMdExcludes\":[\"$HOME/CLAUDE.md\"]}")
 [ -n "${AGENT_NAME:-}" ] && cmd+=(--name "agent-$AGENT_NAME")
-# TSP-013: under $HOME the cwd chain (~/CLAUDE.md -> @~/agents/AGENTS.md) already carries the
-# fleet contract, so appending AGENT-PREAMBLE.md would load it twice.
-contract_imported() {
-  case "$PWD" in "$HOME"/*) grep -q '^@~/agents/AGENTS.md' "$HOME/CLAUDE.md" 2>/dev/null;; *) false;; esac
-}
-if [ -n "${SYSTEM_FILE:-}" ] && [ -r "$SYSTEM_FILE" ] && ! contract_imported; then
+if [ -n "${SYSTEM_FILE:-}" ] && [ -r "$SYSTEM_FILE" ]; then
   cmd+=(--append-system-prompt "$(cat "$SYSTEM_FILE")")
 fi
 cmd+=(--output-format stream-json --verbose)
+# AGENT_WRAP (agent.env): a command prefix such as a sandbox, e.g. "code-review-sandbox --".
+[ -n "${AGENT_WRAP:-}" ] && { read -ra wrap <<<"$AGENT_WRAP"; cmd=("${wrap[@]}" "${cmd[@]}"); }
 [ -n "${AGENT_TIMEOUT:-}" ] && cmd=(timeout "$AGENT_TIMEOUT" "${cmd[@]}")
 
 stream="$(mktemp "${TMPDIR:-/tmp}/agent-stream.XXXXXX")"

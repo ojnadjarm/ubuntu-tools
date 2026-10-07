@@ -1,0 +1,21 @@
+// Cold load + live playback frame times: node tools/cold.mjs <url> [playSeconds]
+import { chromium } from 'playwright-core';
+const GPU = ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-angle=vulkan', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'];
+const b = await chromium.launch({ headless: true, args: GPU });
+const ctx = await b.newContext({ viewport: { width: 1920, height: 1080 }, ignoreHTTPSErrors: true });
+const p = await ctx.newPage();
+p.on('pageerror', (e) => console.log('ERR', e.message));
+await p.goto(process.argv[2], { waitUntil: 'commit' });
+await p.waitForFunction(() => window.__probe?.frames > 0, null, { timeout: 30000, polling: 'raf' });
+const firstPaint = await p.evaluate(() => Math.round(performance.now()));
+await p.waitForFunction(() => !document.querySelector('[data-k=begin]')?.classList.contains('loading'), null, { timeout: 30000 });
+const warm = await p.evaluate(() => Math.round(performance.now()));
+await p.click('[data-k=begin]');
+await p.waitForFunction(() => window.__probe.ready > 0, null, { timeout: 30000 });
+const pre = await p.evaluate(() => ({ ready: Math.round(window.__probe.ready), lt: window.__probe.longtasks, plateMs: window.__probe.plateMs, n: window.__probe.fw.length }));
+await p.evaluate(() => { const d = (window.__dt = []); let l = performance.now(); const f = (t) => { d.push(t - l); l = t; requestAnimationFrame(f); }; requestAnimationFrame(f); });
+await p.waitForTimeout(1000 * Number(process.argv[3] || 20));
+const post = await p.evaluate((n) => { const fw = window.__probe.fw.slice(n + 2); const s = [...fw].sort((a, b) => a - b); return { frames: fw.length, fwMax: s.at(-1), p99: s[Math.floor(s.length * 0.99)], p50: s[Math.floor(s.length / 2)], lt: window.__probe.longtasks, sw: document.documentElement.scrollWidth, rafMax: +Math.max(...window.__dt.slice(2)).toFixed(1), rafOver20: window.__dt.filter((x) => x > 20).length }; }, pre.n);
+const bytes = await p.evaluate(() => Math.round(performance.getEntriesByType('resource').reduce((a, r) => a + r.transferSize, 0) / 1024));
+console.log(JSON.stringify({ firstPaint, warm, ...pre, play: post, kB: bytes }));
+await b.close();

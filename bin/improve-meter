@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+"""improve-meter — one TSV row of the self-improvement loop's daily metrics."""
+import calendar
+import glob
+import json
+import os
+import shutil
+import subprocess
+import sys
+import threading
+import time
+from datetime import datetime
+
+USAGE = """usage: improve-meter [--append] [--idle auto|on|off]
+
+Prints the header and one row, all numbers read over the last 24 h:
+  orch_ctx_k      mean context per assistant turn in the orchestrator's transcripts (k tokens)
+  headless_cc_k   mean cache_creation_input_tokens per headless run, from */logs/*.meta.json (k)
+  doctor_s        wall time of `pc doctor --json` (s)
+  pcbench_pass    new-arm pass rate in bench/LAST.json
+  corpus_wer_pct  pooled word error of the ASR corpus after the Eye's corrector (%)
+  idle_psys_w     median psys watts of `pc idle --seconds 60`; auto = only when
+                  `pcbench away` says the owner is away, else '-'
+--append writes the row to improve/metrics.tsv, replacing a row of the same date.
+Read-only apart from --append. Paths and commands can be overridden with IMPROVE_* (see the test)."""
+
+HOME = os.path.expanduser("~")
+AGENTS = os.environ.get("IMPROVE_AGENTS", HOME + "/agents")
+PROJECTS = os.environ.get("IMPROVE_PROJECTS", HOME + "/.claude/projects")
+ORCH = os.path.join(PROJECTS, HOME.replace("/", "-"))
+CORPUS = os.environ.get("IMPROVE_CORPUS", AGENTS + "/asr-corpus")
+CORRECTOR = os.environ.get("IMPROVE_CORRECTOR", HOME + "/the-dark-eye/body/src/correct.js")
+DASHBOARD = os.environ.get("IMPROVE_DASHBOARD", HOME + "/agents/dashboard")
+METRICS = os.environ.get("IMPROVE_METRICS", AGENTS + "/improve/metrics.tsv")
+PC = os.environ.get("IMPROVE_PC", "pc")
+PCBENCH = os.environ.get("IMPROVE_PCBENCH", "pcbench")
+NOW = float(os.environ.get("IMPROVE_NOW") or time.time())
+CUT = NOW - 86400
+COLS = ["date", "orch_ctx_k", "headless_cc_k", "doctor_s", "pcbench_pass", "corpus_wer_pct", "idle_psys_w"]
+
+
+def fmt(v, digits=1):
+    return "-" if v is None else "%.*f" % (digits, v)
+
+
+def orch_ctx():
+    """Mean input+cache_read+cache_creation per orchestrator assistant turn in the window."""
+    total, n = 0, 0
+    for f in glob.glob(os.path.join(ORCH, "*.jsonl")):
+        if os.path.getmtime(f) < CUT:
+            continue
+        for line in open(f, errors="replace"):
+            if '"assistant"' not in line:
+                continue
+            try:
+                r = json.loads(line)
+                t = calendar.timegm(time.strptime(r["timestamp"][:19], "%Y-%m-%dT%H:%M:%S"))
+            except (ValueError, KeyError, TypeError):
+                continue
+            if r.get("type") != "assistant" or r.get("isSidechain") or t < CUT:
+                continue
+            u = (r.get("message") or {}).get("usage") or {}
+            total += (u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0)
+                      + u.get("cache_creation_input_tokens", 0))
+            n += 1
+    return total / n / 1000 if n else None
+
+
+def headless_cc():
+    """Mean cache_creation_input_tokens over headless runs whose meta.json was written in the window."""
+    vals = []
+    for f in glob.glob(os.path.join(AGENTS, "*", "logs", "*.meta.json")):
+        if os.path.getmtime(f) < CUT:
+            continue
+        try:
+            vals.append(json.load(open(f))["tokens"]["cache_creation_input_tokens"])
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    return sum(vals) / len(vals) / 1000 if vals else None
+
+
+def pcbench_pass():
+    try:
+        return float(json.load(open(os.path.join(AGENTS, "bench", "LAST.json")))["arms"]["new"]["pass"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def corpus_wer():
+    """Pooled WER of every corpus take, transcript passed through the corrector, scored by the dashboard's word_diff."""
+    takes = []
+    for f in sorted(glob.glob(os.path.join(CORPUS, "*.json"))):
+        try:
+            m = json.load(open(f))
+        except (OSError, ValueError):
+            continue
+        if m.get("prompt") and m.get("transcript"):
+            takes.append(m)
+    if not takes or not os.path.exists(CORRECTOR):
+        return None
+    sys.path.insert(0, DASHBOARD)
+    from dash.services import voice
+    node = os.environ.get("IMPROVE_NODE") or shutil.which("node") or voice.NODE
+    js = ('const {correct}=require(process.argv[1]);let d="";process.stdin.on("data",c=>d+=c)'
+          '.on("end",()=>process.stdout.write(JSON.stringify(JSON.parse(d).map(t=>correct(t).text))))')
+    try:
+        out = subprocess.run([node, "-e", js, CORRECTOR], input=json.dumps([m["transcript"] for m in takes]),
+                             capture_output=True, text=True, timeout=30)
+        fixed = json.loads(out.stdout)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    errs = refs = 0
+    for m, heard in zip(takes, fixed):
+        n = len(voice.words(m["prompt"]))
+        errs += round(voice.word_diff(m["prompt"], heard)[1] * n)
+        refs += n
+    return errs * 100 / refs if refs else None
+
+
+def away():
+    try:
+        out = subprocess.run([PCBENCH, "away", "--json"], capture_output=True, text=True, timeout=10)
+        return bool(json.loads(out.stdout).get("away"))
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+
+
+def idle_w():
+    try:
+        out = subprocess.run([PC, "idle", "--seconds", "60", "--json"], capture_output=True, text=True, timeout=75)
+        return float(json.loads(out.stdout)["psys_w"])
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        return None
+
+
+def append(row):
+    lines = []
+    if os.path.exists(METRICS):
+        lines = [l for l in open(METRICS).read().splitlines() if l and not l.startswith(row[0] + "\t")]
+    if not lines or lines[0] != "\t".join(COLS):
+        lines = ["\t".join(COLS)] + [l for l in lines if l != "\t".join(COLS)]
+    os.makedirs(os.path.dirname(METRICS), exist_ok=True)
+    with open(METRICS + ".tmp", "w") as fh:
+        fh.write("\n".join(lines + ["\t".join(row)]) + "\n")
+    os.replace(METRICS + ".tmp", METRICS)
+
+
+def main():
+    argv = sys.argv[1:]
+    if "-h" in argv or "--help" in argv:
+        print(USAGE)
+        return 0
+    mode, do_append = "auto", False
+    while argv:
+        a = argv.pop(0)
+        if a == "--append":
+            do_append = True
+        elif a == "--idle" and argv and argv[0] in ("auto", "on", "off"):
+            mode = argv.pop(0)
+        else:
+            sys.stderr.write("improve-meter: bad option %s\n\n%s\n" % (a, USAGE))
+            return 2
+
+    wall = []
+
+    def doctor_run():
+        t0 = time.time()
+        try:
+            subprocess.run([PC, "doctor", "--json"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+            wall.append(time.time() - t0)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+    doctor = threading.Thread(target=doctor_run)
+    doctor.start()
+    row = [datetime.fromtimestamp(NOW).strftime("%Y-%m-%d"), fmt(orch_ctx()), fmt(headless_cc()), None,
+           fmt(pcbench_pass(), 2), fmt(corpus_wer())]
+    quiet = mode == "on" or (mode == "auto" and away())
+    doctor.join()
+    row[3] = fmt(wall[0] if wall else None)
+    row.append(fmt(idle_w(), 2) if quiet else "-")
+
+    print("\t".join(COLS))
+    print("\t".join(row))
+    if do_append:
+        append(row)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

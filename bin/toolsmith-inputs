@@ -1,33 +1,22 @@
 #!/usr/bin/env python3
-"""toolsmith-inputs [--since 4d] [--json|--md] [--qa] — read-only evidence collector for toolsmith.
+"""toolsmith-inputs [--since 4d] [--json|--md] [--qa] [--check] — read-only evidence collector for toolsmith.
 
 One JSON object with the sections bench_last, bench_failures, audit, guards, changes, doctor,
-qa, idle and tokens. Reads only; runs no mutating verb. Root: TOOLSMITH_ROOT, else HARNESS_HOME,
+qa, idle, tokens and hold; --check exits 1 when a `hold` row changed since state/last-seen.json.
+Reads only; runs no mutating verb. Root: TOOLSMITH_ROOT, else HARNESS_HOME,
 else ~/agents. A live probe is replaced by $ROOT/mock/<name>.json (doctor, power, top) or
 $ROOT/mock/qa.tsv when that file exists, so tests never call pc.
 """
-import argparse, json, os, re, subprocess, sys, time
+import argparse, gzip, json, os, re, subprocess, sys, time
 from collections import Counter
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+from auditlib import raw_call, rotated_rows, row_kind
 
 ROOT = os.environ.get('TOOLSMITH_ROOT') or os.environ.get('HARNESS_HOME') \
     or os.path.expanduser('~/agents')
 MOCK = os.path.join(ROOT, 'mock')
 
-RAW = {
-    'pactl': r'\bpactl\b', 'powerprofilesctl': r'\bpowerprofilesctl\b', 'wpctl': r'\bwpctl\b',
-    'docker restart': r'\bdocker\s+restart\b', 'tailscale': r'\btailscale\b',
-    'systemctl stop': r'\bsystemctl\b[^;|&]*\bstop\b', 'systemctl restart': r'\bsystemctl\b[^;|&]*\brestart\b',
-    'nmcli': r'\bnmcli\b', 'brightnessctl': r'\bbrightnessctl\b',
-}
-RAW_RE = {k: re.compile(v) for k, v in RAW.items()}
-# The pc verb covering each raw tool; None = no verb yet (a toolbox gap).
-# Mirrors RAW_MAP in bin/agents-log, which is the source of truth for the table.
-RAW_PC = {
-    'pactl': 'pc audio', 'wpctl': 'pc audio', 'powerprofilesctl': 'pc power profile',
-    'systemctl stop': 'pc units', 'systemctl restart': 'pc units',
-    'docker restart': 'pc docker restart', 'tailscale': 'pc net tailscale',
-    'nmcli': None, 'brightnessctl': None,
-}
 PC_RE = re.compile(r'\bpc ([a-z][a-z0-9-]*)')
 
 
@@ -60,7 +49,7 @@ def read_json(path, default=None):
 def read_jsonl(path):
     rows = []
     try:
-        fh = open(path)
+        fh = gzip.open(path, 'rt') if path.endswith('.gz') else open(path)
     except OSError:
         return rows
     with fh:
@@ -122,9 +111,15 @@ def sec_bench_failures():
     run, rows = newest_rows()
     if run is None:
         return {'present': False}
-    fails = [r for r in rows if not r.get('pass')]
+    skipped = sum(1 for r in rows if r.get('skipped'))
+    rows = [r for r in rows if not r.get('skipped')]
+    fails = sorted((r for r in rows if not r.get('pass')),
+                   key=lambda r: (r.get('arm') != 'new', r.get('task') or '', r.get('i') or 0))
+    expected = sum(1 for r in fails if r.get('arm') == 'old'
+                   and (r.get('task') or '').startswith('C') and 'no --apply' in (r.get('reason') or ''))
     return {
         'present': True, 'run': run, 'trials': len(rows), 'fails': len(fails),
+        'skipped': skipped, 'expected': expected,
         'by_task': dict(Counter(r.get('task') for r in fails).most_common()),
         'rows': [{
             'task': r.get('task'), 'arm': r.get('arm'), 'i': r.get('i'),
@@ -137,33 +132,38 @@ def sec_bench_failures():
 
 def sec_audit(since, cut):
     path = os.path.join(ROOT, 'log', 'actions.jsonl')
-    rows = [r for r in read_jsonl(path) if ts_epoch(r.get('ts', '')) >= cut]
+    rows = [r for r in rotated_rows(path, cut) if ts_epoch(r.get('ts', '')) >= cut]
     per_session, raw_by_tool, pc_verbs = {}, Counter(), Counter()
-    raw_by_session, pc_by_session, raw_sessions = Counter(), Counter(), {}
+    raw_by_session, pc_by_session, raw_sessions, raw_kind = Counter(), Counter(), {}, {}
     for r in rows:
         sess = r.get('session', '')
         per_session.setdefault(sess, Counter())[(r.get('op') or '').split(' ')[0]] += 1
         if r.get('tool') != 'Bash':
             continue
         blob = r.get('summary') or ''
-        for tool, rx in RAW_RE.items():
-            n = len(rx.findall(blob))
-            if n:
-                raw_by_tool[tool] += n
-                raw_by_session[sess] += n
-                raw_sessions.setdefault(tool, set()).add(sess)
+        hit = raw_call(r) if row_kind(r) == 'agent' else None
+        if hit:
+            raw_by_tool[hit[0]] += 1
+            raw_by_session[sess] += 1
+            raw_sessions.setdefault(hit[0], set()).add(sess)
+            raw_kind[hit[0]] = hit[1:]
         for verb in PC_RE.findall(blob):
             pc_verbs[verb] += 1
             pc_by_session[sess] += 1
     offenders = [{'session': s, 'raw': n, 'pc': pc_by_session.get(s, 0)}
                  for s, n in raw_by_session.most_common(5)]
-    raw_map = [{'raw': t, 'pc': RAW_PC.get(t), 'count': n,
+    raw_map = [{'raw': t, 'class': raw_kind[t][0], 'pc': raw_kind[t][1], 'count': n,
                 'sessions': len(raw_sessions.get(t, ()))}
                for t, n in raw_by_tool.most_common()]
-    coverable = sum(r['count'] for r in raw_map if r['pc'])
+    by = Counter()
+    for r in raw_map:
+        by[r['class']] += r['count']
+    base = by['covered'] + by['gap']
     return {
-        'raw_map': raw_map, 'raw_coverable': coverable,
-        'raw_gaps': [r['raw'] for r in raw_map if not r['pc']],
+        'raw_kind': 'agent', 'raw_map': raw_map, 'raw_coverable': by['covered'],
+        'raw_by_design': by['by-design'],
+        'raw_gap': by['gap'], 'raw_coverable_pct': round(100 * by['covered'] / base) if base else 0,
+        'raw_gaps': [r['raw'] for r in raw_map if r['class'] == 'gap'],
         'present': os.path.exists(path), 'since': since, 'lines': len(rows),
         'sessions': {s: dict(c.most_common(10)) for s, c in per_session.items()},
         'raw_total': sum(raw_by_tool.values()), 'raw_by_tool': dict(raw_by_tool.most_common()),
@@ -178,12 +178,12 @@ def sec_guards(cut):
         return {'present': False, 'rows': 0}
     rows = [r for r in read_jsonl(path) if ts_epoch(r.get('ts', '')) >= cut]
     return {'present': True, 'rows': len(rows),
-            'by_reason': dict(Counter(r.get('reason') or r.get('guard') for r in rows).most_common())}
+            'by_reason': dict(Counter(r.get('rule') or r.get('reason') or r.get('guard') for r in rows).most_common())}
 
 
 def sec_changes(cut):
     path = os.path.join(ROOT, 'log', 'changes.jsonl')
-    rows = read_jsonl(path)
+    rows = rotated_rows(path, cut)
     verdict = {r['id']: r for r in rows if 'verified' in r and 'id' in r}
     applies = [r for r in rows if 'target' in r]
     window = [r for r in applies if ts_epoch(r.get('ts', '')) >= cut]
@@ -260,17 +260,58 @@ def sec_qa(run_qa):
                       if any(v > 0 for k, v in m.get('delta', {}).items() if k != 'lines')]}
 
 
+OWN_UNIT = 'agent@toolsmith.service'
+IDLE_COLS = ['t', 'seconds', 'samples', 'package_w', 'psys_w', 'psys_sd', 'top_waker', 'wake_s',
+             'fleet_rss_mb', 'other_rss_mb', 'top_waker_unit']
+
+
+def own_pids():
+    """This process and its ancestors: the run calling the collector."""
+    pids, pid = set(), os.getpid()
+    while pid > 1 and pid not in pids:
+        pids.add(pid)
+        try:
+            with open(f'/proc/{pid}/stat') as f:
+                pid = int(f.read().rsplit(')', 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            break
+    return pids
+
+
+def idle_baseline():
+    """The newest row of bench/BASELINE-IDLE.tsv (pc idle, Sunday, away and quiet), or None."""
+    try:
+        with open(os.path.join(ROOT, 'bench', 'BASELINE-IDLE.tsv')) as f:
+            rows = [ln.rstrip('\n').split('\t') for ln in f if ln.strip() and not ln.startswith('#')]
+    except OSError:
+        return None
+    if not rows:
+        return None
+    row = dict(zip(IDLE_COLS, rows[-1]))
+    for k in ('package_w', 'psys_w', 'wake_s', 'fleet_rss_mb'):
+        try:
+            row[k] = float(row[k])
+        except (KeyError, ValueError):
+            row[k] = None
+    return {k: row.get(k) for k in ('t', 'package_w', 'psys_w', 'top_waker', 'top_waker_unit',
+                                    'wake_s', 'fleet_rss_mb')}
+
+
 def sec_idle():
     power = probe('power', ['power', '--json']) or {}
     rapl = power.get('rapl') or {}
-    top = probe('top', ['top', '--json', '--sort', 'wake', '-n', '5'])
+    top = probe('top', ['top', '--json', '--sort', 'wake', '-n', '8'])
+    mine = own_pids()
+    rows = [r for r in top if r.get('unit') != OWN_UNIT and r.get('pid') not in mine] \
+        if isinstance(top, list) else []
     wakers = [{'comm': r.get('comm'), 'wake': r.get('wake'), 'unit': r.get('unit'),
-               'rss_kb': r.get('rss')} for r in top[:5]] if isinstance(top, list) else []
-    return {'present': bool(rapl) or bool(wakers),
-            'package_w': rapl.get('package_w'), 'core_w': rapl.get('core_w'),
-            'psys_w': rapl.get('psys_w'),
-            'gpu_rc6_pct': (power.get('gpu') or {}).get('rc6_pct'),
-            'wakers': wakers}
+               'rss_kb': r.get('rss')} for r in rows[:5]]
+    return {'baseline': idle_baseline(),
+            'live': {'present': bool(rapl) or bool(wakers),
+                     'package_w': rapl.get('package_w'), 'core_w': rapl.get('core_w'),
+                     'psys_w': rapl.get('psys_w'),
+                     'gpu_rc6_pct': (power.get('gpu') or {}).get('rc6_pct'),
+                     'wakers': wakers}}
 
 
 def cell_int(fields, i):
@@ -278,6 +319,21 @@ def cell_int(fields, i):
     if i is None or len(fields) <= i or not fields[i].isdigit():
         return 0
     return int(fields[i])
+
+
+def sec_hold():
+    """Owner-held BACKLOG rows (cells after rank) and those that changed since last-seen.json."""
+    ts = os.path.join(ROOT, 'toolsmith')
+    rows = {}
+    try:
+        for line in open(os.path.join(ts, 'BACKLOG.md')):
+            c = [x.strip() for x in line.strip().strip('|').split('|')]
+            if len(c) > 4 and c[4] == 'hold':
+                rows[c[1]] = ' | '.join(c[1:])
+    except OSError:
+        pass
+    seen = (read_json(os.path.join(ts, 'state', 'last-seen.json'), {}) or {}).get('hold') or {}
+    return {'rows': rows, 'changed': sorted(k for k, v in seen.items() if rows.get(k) != v)}
 
 
 def sec_tokens(cut):
@@ -344,13 +400,17 @@ def md(d):
     f = d['bench_failures']
     if f.get('present'):
         by = ', '.join(f'{k}={v}' for k, v in f['by_task'].items()) or 'none'
-        L += ['## bench_failures', f"- run {f['run']}: {f['fails']}/{f['trials']} failed",
+        L += ['## bench_failures', f"- run {f['run']}: {f['fails']}/{f['trials']} failed "
+              f"(expected old C-tier no --apply {f['expected']}, skipped {f['skipped']})",
               f"- by task: {by}"]
         L += [f"  - {r['task']}/{r['arm']}#{r['i']}: {(r['reason'] or '')[:90]}" for r in f['rows'][:10]]
         L.append('')
     a = d['audit']
     L += ['## audit',
           f"- {a['lines']} rows, {len(a['sessions'])} sessions · raw={a['raw_total']} pc={a['pc_total']}",
+          f"- raw by class ({a['raw_kind']} runs only): covered {a['raw_coverable']} · "
+          f"by-design {a['raw_by_design']} · "
+          f"gap {a['raw_gap']} ({a['raw_coverable_pct']}% coverable)",
           '- raw: ' + (', '.join(f'{k}={v}' for k, v in a['raw_by_tool'].items()) or 'none'),
           '- top raw sessions: ' + (', '.join(f"{o['session']}(raw {o['raw']}/pc {o['pc']})"
                                               for o in a['top_raw_offenders']) or 'none'), '']
@@ -364,10 +424,17 @@ def md(d):
     q = d['qa']
     if q.get('ran'):
         L += ['## qa', '- worse than baseline: ' + (', '.join(q['worse']) or 'none'), '']
-    i = d['idle']
-    L += ['## idle',
-          f"- package {i['package_w']} W · core {i['core_w']} W · gpu rc6 {i['gpu_rc6_pct']}%",
-          '- wakers: ' + (', '.join(f"{w['comm']}({w['wake']}/s)" for w in i['wakers']) or 'none'), '']
+    b, i = d['idle']['baseline'], d['idle']['live']
+    L += ['## idle']
+    if b:
+        L.append(f"- baseline {b['t']}: package {b['package_w']} W · psys {b['psys_w']} W · "
+                 f"top waker {b['top_waker']}({b['wake_s']}/s, {b['top_waker_unit'] or '?'}) · "
+                 f"fleet {b['fleet_rss_mb']} MB")
+    else:
+        L.append('- baseline: none (no bench/BASELINE-IDLE.tsv row)')
+    L += [f"- live (biased by this run): package {i['package_w']} W · core {i['core_w']} W · "
+          f"gpu rc6 {i['gpu_rc6_pct']}%",
+          '- live wakers: ' + (', '.join(f"{w['comm']}({w['wake']}/s)" for w in i['wakers']) or 'none'), '']
     t = d['tokens']
     L += ['## tokens',
           '- ' + (', '.join(f"{k}: {v['in_per_run']} in / {v['out_per_run']} out / "
@@ -387,13 +454,22 @@ def main():
     ap.add_argument('--json', action='store_true', help='one JSON object (default)')
     ap.add_argument('--md', action='store_true', help='markdown digest instead of JSON')
     ap.add_argument('--qa', action='store_true', help='also run qa-metrics.sh (several seconds)')
+    ap.add_argument('--check', action='store_true',
+                    help='exit 1 if a hold row changed since state/last-seen.json')
     a = ap.parse_args()
+    if a.check:
+        h = sec_hold()
+        for k in h['changed']:
+            print(f"hold changed: {k} now {h['rows'].get(k, 'gone')}")
+        print(f"hold: {len(h['rows'])} rows, {len(h['changed'])} changed")
+        sys.exit(1 if h['changed'] else 0)
     cut = time.time() - since_seconds(a.since)
     d = {
         'generated': time.strftime('%Y-%m-%dT%H:%M:%S'), 'since': a.since,
         'bench_last': sec_bench_last(), 'bench_failures': sec_bench_failures(),
         'audit': sec_audit(a.since, cut), 'guards': sec_guards(cut), 'changes': sec_changes(cut),
         'doctor': sec_doctor(), 'qa': sec_qa(a.qa), 'idle': sec_idle(), 'tokens': sec_tokens(cut),
+        'hold': sec_hold(),
     }
     print(md(d) if a.md else json.dumps(strip_money(d), indent=1))
 

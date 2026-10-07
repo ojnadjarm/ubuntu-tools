@@ -1,0 +1,4 @@
+{ "compilerOptions": { "target": "es2022", "module": "esnext", "moduleResolution": "bundler", "strict": true, "noEmit": true, "skipLibCheck": true,
+  "lib": ["es2022", "dom"], "types": ["vite/client"], "allowImportingTsExtensions": true,
+  "paths": { "cutaway-kit": ["./node_modules/cutaway-kit/src/index.ts"], "cutaway-kit/*": ["./node_modules/cutaway-kit/src/*"], "explainer-kit": ["./node_modules/explainer-kit/src/index.ts"], "three": ["./node_modules/@types/three"], "three/addons/*": ["./node_modules/@types/three/examples/jsm/*"], "gsap": ["./node_modules/gsap"] } },
+  "include": ["src", "./node_modules/cutaway-kit/src", "./node_modules/explainer-kit/src"], "exclude": [] }

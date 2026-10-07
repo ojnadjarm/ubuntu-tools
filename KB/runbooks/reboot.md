@@ -15,7 +15,18 @@
 `~/.config/pc-harness/config.env` makes `maintenance-run` refuse every reboot with reason
 `auto-reboot-disabled-by-owner` before any other gate, push once ("reboot required … do it
 yourself when convenient") and exit 3. The owner reboots by hand (steps above). Setting the
-switch back to 1 restores the gated behaviour below.
+switch back to 1 restores the gated behaviour below. Unset also means 0 (T116).
+
+T116 (2026-09-27, rebooted at 04:06 despite the switch): `env.sh` sourced config.env without
+exporting it, and a child `maintenance-run` skips `env.sh` once `HARNESS_ENV_LOADED` is set, so
+under `agent-run` the switch never arrived and the old `:-1` default rebooted. `env.sh` now
+exports every config.env key (`set -a`); `bin/tests/maintenance-run.test.sh` replays the unit's
+chain in bwrap with a pending reboot and shutdown/sudo stubbed.
+
+T118: the fleet guard (`bin/guards/_guard`, on every headless agent's PATH) obeys the same switch.
+With `MAINT_AUTO_REBOOT` 0 or unset it refuses `reboot`, `shutdown`, `poweroff`, `halt` and
+`sudo systemctl reboot|poweroff|halt|kexec|soft-reboot` at any hour (exit 3); with 1 it allows them
+only 04:00–05:00. Test: `bash ~/agents/bin/tests/guards.test.sh` (stubs only).
 
 Only `maintenance-run` may reboot this machine. No agent, and no unattended-upgrades run, may
 reboot outside it (`Automatic-Reboot "false"`).

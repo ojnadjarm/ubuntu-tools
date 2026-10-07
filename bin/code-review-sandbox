@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# code-review-sandbox [--fixture <home>] [--post] [--selftest] -- <cmd…> — run the code-review swarm in an allowlist sandbox
+# (bwrap): the whole home read-only, writable only where the swarm may write; no network except the Claude API (through
+# code-review-netproxy); no D-Bus, systemd, docker, ssh-agent or tmux sockets; secrets and the voice corpus hidden; its own
+# pid namespace, so nothing outlives it. Real mode: ~/agents writable except .git, research, backups (but code-review/ and
+# retired/) and the swarm's own containment. Fixture mode: only the fixture home and the audit log are writable.
+# --post: after the session, also on timeout, drop stale claims, restore unverified backups and deliver the report outside.
+# --selftest proves every read-only, hidden and blocked path before anything runs.
+set -uo pipefail
+H="$HOME"; A="$H/agents"; ME="$A/code-review"; U="$(id -u)"; B="$A/bin"
+fixture=""; selftest=0; post=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --fixture) fixture="$(realpath -m "${2:?}")"; shift 2 ;;
+    --selftest) selftest=1; shift ;;
+    --post) post=1; shift ;;
+    --) shift; break ;;
+    -h|--help) sed -n '2,8p' "$0" | sed 's/^# //'; exit 0 ;;
+    *) break ;;
+  esac
+done
+if [ -n "$fixture" ]; then
+  case "$fixture" in "$ME"/state/selftest/*) ;; *)
+    echo "code-review-sandbox: fixture must live under $ME/state/selftest/" >&2; exit 2 ;; esac
+  [ -d "$fixture/agents" ] || { echo "code-review-sandbox: no fixture at $fixture" >&2; exit 2; }
+  work="$fixture/.sandbox"; crhome="$fixture"
+else
+  work="$ME/state/sandbox"; crhome="$H"
+fi
+mkdir -p "$work/shims" "$work/net"
+attempts="${fixture:-$ME/state}/attempts.log"
+
+# Claude's own state stays writable (auth refresh, session files); every other entry of ~/.claude is read-only.
+internal=".credentials.json .last-cleanup .last-update-result.json backups cache debug file-history history.jsonl
+          mcp-needs-auth-cache.json session-env sessions shell-snapshots state statsig todos"
+slug="$(printf '%s' "$PWD" | sed 's/[^a-zA-Z0-9]/-/g')"
+mkdir -p "$H/.claude/projects/$slug"
+
+ro=("$A/.git" "$A/AGENTS.md" "$A/FLEET.md" "$A/research" "$A/backups" "$work")
+while IFS= read -r p; do ro+=("$p"); done < <(python3 "$B/code-review" containment)
+for e in "$H"/.claude/* "$H"/.claude/.[!.]*; do
+  n="${e##*/}"; case " $(echo $internal) " in *" $n "*) continue ;; esac
+  [ "$n" = skills ] && [ -z "$fixture" ] && continue
+  ro+=("$e")
+done
+if [ -z "$fixture" ] && [ -d "$H/.claude/skills" ]; then
+  while IFS=$'\t' read -r pol path; do
+    [ "$pol" = edit ] || [ "$pol" = retire-only ] || ro+=("${path%/}")
+  done < <(CR_HOME="$H" python3 "$B/code-review" policy "$H"/.claude/skills/*/ 2>/dev/null)
+fi
+if [ -n "$fixture" ]; then
+  rw=("$fixture" "$A/log")
+else
+  rw=("$A" "$H/.claude/skills")
+fi
+rw_after=("$H/.claude/projects/$slug")
+[ -z "$fixture" ] && rw_after+=("$A/backups/code-review" "$A/backups/retired")
+hide_dirs=("$A/secrets" "$A/asr-corpus" "$H/.ssh" "$H/.gnupg" "$H/.config/gh" "$H/.local/share/keyrings" "/run/user/$U")
+hide_files=(/run/dbus/system_bus_socket /run/docker.sock /run/containerd/containerd.sock "$H/.git-credentials" "$H/.netrc")
+
+# Shims over the binaries themselves, so they hold whatever PATH a lane's shell has.
+refuse() { printf '#!/bin/sh\necho "refused %s $*" >>"%s"\necho "%s: refused inside the code-review sandbox" >&2\nexit 97\n' "$1" "$attempts" "$1" >"$work/shims/$1"; chmod +x "$work/shims/$1"; }
+shims=()
+for c in systemctl systemd-run busctl docker notify-owner plan-publish eye; do refuse "$c"; done
+for c in systemctl systemd-run busctl docker; do
+  p="$(command -v "$c" 2>/dev/null)"; [ -n "$p" ] && shims+=(--ro-bind "$work/shims/$c" "$(readlink -f "$p")")
+done
+shims+=(--ro-bind "$work/shims/notify-owner" "$B/notify-owner" --ro-bind "$work/shims/plan-publish" "$B/plan-publish")
+eye_real="$(readlink -f "$H/.local/bin/eye" 2>/dev/null)"
+for e in "$B/eye" "$eye_real"; do [ -f "$e" ] && shims+=(--ro-bind "$work/shims/eye" "$e"); done
+if [ -f "$B/pc" ]; then
+  printf '#!/bin/sh\ncase " $* " in *" --apply "*|" undo "*) echo "refused pc $*" >>"%s"; echo "pc: changes are refused inside the code-review sandbox" >&2; exit 97 ;; esac\nexec /tmp/.cr-bin/pc "$@"\n' "$attempts" >"$work/shims/pc"
+  chmod +x "$work/shims/pc"
+  shims+=(--ro-bind "$B/pc" /tmp/.cr-bin/pc --ro-bind "$work/shims/pc" "$B/pc")
+fi
+
+port=18474; sock="$work/net/proxy.sock"
+args=(--dev-bind / / --ro-bind "$H" "$H")
+for p in "${rw[@]}"; do [ -e "$p" ] && args+=(--bind "$p" "$p"); done
+args+=(--bind "$H/.claude" "$H/.claude")
+for p in "$H/.claude.json" "$H/.cache"; do [ -e "$p" ] && args+=(--bind "$p" "$p"); done
+for p in "${ro[@]}"; do [ -e "$p" ] && args+=(--ro-bind "$p" "$p"); done
+for p in "${rw_after[@]}"; do [ -e "$p" ] && args+=(--bind "$p" "$p"); done
+args+=(--tmpfs /tmp)
+for p in "${hide_dirs[@]}"; do [ -d "$p" ] && args+=(--tmpfs "$p"); done
+for p in "${hide_files[@]}"; do [ -e "$p" ] && args+=(--ro-bind /dev/null "$p"); done
+args+=(--bind "$work/net" /tmp/.cr-net "${shims[@]}")
+args+=(--unshare-net --unshare-pid --proc /proc --die-with-parent
+       --unsetenv DBUS_SESSION_BUS_ADDRESS --unsetenv SSH_AUTH_SOCK --unsetenv TMUX --unsetenv TMUX_PANE
+       --setenv XDG_RUNTIME_DIR "/run/user/$U" --setenv HTTPS_PROXY "http://127.0.0.1:$port"
+       --setenv https_proxy "http://127.0.0.1:$port" --setenv NO_PROXY "" --setenv no_proxy ""
+       --setenv CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC 1 --setenv DISABLE_AUTOUPDATER 1 --setenv CR_SANDBOX 1)
+inner='"$0" relay /tmp/.cr-net/proxy.sock '"$port"' 2>/dev/null &
+for _ in $(seq 100); do (exec 3<>/dev/tcp/127.0.0.1/'"$port"') 2>/dev/null && break; sleep 0.05; done
+exec "$@"'
+
+python3 "$B/code-review-netproxy" serve "$sock" 2>>"$work/net/proxy.log" & proxy=$!
+for _ in $(seq 100); do [ -S "$sock" ] && break; sleep 0.05; done
+trap 'kill "$proxy" 2>/dev/null' EXIT
+
+if [ "$selftest" = 1 ]; then
+  wr=("${ro[@]}" "$H" "$H/Documents" "$H/obsidian-vault" "$H/drop" "$H/.moodle-devdocs" "$H/.bashrc" "$H/.local/bin"
+      "$H/.config/pc-harness/config.env" "$H/.claude/projects" "$H/the-dark-eye" "$H/moodle-harness" "$H/moodle-envs" "$H/projects")
+  [ -n "$fixture" ] && wr+=("$A" "$H/.claude/skills")
+  probe='bad=0; say() { echo "$1"; bad=1; }
+  for p in "$@"; do [ -e "$p" ] || continue; [ -w "$p" ] && say "WRITABLE $p"; done
+  for p in "$A/secrets" "$A/asr-corpus" "$H/.ssh"; do [ -d "$p" ] && [ -n "$(ls -A "$p" 2>/dev/null)" ] && say "VISIBLE $p"; done
+  [ -e "/tmp/tmux-$U" ] && say "VISIBLE tmux socket"
+  [ -S "/run/user/$U/bus" ] && say "VISIBLE user bus"
+  curl -s --unix-socket /run/docker.sock -m 3 http://d/_ping >/dev/null 2>&1 && say "REACHABLE docker"
+  timeout 5 /usr/bin/systemd-run --user --wait true >/dev/null 2>&1 && say "ESCAPE systemd-run"
+  timeout 5 busctl --user list >/dev/null 2>&1 && say "REACHABLE user bus (busctl)"
+  timeout 5 ssh-add -l >/dev/null 2>&1 && say "REACHABLE ssh-agent"
+  curl -s -m 5 -o /dev/null https://github.com && say "REACHABLE github.com:443"
+  timeout 5 bash -c "</dev/tcp/github.com/22" 2>/dev/null && say "REACHABLE github.com:22"
+  timeout 3 bash -c "</dev/tcp/127.0.0.1/8642" 2>/dev/null && say "REACHABLE eye bridge 127.0.0.1:8642"
+  code=$(curl -s -m 10 -o /dev/null -w "%{http_code}" https://api.anthropic.com/); [ "$code" = 000 ] && say "UNREACHABLE Claude API"
+  [ "$(cat /proc/1/comm)" = bwrap ] || say "NO pid namespace"
+  notify-owner x >/dev/null 2>&1; [ $? = 97 ] || say "UNSHIMMED notify-owner"
+  systemctl --user status >/dev/null 2>&1; [ $? = 97 ] || say "UNSHIMMED systemctl"
+  exit $bad'
+  out="$(A="$A" H="$H" U="$U" bwrap "${args[@]}" bash -c "$inner" "$B/code-review-netproxy" bash -c "$probe" _ "${wr[@]}" 2>&1)" || {
+    echo "$out"; echo "code-review-sandbox: selftest FAILED" >&2; exit 1; }
+  miss="$(bwrap "${args[@]}" bash -c 'for p in "$@"; do [ -e "$p" ] || continue; [ -w "$p" ] || echo "READONLY $p"; done' _ \
+    "${rw[@]}" "${rw_after[@]}" "$H/.claude/.credentials.json" "$H/.claude.json" 2>&1)"
+  [ -z "$miss" ] || { echo "$miss"; echo "code-review-sandbox: selftest FAILED — a writable path is read-only" >&2; exit 1; }
+  : >"$attempts"
+  n=0; for p in "${wr[@]}"; do [ -e "$p" ] && n=$((n+1)); done
+  echo "code-review-sandbox: selftest ok — $n read-only, ${#rw[@]}+${#rw_after[@]} writable, secrets/corpus/sockets hidden, network only to the Claude API, shims refuse"
+  [ $# -eq 0 ] && exit 0
+fi
+[ $# -gt 0 ] || { echo "usage: code-review-sandbox [--fixture <home>] [--post] [--selftest] -- <cmd…>" >&2; exit 2; }
+
+claude_before="$(ls -A "$H/.claude")"
+bwrap "${args[@]}" bash -c "$inner" "$B/code-review-netproxy" "$@" & bw=$!
+trap 'kill -TERM "$bw" 2>/dev/null' TERM INT
+wait "$bw"; rc=$?
+while kill -0 "$bw" 2>/dev/null; do wait "$bw"; rc=$?; done
+trap - TERM INT
+kill "$proxy" 2>/dev/null
+new="$(LC_ALL=C comm -13 <(printf "%s\n" "$claude_before" | LC_ALL=C sort) <(ls -A "$H/.claude" | LC_ALL=C sort))"
+if [ -n "$new" ]; then
+  echo "code-review-sandbox: WARNING new entries in ~/.claude during the run: $(echo $new)" | tee -a "$ME/state/claude-new-entries.log" >&2
+fi
+if [ "$post" = 1 ]; then
+  CR_HOME="$crhome" python3 "$B/code-review" cleanup
+  CR_HOME="$crhome" python3 "$B/code-review" deliver
+fi
+exit "$rc"

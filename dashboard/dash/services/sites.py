@@ -1,16 +1,19 @@
 """Every listener worth a link: ss + docker ps + an HTTP probe per port."""
-import glob, os, re, time, urllib.error, urllib.request
+import glob, ipaddress, os, re, time, urllib.error, urllib.request
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlsplit
 from dash.env import HOME, PUBLIC_HOST, run
+from dash.routes import route
 
 # port -> (name, what it is, scheme, tailnet https port if tailscale serve fronts it, group)
 # group: a SITES screen group for things a person opens in a browser, None for plumbing
 SITES = {
     19998: ("Dashboard", "this page: the machine's control panel", "http", 8498, "mine"),
-    8070: ("Drop folder", "files you asked for, pull them from the phone", "http", None, "mine"),
-    8071: ("Portfolio preview", "static build of the portfolio site", "http", None, "mine"),
+    8070: ("Drop folder", "files you asked for, pull them from the phone", "http", 8470, "mine"),
+    8072: ("Local sites", "GitHub Pages mirror (sites.service)", "http", 8472, "mine"),
     8644: ("The Eye", "talk to the eye from the phone", "https", 8644, "mine"),
     8052: ("Moodle 5.2", "the dev site, 17 fixture charts", "http", 8452, "moodle"),
+    8045: ("Moodle 4.5 vass", "the vass customer project site", "http", 8445, "moodle"),
     8025: ("MailHog", "every mail the Moodle sites send, caught here", "http", None, "moodle"),
     19999: ("Netdata", "live machine metrics, per second", "http", 8499, "metrics"),
     8642: ("Eye bridge", "the body's local API", None, None, None),
@@ -19,11 +22,22 @@ SITES = {
     7900: ("Selenium noVNC", "watch a behat run", "http", None, None),
     1025: ("MailHog SMTP", "mail sink", None, None, None),
     5452: ("Moodle 5.2 DB", "postgres", None, None, None),
+    5445: ("Moodle 4.5 DB", "postgres", None, None, None),
     5900: ("Selenium VNC", "raw VNC", None, None, None),
     80: ("Moodle proxy", "shared nginx front", None, None, None),
 }
-# infrastructure that is never a "site": ssh, dns, cups, statsd, ephemeral tailscale ports
-SKIP_PORTS = {22, 53, 631, 8125, 8452, 8498, 8499}
+# port -> the sites one static server holds under paths: one row each, probed on its own path
+PAGES = {
+    8072: (("/ailearning/", "ailearning", "the AI learning site, GitHub Pages build"),
+           ("/portfolio/", "Portfolio", "the portfolio site, GitHub Pages build")),
+}
+# secret pages: dashboard path that redirects to the link -> (CLI printing the link, name, what); the link never enters /api/status
+SECRETS = {
+    "/finance": (["finance-month", "link"], "Finances", "your monthly money page · private, tailnet only"),
+}
+TAILNET = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48"))
+# infrastructure that is never a "site": ssh, dns, cups, statsd, the tailscale serve https fronts
+SKIP_PORTS = {22, 53, 631, 8125, 8445, 8452, 8470, 8472, 8498, 8499}
 
 
 def listeners():
@@ -109,12 +123,12 @@ def http_code(url, method):
         return None
 
 
-def probe(port):
-    """HEAD, then GET when HEAD is refused, on the local port (v4 then v6): (state, ms); down when nothing answers."""
+def probe(port, path="/"):
+    """HEAD, then GET when HEAD is refused, on the local port and path (v4 then v6): (state, ms); down when nothing answers."""
     t0 = time.time()
     for host in ("127.0.0.1", "[::1]"):
         for method in ("HEAD", "GET"):
-            code = http_code("http://%s:%d/" % (host, port), method)
+            code = http_code("http://%s:%d%s" % (host, port, path), method)
             if code is None:
                 break
             if code < 400 or method == "GET":
@@ -130,13 +144,73 @@ def declared_ports():
     return out
 
 
+def rows_for(port, name, what, url, group):
+    """One row per page when the listener holds several sites, else the listener's own row."""
+    pages = PAGES.get(port)
+    if not pages:
+        return [{"port": port, "path": "/", "name": name, "what": what, "url": url, "group": group}]
+    return [{"port": port, "path": path, "name": pn, "what": pw, "url": url and url.rstrip("/") + path, "group": group}
+            for path, pn, pw in pages]
+
+
+def secret_link(path):
+    """The link the secret page's CLI prints right now (never stored); '' when it prints none."""
+    try:
+        out = run(SECRETS[path][0], 10).strip()
+    except Exception:
+        return ""
+    return out if out.startswith("https://") else ""
+
+
+def trusted(ip):
+    """True for loopback (the tailnet https front proxies from there) or a tailnet address; the LAN is not."""
+    a = ipaddress.ip_address(ip.split("%")[0])
+    a = getattr(a, "ipv4_mapped", None) or a
+    return a.is_loopback or any(a in n for n in TAILNET if n.version == a.version)
+
+
+def secret_route(h, path):
+    """302 to the secret link for a tailnet or local request, 403 for anyone else, 503 when the CLI has no link."""
+    if not trusted(h.client_address[0]):
+        return h.send(403, b"tailnet only\n", "text/plain")
+    link = secret_link(path)
+    if not link:
+        return h.send(503, b"no link\n", "text/plain")
+    h.send_response(302)
+    h.send_header("Location", link)
+    h.send_header("Cache-Control", "no-store")
+    h.send_header("Referrer-Policy", "no-referrer")
+    h.send_header("Content-Length", "0")
+    h.end_headers()
+
+
+for _p in SECRETS:
+    route("GET", _p)(secret_route)
+
+
+def secret_rows():
+    """One row per secret page: url is the dashboard resolver, host and state come from the live link."""
+    rows = []
+    for path, (cmd, name, what) in SECRETS.items():
+        link = secret_link(path)
+        u = urlsplit(link)
+        code = http_code(link, "HEAD") if link else None
+        state = "down" if code is None else "up" if code < 400 else "warn"
+        rows.append({"port": u.port, "path": path, "name": name, "what": what, "url": path,
+                     "host": u.netloc, "group": "mine", "state": state,
+                     "unit": "", "pid": None, "uptime": "", "proc": "", "tls": True, "ms": None})
+    return rows
+
+
 def sites():
     """Every listener worth a link, live from ss and probed over HTTP; unknown ones are flagged stray."""
+    secret = secret_rows()
+    hidden = {r["port"] for r in secret}
     rows = []
     live = listeners()
     owner = {p: c["name"] for c in docker_ps() for p in c["ports"]}
     for port, info in sorted(live.items()):
-        if port in SKIP_PORTS or port > 30000:
+        if port in SKIP_PORTS or port in hidden or port > 30000:
             continue
         known = SITES.get(port)
         name, what, scheme, ts, group = known or ("port %d" % port, info["proc"] or "unknown listener", "http", None, None)
@@ -146,14 +220,13 @@ def sites():
         elif scheme == "http":
             url = "http://%s:%d/" % (PUBLIC_HOST, port)
         unit = owner.get(port) or (proc_unit(info["pid"]) if info["pid"] else "")
-        rows.append({
-            "port": port, "name": name, "what": what, "url": url, "group": group,
-            "state": "up" if known else "stray", "unit": unit, "pid": info["pid"],
-            "uptime": human_age(proc_started(info["pid"])) if info["pid"] else "",
-            "proc": info["proc"], "tls": bool(ts or scheme == "https"), "ms": None,
-        })
+        for r in rows_for(port, name, what, url, group):
+            r.update({"state": "up" if known else "stray", "unit": unit, "pid": info["pid"],
+                      "uptime": human_age(proc_started(info["pid"])) if info["pid"] else "",
+                      "proc": info["proc"], "tls": bool(ts or scheme == "https"), "ms": None})
+            rows.append(r)
     with ThreadPoolExecutor(8) as pool:
-        probed = list(pool.map(lambda r: probe(r["port"]) if r["url"] else (None, None), rows))
+        probed = list(pool.map(lambda r: probe(r["port"], r["path"]) if r["url"] else (None, None), rows))
     for r, (state, ms) in zip(rows, probed):
         r["ms"] = ms
         if state and r["state"] == "up":
@@ -161,8 +234,10 @@ def sites():
     declared = declared_ports()
     for port, (name, what, scheme, ts, group) in sorted(SITES.items()):
         if port not in live and port not in SKIP_PORTS and scheme and port in declared:
-            rows.append({"port": port, "name": name, "what": what, "url": "", "group": group, "ms": None,
-                         "state": "down", "unit": "", "pid": None, "uptime": "", "proc": "", "tls": False})
+            for r in rows_for(port, name, what, "", group):
+                r.update({"ms": None, "state": "down", "unit": "", "pid": None, "uptime": "", "proc": "", "tls": False})
+                rows.append(r)
+    rows += secret
     order = list(SITES)
     rows.sort(key=lambda r: ({"stray": 0, "down": 1, "warn": 2, "up": 3}[r["state"]],
                              order.index(r["port"]) if r["port"] in order else 99))

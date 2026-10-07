@@ -99,14 +99,14 @@ case "$(jq -r .detail <<<"$row")" in *fakeunackd1*) ok 'the FAIL row names the u
 # --- 6. the browsers row: a fixture /proc, never a real process ---------------
 # TSP-020: a playwright-mcp / headless-chrome tree that outlived its task. Each case builds
 # two fake pids under mktemp; no real pid is read and none is ever signalled.
-fake_proc() {   # fake_proc <dir> <age-seconds> <pages> <cmdline-words…>
+fake_proc() {   # [PARENT=<ppid>] fake_proc <dir> <age-seconds> <pages> <cmdline-words…>
   local d=$1 age=$2 pages=$3; shift 3
   local btime clk start
   clk=$(getconf CLK_TCK); btime=$(awk '$1=="btime"{print $2}' /proc/stat)
   start=$(( ( $(printf '%(%s)T' -1) - age - btime ) * clk ))
   mkdir -p "$d"
   printf '%s\0' "$@" >"$d/cmdline"
-  printf '%s (fake) S 1 1 0 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 %s 0 %s\n' "${d##*/}" "$start" "$pages" >"$d/stat"
+  printf '%s (fake) S %s 1 0 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 %s 0 %s\n' "${d##*/}" "${PARENT:-1}" "$start" "$pages" >"$d/stat"
   printf '%s %s 100 10 0 500 0\n' "$((pages * 2))" "$pages" >"$d/statm"
 }
 brow() { PC_PROC="$1" "$PC" doctor --quick --json 2>/dev/null | jq -c '.[]|select(.name=="browsers")'; }
@@ -146,6 +146,80 @@ case "$(jq -r .detail <<<"$row")" in
 esac
 is 'a WARN row never fails the run' \
   "$(PC_PROC="$FP" "$PC" doctor --quick >/dev/null 2>&1; echo $?)" 0
+
+# TSP-032: Chrome WARNs when orphaned or > 24 h; the server's own age is information only.
+fresh() { mkdir -p "$1"; cp "$WORK/stat.src" "$1/stat"; }
+F1="$WORK/proc-live"; fresh "$F1"
+fake_proc "$F1/4101" $((9 * 86400)) 25600 node /opt/playwright-mcp/cli.js --headless
+PARENT=4101 fake_proc "$F1/4102" 263 1000 sh -c launcher
+PARENT=4102 fake_proc "$F1/4103" 263 25600 /opt/chromium/headless_shell --headless=new
+PARENT=4103 fake_proc "$F1/4104" 200 25600 /opt/chromium/headless_shell --type=renderer
+row=$(brow "$F1")
+is 'a young Chrome under a live 9-day server is OK' "$(jq -r .status <<<"$row")" OK
+case "$(jq -r .detail <<<"$row")" in *'orphan 0'*) ok 'the live tree reports orphan 0';; *) nok 'the live tree reports orphan 0' "$row";; esac
+
+F2="$WORK/proc-orphan"; fresh "$F2"
+fake_proc "$F2/4201" 300 25600 /opt/chromium/headless_shell --headless=new
+PARENT=4201 fake_proc "$F2/4202" 300 25600 /opt/chromium/headless_shell --type=renderer
+row=$(brow "$F2")
+is 'an orphan Chrome is a WARN row' "$(jq -r .status <<<"$row")" WARN
+case "$(jq -r .detail <<<"$row")" in *'orphan 1'*) ok 'the orphan tree counts one root';; *) nok 'the orphan tree counts one root' "$row";; esac
+
+F3="$WORK/proc-server"; fresh "$F3"
+fake_proc "$F3/4301" $((9 * 86400)) 25600 node /opt/playwright-mcp/cli.js --headless
+row=$(brow "$F3")
+is 'a 9-day server alone is OK' "$(jq -r .status <<<"$row")" OK
+case "$(jq -r .detail <<<"$row")" in 'playwright-mcp 9.0 d 100 MB') ok 'the server row still shows age and RSS';; *) nok 'the server row still shows age and RSS' "$row";; esac
+
+F4="$WORK/proc-stale"; fresh "$F4"
+fake_proc "$F4/4401" $((9 * 86400)) 25600 node /opt/playwright-mcp/cli.js --headless
+PARENT=4401 fake_proc "$F4/4402" $((2 * 86400)) 25600 /opt/chromium/headless_shell --headless=new
+row=$(brow "$F4")
+is 'a 2-day Chrome under a live server is a WARN row' "$(jq -r .status <<<"$row")" WARN
+case "$(jq -r .detail <<<"$row")" in *'chrome-headless 2.0 d'*'orphan 0'*|*'orphan 0'*'chrome-headless 2.0 d'*) ok 'the stale row shows the Chrome age';; *) nok 'the stale row shows the Chrome age' "$row";; esac
+
+# --- 7. budgeted rows judge the fastest of up to 3 runs (TSP-023) -------------
+# A fixture BIN (copied doctor + libs, a fake `pc`, a fake `pc-slow`) under a fake HOME and
+# runtime dir: the real bin/ is not timed and no real verb runs.
+FB="$WORK/bin"; mkdir -p "$FB" "$WORK/home" "$WORK/run" "$WORK/state"
+cp "$BIN/pc-doctor" "$BIN/pclib.sh" "$BIN/env.sh" "$FB/"
+cat >"$FB/pc-slow" <<'EOF2'
+#!/usr/bin/env bash
+c=$(cat "$FAKE_STATE/slow" 2>/dev/null || echo 0); echo $((c + 1)) >"$FAKE_STATE/slow"
+case $FAKE_SLOW:$c in always:*|once:0) sleep 0.15;; esac
+exit 0
+EOF2
+cat >"$FB/pc" <<'EOF2'
+#!/usr/bin/env bash
+[ "$1 $2" = 'mode status' ] || exit 1
+c=$(cat "$FAKE_STATE/mode" 2>/dev/null || echo 0); echo $((c + 1)) >"$FAKE_STATE/mode"
+case $FAKE_MODE:$c in always:*|once:0) sleep 0.6;; esac
+echo agent
+EOF2
+chmod +x "$FB/pc-slow" "$FB/pc"
+frow() {   # frow <row name> <slow pc-slow> <slow mode>
+  rm -f "$WORK/state/"*
+  HOME="$WORK/home" XDG_RUNTIME_DIR="$WORK/run" HARNESS_CONFIG=/dev/null PC_LEDGER="$WORK/none.jsonl" \
+    FAKE_STATE="$WORK/state" FAKE_SLOW="$2" FAKE_MODE="$3" \
+    "$FB/pc-doctor" --quick --json 2>/dev/null | jq -c --arg n "$1" '.[]|select(.name==$n)'
+}
+row=$(frow usage once never)
+is 'a -h slow once is a WARN usage row, not FAIL' "$(jq -r .status <<<"$row")" WARN
+case "$(jq -r .detail <<<"$row")" in
+  *'SLOW ONCE: pc-slow:1'[5-9]?/*ms*load*|*load*'SLOW ONCE: pc-slow:1'[5-9]?/*ms) ok 'the WARN detail carries max/min and load';;
+  *) nok 'the WARN detail carries max/min and load' "$row";;
+esac
+row=$(frow usage always never)
+is 'a -h slow every run is a FAIL usage row' "$(jq -r .status <<<"$row")" FAIL
+case "$(jq -r .detail <<<"$row")" in *'BAD: pc-slow:1'[5-9]?ms*) ok 'the FAIL detail names the min';; *) nok 'the FAIL detail names the min' "$row";; esac
+row=$(frow usage never never)
+is 'a fast fixture BIN is an OK usage row' "$(jq -r .status <<<"$row")" OK
+row=$(frow mode never once)
+is 'a check slow once and fast after is OK' "$(jq -r .status <<<"$row")" OK
+case "$(jq -r .detail <<<"$row")" in *'best of 2, first '[5-9]??'ms, load '*) ok 'the retried row says best-of, first run and load';; *) nok 'the retried row says best-of, first run and load' "$row";; esac
+row=$(frow mode never always)
+is 'a check slow on all 3 runs is FAIL' "$(jq -r .status <<<"$row")" FAIL
+case "$(jq -r .detail <<<"$row")" in *'over budget 500ms) (best of 3'*) ok 'the FAIL row says best of 3';; *) nok 'the FAIL row says best of 3' "$row";; esac
 
 [ $bad = 0 ] && echo 'PASS pc-doctor' || echo 'FAIL pc-doctor'
 exit $bad

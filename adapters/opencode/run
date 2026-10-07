@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # OpenCode adapter for agent-exec (GH16). Verified against opencode 1.18.29 on this machine.
 # stdout = the run's result text · $RAW_OUT = opencode's JSON event stream (one object per line)
-# · $META_OUT = cost/tokens · every tool call is audited through audit-from-stream.
+# · $META_OUT = cost/tokens/tool counts · every tool call is audited through audit-from-stream.
 set -uo pipefail
 HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 
@@ -34,7 +34,7 @@ rc=${PIPESTATUS[0]}
 python3 - "$RAW_OUT" "$META_OUT" <<'PY'
 import json, sys
 raw, meta = sys.argv[1], sys.argv[2]
-text, cost, tok = [], None, None
+text, cost, tok, hist = [], None, None, {}
 for line in open(raw, errors="replace"):
     line = line.strip()
     if not line.startswith("{"):
@@ -46,12 +46,22 @@ for line in open(raw, errors="replace"):
     part = ev.get("part") or {}
     if part.get("type") == "text" and part.get("text"):
         text.append(part["text"])
+    if part.get("type") == "tool" and part.get("tool"):
+        hist[part["tool"]] = hist.get(part["tool"], 0) + 1
     if part.get("type") == "step-finish":
         if part.get("cost") is not None:
             cost = (cost or 0) + part["cost"]
-        if part.get("tokens"):
-            tok = part["tokens"]
-json.dump({"cost_usd": cost, "tokens": tok}, open(meta, "w"))
+        t = part.get("tokens")
+        if t:
+            tok = tok or dict.fromkeys(("input_tokens", "output_tokens", "cache_read_input_tokens",
+                                        "cache_creation_input_tokens"), 0)
+            c = t.get("cache") or {}
+            tok["input_tokens"] += t.get("input") or 0
+            tok["output_tokens"] += (t.get("output") or 0) + (t.get("reasoning") or 0)
+            tok["cache_read_input_tokens"] += c.get("read") or 0
+            tok["cache_creation_input_tokens"] += c.get("write") or 0
+json.dump({"cost_usd": cost, "tokens": tok, "tool_calls": sum(hist.values()),
+           "tool_histogram": hist}, open(meta, "w"))
 sys.stdout.write("\n".join(text))
 if text:
     sys.stdout.write("\n")

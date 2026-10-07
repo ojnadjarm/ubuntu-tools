@@ -1,0 +1,8 @@
+{ "id": "s00", "title": "The regulator",
+  "voice": { "engine": "kokoro-82M-fp32", "voice": "af_heart", "speed": 0.92 },
+  "clips": [ { "id": "s1", "sentences": [
+    "{casing}Here is a regulator, drawn in section.",
+    "{dial}The red dial sets the {rate}rate.|",
+    "{pipe}The blue line carries the {flow}flow,",
+    "and the {gauge}gauge reads it against the {target}target.|"
+  ] } ] }

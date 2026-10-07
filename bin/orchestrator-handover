@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Moves the orchestrator from a hand-run `claude --continue` (PID) into claude-orchestrator.service.
+# Usage: orchestrator-handover <pid> [grace_s]. Detaches into a transient user unit, waits grace_s
+# (default 20) for the last reply, SIGTERMs PID, and starts the unit only once PID is gone (two
+# --continue sessions would fork the conversation). Log: journalctl --user -u orchestrator-handover.
+set -uo pipefail
+export PATH="$HOME/.local/bin:$HOME/agents/bin:$PATH"
+UNIT="${ORCHESTRATOR_UNIT:-claude-orchestrator.service}"
+ST="$HOME/agents/sentinel/state"
+
+if [ "${1:-}" != --worker ]; then
+  pid=${1:?usage: orchestrator-handover <pid> [grace_s]}; grace=${2:-20}
+  [ "$(tr '\0' ' ' </proc/"$pid"/cmdline 2>/dev/null)" = "claude --continue " ] \
+    || { echo "orchestrator-handover: pid $pid is not a 'claude --continue'"; exit 2; }
+  [ "$(systemctl --user is-enabled "$UNIT")" = enabled ] || { echo "orchestrator-handover: $UNIT not enabled"; exit 2; }
+  systemctl --user is-active -q "$UNIT" && { echo "orchestrator-handover: $UNIT already active"; exit 2; }
+  exec systemd-run --user --unit=orchestrator-handover --collect --quiet "$0" --worker "$pid" "$grace"
+fi
+
+pid=$2; grace=$3
+fail() { echo "orchestrator-handover: $1"; notify-owner -p high -t orchestrator "handover failed: $1"; exit 1; }
+sleep "$grace"
+kill -TERM "$pid" 2>/dev/null
+timeout 30 wait-for --label orch-handover --every 1 --pid "$pid" >/dev/null || fail "pid $pid still alive after SIGTERM; unit not started"
+rm -f "$ST/orch-repaired" "$ST/orch-notified"
+systemctl --user start "$UNIT" || fail "$UNIT failed to start"
+timeout 120 wait-for --label orch-handover --every 5 --until 'pc status --brief | grep -q " orch=ok "' >/dev/null \
+  || fail "$UNIT started but orch=$(pc status --brief | grep -o 'orch=[a-z-]*')"
+echo "orchestrator-handover: $UNIT serving, orch=ok"
+notify-owner -t orchestrator "orchestrator back in tmux 'claude' (DarkSaddler Command Center), orch=ok"

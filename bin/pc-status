@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# pc status — live health snapshot of this machine (text, --json, --check, --brief, --facts, --fresh).
+# pc status — live health snapshot of this machine (text, --json, --check, --brief, --facts [--apply], --fresh).
 set -uo pipefail
 export LC_ALL=C
 BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 
 MODE=text
 FRESH=0
+APPLY=0
 for a in "$@"; do case "$a" in
   --json) MODE=json;; --check) MODE=check;; --brief) MODE=brief;; --facts) MODE=facts;;
-  --fresh) FRESH=1;;
-  -h|--help) echo "usage: pc status [--json|--check|--brief|--facts] [--fresh]"; exit 0;;
+  --fresh) FRESH=1;; --apply) APPLY=1;;
+  -h|--help) echo "usage: pc status [--json|--check|--brief|--facts [--apply]] [--fresh]"; exit 0;;
   *) echo "pc status: unknown option $a" >&2; exit 2;;
 esac; done
 
@@ -132,12 +133,7 @@ done <<<"$d_stat"
 sess=$(loginctl show-user "$USER" -p Display --value 2>/dev/null)
 [ -n "$sess" ] || sess=$(loginctl list-sessions --no-legend 2>/dev/null | awk -v u="$USER" '$3==u{print $1;exit}')
 _lockstate() {
-  local v=""
-  [ -r "$BIN/lockcheck.sh" ] &&
-    v=$(. "$BIN/lockcheck.sh" 2>/dev/null | grep -Eio 'unlocked|locked' | head -1 | tr 'A-Z' 'a-z')
-  [ -n "$v" ] ||
-    v=$(loginctl show-session "$sess" -p LockedHint --value 2>/dev/null | sed 's/^yes$/locked/;s/^no$/unlocked/')
-  printf '%s\n' "$v"
+  loginctl show-session "$sess" -p LockedHint --value 2>/dev/null | sed 's/^yes$/locked/;s/^no$/unlocked/'
 }
 k_lock=$(cached lock 900 _lockstate); : "${k_lock:=n/a}"
 
@@ -196,6 +192,21 @@ for _s in $SERVICES; do
   SV[$_s]="${_svst[_i]:-}"; _i=$((_i+1)); : "${SV[$_s]:=unknown}"
   gate "svc_$_s" [ "${SV[$_s]}" != active ]
 done
+# Keepalive (T269): user units that must be active and local sites that must answer 200.
+KEEPALIVE_UNITS=${KEEPALIVE_UNITS:-vass-middleware.service vass-frontend.service vass-frontend-proxy.service moodle45-cron.timer}
+KEEPALIVE_HTTP=${KEEPALIVE_HTTP:-moodle45=http://127.0.0.1:8045/login/index.php}
+_keepalive() {
+  local u h
+  for u in $KEEPALIVE_UNITS; do printf '%s %s\n' "$u" "$(systemctl --user is-active "$u" 2>/dev/null)"; done
+  for h in $KEEPALIVE_HTTP; do
+    printf 'http-%s %s\n' "${h%%=*}" "$(curl -s -o /dev/null -m 5 -w '%{http_code}' "${h#*=}" 2>/dev/null)"
+  done
+}
+declare -A KA=()
+while read -r _k _v; do [ -n "$_k" ] && KA[$_k]=${_v:-unknown}; done < <(cached keepalive 60 _keepalive)
+for _k in "${!KA[@]}"; do
+  case $_k in http-*) gate "ka_$_k" [ "${KA[$_k]}" != 200 ];; *) gate "ka_$_k" [ "${KA[$_k]}" != active ];; esac
+done
 _internet() { ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 && echo reachable || echo unreachable; }
 n_inet=$(cached internet 60 _internet); : "${n_inet:=unreachable}"
 gate internet [ "$n_inet" != reachable ]
@@ -237,11 +248,75 @@ if [ "$MODE" = brief ]; then
 fi
 
 ## --- facts (KB/machine.md) --------------------------------------------------
-if [ "$MODE" = facts ]; then
+FACTS_BEGIN='<!-- pc-status-facts:begin -->'
+FACTS_END='<!-- pc-status-facts:end -->'
+# splice_facts <file> <blockfile>: replace the marked region; without markers keep every hand section.
+splice_facts() {
+  local f=$1 blk=$2 out b e
+  out=$(mktemp "$f.XXXXXX") || return 1
+  b=$(grep -nxF "$FACTS_BEGIN" "$f" | cut -d: -f1); e=$(grep -nxF "$FACTS_END" "$f" | cut -d: -f1)
+  if [[ "$b" =~ ^[0-9]+$ && "$e" =~ ^[0-9]+$ ]] && [ "$b" -lt "$e" ]; then
+    awk -v b="$FACTS_BEGIN" -v e="$FACTS_END" -v blk="$blk" '
+      $0==b {while ((getline l <blk) > 0) print l; skip=1; next}
+      $0==e {skip=0; next}
+      !skip' "$f" >"$out"
+  else
+    { cat "$blk"
+      [ -s "$f" ] && awk -v blk="$blk" '
+        BEGIN {while ((getline l <blk) > 0) if (l ~ /^## /) gen[l]=1}
+        /^## / {keep=!($0 in gen); if (keep) print ""}
+        keep' "$f"
+    } >"$out"
+  fi
+  cat "$out" >"$f" && rm -f "$out"
+}
+
+# serve_pairs: "front backend" per tailscale serve https port, sorted by front port.
+serve_pairs() {
+  tailscale serve status --json 2>/dev/null | jq -r '.Web // {} | to_entries[]
+    | "\(.key | sub(".*:"; "")) \(.value.Handlers["/"].Proxy // "" | sub(".*:"; ""))"' 2>/dev/null | sort -n
+}
+# serve_row: the tailscale serve row of the exposure table, read live.
+serve_row() {
+  local pairs ip6
+  pairs=$(serve_pairs); [ -n "$pairs" ] || return 0
+  ip6=$(ip -6 -o addr show tailscale0 scope global 2>/dev/null | awk '{sub("/.*", "", $4); print $4; exit}')
+  printf '| %s | tailscale serve (tailscaled) https %s | tailnet only (%s%s) |\n' \
+    "$(cut -d' ' -f1 <<<"$pairs" | paste -sd, - | sed 's/,/, /g')" \
+    "$(sed 's/ /→/' <<<"$pairs" | paste -sd, - | sed 's/,/, /g')" "$n_ts_ip" "${ip6:+ + $ip6}"
+}
+# moodle_dirs: each Moodle env dir (trailing /), i.e. a compose stack mounting /var/www/html, as moodle-keep.
+moodle_dirs() {
+  local d
+  for d in "${MOODLE_ENVS_DIR:-$HOME/moodle-envs}"/*/; do
+    [ "$(basename "$d")" = shared ] || [ ! -f "$d/docker-compose.yml" ] && continue
+    sed -n 's#^[[:space:]]*-[[:space:]]*"\{0,1\}\([^:"]*\):/var/www/html"\{0,1\}[[:space:]]*$#\1#p' "$d/docker-compose.yml" | grep -q . && echo "$d"
+  done
+}
+# moodle_lines: one line per Moodle env (compose mount at /var/www/html, as moodle-keep), read from its running app container.
+moodle_lines() {
+  local host d v app port code sp url
+  host=$(jq -r '.Self.DNSName // "localhost"' <<<"${n_ts_json:-null}" | sed 's/\.$//')
+  while IFS= read -r d; do
+    v=$(basename "$d")
+    app=$(docker ps --filter "label=com.docker.compose.project.working_dir=${d%/}" --format '{{.Names}}' 2>/dev/null | grep -- '-app' | head -1)
+    port=; code="${d%/}/www"
+    if [ -n "$app" ]; then
+      port=$(docker port "$app" 80/tcp 2>/dev/null | grep -oE '0\.0\.0\.0:[0-9]+' | cut -d: -f2 | head -1)
+      code=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/var/www/html"}}{{.Source}}{{end}}{{end}}' "$app" 2>/dev/null)
+    fi
+    sp=$([ -n "$port" ] && serve_pairs | awk -v p="$port" '$2 == p {print $1; exit}')
+    if [ -n "$sp" ]; then url="https://$host:$sp (http :$port)"; else url="http://$host:${port:-down}"; fi
+    echo "- Moodle $v: $url · code \`$code\`$([ -d "$code/public" ] && echo ' (plugins in `public/`)') · admin / ${MOODLE_ADMIN_PASSWORD:-<MOODLE_ADMIN_PASSWORD>}"
+  done < <(moodle_dirs)
+}
+
+# facts_body: the generated KB/machine.md region (without markers).
+facts_body() {
   cat <<EOF
 # Machine facts (generated by \`pc status --facts\` on $(date '+%Y-%m-%d %H:%M %Z'))
 
-Regenerate: \`pc status --facts > ~/agents/KB/machine.md\`. Never hand-edit.
+Regenerate: \`pc status --facts --apply\` rewrites only the region between the pc-status-facts markers; never hand-edit inside them.
 
 ## Identity
 - Hostname: $(hostname) · Tailscale name: $(jq -r '.Self.DNSName // "n/a"' <<<"${n_ts_json:-null}" | sed 's/\.$//')
@@ -280,7 +355,7 @@ because DNAT rewrites the port before FORWARD).
 | 7900 | selenium noVNC (docker) | tailscale0 |
 | 8025 | mailhog UI (docker) | tailscale0, 192.168.1.0/24 |
 | 8052 | Moodle 5.2 (docker) | tailscale0, 192.168.1.0/24 |
-| 8452, 8499 | tailscale serve (tailscaled) | bound to $n_ts_ip only |
+$(serve_row)
 | 19998 | agents status page | tailscale0, 192.168.1.0/24 (binds 0.0.0.0 + ::) |
 | 19999 | netdata | tailscale0, 192.168.1.0/24 (binds 0.0.0.0 + ::) |
 
@@ -291,14 +366,11 @@ Everything else from the LAN and everything from the internet is dropped. Revert
 - Agent scripts: \`~/agents/bin\` (\`pc\`, \`notify-owner\`, \`screenshot.sh\`)
 - Knowledge base: \`~/agents/KB\` · results: \`~/agents/bench\`
 - Audit log: \`~/agents/log/actions.jsonl\` (written by the agent adapter, see \`~/agents/KB/audit.md\`) · view with \`agents-log [--since 2h] [--session ID] [--grep X] [--stats]\`
-- Moodle envs: $(ls -d ~/moodle-envs/*/ 2>/dev/null | sed 's|.*/\([^/]*\)/$|`~/moodle-envs/\1`|' | paste -sd', ' -)
+- Moodle envs: $(moodle_dirs | sed 's|.*/\([^/]*\)/$|`~/moodle-envs/\1`|' | paste -sd, - | sed 's/,/, /g')
 - Harness: \`~/agents\` (this repo) · agent CLI wiring: \`~/agents/adapters/${HARNESS_AGENT:-<agent>}/README.md\` · \`~/moodle-harness\` (Moodle coding harness, never push)
 
 ## Moodle
-$(host=$(jq -r '.Self.DNSName // "localhost"' <<<"${n_ts_json:-null}" | sed 's/\.$//')
-  for d in ~/moodle-envs/*/; do v=$(basename "$d"); [ "$v" = shared ] && continue
-    port=$(docker ps --format '{{.Names}}|{{.Ports}}' 2>/dev/null | grep "^moodle${v//./}-app" | grep -oE '0\.0\.0\.0:[0-9]+' | cut -d: -f2 | head -1)
-    echo "- Moodle $v: http://$host:${port:-down} · code \`${d%/}/www\` (plugins in \`www/public/\`) · admin / Admin1234!"; done)
+$(moodle_lines)
 - Shared stack: mailhog http://localhost:8025, selenium :4444, proxy :80
 
 ## Monitoring (netdata, T26)
@@ -317,6 +389,16 @@ $(host=$(jq -r '.Self.DNSName // "localhost"' <<<"${n_ts_json:-null}" | sed 's/\
 ## Session env for desktop control (see ~/agents/bin/env.sh)
 $(sed -n 's/^export /- /p' "$BIN/env.sh" 2>/dev/null | tr ' ' '\n' | sed '/^-$/d;s/^/  /' | paste -sd' ' - | sed 's/^ *//')
 EOF
+}
+
+if [ "$MODE" = facts ]; then
+  blk=$(mktemp); trap 'rm -f "$REC" "$blk"' EXIT
+  { echo "$FACTS_BEGIN"; facts_body; echo "$FACTS_END"; } >"$blk"
+  if [ "$APPLY" = 0 ]; then cat "$blk"; exit 0; fi
+  f=${PC_FACTS_FILE:-$HOME/agents/KB/machine.md}
+  [ -e "$f" ] || : >"$f"
+  splice_facts "$f" "$blk" || { echo "pc status: could not write $f" >&2; exit 1; }
+  echo "wrote $f (generated region only)"
   exit 0
 fi
 
@@ -358,6 +440,10 @@ add network dns "$(cached dns 3600 _dns)"
 add network internet "$n_inet" "${V[internet]}"
 
 for s in $SERVICES; do add services "$s" "${SV[$s]}" "${V[svc_$s]}"; done
+
+for _k in $KEEPALIVE_UNITS $(for h in $KEEPALIVE_HTTP; do echo "http-${h%%=*}"; done); do
+  add keepalive "$_k" "${KA[$_k]:-unknown}" "${V[ka_$_k]:-FAIL}"
+done
 
 if [ -n "$d_stat" ]; then
   while IFS='|' read -r proj run tot ports; do
@@ -419,7 +505,7 @@ case "$MODE" in
     if [ "$fails" -gt 0 ]; then awk -F'\t' '$4=="FAIL"{print "FAIL "$1"."$2": "$3}' "$REC"; exit 1; fi
     echo "OK — all checks passed"; exit 0;;
   json)
-    ratio=$(cached look_ratio 60 "$BIN/agents-log" --pc --since 24h | awk '$1=="TOTAL"{print $4}')
+    ratio=$(cached look_ratio 3600 "$BIN/agents-log" --pc --since 24h | awk '$1=="TOTAL"{print $4}')
     jq -Rn --argjson fails "$fails" --argjson ratio "${ratio:-0}" '
       [inputs|split("\t")|{section:.[0],key:.[1],value:.[2],state:.[3]}]
       | {generated:(now|todate), fails:$fails, pc_look_ratio_24h:$ratio,

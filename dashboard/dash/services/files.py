@@ -119,10 +119,11 @@ def plan_excerpt(src, updated):
         tags = lambda m: html.unescape(" ".join(re.sub(r"<[^>]+>", " ", m).split()))
         outline = [tags(m) for m in re.findall(r"<h2[^>]*>(.*?)</h2>", head, re.S)][:12]
         text = next((tags(m) for m in re.findall(r"<p[^>]*>(.*?)</p>", head, re.S) if len(tags(m)) > 3), "")
-    _EXCERPTS[key] = (text if len(text) <= 320 else text[:319] + "…", outline)
-    if len(_EXCERPTS) > 200:
+    val = (text if len(text) <= 320 else text[:319] + "…", outline)
+    if len(_EXCERPTS) >= 200:
         _EXCERPTS.clear()
-    return _EXCERPTS[key]
+    _EXCERPTS[key] = val
+    return val
 
 
 def plans():
@@ -205,7 +206,7 @@ def docs_delete_route(h, path):
 
 @route("GET", "/api/ls")
 def ls_route(h, path):
-    code, out = ls_dir(urllib.parse.parse_qs(h.path.partition("?")[2]).get("p", [""])[0])
+    code, out = ls_dir(urllib.parse.quote(urllib.parse.parse_qs(h.path.partition("?")[2]).get("p", [""])[0]))
     h.json(out, code)
 
 
@@ -260,6 +261,8 @@ def drop_file(h, raw, query):
         h.send_header("ETag", etag)
         h.send_header("Cache-Control", "no-cache")
         h.end_headers()
+        if getattr(h, "head_only", False):
+            return
         with open(full, "rb") as f:
             f.seek(start)
             left = end - start + 1

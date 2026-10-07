@@ -23,7 +23,7 @@
 #   pc_apply <target> <before> <after> <rollback> <cmd…>   (PC_NESTED=1 in <cmd…>'s env: an inner pc_apply just runs)
 #                                   without APPLY prints "would: <target> <before> → <after>"; with it appends the
 #                                   ledger entry, runs the command, appends {id,verified,observed} and prints
-#                                   "rollback: pc undo <id>" as the last line
+#                                   "rollback: pc undo <id>" as the last line; `redo` records $PC_REDO or the verb's own argv
 # Globals: PC_SYS PC_PROC PC_BAT PC_FIXTURE PC_LEDGER PC_ROOT_TIMEOUT PC_TIMEOUT_BIN PC_READ_CMD PC_USAGE PC_SUB JSON APPLY FRESH
 #          SECONDS_ PC_ARGS[] PC_EXTRA_FLAGS[] PC_EXTRA[] PC_OPT[]
 
@@ -43,6 +43,7 @@ ORCHESTRATOR_UNIT_BASE="${ORCHESTRATOR_UNIT%.*}"
 PC_EXTRA_FLAGS=("${PC_EXTRA_FLAGS[@]:-}"); [ -z "${PC_EXTRA_FLAGS[0]}" ] && PC_EXTRA_FLAGS=()
 PC_EXTRA=()
 declare -A PC_OPT=()
+PC_ARGV=("$@")
 
 pc_usage() {
   PC_USAGE=$1; shift
@@ -212,9 +213,11 @@ pc_apply() {
   local id ts rc observed verified
   id=$(pc_id); printf -v ts '%(%Y-%m-%dT%H:%M:%S%z)T' -1
   [ -d "${PC_LEDGER%/*}" ] || mkdir -p "${PC_LEDGER%/*}" 2>/dev/null
-  pc_json '{ts:$ts,id:$id,session:$se,cmd:$c,target:$t,before:$b,after:$a,rollback:$r,read:$rd}' -c \
+  local redo=${PC_REDO:-}
+  [ -n "$redo" ] || printf -v redo '%q ' "$(readlink -f "$0")" ${PC_ARGV[@]+"${PC_ARGV[@]}"}
+  pc_json '{ts:$ts,id:$id,session:$se,cmd:$c,target:$t,before:$b,after:$a,rollback:$r,redo:$re,read:$rd}' -c \
     --arg ts "$ts" --arg id "$id" --arg se "${CLAUDE_SESSION_ID:-}" --arg c "$*" \
-    --arg t "$target" --arg b "$before" --arg a "$after" --arg r "$rollback" \
+    --arg t "$target" --arg b "$before" --arg a "$after" --arg r "$rollback" --arg re "${redo% }" \
     --arg rd "${PC_READ_CMD:-}" >>"$PC_LEDGER"
   PC_NESTED=1 "$@"; rc=$?
   # The mutation invalidates whatever `cached` holds for this domain, so the next

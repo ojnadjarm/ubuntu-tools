@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# ctxrot — context-rot curve for a Claude model: ctxrot corpus|run|report <out-dir> [--lengths …] [--seeds …]; skill /context-rot.
+set -euo pipefail
+PYTHONPATH="$HOME/.claude/skills/context-rot${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m ctxrot "$@"

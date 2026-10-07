@@ -1,6 +1,6 @@
 ---
 name: browser
-description: Drive a web page with the Playwright MCP - persistent logins, headless by default, headed on the real desktop with PW_HEADED=1. Use for web scraping, web app testing and any Moodle UI work. Not for native apps or the owner's Chrome profile (use the `desktop` skill / `pc` CLI).
+description: Drive a web page with the Playwright MCP - persistent logins, headless by default, headed on the real desktop with PW_HEADED=1. Use for web scraping, web app testing; Moodle UI work: load /moodle-web. Not for native apps or the owner's Chrome profile (use the `desktop` skill / `pc` CLI).
 ---
 
 # Browser automation (Playwright MCP, T12)
@@ -14,6 +14,8 @@ description: Drive a web page with the Playwright MCP - persistent logins, headl
 - Launcher `~/agents/bin/playwright-mcp` (sources nvm, execs pinned `@playwright/mcp` 0.0.80),
   config `~/.claude/playwright-mcp.json`. Registered user-scope; config changes affect **new** sessions only.
 - Viewport 1280x720. Downloads/screenshots/traces land in `~/agents/browser/out`.
+  The launcher deletes files there older than 7 days at start: copy anything you keep elsewhere
+  (your ticket folder, or `drop-link`).
 - Profile `~/agents/browser/profile-default` is persistent: **logins survive across sessions**.
 
 ## Switches (env vars, set when starting the session)
@@ -30,7 +32,9 @@ description: Drive a web page with the Playwright MCP - persistent logins, headl
 - One browser at a time per profile: a second concurrent session on the same profile hits the Chromium profile lock.
 - `browser_snapshot` before clicking; act on refs from the snapshot, not on guessed coordinates.
 - Log in once per profile, then reuse it — do not re-enter credentials every run.
-- Moodle 5.2 test site: `http://$HARNESS_TAILNET_FQDN:8052` (admin / Admin1234!), already logged in on `profile-default`. `moodle-envs` lists the envs and their ports.
+- Call `browser_close` when the task ends: an open page keeps rendering (a WebGL page burned 1-1.6 cores for 2.5 days,
+  2026-09-26). `sentinel-runaway` rule 6 closes a hot browser only after 30 min without a Playwright call.
+- Moodle UI work: load `/moodle-web` (env URLs, admin login, admin-page table, when to use the CLI instead).
 
 ## Claude in Chrome (T14) — the owner's real browser — NOT AVAILABLE
 - **Status: pending owner sign-in to the Claude extension.** The extension is installed but is not

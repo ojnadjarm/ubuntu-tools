@@ -60,10 +60,10 @@ def snippets(e, terms, limit=3):
             continue
         i = min(low.find(w) for w in words if w in low)
         s = line.strip()[max(0, i - 60):][:180]
-        s = s.replace("&", "&amp;").replace("<", "&lt;")
-        for w in sorted(words, key=len, reverse=True):
-            s = re.sub("(%s)" % re.escape(w), r"<mark>\1</mark>", s, flags=re.I)
-        out.append(s)
+        pat = "|".join(re.escape(w) for w in sorted(words, key=len, reverse=True))
+        parts = re.split("(%s)" % pat, s, flags=re.I)
+        esc = [p.replace("&", "&amp;").replace("<", "&lt;") for p in parts]
+        out.append("".join("<mark>%s</mark>" % p if k % 2 else p for k, p in enumerate(esc)))
         if len(out) >= limit:
             break
     return out

@@ -1,5 +1,5 @@
 """/thumb/<path>?w=: WebP thumbnails of ~/drop images, cropped to the grid's 16:10 cell, disk-cached by mtime."""
-import hashlib, os, urllib.parse
+import hashlib, os, threading, urllib.parse
 from PIL import Image, ImageOps
 from dash.env import HERE
 from dash.routes import route
@@ -31,7 +31,7 @@ def thumb(full, w):
         box = ((W - cw) / 2, (H - ch) / 2, (W + cw) / 2, (H + ch) / 2)
         im = im.resize((w, h), Image.LANCZOS, box=box, reducing_gap=2.0)
         os.makedirs(CACHE, exist_ok=True)
-        tmp = out + ".%d.tmp" % os.getpid()
+        tmp = out + ".%d.%d.tmp" % (os.getpid(), threading.get_ident())
         im.save(tmp, "WEBP", quality=80, method=4)
     os.replace(tmp, out)
     with open(out, "rb") as f:

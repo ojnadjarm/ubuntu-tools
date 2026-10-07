@@ -13,6 +13,8 @@ fleet_path
 MODEL=opus; TIMEOUT=3600
 # shellcheck source=/dev/null
 [ -r "$dir/agent.env" ] && . "$dir/agent.env"
+[ -n "${AGENT_TOOLS:-}" ] && export AGENT_TOOLS
+[ -n "${AGENT_WRAP:-}" ] && export AGENT_WRAP
 
 mkdir -p "$dir/logs" "$dir/state"
 fleet_lock "$dir/.lock" 8 || { echo "agent-run: $name is already running" >&2; exit 0; }

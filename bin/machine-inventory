@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# machine-inventory — read-only list of what the fleet changed on this install, from etckeeper + dpkg; --check diffs it against the migration runbook.
+set -uo pipefail
+export LC_ALL=C
+
+usage() {
+  cat <<'EOF'
+usage: machine-inventory [--etc|--etc-list|--packages|--snaps|--units] [--check [DOC]]
+  (no flag)   every section: etc, packages, snaps, units
+  --etc       /etc paths we added, changed or removed: "<A|M|D> <path>"
+  --etc-list  the same paths, absolute, existing files only (for: sudo tar -czf x.tgz -T <(machine-inventory --etc-list))
+  --packages  apt packages installed by hand after the OS install
+  --snaps     snaps beyond the Ubuntu desktop defaults
+  --units     user units and drop-ins in ~/.config/systemd/user
+  --check     exit 1 and list every item DOC (default KB/runbooks/migration.md) does not mention
+Read-only: runs `sudo -n git` on /etc/.git and `sudo -n md5sum` on root-only conffiles.
+Env for fixtures: MI_ETC (default /etc), MI_SUDO (default "sudo -n"), MI_INSTALL_END (epoch).
+EOF
+}
+
+ETC="${MI_ETC:-/etc}"
+SUDO="${MI_SUDO-sudo -n}"
+DOC_DEFAULT="$HOME/agents/KB/runbooks/migration.md"
+INSTALLER_LOG=/var/log/installer/curtin-install.log
+DEFAULT_SNAPS=" bare core22 core24 desktop-security-center firefox firmware-updater gnome-42-2204 gnome-46-2404 gtk-common-themes mesa-2404 prompting-client snap-store snapd snapd-desktop-integration "
+
+g() { $SUDO git -C "$ETC" "$@"; }
+
+# Paths the installer, first boot or a package script writes on every install; never fleet work.
+generated() {
+  case "$1" in
+    .etckeeper|.updated|.gitignore|*-) return 0;;
+    alternatives/*|rc[0-6S].d/*|ssl/*|console-setup/*|cloud/*|dictionaries-common/*) return 0;;
+    php/*/conf.d/*|lighttpd/conf-enabled/*|network/fan) return 0;;
+    ssh/ssh_host_*|machine-id|hostname|hosts|fstab|locale.conf|localtime|timezone|shells|whoopsie) return 0;;
+    subuid|subgid|default/keyboard|apt/sources.list|apt/sources.list.d/ubuntu.sources) return 0;;
+    pam.d/common-*|netplan/00-installer-config.yaml) return 0;;
+    mysql/my.cnf|odbcinst.ini|netdata/.opt-out-from-anonymous-statistics) return 0;;
+    systemd/system/snap-*.mount|systemd/system/*/snap-*.mount|systemd/system/snap.*|systemd/user/snap.*) return 0;;
+    systemd/user/*.wants/snap.*|udev/rules.d/70-snap.*) return 0;;
+  esac
+  return 1
+}
+
+# 0 when a package owns the path and it is byte-identical to what the package shipped.
+package_pristine() {
+  [ "$ETC" = /etc ] || return 1
+  local f="/etc/$1" pkg want have
+  pkg=$(dpkg -S "$f" 2>/dev/null | head -1 | cut -d: -f1) || return 1
+  [ -n "$pkg" ] || return 1
+  want=$(dpkg-query -W -f='${Conffiles}\n' "$pkg" 2>/dev/null | awk -v f="$f" '$1==f {print $2}')
+  [ -n "$want" ] || return 0
+  have=$($SUDO md5sum "$f" 2>/dev/null | cut -d' ' -f1)
+  [ "$want" = "$have" ]
+}
+
+# An added *.wants/*.requires link or an alias into /usr/lib is enablement, listed under units.
+enablement_link() {
+  local p="$ETC/$1" t
+  [ -L "$p" ] || return 1
+  t=$(readlink "$p")
+  case "$1" in *.wants/*|*.requires/*) return 0;; esac
+  case "$t" in /usr/lib/*|/lib/*) return 0;; esac
+  return 1
+}
+
+etc_changes() {
+  local base base_ts start
+  base=$(g rev-list --max-parents=0 HEAD 2>/dev/null | tail -1)
+  [ -n "$base" ] || { echo "machine-inventory: no etckeeper history in $ETC (need sudo?)" >&2; return 2; }
+  base_ts=$(g log -1 --format=%ct "$base")
+  start="${MI_INSTALL_END:-$(stat -c %Y "$INSTALLER_LOG" 2>/dev/null || echo "$base_ts")}"
+  {
+    # Since the etckeeper baseline: committed and still uncommitted changes, renames as add + delete.
+    g diff --no-renames --name-status "$base" 2>/dev/null | sed 's/\t/ /'
+    g ls-files --others --exclude-standard 2>/dev/null | sed 's/^/A /'
+    # Between the OS install and the baseline: tracked files whose mtime falls in that window.
+    $SUDO find "$ETC" -path "$ETC/.git" -prune -o \( -type f -o -type l \) \
+      -newermt "@$start" ! -newermt "@$base_ts" -printf 'A %P\n' 2>/dev/null
+  } | awk '!seen[$2]++' | while read -r st p; do
+    p="${p#\"}"; p="${p%\"}"
+    generated "$p" && continue
+    if [ "$st" != D ]; then
+      enablement_link "$p" && continue
+      package_pristine "$p" && continue
+    else
+      case "$p" in *snap*) continue;; esac
+    fi
+    echo "$st $p"
+  done | sort -k2
+}
+
+packages() {
+  local since
+  since=$(date -d "@$(stat -c %Y "$INSTALLER_LOG" 2>/dev/null || echo 0)" +%F)
+  zcat -f /var/log/apt/history.log* 2>/dev/null | awk -v since="$since" '
+    /^Start-Date:/ {d=$2}
+    /^Commandline:/ {c=$0}
+    /^Install:/ && d >= since && c !~ /--force-confold/ {
+      sub(/^Install: /,""); n=split($0,a,/\), /)
+      for(i=1;i<=n;i++) if (a[i] !~ /automatic/) {split(a[i],b,":"); print b[1]}
+    }' | sort -u | comm -12 - <(apt-mark showmanual | sort -u)
+}
+
+snaps() {
+  snap list 2>/dev/null | awk 'NR>1 {print $1}' | while read -r s; do
+    [[ "$DEFAULT_SNAPS" == *" $s "* ]] || echo "$s"
+  done
+}
+
+units() {
+  local d="$HOME/.config/systemd/user" f
+  for f in "$d"/*.service "$d"/*.timer "$d"/*.socket "$d"/*.path "$d"/*.d; do
+    [ -e "$f" ] || [ -L "$f" ] || continue
+    basename "$f"
+  done | sort
+}
+
+# Backticked /etc/... tokens of the doc; each may be a glob (`/etc/netplan/90-NM-*.yaml`).
+doc_etc_patterns() { grep -oE '`/etc/[^` ]+`' "$1" | tr -d '`' | sort -u; }
+
+check() {
+  local doc="$1" gaps=0 st p pat hit
+  [ -r "$doc" ] || { echo "machine-inventory: cannot read $doc" >&2; return 2; }
+  mapfile -t pats < <(doc_etc_patterns "$doc")
+  while read -r st p; do
+    hit=0
+    for pat in "${pats[@]}"; do
+      # shellcheck disable=SC2053
+      [[ "/etc/$p" == $pat ]] && { hit=1; break; }
+    done
+    [ "$hit" = 1 ] || { echo "GAP etc $st /etc/$p"; gaps=$((gaps+1)); }
+  done < <(etc_changes)
+  while read -r p; do grep -qwF -- "$p" "$doc" || { echo "GAP package $p"; gaps=$((gaps+1)); }; done < <(packages)
+  while read -r p; do grep -qwF -- "$p" "$doc" || { echo "GAP snap $p"; gaps=$((gaps+1)); }; done < <(snaps)
+  while read -r p; do grep -qF -- "$p" "$doc" || { echo "GAP unit $p"; gaps=$((gaps+1)); }; done < <(units)
+  echo "gaps: $gaps (doc $doc)"
+  [ "$gaps" = 0 ]
+}
+
+case "${1:-}" in
+  -h|--help) usage; exit 0;;
+  --etc) etc_changes;;
+  --etc-list) etc_changes | awk '$1!="D" {print "'"$ETC"'/" $2}' | while read -r f; do [ -e "$f" ] && echo "$f"; done;;
+  --packages) packages;;
+  --snaps) snaps;;
+  --units) units;;
+  --check) check "${2:-$DOC_DEFAULT}";;
+  "")
+    echo "## etc"; etc_changes | sed 's/^/  /'
+    echo "## packages"; packages | paste -sd' ' | fold -s -w 100 | sed 's/^/  /'
+    echo "## snaps"; snaps | sed 's/^/  /'
+    echo "## units"; units | sed 's/^/  /';;
+  *) usage >&2; exit 2;;
+esac

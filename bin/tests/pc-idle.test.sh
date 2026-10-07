@@ -33,6 +33,8 @@ is 'psys stddev'    "$(jq .psys_sd <<<"$J")" 0.82
 is 'five wakers'     "$(jq '.wakers|length' <<<"$J")" 5
 is 'busiest first'   "$(jq -r '.wakers[0].comm' <<<"$J")" claude
 is 'wake rate kept'  "$(jq '.wakers[0].wake' <<<"$J")" 140.0
+is 'waker unit kept' "$(jq -r '.wakers[0].unit' <<<"$J")" agent@x.service
+is 'tmux-spawn scope collapsed' "$(jq -r '.wakers[4].unit' <<<"$J")" tmux-spawn
 
 # 4. fleet RSS: only agent@*, sentinel*, dark-eye* units are counted.
 is 'fleet rss in MB' "$(jq '.fleet.rss_mb' <<<"$J")" 350
@@ -47,7 +49,8 @@ is 'browser trees in other_rss_mb' "$(jq '.other_rss_mb' <<<"$J")" 150
 # 5. --tsv: the row pcbench-weekly appends, matching BASELINE-IDLE.tsv's header.
 R=$(fx --seconds 3 --tsv)
 is 'one tsv row'     "$(wc -l <<<"$R")" 1
-is 'ten columns'     "$(awk -F'\t' '{print NF}' <<<"$R")" 10
+is 'eleven columns'  "$(awk -F'\t' '{print NF}' <<<"$R")" 11
+is 'tsv ends with the top waker unit' "$(awk -F'\t' '{print $NF}' <<<"$R")" agent@x.service
 is 'tsv other_rss_mb' "$(cut -f10 <<<"$R")" 150
 is 'columns match the baseline header' \
   "$(awk -F'\t' '{print NF}' <<<"$R")" \

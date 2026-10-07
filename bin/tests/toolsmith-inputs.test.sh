@@ -47,13 +47,13 @@ t "each failure row keeps reason, raw_recipes_detail, tool_histogram"
 t "audit counts raw tools and pc verbs per session"
 [ "$(printf '%s' "$J" | jq -c '[.audit.raw_total,.audit.pc_total,
   .audit.raw_by_tool["docker restart"],.audit.raw_by_tool["systemctl restart"],
-  .audit.pc_verbs.status]')" = '[6,3,1,1,1]' ] &&
+  .audit.pc_verbs.status]')" = '[3,3,1,null,1]' ] &&
   ok || no "$(printf '%s' "$J" | jq -c '.audit|{raw_total,pc_total,raw_by_tool,pc_verbs}')"
 
-t "audit.raw_map pairs each raw tool with the pc verb that covers it"
+t "audit.raw_map pairs each raw tool with its class and pc verb"
 [ "$(printf '%s' "$J" | jq -c '[(.audit.raw_map|length),.audit.raw_coverable,.audit.raw_gaps,
-  (.audit.raw_map[]|select(.raw=="docker restart")|[.pc,.count,.sessions])]')" \
-  = '[6,6,[],["pc docker restart",1,1]]' ] &&
+  (.audit.raw_map[]|select(.raw=="docker restart")|[.class,.pc,.count,.sessions])]')" \
+  = '[3,3,[],["covered","pc docker restart",1,1]]' ] &&
   ok || no "$(printf '%s' "$J" | jq -c '.audit|{raw_map,raw_coverable,raw_gaps}')"
 
 t "audit per-session stats match agents-log --stats shape"
@@ -61,7 +61,7 @@ t "audit per-session stats match agents-log --stats shape"
   ok || no "$(printf '%s' "$J" | jq -c '.audit.sessions')"
 
 t "top raw offender is the session with no pc calls"
-[ "$(printf '%s' "$J" | jq -c '.audit.top_raw_offenders[0]|[.session,.raw,.pc]')" = '["bbbb2222",5,0]' ] &&
+[ "$(printf '%s' "$J" | jq -c '.audit.top_raw_offenders[0]|[.session,.raw,.pc]')" = '["bbbb2222",2,0]' ] &&
   ok || no "$(printf '%s' "$J" | jq -c '.audit.top_raw_offenders')"
 
 t "guards: absent file is 0 rows, not an error"
@@ -86,9 +86,18 @@ t "qa is opt-in: no --qa means not run"
 [ "$(run --since 9999d 2>/dev/null | jq -c '[.qa.ran,(.qa|has("hint"))]')" = '[false,true]' ] &&
   ok || no "qa ran without --qa"
 
-t "idle takes watts and wakers from the mocks"
-[ "$(printf '%s' "$J" | jq -c '[.idle.package_w,.idle.gpu_rc6_pct,.idle.wakers[0].comm]')" \
+t "idle.live takes watts and wakers from the mocks"
+[ "$(printf '%s' "$J" | jq -c '[.idle.live.package_w,.idle.live.gpu_rc6_pct,.idle.live.wakers[0].comm]')" \
   = '[4.2,98,"kworker/u64:1"]' ] && ok || no "$(printf '%s' "$J" | jq -c .idle)"
+
+t "idle.live drops the collector's own agent@toolsmith waker"
+[ "$(printf '%s' "$J" | jq -c '[([.idle.live.wakers[]|select(.unit=="agent@toolsmith.service")]|length),
+  (.idle.live.wakers|length)]')" = '[0,2]' ] && ok || no "$(printf '%s' "$J" | jq -c .idle.live.wakers)"
+
+t "idle.baseline is the last BASELINE-IDLE.tsv row"
+[ "$(printf '%s' "$J" | jq -c '.idle.baseline|[.t,.package_w,.psys_w,.top_waker,.wake_s,.top_waker_unit]')" \
+  = '["2026-01-11T02:00:00+01:00",4.54,5.59,"rcu_preempt",76.7,"-"]' ] &&
+  ok || no "$(printf '%s' "$J" | jq -c .idle.baseline)"
 
 t "tokens: per-agent per-run in/out where the columns exist"
 [ "$(printf '%s' "$J" | jq -c '[.tokens.columns_present,.tokens.agents.alpha.runs,
@@ -114,6 +123,11 @@ M="$(run --since 9999d --md 2>/dev/null)"
 n=$(printf '%s\n' "$M" | grep -c '^## ')
 { [ "$n" -ge 5 ] && printf '%s' "$M" | grep -q 'X02/new#1'; } && ok || no "$n headings"
 
+t "--md prints the baseline before the biased live sample"
+printf '%s\n' "$M" | grep -A2 '^## idle' | sed -n '2p;3p' | tr '\n' '|' |
+  grep -q '^- baseline 2026-01-11T02:00:00+01:00: package 4.54 W.*|- live (biased by this run)' &&
+  ok || no "$(printf '%s\n' "$M" | grep -A3 '^## idle')"
+
 t "--md carries no money either"
 printf '%s' "$M" | grep -qiE 'cost|usd|\$' && no "money in --md" || ok
 
@@ -123,9 +137,92 @@ o="$(TOOLSMITH_ROOT="$E" HARNESS_HOME=/nonexistent PATH=/usr/bin:/bin \
   "$CLI" --since 4d 2>/dev/null)"
 rc=$?
 { [ $rc = 0 ] && printf '%s' "$o" | jq -e '.bench_last.present == false and
-  .audit.lines == 0 and .doctor.present == false' >/dev/null; } &&
+  .audit.lines == 0 and .doctor.present == false and .idle.baseline == null' >/dev/null; } &&
   ok || no "rc=$rc on an empty root"
 rm -rf "$E"
+
+t "audit and changes read rotated .N.gz logs too"
+R="$(mktemp -d)"; mkdir -p "$R/log"
+now=$(date +%s); at() { date -d "@$((now - $1 * 3600))" +%Y-%m-%dT%H:%M:%S; }
+printf '{"ts":"%s","session":"s","tool":"Bash","summary":"pc status"}\n' "$(at 1)" > "$R/log/actions.jsonl"
+printf '{"ts":"%s","session":"s","tool":"Bash","summary":"pc status"}\n' "$(at 30)" "$(at 40)" \
+  | gzip > "$R/log/actions.jsonl.1.gz"
+printf '{"ts":"%s","session":"s","tool":"Bash","summary":"pc status"}\n' "$(at 200)" \
+  | gzip > "$R/log/actions.jsonl.2.gz"
+printf '{"ts":"%s","id":"c1","verified":true}\n' "$(at 1)" > "$R/log/changes.jsonl"
+printf '{"ts":"%s","id":"c1","target":"x","before":"a","after":"b"}\n' "$(at 30)" \
+  | gzip > "$R/log/changes.jsonl.1.gz"
+o="$(TOOLSMITH_ROOT="$R" HARNESS_HOME=/nonexistent "$CLI" --since 4d 2>/dev/null)"
+[ "$(printf '%s' "$o" | jq -c '[.audit.lines,.changes.window,.changes.verified]')" = '[3,1,1]' ] &&
+  ok || no "$(printf '%s' "$o" | jq -c '[.audit.lines,.changes]')"
+rm -rf "$R"
+
+t "audit: raw counts key on the op, classes covered/by-design/gap"
+R="$(mktemp -d)"; mkdir -p "$R/log"
+now=$(date +%Y-%m-%dT%H:%M:%S)
+a='{"ts":"%s","session":"s","agent":"toolsmith","tool":"Bash","op":"%s","summary":"%s"}\n'
+{ printf "$a" "$now" "pc net" "pc net tailscale"; printf "$a" "$now" "grep tailscale" "grep tailscale x"
+  printf "$a" "$now" "tailscale serve" "tailscale serve --bg 80"
+  printf "$a" "$now" "tailscale status" "tailscale status"
+  printf "$a" "$now" "tailscale status" "cd ~ && tailscale status"
+  printf "$a" "$now" "nmcli device" "nmcli device wifi list"; } > "$R/log/actions.jsonl"
+o="$(TOOLSMITH_ROOT="$R" HARNESS_HOME=/nonexistent "$CLI" --since 4d 2>/dev/null)"
+[ "$(printf '%s' "$o" | jq -c '[.audit.raw_total,.audit.raw_coverable,.audit.raw_by_design,
+  .audit.raw_gap,.audit.raw_coverable_pct,([.audit.raw_map[]|select(.raw|startswith("tailscale"))|.count]|add),
+  (.audit.raw_map|all(has("class")))]')" = '[4,2,1,1,67,3,true]' ] &&
+  ok || no "$(printf '%s' "$o" | jq -c .audit.raw_map)"
+m="$(TOOLSMITH_ROOT="$R" HARNESS_HOME=/nonexistent "$CLI" --since 4d --md 2>/dev/null)"
+t "--md prints the three raw totals"
+printf '%s' "$m" | grep -q 'covered 2 · by-design 1 · gap 1' && ok || no "$(printf '%s' "$m" | grep raw)"
+rm -rf "$R"
+
+t "audit: raw counts agent runs only, not interactive or bench"
+R="$(mktemp -d)"; mkdir -p "$R/log"
+{ printf '{"ts":"%s","session":"a","agent":"toolsmith","tool":"Bash","op":"pactl list","summary":"pactl list"}\n' "$now"
+  printf '{"ts":"%s","session":"i","tool":"Bash","op":"pactl list","summary":"pactl list"}\n' "$now"
+  printf '{"ts":"%s","session":"b","agent":"bench","tool":"Bash","op":"pactl list","summary":"pactl list"}\n' "$now"
+  printf '{"ts":"%s","session":"c","cwd":"/h/agents/bench/runs/x/D01","tool":"Bash","op":"pactl list","summary":"pactl list"}\n' "$now"
+} > "$R/log/actions.jsonl"
+o="$(TOOLSMITH_ROOT="$R" HARNESS_HOME=/nonexistent "$CLI" --since 4d 2>/dev/null)"
+[ "$(printf '%s' "$o" | jq -c '[.audit.raw_kind,.audit.raw_total,.audit.lines]')" = '["agent",1,4]' ] &&
+  ok || no "$(printf '%s' "$o" | jq -c '.audit|[.raw_kind,.raw_total,.lines]')"
+rm -rf "$R"
+
+t "bench_failures: skipped rows out, new arm first, old C no --apply expected"
+R="$(mktemp -d)"; mkdir -p "$R/bench/runs/20260103-000000-ab"
+{ echo '{"task":"S01","arm":"new","i":1,"pass":0,"skipped":"need:owner_go","reason":"gated: needs owner_go, not granted"}'
+  echo '{"task":"C01","arm":"old","i":1,"pass":0,"reason":"state reached but no ledger line (no --apply)"}'
+  echo '{"task":"D01","arm":"new","i":1,"pass":0,"reason":"killed the burner"}'
+  echo '{"task":"O01","arm":"new","i":1,"pass":1,"reason":""}'; } > "$R/bench/runs/20260103-000000-ab/rows.jsonl"
+o="$(TOOLSMITH_ROOT="$R" HARNESS_HOME=/nonexistent "$CLI" --since 4d 2>/dev/null)"
+[ "$(printf '%s' "$o" | jq -c '.bench_failures|[.fails,.trials,.skipped,.expected,(.rows[0]|[.task,.arm])]')" \
+  = '[2,3,1,1,["D01","new"]]' ] && ok || no "$(printf '%s' "$o" | jq -c '.bench_failures|del(.rows)')"
+rm -rf "$R"
+
+t "guards: by_reason counts the rule field _guard writes"
+R="$(mktemp -d)"; mkdir -p "$R/log"
+g='{"ts":"%s","tool":"git","rule":"no push","argv":"push","agent":"a","refused":true}\n'
+printf "$g$g" "$(date +%Y-%m-%dT%H:%M:%S)" "$(date +%Y-%m-%dT%H:%M:%S)" > "$R/log/guards.jsonl"
+o="$(TOOLSMITH_ROOT="$R" HARNESS_HOME=/nonexistent "$CLI" --since 4d 2>/dev/null)"
+[ "$(printf '%s' "$o" | jq -c '[.guards.rows,.guards.by_reason["no push"]]')" = '[2,2]' ] &&
+  ok || no "$(printf '%s' "$o" | jq -c .guards)"
+rm -rf "$R"
+
+t "hold: --check flags a re-queued row"
+R="$(mktemp -d)"; mkdir -p "$R/toolsmith/state"
+hdr='| rank | id | title | class | status | metric | sessions | score |\n|---|---|---|---|---|---|---|---|\n'
+printf "$hdr| 1 | TSP-101 | open | auto-ok | proposed | a | 1 | 9 |\n| 2 | TSP-102 | vetoed | auto-ok | hold | x | 1 | 9 |\n" \
+  > "$R/toolsmith/BACKLOG.md"
+o="$(TOOLSMITH_ROOT="$R" HARNESS_HOME=/nonexistent "$CLI" --since 4d 2>/dev/null)"
+printf '%s' "$o" | jq '{hold: .hold.rows}' > "$R/toolsmith/state/last-seen.json"
+printf "$hdr| 1 | TSP-102 | vetoed | auto-ok | hold | x | 1 | 9 |\n| 2 | TSP-101 | open | auto-ok | proposed | a | 1 | 9 |\n" \
+  > "$R/toolsmith/BACKLOG.md"
+TOOLSMITH_ROOT="$R" HARNESS_HOME=/nonexistent "$CLI" --check >/dev/null 2>&1; rc1=$?
+printf "$hdr| 1 | TSP-102 | vetoed | auto-ok | proposed | x | 1 | 9 |\n" > "$R/toolsmith/BACKLOG.md"
+c="$(TOOLSMITH_ROOT="$R" HARNESS_HOME=/nonexistent "$CLI" --check 2>&1)"; rc2=$?
+[ "$(printf '%s' "$o" | jq -c '.hold.rows|keys')" = '["TSP-102"]' ] && [ $rc1 = 0 ] && [ $rc2 = 1 ] &&
+  printf '%s' "$c" | grep -q TSP-102 && ok || no "keys $(printf '%s' "$o" | jq -c '.hold') rc $rc1/$rc2 $c"
+rm -rf "$R"
 
 t "no live probe: the fixture run never calls pc"
 grep -q "mock" "$CLI" && [ ! -x "$FIX/bin/pc" ] && ok || no "probe would fall through to live pc"

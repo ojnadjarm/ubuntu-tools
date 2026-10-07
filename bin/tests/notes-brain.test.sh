@@ -15,7 +15,8 @@ exec_line="$(sed -n 's/^ExecStart=//p' "$UNIT")"
 [ "$(printf '%s\n' "$exec_line" | wc -l)" = 1 ] || fail "one ExecStart expected"
 for want in "--continue" "--no-chrome" "--name notes" "--model claude-sonnet-5" \
             "--append-system-prompt-file BRIEF.md" "--tools Monitor,Bash,Read" \
-            "--permission-mode dontAsk" "--strict-mcp-config" "--add-dir %h/obsidian-vault" \
+            "--permission-mode dontAsk" "--strict-mcp-config" "--mcp-config %h/agents/eye-relay/mcp-notes.json" \
+            "--dangerously-load-development-channels server:eye-notes" "--add-dir %h/obsidian-vault" \
             '--allowedTools \\"Bash(eye:*),Bash(notes-file:*),Bash(sleep:*)\\"' \
             '--disallowedTools \\"Bash(eye tv:*),Bash(eye talk-to:*),Bash(eye mic:*),Bash(eye show:*)\\"'; do
   case "$exec_line" in *"$want"*) ;; *) fail "ExecStart lacks $want" ;; esac
@@ -56,11 +57,13 @@ $STUB/claude") ;; *) fail "selftest: stubs not on PATH: $resolved" ;; esac
 body="$(printf '%s' "$exec_line" | sed "s|^/bin/sh -c '||; s|'\$||; s|%h|$WORK|g; s|\\\\\\\\\"|\\\\\"|g")"
 HOME="$WORK" CALLS="$CALLS" PATH="$STUB:/usr/bin:/bin" sh -c "$body" || fail "ExecStart body exited $?"
 grep -q "^tmux new-session -d -s notes -c $WORK/agents/notes " "$CALLS" || fail "tmux session: $(cat "$CALLS")"
-grep -q '^claude --continue --no-chrome --name notes --model claude-sonnet-5 --append-system-prompt-file BRIEF.md --tools Monitor,Bash,Read --permission-mode dontAsk --strict-mcp-config --add-dir '"$WORK"'/obsidian-vault --allowedTools Bash(eye:\*),Bash(notes-file:\*),Bash(sleep:\*) --disallowedTools Bash(eye tv:\*),Bash(eye talk-to:\*),Bash(eye mic:\*),Bash(eye show:\*)$' "$CALLS" || fail "claude args: $(cat "$CALLS")"
+grep -q '^claude --continue --no-chrome --name notes --model claude-sonnet-5 --append-system-prompt-file BRIEF.md --tools Monitor,Bash,Read --permission-mode dontAsk --strict-mcp-config --mcp-config '"$WORK"'/agents/eye-relay/mcp-notes.json --dangerously-load-development-channels server:eye-notes --add-dir '"$WORK"'/obsidian-vault --allowedTools Bash(eye:\*),Bash(notes-file:\*),Bash(sleep:\*) --disallowedTools Bash(eye tv:\*),Bash(eye talk-to:\*),Bash(eye mic:\*),Bash(eye show:\*)$' "$CALLS" || fail "claude args: $(cat "$CALLS")"
 grep -q "^cwd $WORK/agents/notes vault $WORK/obsidian-vault folder audio notes$" "$CALLS" || fail "env/cwd: $(cat "$CALLS")"
 [ "$(grep -c '^claude ' "$CALLS")" = 1 ] || fail "fallback claude ran although --continue succeeded"
 post="$(sed -n 's/^ExecStartPost=//p' "$UNIT")"
-[ "$post" = '%h/agents/bin/notes-brain-arm' ] || fail "ExecStartPost is not notes-brain-arm: $post"
+[ "$post" = '%h/.local/bin/eye-channel-accept notes
+%h/agents/bin/notes-brain-arm' ] || fail "ExecStartPost is not eye-channel-accept then notes-brain-arm: $post"
+[ -x "$HOME/.local/bin/eye-channel-accept" ] || fail "eye-channel-accept not installed (the-dark-eye bridge/relay/install.sh)"
 [ -x "$BINDIR/notes-brain-arm" ] || fail "notes-brain-arm missing or not executable"
 cat >"$STUB/eye" <<'STUBEOF'
 #!/bin/sh
@@ -102,7 +105,7 @@ grep -q '^systemctl --user enable --now notes-brain.service$' "$CALLS" || fail "
 
 # --- the brief -------------------------------------------------------------------------
 for want in '`file it`, `save it`, `that'"'"'s it`, `done`, `guárdalo`, `ya está`, `archívalo`,' '`listo`' \
-            'eye listen-loop --as notes' 'eye speak --as notes' 'notes-file raw' "notes-file apply - <<'EOF'" \
+            'The ear is the `eye-notes` channel, already on at launch; never arm' 'eye speak --as notes' 'notes-file raw' "notes-file apply - <<'EOF'" \
             'no new `VOICE:` line has come for 10 minutes' 'sleep 600' 'refused: no vault' \
             'Not atomic across files' 'Never speak unprompted' 'never forward anything to `main`' \
             'never file an idea twice' 'Synthesise' 'One file per idea' '`[[wikilink]]`'; do

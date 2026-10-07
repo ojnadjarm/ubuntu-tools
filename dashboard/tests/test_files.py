@@ -38,6 +38,14 @@ class Files(unittest.TestCase):
         self.assertEqual(server.ls_dir("../")[0], 404)
         self.assertEqual(server.ls_dir("escdir")[0], 404)
 
+    def test_ls_route_decodes_once(self):
+        os.makedirs(os.path.join(self.root, "a%41b"))
+        open(os.path.join(self.root, "a%41b", "x.txt"), "w").write("x")
+        out = {}
+        h = type("H", (), {"path": "/api/ls?p=a%2541b", "json": lambda s, o, c: out.update(code=c, body=o)})()
+        server.ls_route(h, "/api/ls")
+        self.assertEqual((out["code"], out["body"].get("path")), (200, "a%41b"))
+
     def test_unreadable_is_not_empty(self):
         os.chmod(os.path.join(self.root, "empty"), 0)
         try:
@@ -46,6 +54,12 @@ class Files(unittest.TestCase):
             os.chmod(os.path.join(self.root, "empty"), 0o755)
         self.assertEqual(code, 200)
         self.assertEqual((out["items"], out["error"]), ([], "Permission denied"))
+
+    def test_plan_excerpt_survives_memo_overflow(self):
+        from dash.services import files
+        files._EXCERPTS.clear()
+        for i in range(205):
+            self.assertEqual(files.plan_excerpt(os.path.join(self.tmp.name, "nope"), str(i)), ("", []))
 
 
 if __name__ == "__main__":

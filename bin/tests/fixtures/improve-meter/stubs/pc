@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Fixture pc: doctor sleeps briefly, idle prints a fixed sample.
+case "$1" in
+  doctor) sleep 0.3; echo '[]' ;;
+  idle) echo '{"samples":30,"psys_w":4.2,"package_w":3.6}' ;;
+  *) exit 2 ;;
+esac

@@ -14,6 +14,9 @@ fx_remote()   { printf '%s/dark-eye-remote.git' "$(fx_root)"; }
 fx_gitconfig(){ printf '%s/gitconfig' "$(fx_root)"; }
 fx_empty()    { printf '%s/empty' "$(fx_root)"; }
 
+# The system git, not a guard shim first on PATH: the fixture's own commit is not a user repo's.
+_fx_git=$(command -pv git 2>/dev/null || printf /usr/bin/git)
+
 # The only source the fixture copies from the real repo: bridge/ (20 K, keeps `eye` working
 # inside the arm) and the top-level docs. Never .git, never anything else.
 _fx_seed() {
@@ -33,14 +36,14 @@ fx_reset() {
   rm -rf "$repo" "$remote"
   mkdir -p "$(fx_root)" "$(fx_empty)"
   printf '[user]\n\tname = pcbench fixture\n\temail = pcbench@localhost\n' > "$g"
-  git init -q --bare -b main "$remote" || return 1
+  "$_fx_git" init -q --bare -b main "$remote" || return 1
   _fx_seed "$repo"
-  git -C "$repo" init -q -b main
-  git -C "$repo" -c user.name=pcbench -c user.email=pcbench@localhost add -A
-  git -C "$repo" -c user.name=pcbench -c user.email=pcbench@localhost \
+  "$_fx_git" -C "$repo" init -q -b main
+  "$_fx_git" -C "$repo" -c user.name=pcbench -c user.email=pcbench@localhost add -A
+  "$_fx_git" -C "$repo" -c user.name=pcbench -c user.email=pcbench@localhost \
       commit -qm 'eye: bridge and docs' || return 1
-  git -C "$repo" remote add origin "$remote"
-  git -C "$repo" push -q -u origin main 2>/dev/null
+  "$_fx_git" -C "$repo" remote add origin "$remote"
+  "$_fx_git" -C "$repo" push -q -u origin main 2>/dev/null
   # …then dirty it, so a trial finds uncommitted work exactly as the real repo had.
   printf '\n<!-- pcbench fixture: uncommitted work -->\n' >> "$repo/README.md"
   printf 'draft note, not committed\n' > "$repo/NOTES-draft.md"

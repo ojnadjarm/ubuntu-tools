@@ -71,6 +71,23 @@ t "the adapter asks for the stream format that carries tool events"
 grep -q -- '--output-format stream-json' "$SB/claude-args.log" &&
   grep -q -- '--verbose' "$SB/claude-args.log" && ok || no "$(cat "$SB/claude-args.log")"
 
+t "TSP-013: lean headless flags, contract appended once"
+{ grep -q -- '--strict-mcp-config --tools Bash,Read,Edit,Write --settings {"claudeMdExcludes":\["'"$SB"'/CLAUDE.md"\]}' \
+    "$SB/claude-args.log" && grep -q -- '--append-system-prompt preamble' "$SB/claude-args.log"; } \
+  && ok || no "$(cat "$SB/claude-args.log")"
+
+t "TSP-013: AGENT_TOOLS in agent.env reaches --tools"
+printf 'AGENT_TOOLS=Bash,WebFetch\n' >"$SB/agents/demo/agent.env"; : >"$SB/claude-args.log"
+run_agent claude; rm -f "$SB/agents/demo/agent.env"; sed -i '$d' "$idx"
+grep -q -- '--tools Bash,WebFetch ' "$SB/claude-args.log" && ok || no "$(cat "$SB/claude-args.log")"
+
+t "T74: AGENT_WRAP in agent.env prefixes the claude command"
+printf '#!/usr/bin/env bash\necho "wrap $*" >>"$HOME/wrap.log"\n[ "$1" = -- ] && shift\nexec "$@"\n' >"$SB/agents/bin/wrapstub"
+chmod +x "$SB/agents/bin/wrapstub"
+printf 'AGENT_WRAP="wrapstub --"\n' >"$SB/agents/demo/agent.env"; : >"$SB/claude-args.log"
+run_agent claude; rm -f "$SB/agents/demo/agent.env"; sed -i '$d' "$idx"
+{ grep -q '^wrap -- claude -p ' "$SB/wrap.log" && [ -s "$SB/claude-args.log" ]; } && ok || no "$(cat "$SB/wrap.log" 2>&1)"
+
 t "no new money column: cost_usd stays the only one"
 [ "$(head -1 "$idx" | tr '\t' '\n' | grep -ciE 'cost|usd|price|spend')" = 1 ] \
   && ok || no "$(head -1 "$idx")"

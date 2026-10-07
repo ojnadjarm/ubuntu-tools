@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# drop-link — publish a file or folder into ~/drop/<sub>/ and print its checked https link (tailscale serve :8470 → caddy :8070).
+set -uo pipefail
+. "$(dirname "$(readlink -f "$0")")/env.sh"
+
+DROP=${DROP_DIR:-$HOME/drop}
+BASE=${DROP_URL:-https://${HARNESS_TAILNET_FQDN:-$HARNESS_HOST}:8470}
+
+usage() {
+  cat <<'EOF'
+usage: drop-link <file|dir> <sub>    hard-link (copy across filesystems) into ~/drop/<sub>/, print the https URL, check it answers 200
+       drop-link <path-in-drop>      print and check the URL of something already in ~/drop
+Folders and index.html get a trailing-slash URL (a page opens); any other file downloads.
+exit 0 link answers 200 · 1 link does not answer · 2 usage
+EOF
+}
+
+[ "${1:-}" = -h ] || [ "${1:-}" = --help ] && { usage; exit 0; }
+[ -e "${1:-}" ] || { usage >&2; exit 2; }
+src=$(readlink -f "$1"); drop=$(readlink -f "$DROP")
+
+if [[ "$src" == "$drop"/* ]]; then
+  dest=$src
+else
+  [[ "${2:-}" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$ ]] && [[ "/$2/" != */./* && "/$2/" != */../* ]] || { usage >&2; exit 2; }
+  mkdir -p "$drop/$2"
+  dest="$drop/$2/$(basename "$src")"
+  rm -rf -- "$dest"
+  if [ -d "$src" ]; then cp -al "$src" "$dest" 2>/dev/null || { rm -rf -- "$dest"; cp -a "$src" "$dest"; }
+  else ln "$src" "$dest" 2>/dev/null || cp -a "$src" "$dest"; fi
+fi
+
+rel=${dest#"$drop"/}
+case "$rel" in
+  */index.html|index.html) rel=${rel%index.html} ;;
+  *.html|*.htm) echo "drop-link: $rel is served as a download; link its folder with an index.html to open it as a page" >&2 ;;
+esac
+[ -d "$dest" ] && rel="$rel/"
+url="$BASE/$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1]))' "$rel")"
+code=$(curl -s -o /dev/null -w '%{http_code}' -I --max-time 10 "$url")
+echo "$url"
+[ "$code" = 200 ] || { echo "drop-link: $url answered $code" >&2; exit 1; }

@@ -1,0 +1,22 @@
+// Playback budget check: node tools/perf.mjs <url> [seconds] — muted run from Begin over the whole script (default: its length + 1 s), then 3 s idle.
+import { chromium } from 'playwright-core';
+const GPU = ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-angle=vulkan', '--enable-gpu', '--ignore-gpu-blocklist'];
+const [url, secsArg] = process.argv.slice(2);
+const b = await chromium.launch({ headless: true, args: GPU });
+const p = await b.newPage({ viewport: { width: 1920, height: 1080 }, ignoreHTTPSErrors: true });
+p.on('pageerror', (e) => console.log('ERR', e.message));
+const t0 = Date.now();
+await p.goto(url + (url.includes('?') ? '&' : '?') + 'mute');
+await p.waitForFunction(() => window.__probe?.ready > 0, null, { timeout: 30000 });
+const load = Date.now() - t0;
+await p.evaluate(() => { window.__iv = []; let l = performance.now(); const f = (n) => { window.__iv.push(n - l); l = n; requestAnimationFrame(f); }; requestAnimationFrame(f); });
+const secs = secsArg ? +secsArg : Math.ceil((await p.evaluate(() => window.__probe.duration)) + 1);
+await p.click('[data-k="begin"]');
+await p.waitForTimeout(secs * 1000);
+const play = await p.evaluate(() => { const iv = window.__iv.slice(5), fw = window.__probe.fw.slice(1); const s = [...fw].sort((a, b) => a - b); return { firstDraw: window.__probe.fw[0], rafMax: Math.max(...iv).toFixed(1), slow: iv.filter((x) => x > 20).length, drawP50: s[s.length >> 1], drawMax: Math.max(...fw), frames: window.__probe.frames }; });
+const f0 = await p.evaluate(() => window.__probe.frames);
+await p.waitForTimeout(3000);
+const idle = (await p.evaluate(() => window.__probe.frames)) - f0;
+const lt = await p.evaluate(() => window.__probe.longtasks);
+console.log(JSON.stringify({ playedS: secs, loadMs: load, longtasks: lt, plateMs: await p.evaluate(() => window.__probe.plateMs), ...play, idleFramesIn3s: idle }));
+await b.close();

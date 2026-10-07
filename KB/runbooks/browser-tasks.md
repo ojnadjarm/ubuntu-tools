@@ -8,5 +8,6 @@
    `other_rss_mb` is the same total, next to `fleet_rss_mb`.
 3. The row never kills anything: the tree usually belongs to a live interactive session, so
    ending it is the owner's call (quit that session, or `browser_close` from it).
-4. Permanent fix, owner-only: `--isolated` in the Playwright MCP config (fresh in-memory
-   profile per session, browser closed on disconnect) — it lives in his Claude settings.
+4. Permanent fix (TSP-026): `@playwright/mcp` >= 0.0.81 closes the browser after `timeouts.idle`
+   ms without a tool call (1800000 in `~/.claude/playwright-mcp.json`) and relaunches it on the next
+   call, profile kept; `bin/playwright-mcp` refuses to start an older binary (exit 3).

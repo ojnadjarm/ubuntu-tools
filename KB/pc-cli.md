@@ -22,7 +22,7 @@ Regenerate: `pc help --md > ~/agents/KB/pc-cli.md`. Never hand-edit.
 | `pc selftest` | drives gnome-calculator with type/key/clip and a screenshot; prints PASS or FAIL. | `pc selftest` | — |
 | `pc shot` | screenshot the screen or a region; --diff reports what changed since the previous shot. | `pc shot [out.png] [--scale F] [--region X,Y,W,H] [--diff [PREV]] [--ignore X,Y,W,H] [--changed-only] [--quiet]` | — |
 | `pc spotify` | drive the Spotify desktop app over MPRIS; no screenshots, ever. | `pc spotify <command> [args]` | — |
-| `pc status` | live health snapshot of this machine (text, --json, --check, --brief, --facts, --fresh). | `pc status [--json\|--check\|--brief\|--facts] [--fresh]` | 0.11 s |
+| `pc status` | live health snapshot of this machine (text, --json, --check, --brief, --facts [--apply], --fresh). | `pc status [--json\|--check\|--brief\|--facts [--apply]] [--fresh]` | 0.11 s |
 | `pc tree` | AT-SPI UI tree. | `pc tree [app-substring] [--depth N] [--json] [--max N] [--interactive] [--find "name"] [--role R]` | — |
 | `pc type` | type text via mutter RemoteDesktop keysyms ("\n" = Enter, "\t" = Tab). | `pc type [--force] "text"` | — |
 | `pc wait` | sleep S seconds, then take a screenshot; prints its path. | `pc wait SECONDS [shot args]` | — |
@@ -69,6 +69,7 @@ Regenerate: `pc help --md > ~/agents/KB/pc-cli.md`. Never hand-edit.
 | `pc bench` | wall, CPU and exec count for every read-only pc subcommand, warm and cold. | `pc bench [--cold] [--runs 3] [--save] [--compare] [--only <sub>…] [--json]` | — |
 | `pc doctor` | PASS/FAIL for the whole pc family without opening a window, making a sound or touching the TV. | `pc doctor [--quick] [--json]` | 1.20 s |
 | `pc explain` | ranked KB lookup: heading > bold lead > exact quoted token > partial quote/backtick > word > substring. | `pc explain <thing…> [-n 3] [--json] [--files]` | — |
+| `pc need` | the dashboard "need you" pushes; resolve one as a ledgered, undoable ack. | `pc need [list] [--json]` | — |
 | `pc undo` | the change ledger and its rollbacks. | `pc undo list [-n N] [--json]` | 0.02 s |
 
 ## Mutations, the ledger and `pc undo`

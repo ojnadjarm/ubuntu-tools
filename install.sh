@@ -91,7 +91,7 @@ roster_units=""
 for d in "$HARNESS_DIR"/*/; do
   [ -r "$d/BRIEF.md" ] && [ -r "$d/agent.env" ] || continue
   name="$(basename "$d")"
-  SCHEDULE=""; ENABLED=no
+  SCHEDULE=""; ENABLED=no; UNIT_TIMEOUT=""
   # shellcheck source=/dev/null
   . "$d/agent.env"
   [ -n "$SCHEDULE" ] || { echo "  $name: no SCHEDULE= in agent.env, left alone"; continue; }
@@ -104,6 +104,12 @@ for d in "$HARNESS_DIR"/*/; do
     note "schedule $name = $SCHEDULE"; reload=1
   else
     skip "schedule $name"
+  fi
+  if [ -n "${UNIT_TIMEOUT:-}" ]; then
+    sd="$UD/agent@$name.service.d"; want="$(printf '[Service]\nTimeoutStartSec=%s\n' "$UNIT_TIMEOUT")"
+    if [ "$(cat "$sd/timeout.conf" 2>/dev/null)" != "$want" ]; then
+      mkdir -p "$sd"; printf '%s\n' "$want" >"$sd/timeout.conf"; note "unit timeout $name = $UNIT_TIMEOUT s"; reload=1
+    fi
   fi
   [ "$ENABLED" = yes ] && roster_units="$roster_units agent@$name.timer"
 done
@@ -130,7 +136,8 @@ done
 echo "5. KB/machine.md"
 facts="$HARNESS_DIR/KB/machine.md"
 tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
-if "$HARNESS_DIR/bin/pc" status --facts >"$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+[ -r "$facts" ] && cp "$facts" "$tmp"
+if PC_FACTS_FILE="$tmp" "$HARNESS_DIR/bin/pc" status --facts --apply >/dev/null 2>&1 && [ -s "$tmp" ]; then
   # The header carries a generation timestamp; compare only the body so a re-run is a no-op.
   if [ -r "$facts" ] && [ "$(grep -v '^# Machine facts (generated' "$tmp")" = "$(grep -v '^# Machine facts (generated' "$facts")" ]; then
     skip "KB/machine.md up to date"
@@ -138,7 +145,7 @@ if "$HARNESS_DIR/bin/pc" status --facts >"$tmp" 2>/dev/null && [ -s "$tmp" ]; th
     cp "$tmp" "$facts"; note "regenerated KB/machine.md"
   fi
 else
-  echo "  could not run pc status --facts — KB/machine.md left as is"
+  echo "  could not run pc status --facts --apply — KB/machine.md left as is"
 fi
 
 ## 6. Agent adapter -----------------------------------------------------------

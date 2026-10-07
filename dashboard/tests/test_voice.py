@@ -42,6 +42,11 @@ class Voice(unittest.TestCase):
                               ("the recogniser, the four hundred users", "the recognizer, the 400 users")]:
             ops, wer = server.word_diff(prompt, heard)
             self.assertEqual((wer, {o[0] for o in ops}), (0.0, {"eq"}), (prompt, heard))
+        for spoken, key in [("two hundred five", "205"), ("one hundred twenty", "120"), ("one hundred twenty five", "125"),
+                            ("one thousand two hundred", "1200"), ("nineteen hundred eighty four", "1984"),
+                            ("eighty seventy one", "8071")]:
+            self.assertEqual([k for _, k in server.words(spoken)], [key], spoken)
+        self.assertEqual(server.word_diff("Room 205 is open", "room two hundred five is open")[1], 0.0)
         ops, wer = server.word_diff("Tailscale, example-host, the tailnet", "Tail scale, exemplost, the tailnet")
         self.assertEqual(ops[0], ["sub", ["tailscale", "example", "host"], ["tail", "scale", "exemplost"]])
         self.assertEqual(wer, 0.6)

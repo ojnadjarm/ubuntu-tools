@@ -63,6 +63,25 @@ class Thumbs(unittest.TestCase):
         r, body = self.get("/thumb/sub/big.png?w=640", **{"If-None-Match": etag})
         self.assertEqual((r.status, body), (304, b""))
 
+    def test_concurrent_cold_generation(self):
+        full = os.path.join(server.DROP, "sub", "big.png")
+        for run in range(10):
+            os.utime(full, ns=(run, run))
+            gate, errors = threading.Barrier(4), []
+
+            def go():
+                gate.wait()
+                try:
+                    thumbs.thumb(full, 160)
+                except OSError as e:
+                    errors.append(e)
+            ts = [threading.Thread(target=go) for _ in range(4)]
+            for t in ts:
+                t.start()
+            for t in ts:
+                t.join()
+            self.assertEqual(errors, [], run)
+
     def test_refuses_traversal_and_non_images(self):
         for p in ("../outside.png", "sub/../../outside.png", "%2e%2e/outside.png", ".hidden.png", "", "note.txt", "missing.png"):
             self.assertEqual(self.get("/thumb/" + p)[0].status, 404, p)

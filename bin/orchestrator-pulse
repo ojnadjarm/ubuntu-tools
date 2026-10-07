@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Hourly pulse: types one prompt into the orchestrator's tmux session, only when it sits idle at an empty prompt.
+set -uo pipefail
+SESSION=${PULSE_SESSION:-${ORCHESTRATOR_TMUX_SESSION:-claude}}
+LOG=${PULSE_LOG:-$HOME/agents/log/pulse.log}
+SETTLE=${PULSE_SETTLE:-3}
+TURN=${PULSE_TURN:-'Pulse: run plan-usage, then continue the standing queue (see ~/agents/KB/orchestrator.md "Pulse") or report nothing.'}
+tm() { if [ -n "${PULSE_TMUX_SOCKET:-}" ]; then tmux -L "$PULSE_TMUX_SOCKET" "$@"; else tmux "$@"; fi; }
+log() { mkdir -p "$(dirname "$LOG")"; printf '%s %s session=%s %s\n' "$(date -Is)" "$1" "$SESSION" "$2" >>"$LOG"; echo "orchestrator-pulse: $1 $2"; }
+pane() { tm capture-pane -pJt "$SESSION" 2>/dev/null; }
+prompt_line() { pane | grep -E '^(❯|>)' | tail -n1; }
+squash() { tr -s ' \n' '  '; }
+# The input box text from the last prompt glyph to the box border, joined, so a wrapped prompt still matches.
+box_text() { pane | awk '/^(❯|>)/{buf=""; on=1} on&&/^─/{on=0} on{buf=buf" "$0} END{print buf}' | squash; }
+
+tm has-session -t "$SESSION" 2>/dev/null || { log skip "no tmux session"; exit 0; }
+[ "$(tm display -pt "$SESSION" '#{pane_in_mode}' 2>/dev/null)" = 0 ] || { log skip "pane in copy mode"; exit 0; }
+a=$(pane)
+case "$a" in
+  *"esc to interrupt"*) log skip "turn in progress"; exit 0 ;;
+  *"Waiting for"*"background"*) log skip "background agents running"; exit 0 ;;
+esac
+line=$(prompt_line)
+[ -n "$line" ] || { log skip "no prompt box (dialog or startup)"; exit 0; }
+rest=$(printf '%s' "$line" | sed -e 's/^❯//' -e 's/^>//' | tr -d ' \302\240')
+[ -z "$rest" ] || { log skip "input line not empty"; exit 0; }
+sleep "$SETTLE"
+[ "$(pane)" = "$a" ] || { log skip "pane changing"; exit 0; }
+
+tm send-keys -t "$SESSION" -l "$TURN" || { log skip "send-keys failed"; exit 0; }
+for _ in 1 2 3 4 5; do
+  sleep 1
+  if box_text | grep -qF "$(printf '%s' "$TURN" | squash)"; then tm send-keys -t "$SESSION" Enter; log fired "prompt submitted"; exit 0; fi
+done
+tm send-keys -t "$SESSION" C-u
+log skip "prompt never echoed whole; line cleared"

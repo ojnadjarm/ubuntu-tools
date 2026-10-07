@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#000000">
+<title>dark eye · lab</title>
+<link rel="stylesheet" href="/static/eye.css">
+<link rel="stylesheet" href="/static/next/lab/lab.css">
+<link rel="modulepreload" href="/static/next/lab/js/engine.js">
+<link rel="modulepreload" href="/static/next/lab/vendor/three.lab.js">
+</head>
+<body class="lab eyep">
+<canvas id="gl" aria-hidden="true"></canvas>
+<header class="lhead">
+  <a class="brand" href="/static/next/lab/"><b>Dark Eye</b><s>lab · T53</s></a>
+  <nav class="vars" aria-label="Variants">
+    <a href="?v=a" data-v="a">A · Oracle</a>
+    <a href="?v=b" data-v="b">B · Obsidian</a>
+    <a href="?v=c" data-v="c">C · Swarm</a>
+  </nav>
+  <p class="live" id="live">…</p>
+</header>
+<div id="stage" aria-hidden="true"></div>
+<footer class="ctl" aria-label="Events">
+  <button type="button" data-ev="done">agent done</button>
+  <button type="button" data-ev="needs">needs you</button>
+  <button type="button" data-ev="stray">stray</button>
+  <button type="button" data-ev="poke">blink</button>
+  <label class="ld"><span>pupil · load</span><input type="range" id="load" min="0" max="100" value="25"></label>
+</footer>
+<pre id="hud" hidden></pre>
+<script type="module" src="/static/next/lab/js/eye.js"></script>
+</body>
+</html>

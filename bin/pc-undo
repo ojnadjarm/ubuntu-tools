@@ -65,7 +65,7 @@ e=$(entries | jq --arg id "$id" 'if $id == "" then .[0] else (map(select(.id == 
 [ -n "$e" ] || { echo "pc undo: nothing to undo" >&2; exit 1; }
 
 target=$(jq -r '.target' <<<"$e"); before=$(jq -r '.before' <<<"$e"); after=$(jq -r '.after' <<<"$e")
-rollback=$(jq -r '.rollback' <<<"$e"); cmd=$(jq -r '.cmd' <<<"$e"); readcmd=$(jq -r '.read // ""' <<<"$e")
+rollback=$(jq -r '.rollback' <<<"$e"); redo=$(jq -r '.redo // .cmd' <<<"$e"); readcmd=$(jq -r '.read // ""' <<<"$e")
 
 if [ -n "$readcmd" ] && [ "$FORCE" != 1 ]; then
   now=$(eval "$readcmd" 2>/dev/null)
@@ -75,5 +75,5 @@ if [ -n "$readcmd" ] && [ "$FORCE" != 1 ]; then
   }
 fi
 
-# The undo is a ledgered change of its own, whose inverse is the command it is undoing.
-PC_READ_CMD="$readcmd" pc_apply "$target" "$after" "$before" "$cmd" bash -c "$rollback"
+# The undo is a ledgered change of its own: its inverse is the undone entry's redo, and its redo that entry's rollback.
+PC_READ_CMD="$readcmd" PC_REDO="$rollback" pc_apply "$target" "$after" "$before" "$redo" bash -c "$rollback"

@@ -1,0 +1,4 @@
+{ "compilerOptions": { "target": "es2022", "module": "esnext", "moduleResolution": "bundler", "strict": true, "noEmit": true, "skipLibCheck": true, "resolveJsonModule": true,
+  "lib": ["es2022", "dom"], "types": ["vite/client"],
+  "paths": { "explainer-kit": ["../src/index.ts"], "explainer-kit/cutaway": ["../adapters/cutaway/index.ts"], "gsap": ["./node_modules/gsap"] } },
+  "include": ["src", "../src", "../adapters"] }

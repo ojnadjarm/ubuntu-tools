@@ -1,5 +1,5 @@
 """Transport: gzip, ETag/304, Range and the keep-alive stall, on a throwaway server and drop fixture."""
-import gzip, http.client, json, os, sys, tempfile, threading, time, unittest
+import gzip, http.client, json, os, socket, sys, tempfile, threading, time, unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import server
 
@@ -83,6 +83,20 @@ class Http(unittest.TestCase):
         r, body = self.get("/api/ls")
         self.assertEqual(json.loads(body)["path"], "")
 
+    def test_head_file_has_no_body(self):
+        s = socket.create_connection(self.srv.server_address, timeout=0.5)
+        s.sendall(b"HEAD /files/blob.bin HTTP/1.1\r\nHost: x\r\n\r\n")
+        data = b""
+        try:
+            while chunk := s.recv(65536):
+                data += chunk
+        except socket.timeout:
+            pass
+        s.close()
+        head, _, rest = data.partition(b"\r\n\r\n")
+        self.assertIn(b"Content-Length: 1024", head)
+        self.assertEqual(rest, b"")
+
     def test_keep_alive_no_stall(self):
         worst = 0
         for _ in range(5):
@@ -95,17 +109,38 @@ class Http(unittest.TestCase):
         from dash import http as dh
         was = dh.BRAND
         try:
-            for brand, want in (("", b"<title>Voice training</title>"), ("A & B", b"<title>Voice training \xc2\xb7 A &amp; B</title>")):
+            for brand, want in (("", b"<title>What runs on this machine</title>"), ("A & B", b"<title>What runs on this machine \xc2\xb7 A &amp; B</title>")):
                 dh.BRAND = brand
                 dh._assets.clear()
-                for path in ("/voice", "/static/voice.html"):
-                    r, body = self.get(path)
-                    self.assertIn(want, body, path)
+                r, body = self.get("/static/machine.html")
+                self.assertIn(want, body)
             r, body = self.get("/")
             self.assertIn(b" \xc2\xb7 A &amp; B</title>", body)
         finally:
             dh.BRAND = was
             dh._assets.clear()
+
+
+class MainIdle(unittest.TestCase):
+    def test_main_serves_without_poll_timer(self):
+        """main() blocks in select on every bind instead of waking every 0.5 s."""
+        from dash import http as dh
+        calls, done = [], threading.Event()
+
+        def fake(srv, poll_interval=0.5):
+            calls.append(poll_interval)
+            srv.server_close()
+            if len(calls) == 2:
+                done.set()
+
+        was = (dh.BINDS, dh.PORT, dh.Server.serve_forever)
+        dh.BINDS, dh.PORT, dh.Server.serve_forever = ["127.0.0.1", "::1"], 0, fake
+        try:
+            dh.main()
+            self.assertTrue(done.wait(5))
+        finally:
+            dh.BINDS, dh.PORT, dh.Server.serve_forever = was
+        self.assertEqual(calls, [None, None])
 
 
 if __name__ == "__main__":

@@ -84,7 +84,7 @@ w=$(sed -n 's/.*would run: //p' "$W/o2")
 t "the idle row is sampled after the gate, never on a dry run"
 { grep -q 'pc idle --seconds 60 --tsv >>"$BENCH/BASELINE-IDLE.tsv"' "$RUNNER" &&
   ! grep -q 'BASELINE-IDLE' "$W/o2" &&
-  [ "$(sed -n '2s/^#//p' "$BIN/../bench/BASELINE-IDLE.tsv" | awk -F'\t' '{print NF}')" = 10 ]
+  [ "$(sed -n '2s/^#//p' "$BIN/../bench/BASELINE-IDLE.tsv" | awk -F'\t' '{print NF}')" = 11 ]
 } && ok || no "idle line missing, sampled on --dry-run, or the header is not 9 columns"
 
 t "the weekly selection includes the confirming C02/C04 re-run"

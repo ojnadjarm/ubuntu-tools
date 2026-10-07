@@ -21,7 +21,7 @@ mkdir -p "$BIN" "$ST" "$WORK/tmux" "$WORK/xdg/pc-status" "$WORK/fxbin"
 REAL_TMUX=$(command -v tmux)
 fx() { env -u TMUX TMUX_TMPDIR="$WORK/tmux" HOME="$WORK" HARNESS_HOME="$WORK/agents" \
        XDG_RUNTIME_DIR="$WORK/xdg" ORCHESTRATOR_TMUX_SESSION="$FXS" ORCHESTRATOR_UNIT="$FXU" \
-       PATH="$BIN:$PATH" CALLS="$CALLS" SENTINEL_STATUS_CMD="$BIN/status-real" SENTINEL_ORCH_WAIT=1 FX_UNIT_ENABLED="${FX_UNIT_ENABLED:-enabled}" "$@"; }
+       PATH="$BIN:$PATH" CALLS="$CALLS" SENTINEL_STATUS_CMD="$BIN/status-real" SENTINEL_ORCH_WAIT=1 SENTINEL_SETTLE=0 FX_UNIT_ENABLED="${FX_UNIT_ENABLED:-enabled}" "$@"; }
 printf 'set -g remain-on-exit on\n' >"$WORK/tmux.conf"
 ftmux() { fx "$REAL_TMUX" -f "$WORK/tmux.conf" "$@"; }
 cleanup() { ftmux kill-server 2>/dev/null; rm -rf "$WORK"; }

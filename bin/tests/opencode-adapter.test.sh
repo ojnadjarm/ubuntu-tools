@@ -38,9 +38,17 @@ OPENCODE_BIN="$F/bin/opencode" OC_ARGV_OUT="$tmp/argv2" OPENCODE_MODEL=zen/free 
   RAW_OUT="$tmp/raw2.json" META_OUT="$tmp/meta2.json" "$A/run" >/dev/null
 grep -qx 'zen/free' "$tmp/argv2" && ok 1 "OPENCODE_MODEL pins the model" || ok 0 "OPENCODE_MODEL pins the model"
 
-cost="$(jq -r '.cost_usd' "$tmp/meta.json")"; tin="$(jq -r '.tokens.input' "$tmp/meta.json")"
-[ "$cost" != null ] && [ "$tin" != null ] && ok 1 "meta.json carries cost_usd and tokens" \
-  || ok 0 "meta.json carries cost_usd and tokens (cost=$cost input=$tin)"
+cost="$(jq -r '.cost_usd' "$tmp/meta.json")"
+[ "$cost" != null ] && ok 1 "meta.json carries cost_usd" || ok 0 "meta.json carries cost_usd (got $cost)"
+# The fixture has 2 step-finish parts; agent-run's usage_row must see their sums.
+usage="$(jq -r '[(.tokens // {}) | (.input_tokens // 0), (.output_tokens // 0),
+                (.cache_read_input_tokens // 0)] + [(.tool_calls // 0)] | @tsv' "$tmp/meta.json")"
+[ "$usage" = "$(printf '4153\t142\t17408\t1')" ] \
+  && ok 1 "meta tokens are summed over steps in agent-run's key names, with tool_calls" \
+  || ok 0 "meta tokens are summed over steps in agent-run's key names, with tool_calls (got '$usage')"
+[ "$(jq -c '.tool_histogram' "$tmp/meta.json")" = '{"bash":1}' ] \
+  && ok 1 "meta tool_histogram counts tool parts by opencode tool name" \
+  || ok 0 "meta tool_histogram counts tool parts by opencode tool name"
 
 # audit: run wrote log/actions.jsonl under the fake HARNESS_HOME, mapping bash -> Bash.
 log="$tmp/log/actions.jsonl"
@@ -71,6 +79,32 @@ OPENCODE_CONFIG_DIR="$conf" "$A/install" 2>/dev/null | grep -q 'no changes' \
 OPENCODE_CONFIG_DIR="$conf" "$A/uninstall" >/dev/null 2>&1
 [ ! -e "$conf/skills/desktop/SKILL.md" ] && [ "$(jq -r '.instructions // "gone"' "$conf/opencode.json")" = gone ] \
   && ok 1 "uninstall reverses both" || ok 0 "uninstall reverses both"
+
+# F42: an unwritable audit log or a malformed tool event must not stop the stdin echo.
+bh="$tmp/badhome"; mkdir -p "$bh/log/actions.jsonl"
+producer() {
+  printf '%s\n' '{"type":"tool_use","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":"oops"}}}'
+  for i in $(seq 200); do
+    printf '{"type":"tool_use","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"echo %s"}}}}\n' "$i"
+  done
+  echo FINAL
+}
+producer | tee "$tmp/raw5" | HARNESS_HOME="$bh" "$A/audit-from-stream" >/dev/null 2>"$tmp/err5"
+ps="${PIPESTATUS[*]}"
+[ "$ps" = "0 0 0" ] && ok 1 "an audit failure leaves the pipe exiting 0 0 0" \
+  || ok 0 "an audit failure leaves the pipe exiting 0 0 0 (got $ps)"
+[ "$(wc -l <"$tmp/raw5")" = 202 ] && tail -1 "$tmp/raw5" | grep -qx FINAL \
+  && ok 1 "an audit failure keeps the whole raw stream" || ok 0 "an audit failure keeps the whole raw stream"
+HARNESS_HOME="$bh" python3 -c "
+import importlib.util, sys
+s = importlib.util.spec_from_file_location('c', '$HOME_DIR/agents/hooks/audit-log.py')
+c = importlib.util.module_from_spec(s); s.loader.exec_module(c)
+c.record('Bash', {'command': 'x'}); c.record('Bash', ['not', 'a', 'dict'])" 2>/dev/null \
+  && ok 1 "record() never raises" || ok 0 "record() never raises"
+
+# F46: budget caps are gone fleet-wide, so the README must not list one as lost.
+! grep -q -- '--max-budget-usd' "$A/README.md" \
+  && ok 1 "README lists no budget cap as lost" || ok 0 "README lists no budget cap as lost"
 
 [ "$bad" = 0 ] && echo "all opencode-adapter cases pass" || echo "$bad FAILURES"
 exit $([ "$bad" = 0 ] && echo 0 || echo 1)

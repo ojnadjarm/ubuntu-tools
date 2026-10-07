@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""plan-usage — the Claude plan meter (5-hour and weekly used %) from the endpoint /usage reads."""
+import json
+import os
+import sys
+import time
+import urllib.request
+from datetime import datetime
+
+USAGE = """usage: plan-usage [--json] [--check PCT] [--cached]
+
+One line: 5h N% (resets HH:MM) · week N% (resets Day HH:MM) · source <name> · age <s>
+  --json       the reading as JSON
+  --check PCT  exit 1 when either window is at or above PCT (2 = no reading at all)
+  --cached     no network; print the last good reading from the state file
+Source: GET api.anthropic.com/api/oauth/usage with the Claude Code OAuth token (the
+plan's own percentage, same as /usage). On failure the last good reading is shown as
+source cache; older than 30 min it says stale. The token is never printed."""
+
+HOME = os.path.expanduser("~")
+CREDS = os.environ.get("PLAN_USAGE_CREDS", HOME + "/.claude/.credentials.json")
+STATE = os.environ.get("PLAN_USAGE_STATE", HOME + "/agents/state/usage.json")
+URL = os.environ.get("PLAN_USAGE_URL", "https://api.anthropic.com/api/oauth/usage")
+STALE_S = 1800
+
+
+def fetch():
+    with open(CREDS) as f:
+        token = json.load(f)["claudeAiOauth"]["accessToken"]
+    req = urllib.request.Request(URL, headers={
+        "Authorization": "Bearer " + token,
+        "anthropic-beta": "oauth-2025-04-20",
+        "User-Agent": "plan-usage",
+    })
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        raw = json.load(resp)
+    reading = {"ts": int(time.time()), "source": "oauth-usage-api"}
+    for key, name in (("five_hour", "5h"), ("seven_day", "week")):
+        w = raw.get(key) or {}
+        reading[name] = {"pct": w.get("utilization"), "resets_at": w.get("resets_at")}
+    reading["scoped"] = [{"model": ((l.get("scope") or {}).get("model") or {}).get("display_name"),
+                          "pct": l.get("percent"), "resets_at": l.get("resets_at")}
+                         for l in raw.get("limits") or [] if l.get("kind") == "weekly_scoped"]
+    return reading
+
+
+def save(reading):
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    tmp = STATE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(reading, f)
+    os.replace(tmp, STATE)
+
+
+def load():
+    try:
+        with open(STATE) as f:
+            r = json.load(f)
+        r["source"] = "cache"
+        return r
+    except (OSError, ValueError):
+        return None
+
+
+def when(iso, fmt):
+    if not iso:
+        return "?"
+    return datetime.fromtimestamp(round(datetime.fromisoformat(iso).timestamp() / 60) * 60).strftime(fmt)
+
+
+def line(r):
+    age = int(time.time()) - r["ts"]
+    out = "5h {}% (resets {}) · week {}% (resets {}) · source {} · age {}s".format(
+        fmt_pct(r["5h"]["pct"]), when(r["5h"]["resets_at"], "%H:%M"),
+        fmt_pct(r["week"]["pct"]), when(r["week"]["resets_at"], "%a %d %b %H:%M"),
+        r["source"], age)
+    return out + (" · stale" if age > STALE_S else "")
+
+
+def fmt_pct(p):
+    return "?" if p is None else ("%g" % p)
+
+
+def main(argv):
+    if "-h" in argv or "--help" in argv:
+        print(USAGE)
+        return 0
+    check = None
+    if "--check" in argv:
+        try:
+            check = float(argv[argv.index("--check") + 1])
+        except (IndexError, ValueError):
+            print(USAGE, file=sys.stderr)
+            return 2
+    r = None
+    if "--cached" not in argv:
+        try:
+            r = fetch()
+            save(r)
+        except Exception as e:  # network, HTTP 401 on an expired token, bad JSON
+            print("plan-usage: live read failed ({}); using cache".format(type(e).__name__), file=sys.stderr)
+    r = r or load()
+    if not r:
+        print("plan-usage: no reading (live read failed and no cache)", file=sys.stderr)
+        return 2
+    r["age"] = int(time.time()) - r["ts"]
+    r["stale"] = r["age"] > STALE_S
+    print(json.dumps(r) if "--json" in argv else line(r))
+    if check is not None:
+        pcts = [p for p in (r["5h"]["pct"], r["week"]["pct"]) if p is not None]
+        return 1 if any(p >= check for p in pcts) else 0
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

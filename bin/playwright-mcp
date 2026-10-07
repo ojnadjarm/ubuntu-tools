@@ -8,6 +8,11 @@ case "${PW_PROFILE:-default}" in
   *[!A-Za-z0-9_-]*) echo "bad PW_PROFILE: use only [A-Za-z0-9_-]" >&2; exit 2;;
 esac
 
+pw="$NVM_DIR/versions/node/v24.20.0/bin/playwright-mcp"
+# The idle timeout (@playwright/mcp >= 0.0.81) is what closes a forgotten headless Chrome (TSP-026).
+"$pw" --help 2>/dev/null | grep -q idle || {
+  echo "playwright-mcp: $pw has no idle timeout; run: npm i -g @playwright/mcp@latest (>= 0.0.81)" >&2; exit 3; }
+
 # Keep the shared output dir bounded.
 find "$HOME/agents/browser/out" -type f -mtime +7 -delete 2>/dev/null
 
@@ -19,4 +24,4 @@ args=()
 [ "${PW_HEADED:-0}" = "1" ] || args+=(--headless)
 args+=(--user-data-dir "$profile")
 
-exec "$NVM_DIR/versions/node/v24.20.0/bin/playwright-mcp" "${args[@]}" "$@"
+exec "$pw" "${args[@]}" "$@"

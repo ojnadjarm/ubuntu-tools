@@ -208,6 +208,10 @@ tbody tr.grp:hover td { background: none; }
 .meter { grid-column: 1/-1; height: 3px; background: var(--w08); position: relative; margin-top: 2px; }
 .meter i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--g); width: var(--v); }
 
+/* @component .proj — a project tile's 12 stat rows on a fluid grid of 1–4 columns, so every row is full */
+.proj { display: grid; grid-template-columns: repeat(auto-fit, minmax(max(min(100%, 280px), calc(25% - 1px)), 1fr)); }
+.proj .stat:last-child { border-bottom: 1px solid var(--line); }
+
 /* @component .big — the display number with its unit and a line under it */
 .big { padding: 12px 12px 8px; }
 .big b { display: block; font-size: 30px; color: var(--hi); font-weight: 600; letter-spacing: -.03em; line-height: 1; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
@@ -385,6 +389,8 @@ body.panel .cfm .card { zoom: var(--z); }
 .page .toc { display: none; list-style: none; font-size: 11px; line-height: 1.7; }
 .page .toc a { color: var(--mid); display: block; padding: 1px 0; border-left: 1px solid var(--line); padding-left: 10px; }
 .page .toc a:hover { color: var(--g); border-left-color: var(--g); }
+.page .tk-acts { display: flex; flex-wrap: wrap; gap: 8px; margin: -2px 0 10px; }
+.page .tk-acts .btn { min-height: 36px; padding-inline: 14px; }
 .prose { max-width: 80ch; color: var(--txt); font-size: 12.5px; line-height: 1.65; }
 .page .prose { max-width: none; }
 .prose h1 { font-size: 24px; color: var(--hi); font-weight: 600; letter-spacing: -.01em; margin: 8px 0 22px; }
@@ -576,7 +582,7 @@ mark { background: var(--gold-w); color: var(--gold); padding: 0 2px; }
   .tw td.go a, .tw td.go button { display: inline-flex; align-items: center; min-height: 44px; padding-left: 12px; margin: -12px 0; }
   .tw tbody tr:hover td, .tw tbody tr.sel td { background: none; }
   .tw tbody tr.sel { background: var(--w08); }
-  .crumbs button, .fbar .btn, .fbar input, .tn button, .btns .btn { min-height: 44px; }
+  .crumbs button, .fbar .btn, .fbar input, .tn button, .btns .btn, .page .tk-acts .btn { min-height: 44px; }
   .fbar .btn, .btns .btn { display: inline-flex; align-items: center; }
   .sg-comp { grid-template-columns: 1fr; } .sg-type div { grid-template-columns: 1fr; } .sg-type code { text-align: left; }
   .btn, .facet, [data-sort], .head .right .clear { min-height: 36px; display: inline-flex; align-items: center; padding-inline: 10px; }

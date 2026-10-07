@@ -9,8 +9,8 @@ BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 pc_usage 'usage: pc explain <thing…> [-n 3] [--json] [--files]
 
 Ranked lookup over the KB corpus (toolbox.md, quirks.md, audit.md, machine.md, KB/runbooks/*.md,
-README-pc-control.md, FLEET.md, RUNNER.md, the-dark-eye/{RUNBOOK,RUNBOOK-earbuds,PLAN-*}.md,
-KB/pc-cli.md) so an agent gets the heading and the paragraph instead of opening the whole
+KB/guides/*.md, README-pc-control.md, FLEET.md, RUNNER.md,
+the-dark-eye/{RUNBOOK,RUNBOOK-earbuds,PLAN-*}.md, KB/pc-cli.md) so an agent gets the heading and the paragraph instead of opening the whole
 file. A match on a line scores, highest first: an atx heading (`# ...`) > a `- **Bold
 lead:**` bullet (this KBs own mini-heading convention) whose bold span holds the query >
 an exact quoted/backticked token (`` `x` `` or "x" equal to the query) > a partial
@@ -38,6 +38,7 @@ CORPUS=(
   "$HOME/the-dark-eye/RUNBOOK-earbuds.md"
   "$HOME/agents/KB/machine.md"
   "$HOME/agents/KB/runbooks"/*.md
+  "$HOME/agents/KB/guides"/[a-z]*.md
   "$HOME/agents/FLEET.md"
   "$HOME/agents/RUNNER.md"
   "$HOME/the-dark-eye/PLAN-"*.md

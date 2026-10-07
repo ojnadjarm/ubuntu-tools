@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+# sites — local GitHub Pages mirror: build a repo, swap its snapshot atomically into ~/sites, served by sites.service (T85).
+set -euo pipefail
+
+ROOT="${SITES_ROOT:-$HOME/sites}"
+STATE="${SITES_STATE:-$HOME/.local/state/sites}"
+[ -n "${HARNESS_ENV_LOADED:-}" ] || . "$HOME/agents/bin/env.sh"
+URL="${SITES_URL:-https://$HARNESS_TAILNET_FQDN:8472}"
+PAGES="${HARNESS_GITHUB_USER:+$HARNESS_GITHUB_USER.github.io}"; PAGES="${PAGES:-GitHub Pages}"
+declare -A REPO=(
+  [ailearning]="$HOME/projects/personal/ailearning"
+  [portfolio]="$HOME/projects/personal/portfolio"
+)
+declare -A BUILD_ENV=(  # extra env for the build: the local ailearning site carries its in-review sheets behind a switch (T271)
+  [ailearning]="REVIEW=toggle"
+)
+
+usage() {
+  cat <<EOF
+sites — local mirror of $PAGES, served like GitHub Pages ($URL/<site>/)
+
+  sites publish <site> [--no-build]   npm run build in the repo (ailearning: REVIEW=toggle), then swap dist/ into $ROOT/<site>/ atomically
+                                      --no-build: snapshot the repo's current dist/ as it is
+  sites status                        link, build time and source commit of each site
+  sites check [base-url]              Pages-behaviour check against the running service (default $URL)
+
+sites: ${!REPO[*]}    unit: sites.service (caddy in bwrap, :8072)    guide: local-sites
+EOF
+}
+
+die() { echo "sites: $*" >&2; exit 1; }
+
+write_index() {
+  local rows="" name built commit
+  for name in $(printf '%s\n' "${!REPO[@]}" | sort); do
+    [[ -d "$ROOT/$name" ]] || continue
+    built="" commit=""
+    [[ -f "$STATE/meta/$name.env" ]] && source "$STATE/meta/$name.env"
+    rows+="<li><a href=\"$name/\">/$name/</a> <small>built $built · $commit</small></li>"
+  done
+  cat > "$ROOT/index.html.tmp" <<EOF
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$PAGES (local)</title>
+<style>body{font:1rem/1.6 system-ui,sans-serif;margin:0 auto;padding:2rem 16px;max-width:min(40rem,100%);box-sizing:border-box}
+li{margin:.5rem 0;overflow-wrap:anywhere}small{color:#666}</style></head>
+<body><h1>$PAGES (local)</h1><ul>$rows</ul></body></html>
+EOF
+  mv -f "$ROOT/index.html.tmp" "$ROOT/index.html"
+  [[ -f "$ROOT/404.html" ]] || cat > "$ROOT/404.html" <<'EOF'
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>404</title></head><body style="font:1rem/1.6 system-ui,sans-serif;padding:2rem 16px"><h1>404</h1><p><a href="/">Sites</a></p></body></html>
+EOF
+}
+
+publish() {
+  local name="${1:-}" build=1 repo stage t0
+  [[ "${2:-}" == "--no-build" ]] && build=0
+  repo="${REPO[$name]:-}"; [[ -n "$repo" ]] || die "unknown site '$name' (${!REPO[*]})"
+  mkdir -p "$ROOT" "$STATE/stage" "$STATE/meta"
+  exec 9>"$STATE/$name.lock"; flock 9
+  t0=$(date +%s)
+  if (( build )); then (cd "$repo" && env ${BUILD_ENV[$name]:-} npm run build >&2) || die "build failed in $repo"; fi
+  [[ -f "$repo/dist/index.html" ]] || die "$repo/dist/index.html missing"
+  stage="$STATE/stage/$name"
+  rm -rf "$stage"; cp -a "$repo/dist" "$stage"
+  if [[ -d "$ROOT/$name" ]]; then mv --exchange -T "$stage" "$ROOT/$name"; rm -rf "$stage"; else mv -T "$stage" "$ROOT/$name"; fi
+  printf 'built=%q\ncommit=%q\n' "$(date '+%Y-%m-%d %H:%M')" "$(git -C "$repo" rev-parse --short HEAD 2>/dev/null || echo none)" > "$STATE/meta/$name.env"
+  write_index
+  echo "published $name in $(( $(date +%s) - t0 )) s → $URL/$name/"
+}
+
+status() {
+  local name built commit
+  systemctl --user is-active sites.service >/dev/null 2>&1 && echo "sites.service active" || echo "sites.service NOT active"
+  for name in $(printf '%s\n' "${!REPO[@]}" | sort); do
+    built="never" commit="-"
+    [[ -f "$STATE/meta/$name.env" ]] && source "$STATE/meta/$name.env"
+    echo "$name  $URL/$name/  built $built  commit $commit"
+  done
+}
+
+check() {
+  local base="${1:-$URL}" fail=0 pass=0
+  expect() {  # <label> <want> <got>
+    if [[ "$3" == "$2" ]]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL $1: want '$2' got '$3'"; fi
+  }
+  hdr() { curl -sS -o /dev/null -D - "${@:2}" "$base$1" | tr -d '\r'; }
+  code() { curl -sS -o /dev/null -w '%{http_code}' "$base$1"; }
+  field() { grep -i "^$1:" | head -1 | cut -d' ' -f2- ; }
+  local site asset
+  expect "/ 200" 200 "$(code /)"
+  for site in $(printf '%s\n' "${!REPO[@]}" | sort); do
+    [[ -d "$ROOT/$site" ]] || { echo "skip $site (not published)"; continue; }
+    expect "/$site/ 200" 200 "$(code "/$site/")"
+    expect "/$site 301" 301 "$(code "/$site")"
+    expect "/$site location" "/$site/" "$(hdr "/$site" | field location)"
+    expect "/$site/nope 404" 404 "$(code "/$site/nope-$$")"
+    if [[ -f "$ROOT/$site/404.html" ]]; then
+      expect "/$site/nope body = $site/404.html" "$(sha1sum < "$ROOT/$site/404.html")" "$(curl -sS "$base/$site/nope-$$" | sha1sum)"
+    fi
+    expect "/$site/ cache-control" "max-age=600" "$(hdr "/$site/" | field cache-control)"
+    asset=$(cd "$ROOT/$site" && find assets -name '*.js' -size +2k | head -1)
+    [[ -n "$asset" ]] && expect "/$site/$asset gzip" gzip "$(hdr "/$site/$asset" -H 'Accept-Encoding: gzip' | field content-encoding)"
+    [[ -n "$asset" ]] && expect "/$site/$asset zstd" zstd "$(hdr "/$site/$asset" -H 'Accept-Encoding: zstd' | field content-encoding)"
+  done
+  local ext want f
+  for ext in opus:audio/ogg m4a:audio/mp4 avif:image/avif wasm:application/wasm woff2:font/woff2; do
+    want="${ext#*:}"; ext="${ext%%:*}"
+    f=$(cd "$ROOT" && find . -name "*.$ext" -print -quit | sed 's|^\.||')
+    if [[ -n "$f" ]]; then expect "$f type" "$want" "$(hdr "$f" | field content-type)"; else echo "skip .$ext (no file published)"; fi
+  done
+  expect "/nope 404" 404 "$(code "/nope-$$")"
+  echo "check: $pass passed, $fail failed ($base)"
+  (( fail == 0 ))
+}
+
+case "${1:-}" in
+  publish) shift; publish "$@" ;;
+  status) status ;;
+  check) shift; check "$@" ;;
+  -h|--help|help|"") usage ;;
+  *) usage >&2; exit 2 ;;
+esac

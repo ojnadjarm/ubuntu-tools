@@ -9,7 +9,7 @@ SYSTEM=""
 [ -n "${SYSTEM_FILE:-}" ] && [ -r "$SYSTEM_FILE" ] && SYSTEM="$(cat "$SYSTEM_FILE")"
 export PROMPT SYSTEM
 
-cmd=($HARNESS_AGENT_CMD)
+cmd=(bash -c "$HARNESS_AGENT_CMD")
 [ -n "${AGENT_TIMEOUT:-}" ] && cmd=(timeout "$AGENT_TIMEOUT" "${cmd[@]}")
 
 "${cmd[@]}" </dev/null | tee "$RAW_OUT"

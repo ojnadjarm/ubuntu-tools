@@ -94,6 +94,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(404, b"not found\n", "text/plain")
         fn(self, path)
 
+    def redirect(self, loc):
+        """302 to loc; the browser carries the #fragment over."""
+        self.send_response(302)
+        self.send_header("Location", loc)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def json(self, obj, code=200):
         """Send obj as a JSON body."""
         self.send(code, json.dumps(obj).encode(), "application/json")
@@ -146,26 +153,36 @@ def main():
     if not servers:
         raise SystemExit(1)
     for s in servers[1:]:
-        threading.Thread(target=s.serve_forever, daemon=True).start()
+        threading.Thread(target=s.serve_forever, kwargs={"poll_interval": None}, daemon=True).start()
     print("dashboard on %s:%d" % (",".join(BINDS), PORT), flush=True)
-    servers[0].serve_forever()
+    servers[0].serve_forever(poll_interval=None)
 
 
 @route("GET", "/")
 @route("GET", "/index.html")
 def index_route(h, path):
+    h.static("/static/next/index.html")
+
+
+@route("GET", "/classic")
+def classic_route(h, path):
     body, gz, etag = asset(os.path.join(HERE, "index.html"), "text/html; charset=utf-8", True)
     h.send(200, body, "text/html; charset=utf-8", etag, gz)
 
 
 @route("GET", "/voice")
 def voice_page(h, path):
-    h.static("/static/voice.html")
+    h.redirect("/#voice")
+
+
+@route("GET", "/next")
+def next_page(h, path):
+    h.redirect("/")
 
 
 @route("GET", "/pronunciation")
 def pronunciation_page(h, path):
-    h.static("/static/pronunciation.html")
+    h.redirect("/#pronunciation")
 
 
 @route("GET", "/tts/", prefix=True)

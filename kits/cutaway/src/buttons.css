@@ -1,0 +1,56 @@
+/* Cutaway buttons, "hatched section": a framed button stands on a hatched section like a cut part and presses down into it;
+   a quiet action is an underlined word on bare paper. One `.btn` plus one role:
+   primary (the one way on per view), secondary (another real choice), back (the arrowed way back), quiet (help and exits),
+   icon (a bar icon), toggle (`aria-pressed`), tab (`aria-current`). `.btn-row` groups them. Reads --ink, --paper, --line, --signal. */
+:root {
+  --btn-ink: var(--ink, #1c2230); --btn-ink2: #2c3446; --btn-paper: var(--paper, #f2ecdf); --btn-lift: #faf6ec; --btn-tint: rgba(28, 34, 48, 0.07);
+  --btn-hatch: #857e70; --btn-off: #6b6861; --btn-rule: var(--line, rgba(28, 34, 48, 0.3)); --btn-focus: var(--signal, #1d5fb0);
+}
+.btn { position: relative; isolation: isolate; display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px; margin: 0;
+  padding: 0 20px; border: 0; border-radius: 0; background: transparent; color: var(--btn-ink); font: 600 14px/1 "Plex Cond", system-ui, sans-serif;
+  letter-spacing: 0.14em; text-transform: uppercase; text-decoration: none; white-space: nowrap; cursor: pointer; touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent; }
+.btn:focus-visible { outline: 2px solid var(--btn-focus); outline-offset: 5px; }
+.btn:disabled, .btn[aria-disabled="true"] { color: var(--btn-off); cursor: default; }
+.btn svg { flex: none; }
+
+/* Framed roles: the face (::after) over its hatched section (::before), offset down-right; pressed, the face sinks onto the section. */
+.btn:is(.primary, .secondary, .back) { --face: var(--btn-paper); margin: 0 6px 6px 0; transition: translate 0.08s; }
+.btn:is(.primary, .secondary, .back)::before { content: ""; position: absolute; inset: 5px -6px -6px 5px; z-index: -2; border: 1px solid var(--btn-hatch);
+  background: repeating-linear-gradient(-45deg, var(--btn-hatch) 0 1px, transparent 1px 4px); transition: inset 0.08s; }
+.btn:is(.primary, .secondary, .back)::after { content: ""; position: absolute; inset: 0; z-index: -1; border: 1.5px solid var(--btn-ink); background: var(--face); }
+.btn.primary { --face: var(--btn-ink); color: var(--btn-paper); }
+.btn.primary:hover { --face: var(--btn-ink2); }
+.btn:is(.secondary, .back):hover { --face: var(--btn-lift); }
+.btn:is(.primary, .secondary, .back):active:not(:disabled) { translate: 4px 4px; }
+.btn:is(.primary, .secondary, .back):active:not(:disabled)::before { inset: 1px -2px -2px 1px; }
+.btn:is(.primary, .secondary, .back):disabled { --face: var(--btn-paper); color: var(--btn-off); }
+.btn:is(.primary, .secondary, .back):disabled::before { display: none; }
+.btn:is(.primary, .secondary, .back):disabled::after { border-color: var(--btn-rule); }
+.btn.primary.loading { color: var(--btn-paper); }
+.btn.primary.loading::after { background: linear-gradient(90deg, var(--btn-ink) var(--p, 0%), #6f7079 var(--p, 0%)); }
+.btn.back { padding: 0 18px 0 14px; }
+.btn.back svg { width: 22px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.15s; }
+.btn.back:hover svg { transform: translateX(-3px); }
+
+/* Quiet: a word with a dotted rule under it; the rule goes solid and blue on hover. */
+.btn.quiet { min-height: 36px; padding: 0 4px; letter-spacing: 0.12em; text-decoration: underline dotted 1.5px; text-underline-offset: 6px; }
+.btn.quiet:hover:not(:disabled) { color: var(--btn-focus); text-decoration-style: solid; }
+.btn.quiet:active:not(:disabled) { translate: 0 1px; }
+
+/* Bar icons, toggles and tabs: no section under them; a toggle or tab that is on is inked. */
+.btn.icon { width: 44px; height: 44px; padding: 0; }
+.btn.icon svg { width: 22px; height: 22px; fill: currentColor; }
+.btn.icon:hover:not(:disabled) { background: var(--btn-tint); }
+.btn.icon:active:not(:disabled) { background: rgba(28, 34, 48, 0.14); }
+.btn.icon:disabled { opacity: 0.35; }
+.btn:is(.toggle, .tab) { min-width: 44px; min-height: 36px; padding: 0 10px; border: 1.5px solid var(--btn-ink); font: 500 12px/1 "Plex Mono", ui-monospace, monospace;
+  letter-spacing: 0.08em; }
+.btn:is(.toggle, .tab):hover:not([aria-pressed="true"], [aria-current]) { background: var(--btn-lift); }
+.btn:is(.toggle, .tab):active { translate: 0 1px; }
+.btn.toggle[aria-pressed="true"], .btn.tab[aria-current] { background: var(--btn-ink); color: var(--btn-paper); }
+
+.btn-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; }
+
+@media (pointer: coarse) { .btn, .btn:is(.quiet, .toggle, .tab) { min-height: 44px; } }
+@media (prefers-reduced-motion: reduce) { .btn, .btn::before, .btn svg { transition: none; } }

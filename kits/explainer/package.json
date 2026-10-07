@@ -1,0 +1,11 @@
+{
+  "name": "explainer-kit",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Style-agnostic engine for narrated learning units: audio clock, cue-synced GSAP timeline, director and beats, guided play, exercises (TypeScript source, no build).",
+  "exports": { ".": "./src/index.ts", "./cutaway": "./adapters/cutaway/index.ts" },
+  "peerDependencies": { "gsap": "^3.15.0" },
+  "devDependencies": { "gsap": "^3.15.0" },
+  "scripts": { "test": "node --import ./test/register.mjs --test test/*.test.ts" }
+}

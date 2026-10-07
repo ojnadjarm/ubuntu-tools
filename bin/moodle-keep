@@ -22,10 +22,16 @@ for d in "$ROOT"/*/; do
   [ "$ver" = shared ] || [ ! -f "$d/docker-compose.yml" ] && continue
   say "== $ver"
 
+  # The Moodle code dir is whatever the compose file mounts at /var/www/html; no such mount means no Moodle.
+  src="$(sed -n 's#^[[:space:]]*-[[:space:]]*"\{0,1\}\([^:"]*\):/var/www/html"\{0,1\}[[:space:]]*$#\1#p' "$d/docker-compose.yml" | head -1)"
+  [ -n "$src" ] || { say "  skipped: not a Moodle env (no mount at /var/www/html)"; continue; }
+  case "$src" in /*) ;; *) src="$d/${src#./}" ;; esac
+  cfg="$src/config.php"
+
   proj="$(sed -n 's/^name:[[:space:]]*//p' "$d/docker-compose.yml" | head -1)"; : "${proj:=$ver}"
   ( cd "$d" && docker compose up -d ) >/dev/null 2>&1 || fail "$ver: compose up"
 
-  url="$(sed -n "s/.*\$CFG->wwwroot[[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" "$d/www/config.php" 2>/dev/null | head -1)"
+  url="$(sed -n "s/.*\$CFG->wwwroot[[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" "$cfg" 2>/dev/null | head -1)"
   code=000
   for _ in $(seq 1 30); do
     code="$(curl -sS -o /dev/null -w '%{http_code}' -m 10 "$url/login/index.php" 2>/dev/null)"
@@ -36,8 +42,8 @@ for d in "$ROOT"/*/; do
 
   db="$(cid "$proj" db)"; app="$(cid "$proj" app)"
   [ -n "$db" ] || { fail "$ver: no db container"; continue; }
-  user="$(sed -n "s/.*\$CFG->dbuser[[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" "$d/www/config.php" | head -1)"
-  name="$(sed -n "s/.*\$CFG->dbname[[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" "$d/www/config.php" | head -1)"
+  user="$(sed -n "s/.*\$CFG->dbuser[[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" "$cfg" | head -1)"
+  name="$(sed -n "s/.*\$CFG->dbname[[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" "$cfg" | head -1)"
 
   out="$BACKUPS/$ver/$(date +%F).sql.gz"
   mkdir -p "$BACKUPS/$ver"
