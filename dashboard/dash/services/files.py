@@ -12,6 +12,7 @@ KINDS = {".png": "image", ".jpg": "image", ".jpeg": "image", ".gif": "image", ".
 for _e in (".py", ".sh", ".js", ".ts", ".css", ".html", ".xml", ".toml", ".ini", ".conf", ".cfg", ".php", ".sql", ".env"):
     KINDS[_e] = "code"
 TEXT_EXT = tuple(e for e, k in KINDS.items() if k in ("markdown", "text", "code"))
+PREVIEW_MAX = 2 << 20
 MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
         ".svg": "image/svg+xml", ".md": "text/plain; charset=utf-8", ".txt": "text/plain; charset=utf-8",
         ".log": "text/plain; charset=utf-8", ".csv": "text/plain; charset=utf-8", ".json": "application/json",
@@ -226,12 +227,17 @@ def drop_file(h, raw, query):
         name = os.path.basename(rel)
         ext = os.path.splitext(name)[1].lower()
         if "md=1" in query and ext in TEXT_EXT:
-            text = open(full, encoding="utf-8", errors="replace").read()
+            with open(full, "rb") as f:
+                data = f.read(PREVIEW_MAX + 1)
+            text = data[:PREVIEW_MAX].decode("utf-8", errors="replace")
             if ext == ".md":
                 import markdown
                 body = markdown.markdown(text, extensions=["extra", "sane_lists"], output_format="html5")
             else:
                 body = "<pre>%s</pre>" % (text.replace("&", "&amp;").replace("<", "&lt;"))
+            if len(data) > PREVIEW_MAX:
+                body += '<p><em>Truncated at %d MB; <a href="/files/%s?dl=1">download</a> for the rest.</em></p>' % (
+                    PREVIEW_MAX >> 20, urllib.parse.quote(rel))
             return h.send(200, body.encode(), "text/html; charset=utf-8")
         st = os.stat(full)
         size, etag = st.st_size, '"%x-%x"' % (st.st_mtime_ns, st.st_size)
@@ -255,7 +261,9 @@ def drop_file(h, raw, query):
         if m:
             h.send_header("Content-Range", "bytes %d-%d/%d" % (start, end, size))
         if "dl=1" in query:
-            h.send_header("Content-Disposition", 'attachment; filename="%s"' % name.replace('"', ""))
+            ascii_name = re.sub(r"[^ -~]+", "_", name.replace('"', ""))
+            h.send_header("Content-Disposition", "attachment; filename=\"%s\"; filename*=UTF-8''%s"
+                          % (ascii_name, urllib.parse.quote(name, safe="")))
         else:
             h.send_header("Content-Disposition", "inline")
         h.send_header("ETag", etag)

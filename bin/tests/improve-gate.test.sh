@@ -16,13 +16,14 @@ while IFS=$'\t' read -r f cls _; do
 done < <("$BIN/improve-gate" class "$FIX"/proposals/*.md)
 [ "$hit" = 12 ] && [ "$n" = 12 ] && ok "fixture proposals classed $hit/$n" || nok 'fixture proposals' "$hit/$n"
 
-# 2. import reads the toolsmith tree and writes only into the temp queue.
-out=$("$BIN/improve-gate" import --to "$WORK/q")
-[ "$(tail -1 <<<"$out")" = 'imported 10' ] && ok 'imported 10 open TSPs' || nok 'import count' "$(tail -1 <<<"$out")"
+# 2. import reads a fixture toolsmith tree (2 open rows, 1 done) and writes only into the temp queue.
+out=$("$BIN/improve-gate" import --from "$FIX/toolsmith/proposals" --backlog "$FIX/toolsmith/BACKLOG.md" --to "$WORK/q")
+want=$(grep -cP '^TSP-\d+\t(auto|owner-go|owner-reboot)\t' <<<"$out")
+[ "$want" = 2 ] && [ "$(tail -1 <<<"$out")" = "imported $want" ] && ok "imported $want open TSPs" || nok 'import count' "$(tail -1 <<<"$out"), listed $want"
 cr=0; for f in "$WORK"/q/*.md; do
   grep -qE '^class: (auto|owner-go|owner-reboot)$' "$f" && grep -qE '^rollback: .+' "$f" && cr=$((cr+1))
 done
-[ "$cr" = 10 ] && ok "class + rollback on $cr/10" || nok 'class + rollback' "$cr/10"
+[ "$cr" = "$want" ] && ok "class + rollback on $cr/$want" || nok 'class + rollback' "$cr/$want"
 "$BIN/improve-gate" check "$WORK"/q/*.md >/dev/null && ok 'imported queue passes check' || nok 'imported queue passes check' 'rc != 0'
 
 # 3. check accepts the valid item and flags each broken one.

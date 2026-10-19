@@ -24,7 +24,7 @@ STATE = os.environ.get("VOICE_STATE", HOME + "/agents/dashboard/state/pronunciat
 
 # Target words in the full drill set, per pattern (Q6/T30 plan §6).
 FULL = {"final-consonant": 29, "v-b": 25, "ch-sh": 24, "vowel": 22}
-# Week-0 word error from ~/agents/research/2026-09-22/Q6-his-voice.md.
+# Week-0 word error from $AGENT_WORK/research/2026-09-22/Q6-his-voice.md.
 BASELINE = {"all": 15.6, "no_spelling": 13.4, "no_names": 10.7, "takes": 59, "words": 1678}
 
 WORD = re.compile(r"[a-z0-9']+")

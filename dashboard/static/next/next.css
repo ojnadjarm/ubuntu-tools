@@ -166,6 +166,12 @@ body.nx { font-size: 1rem; min-height: 100svh; overflow-x: hidden; padding-botto
 .eyebox .verdict b { display: block; font-size: clamp(1.9rem, 1.2rem + 1.6vw, 3.2rem); letter-spacing: -.03em; color: var(--g); text-shadow: 0 0 24px var(--w34); line-height: 1.1; }
 .eyebox .verdict.bad b { color: var(--gold); text-shadow: 0 0 24px color-mix(in srgb, var(--gold) 35%, transparent); }
 .eyebox .verdict span { color: var(--mid); font-size: .86rem; text-shadow: 0 0 2px var(--bg), 0 0 10px var(--bg); }
+.eyebox .verdict .owner { display: flex; flex-wrap: wrap; justify-content: center; gap: .2rem 1rem; margin: 0 0 .4rem; }
+.eyebox .verdict .owner span { color: var(--mid); font-size: .86rem; white-space: nowrap; }
+.eyebox .verdict .owner b { display: inline; font-size: 1rem; color: var(--g); text-shadow: none; letter-spacing: 0; }
+.eyebox .verdict .pin { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: .2rem .9rem; margin: 0 0 .4rem; color: var(--mid); font-size: .86rem; text-shadow: 0 0 2px var(--bg), 0 0 10px var(--bg); }
+.eyebox .verdict .pin a { color: var(--g); display: inline-flex; align-items: center; }
+@media (pointer: coarse) { .eyebox .verdict .pin a { min-height: 44px; } }
 .probs { list-style: none; font-size: .86rem; color: var(--gold); margin-top: .3rem; } .probs li { overflow-wrap: anywhere; }
 .nread { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: .5rem; width: 100%; margin-top: 1rem; }
 .nread div { text-align: center; border-top: 1px solid var(--line2); padding-top: .4rem; min-width: 0; transition: border-color .3s; }

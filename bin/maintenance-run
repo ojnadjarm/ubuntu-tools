@@ -26,15 +26,17 @@ if [ "$ignore_window" = 1 ] && [ "$dry" = 0 ]; then
 fi
 
 STATE="$HOME/agents/maintenance/state"
-mkdir -p "$STATE"
 SUMMARY="$STATE/last-summary.txt"
-fleet_lock "$STATE/.lock" 9 || { echo "maintenance-run: already running"; exit 1; }
+if [ "$dry" = 1 ]; then SUMMARY=/dev/null
+else
+  mkdir -p "$STATE"
+  fleet_lock "$STATE/.lock" 9 || { echo "maintenance-run: already running"; exit 1; }
+  : >"$SUMMARY"; : >"$STATE/last-apt.log"
+fi
 
 out() { printf '%s\n' "$*" | tee -a "$SUMMARY"; }
 run() { if [ "$dry" = 1 ]; then out "would run: $*"; else "$@" >>"$STATE/last-apt.log" 2>&1; fi; }
 
-: >"$SUMMARY"
-[ "$dry" = 1 ] || : >"$STATE/last-apt.log"
 out "maintenance-run $(date -Is)$([ "$dry" = 1 ] && echo " (dry-run)")"
 
 # --- packages ---------------------------------------------------------------
@@ -93,7 +95,13 @@ refuse=""
 hour=$(TZ=Europe/Madrid date +%-H)
 [ "$ignore_window" = 1 ] || { [ "$hour" -ge "$WINDOW_START" ] && [ "$hour" -lt "$WINDOW_END" ]; } \
   || refuse="$refuse time-window(now ${hour}h, allowed ${WINDOW_START}-${WINDOW_END}h Europe/Madrid);"
-pc status --check >/dev/null 2>&1 || refuse="$refuse pc-status-check;"
+# The pending reboot is the fault this run clears, so it never blocks itself (T347-10).
+if ! st_out=$(pc status --check 2>/dev/null); then
+  if grep -qv '^FAIL host\.reboot_required:' <<<"${st_out:-no output}"; then
+    fails=$(awk '/^FAIL / && !/^FAIL host\.reboot_required:/ && n < 3 {sub(/^FAIL /, ""); printf "%s%s", (n++ ? ", " : ""), $0}' <<<"$st_out")
+    refuse="$refuse pc-status-check${fails:+($fails)};"
+  fi
+fi
 "$HOME/agents/bin/boot-check.sh" >/dev/null 2>&1 || refuse="$refuse boot-check;"
 busy=$(systemctl --user list-units --state=active --no-legend 'agent@*.service' 2>/dev/null \
        | awk '{print $1}' | grep -v "^agent@maintenance\.service$" | tr '\n' ' ')
@@ -102,7 +110,10 @@ busy=$(systemctl --user list-units --state=active --no-legend 'agent@*.service' 
 if [ -n "$refuse" ]; then
   refuse="${refuse# }"; refuse="${refuse%;}"
   out "REBOOT REFUSED: $refuse"
-  [ "$dry" = 1 ] || notify-owner -t maintenance "reboot pending, window missed: $refuse" || true
+  msg="reboot pending, window missed: $refuse"
+  [ "${#msg}" -le 200 ] || msg="${msg:0:197}..."
+  if [ "$dry" = 1 ]; then out "would run: notify-owner -t maintenance \"$msg\""
+  else notify-owner -t maintenance "$msg" || true; fi
   exit 3
 fi
 

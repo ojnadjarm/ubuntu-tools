@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Merge (or remove) this harness's hooks in ~/.claude/settings.json — idempotent.
+"""Merge (or remove) this harness's hooks and deny rules in ~/.claude/settings.json — idempotent.
 
 usage: merge-settings.py install|uninstall <settings.json> <fragment.json> <harness-home>
 
 Adds exactly one group per event, dropping any earlier copy of the same command or of a
-command the fragment supersedes. Every other key — permissions, model, effortLevel, the
-Moodle Stop hook — is preserved byte for byte. Prints "no changes" when nothing moved.
+command the fragment supersedes, and appends the fragment's permissions.deny rules that are
+missing. Every other key — other permissions, model, effortLevel, the Moodle Stop hook — is
+preserved byte for byte. Prints "no changes" when nothing moved.
 """
 import json, os, sys
 
@@ -46,6 +47,19 @@ for event, groups in frag["hooks"].items():
         hooks.pop(event, None)
 if not hooks:
     data.pop("hooks", None)
+
+ourdeny = frag.get("permissions", {}).get("deny", [])
+if ourdeny:
+    perms = data.setdefault("permissions", {})
+    deny = [r for r in perms.get("deny", []) if r not in ourdeny]
+    if mode == "install":
+        deny = perms.get("deny", []) + [r for r in ourdeny if r not in perms.get("deny", [])]
+    if deny:
+        perms["deny"] = deny
+    else:
+        perms.pop("deny", None)
+    if not perms:
+        data.pop("permissions", None)
 
 after = json.dumps(data, indent=2)
 if after == before:

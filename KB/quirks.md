@@ -247,43 +247,12 @@
   idle and can clip the **start** of a clip on this codec. It cannot explain a whole silent track;
   do not chase it first, and do not raise it without the ear test above.
 - Never flap the card profile to "test" this (`analog ↔ off ↔ hdmi`, as happened on 2026-09-06):
-  it proves nothing the ELD and `pcm3p/status` do not already say, and the PTT sidecar owns the
-  bluez card profile (`toolbox.md` §4).
-
-## XM5 buds: "the digital assistant is not connected" (E24)
-- Symptom: one tap on the right bud triggers the buds' own voice-assistant announcement and **nothing
-  reaches the host** — no event on the grabbed `WF-1000XM5 (AVRCP)` node, nothing in `bluetoothd`, no D-Bus
-  call. Reads as "the tap only works while a media app plays", because a reconnect happens to clear it.
-- Cause: bud-side gesture state, not the host. The buds keep a phantom voice/call context after a mic close
-  and re-route the right-bud gestures to their assistant. Marker in the journal, seconds after the last good
-  mic close: `kernel: Bluetooth: hci0: SCO packet for unknown connection handle` + `bluetoothd: .../fd0: fd(N) ready`.
-- Fix: case in and out, or `bluetoothctl disconnect $HARNESS_BUDS_MAC && sleep 5 && bluetoothctl connect …`.
-  Both restore the taps within seconds; check the card lands back on `a2dp-sink`.
-- Mechanism: PipeWire holds the (e)SCO for its whole suspend timeout after the recorder stops — **6.2 s
-  measured** — and the old close path flipped the card back to A2DP on top of the live link. The cheap
-  deterministic teardown is `pactl suspend-source <bluez_input…> 1`, which releases it in **1.09 s**.
-- The sidecar now suspends the source, waits (bounded 4 s) for `hcitool con` to show no (e)SCO, falls back
-  to disconnecting **only** the HFP profile (`org.bluez.Device1.DisconnectProfile`, Handsfree UUID — A2DP
-  and the AVRCP node survive), and only then returns to A2DP; then watches 30 s. Verified at the audio
-  layer (close 1.09-1.14 s, link down before the flip); **not yet verified with the owner's own taps**.
-- **The kernel marker is the teardown's own echo, not a stuck link (E30).** A live mic open on this box is
-  `< eSCO $HARNESS_BUDS_MAC handle 3584` — the *same* handle as every "SCO packet for unknown connection
-  handle 3584" line (~35 of them on 2026-09-06, ~7-9 s after each close, working cycles either side). So
-  the marker never justifies a recovery on its own: a bounce fired on it at 15:51:52 and cost the owner
-  10 s of audio for a healthy link. A live (e)SCO in `hcitool con` is the only evidence worth acting on,
-  and the sidecar now climbs a ladder — `suspend-source` → HFP-only DisconnectProfile+ConnectProfile →
-  whole-device bounce — one step per 5 s poll, never while the mic is open or within 4 s of a tap.
-- Ruled out with evidence (E24 in `~/the-dark-eye/RUNBOOK-earbuds.md`): registering a dummy
-  `org.bluez.MediaPlayer1` AVRCP target, and a silent `pw-cat` keeping A2DP `RUNNING`. Neither made a single
-  tap arrive. Also: a registered player would *take* the keys off evdev (BlueZ falls through to uinput only
-  when no player is registered), so it is a rewrite of the sidecar's key path, not an addition.
+  it proves nothing the ELD and `pcm3p/status` do not already say.
 
 ## Screen captures while the owner is present
 Every `pc shot` / gnome-screenshot is visible to the owner on the TV (he counted 20 during a parity check and asked why). The rule that follows from it is `KB/toolbox.md` §6 practice 2; renderer comparisons dump frames offscreen (cairo `write_to_png`, `glReadPixels`/FBO) from a seeded scene instead.
 
 - **Hand-run eye-render hijacks the live eye** unless the socket is private (the bridge `sock` option alone is not enough; `net.createServer` accepts any number of clients). 2026-09-06 15:46: E29 made the production eye flap and vanish 3 s. **Do not type the recipe — run `body-sandbox`** (EF06); its subcommands, the mandatory `--x-offset -1400` and the scene names are in `KB/toolbox.md` §3. Sandbox processes carry `DARK_EYE_SANDBOX=<name>` and live under the sandbox dir, so `sentinel-runaway` rule 3 tells them from a hijack and still reaps one older than 2 h — `body-sandbox down` is the normal exit. Since TSP-016 (2026-09-21) rule 3 matches the body by argv[0] (Node >= 23 sets comm to `MainThread`) and, when `/proc/<pid>/environ` carries `DARK_EYE_SANDBOX=<name>`, runs `body-sandbox down --name <name>` once per name instead of killing one pid; processes inside `dark-eye.service`'s cgroup are never touched.
-
-- **Sony WF-1000XM5 "digital assistant is not connected" on tap**: caused by the Sony app voice-assistant setting ("Asistente digital"), not by the host. Set it to "No utilizar". Verified 2026-09-06. Do not chase it host-side again; `buds-capture` shows the gesture is silent on the wire in that state.
 
 - **dark-eye runs straight from the working tree**: any `systemctl --user restart dark-eye` while another agent is mid-edit ships a half-applied build (16:30 2026-09-06: empty transcripts). Before restarting, check no other agent is editing body/src (ask the orchestrator) and that `npm test` passes on the tree as it is.
 
@@ -302,3 +271,6 @@ Every `pc shot` / gnome-screenshot is visible to the owner on the TV (he counted
 - **python-evdev's `UInput` node lookup costs 1.9 s of a 2.3 s `pc input inject`**: it retries `/dev/input/event*` 19 times at 0.1 s on a node the calling user cannot open, before falling back. `UI_GET_SYSNAME` on the freshly created uinput fd gets the node name directly and skips the retry loop (PT10).
 - **jq operator precedence in `a|b and c`**: `|` binds looser than expected next to `and`/`or`, so `.pci|length>5 and (...)` pipes `.pci` into the *entire* `and` expression, not just `length>5`. Parenthesise the piped side: `(.pci|length>5) and (...)` (found in `pc hw`'s own success-check line, PT07).
 - **Parallel sandboxes collide on the default name.** 2026-09-14: a second ticket's `body-sandbox up` found `s1` already up, left `DARK_EYE_CONFIG` empty and its `eye speak` reached the live body; its unnamed `down` then killed the sibling's sandbox. When more than one agent may be running, always `body-sandbox up --name <ticket>` and `down --name <ticket>`. Guarded since M02b (2026-09-14): `down` refuses without `--name`/`--all`, an unnamed `up` is `sb-<pid>`, and `up` on a name already up prints `export DARK_EYE_CONFIG=/nonexistent; false` so the eval'd session cannot reach the live body.
+- **Claude Code shells take PATH from the claude process (or settings `env.PATH`), never from `~/.bashrc`** (T287, 2026-10-07): the snapshot sources `.bashrc` non-interactively (guard returns) and then writes `export PATH=<process PATH>`; the orchestrator unit sets only `~/.local/bin:/usr/local/bin:/usr/bin:/bin`, so a new `bin/` command or nvm node is found only once `install.sh` §3 links it into `~/.local/bin` — rerun `install.sh` after adding a command.
+- **`systemd-run` by hand: always `--collect`** (TSP-044, 2026-10-19): a failed `run-*` scope without it stays in `--failed` until reset. `pc status` lists such transient units apart (`host.failed_transient`, WARN, no FAIL) and `sentinel-check` resets one older than 10 min with `pc units reset-failed <u> --user --apply`.
+- **localsearch-3 indexes all of `$HOME` and SEGV-loops on agent output** (T450, 2026-10-19): ~/agent-work held 228k of its rows, the unit used 99 s CPU/h steady and ~2,700 s/h re-crawling after each of its core dumps (7 on 10-16, 3 on 10-19). Hidden dirs (~/.claude) are never indexed. `pc search-index status` shows cost and busiest dirs; `pc search-index exclude <dir> --apply` writes a ledgered `.trackerignore` (never ~/moodle-envs).

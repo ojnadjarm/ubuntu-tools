@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# discord-bot status|setup|post|read|invite|selftest|test — the family/friends Discord forum bot (T348).
+. "$HOME/agents/bin/env.sh"
+D="$HOME/agents/discord-bot"
+PYTHONPATH="$D" exec "$D/.venv/bin/python" -m discordbot.cli "$@"

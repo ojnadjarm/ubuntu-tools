@@ -1,6 +1,6 @@
 # Plan limits: 5-hour and weekly used %, and the hourly orchestrator pulse
 
-Ticket: T170 · Last verified: 2026-10-03 by live `plan-usage` (week 55% = owner's reading), `--check` at 50/55/80, pulse fixtures on a private tmux socket
+Ticket: T170 · Last verified: 2026-10-10 (pulse ghost-text fix, fixture test) and 2026-10-03 by live `plan-usage` (week 55% = owner's reading), `--check` at 50/55/80, pulse fixtures on a private tmux socket
 
 ## When to use
 Before deciding how much work to start (lesson builds, swarms, big tests): read the plan meter instead of asking
@@ -13,8 +13,7 @@ the owner. Not for token counts per session (those are in `~/.claude/projects` t
   endpoint `/usage` reads: the plan's own percentage, no tokens spent.
 - Architecture: source adapter `fetch()` (one endpoint → `{5h, week, scoped}`), cache `~/agents/state/usage.json`
   (last good reading, fallback on any failure, `stale` > 30 min), CLI `plan-usage` (line / `--json` / `--check`),
-  timer `orchestrator-pulse.timer` → `orchestrator-pulse` (guarded `tmux send-keys`, same echo-then-Enter pattern
-  as `notes-brain-arm`). Each piece has one job; the pulse never reads the meter itself, the orchestrator does.
+  timer `orchestrator-pulse.timer` → `orchestrator-pulse` (guarded `tmux send-keys`, echo then Enter). Each piece has one job; the pulse never reads the meter itself, the orchestrator does.
 
 ## Exact commands
 ```bash
@@ -41,6 +40,9 @@ tail ~/agents/log/pulse.log
 - Pulse busy markers: `esc to interrupt` (turn running) and `Waiting for … background` (agents running); text on
   the `❯` line means the owner is typing. All skip, logged with the reason. The 130-char prompt wraps on an 80-col
   pane: the echo check joins the box lines before matching.
+- Prompt suggestions (`tengu_prompt_suggestion`) draw dim ghost text on an empty `❯` line (first cell inverse as the
+  cursor). Plain `capture-pane -p` reads it as typed text: 0 fired in 161 runs to 2026-10-10, 75 'input line not
+  empty'. The emptiness check uses `capture-pane -e` and drops dim runs first; test `bin/tests/orchestrator-pulse.test.sh`.
 
 ## Links
 - Code: `~/agents/bin/plan-usage`, `~/agents/bin/orchestrator-pulse`, `~/.config/systemd/user/orchestrator-pulse.{service,timer}`

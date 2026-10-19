@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""owner-todo — the owner's "waiting on you" list: steps only he can take, each with the exact how-to."""
+import argparse, json, os, re, sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
+import owner_todo  # noqa: E402
+
+BY = os.environ.get("AGENT_NAME") or os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("USER", "")
+DECISION = re.compile(r"(?<![/\w])(go|drop|reply)\b(?!/)|tell the orchestrator:", re.I)
+
+
+def show(items):
+    for i in items:
+        mark = " (done %s)" % i["done_at"][:16] if i["done"] else ""
+        print("%s. %s%s%s" % (i["id"], i["text"], "  [%s]" % i["src"] if i["src"] else "", mark))
+        for line in i["how"].splitlines():
+            print("     " + line)
+
+
+def decide(items):
+    """Open go/drop items as one line each, plus a sample batch reply."""
+    ids = [i["id"] for i in items if DECISION.search(i["text"] + "\n" + i["how"])]
+    if not ids:
+        print("no decisions wait on the owner")
+        return
+    for i in items:
+        if i["id"] in ids:
+            t = i["text"] if len(i["text"]) <= 90 else i["text"][:89] + "…"
+            print("%s. %s%s  -> go | drop" % (i["id"], t, "  [%s]" % i["src"] if i["src"] else ""))
+    a, b, c = (ids * 3)[:3]
+    print("reply: %s go, %s drop, %s go <words>   (owner-todo list: the detail per id)" % (a, b, c))
+
+
+def main(argv):
+    p = argparse.ArgumentParser(prog="owner-todo", description="Ledger %s (append-only; latest event per id wins). Dashboard: Machine > To do."
+                                % owner_todo.path())
+    sub = p.add_subparsers(dest="cmd")
+    a = sub.add_parser("add", help="add an open item; prints its id")
+    a.add_argument("text")
+    a.add_argument("--how", default="", help="the exact command or clicks (newlines allowed)")
+    a.add_argument("--src", default="", help="where it came from, e.g. T362")
+    ls = sub.add_parser("list", help="open items (default)")
+    ls.add_argument("--all", action="store_true", help="done ones too")
+    ls.add_argument("--json", action="store_true")
+    d = sub.add_parser("done", help="mark an item done")
+    d.add_argument("id")
+    d.add_argument("--note", default="")
+    r = sub.add_parser("reopen", help="undo a done")
+    r.add_argument("id")
+    sub.add_parser("decide", help="the open go/drop decisions, one line each, and a sample batch reply")
+    for s in (a, d, r):
+        s.add_argument("--by", default=BY, help=argparse.SUPPRESS)
+    o = p.parse_args(argv)
+    try:
+        if o.cmd == "add":
+            print(owner_todo.add(o.text, o.how, o.src, o.by))
+        elif o.cmd == "done":
+            owner_todo.done(o.id, o.note, o.by)
+            print("done %s · undo: owner-todo reopen %s" % (o.id, o.id))
+        elif o.cmd == "reopen":
+            owner_todo.reopen(o.id, o.by)
+            print("open %s" % o.id)
+        elif o.cmd == "decide":
+            decide(owner_todo.items())
+        else:
+            items = owner_todo.items(all=getattr(o, "all", False))
+            if getattr(o, "json", False):
+                print(json.dumps(items, ensure_ascii=False, indent=1))
+            elif items:
+                show(items)
+            else:
+                print("nothing waits on the owner")
+    except (KeyError, ValueError) as e:
+        print("owner-todo: %s" % (e.args[0] if e.args else e), file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

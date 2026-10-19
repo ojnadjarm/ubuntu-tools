@@ -8,9 +8,12 @@ SKILLS=${SKILLS_DIR:-$HOME/.claude/skills}
 usage() {
   cat <<'EOF'
 usage: guide                 print the guide index
-       guide <words…>        rank guides and skills by how many of the words they mention;
+       guide <words…>        rank guides and skills on the words (BM25: rare words and slug/trigger hits weigh most;
+                             weak matches are left out; N/M = words matched of the words searched);
                              "→ invoke /name" = load that skill with the Skill tool before you start
-       guide new <slug>      start KB/guides/<slug>.md from TEMPLATE.md
+       guide --new <slug>    start KB/guides/<slug>.md from TEMPLATE.md ("guide new …" is a search)
+       guide --stale [days]  guides last verified [days] or more days ago (default 0: all), oldest first,
+                             then guides with no "verified <date>" in INDEX.md
 exit 0 found · 1 nothing matched · 2 usage
 EOF
 }
@@ -18,14 +21,27 @@ EOF
 case "${1:-}" in
   -h|--help) usage; exit 0 ;;
   "") cat "$GUIDES/INDEX.md"; exit 0 ;;
-  new)
-    [[ "${2:-}" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { usage >&2; exit 2; }
+  --new)
+    [ $# -eq 2 ] && [[ "$2" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { usage >&2; exit 2; }
     f="$GUIDES/$2.md"
     [ -e "$f" ] && { echo "guide: $f exists; update it" >&2; exit 2; }
     cp "$GUIDES/TEMPLATE.md" "$f"
     echo "$f"
     echo "then add one line to $GUIDES/INDEX.md: - $2 — <what it does> · triggers: <words> · verified $(date +%F)  (name any backing skill as: skill /<name>)"
     exit 0 ;;
+  --stale)
+    [ $# -le 2 ] && [[ "${2:-0}" =~ ^[0-9]+$ ]] || { usage >&2; exit 2; }
+    cut=$(date -d "-${2:-0} days" +%F) now=$(date -u -d "$(date +%F)" +%s)
+    for f in "$GUIDES"/*.md; do
+      s=${f##*/}; s=${s%.md}
+      case $s in INDEX|TEMPLATE) continue ;; esac
+      d=$(grep -m1 "^- $s — " "$GUIDES/INDEX.md" 2>/dev/null | grep -o 'verified [0-9]\{4\}-[0-9][0-9]-[0-9][0-9]' | tail -1)
+      d=${d#verified }
+      if [ -z "$d" ]; then echo "no date          $s"
+      elif [[ ! "$d" > "$cut" ]]; then printf '%s %4dd  %s\n' "$d" $(( (now - $(date -u -d "$d" +%s)) / 86400 )) "$s"; fi
+    done | LC_ALL=C sort
+    exit 0 ;;
+  -*) usage >&2; exit 2 ;;
 esac
 
 # One candidate per line: "<kind>\t<where>\t<text searched and shown>".
@@ -44,6 +60,17 @@ candidates() {
 }
 
 candidates | awk -F'\t' -v q="$*" '
+  # BM25 per candidate, + idf when the title (slug/name + triggers) has the term, + a bonus for adjacent query pairs; weak matches are cut.
+  function toks(s, a,   n, i, m, x) {
+    n = split(s, raw, /[^a-z0-9.]+/); m = 0
+    for (i = 1; i <= n; i++) { x = raw[i]; gsub(/^\.+|\.+$/, "", x); if (x != "") a[++m] = x }
+    return m
+  }
+  # a term hits a word it starts, when the rest is an inflection ("narrat" hits "narration", "lan" misses "lanes")
+  function hit(x, t,   r) { if (index(x, t) != 1) return 0; r = substr(x, length(t) + 1)
+    if (length(t) < 4 || (r == "es" && t !~ /(s|x|z|ch|sh)$/)) return r == "" || r == "s"
+    return r ~ /^(|s|es|e|ed|d|er|ers|ing|ings|ion|ions|ation|ations|y|ies|ment|ments)$|^\./ }
+  function has(a, n, t,   i) { for (i = 1; i <= n; i++) if (hit(a[i], t)) return 1; return 0 }
   BEGIN {
     split("the and for with how what from into that this when use add new make seems small some our its", sw, " ")
     for (i in sw) stop[sw[i]] = 1
@@ -55,20 +82,40 @@ candidates | awk -F'\t' -v q="$*" '
       if (length(x) > 5 && x ~ /ing$/) x = substr(x, 1, length(x) - 3)
       else if (length(x) > 4 && x ~ /(ed|es|er)$/) x = substr(x, 1, length(x) - 2)
       else if (length(x) > 3 && x ~ /[^s]s$/) x = substr(x, 1, length(x) - 1)
-      gsub(/\./, "\\.", x)
-      w[++nw] = "(^|[^a-z0-9])" x
+      w[++nw] = x
     }
   }
   {
-    t = tolower($3); s = 0
-    for (i = 1; i <= nw; i++) if (t ~ w[i]) s++
-    if (s) printf "%d\t%d\t%s\t%s\t%s\t%d\n", s, ($1 == "guide" ? 0 : 1), $1, $2, $3, nw
-  }' | sort -t $'\t' -k1,1nr -k2,2n | head -8 | awk -F'\t' '
+    N++; kind[N] = $1; where[N] = $2; text[N] = $3; t = tolower($3)
+    title = t; sub(/ — .*/, "", title)
+    if (kind[N] == "guide") { title = where[N]; sub(/.*\//, "", title); sub(/\.md$/, "", title) }
+    if (match(t, /triggers:[^·]*/)) title = title " " substr(t, RSTART + 9, RLENGTH - 9)
+    split("", d); split("", h); len[N] = toks(t, d); hl = toks(title, h); total += len[N]
+    for (j = 1; j <= nw; j++) {
+      c = 0; for (i = 1; i <= len[N]; i++) if (hit(d[i], w[j])) { c++; pos[N, j, i] = 1 }
+      tf[N, j] = c; ti[N, j] = has(h, hl, w[j]); if (c) df[j]++
+    }
+    for (j = 1; j < nw; j++) for (i = 1; i < len[N]; i++) if ((N, j, i) in pos && (N, j + 1, i + 1) in pos) { pair[N, j] = 1; break }
+  }
+  END {
+    avg = total / (N ? N : 1); top = log(1 + (N - 0.5) / 1.5)
+    for (j = 1; j <= nw; j++) idf[j] = log(1 + (N - df[j] + 0.5) / (df[j] + 0.5))
+    for (k = 1; k <= N; k++) {
+      s = 0; m = 0; e[k] = 0
+      for (j = 1; j <= nw; j++) if (tf[k, j]) {
+        m++; f = tf[k, j]; e[k] += idf[j] * (1 + ti[k, j]); s += idf[j] * (f * 2.2 / (f + 1.2 * (0.25 + 0.75 * len[k] / avg)) + ti[k, j])
+        if ((k, j) in pair) s += 0.5 * (idf[j] + idf[j + 1])
+      }
+      sc[k] = s; mt[k] = m; if (s > best) best = s
+    }
+    for (k = 1; k <= N; k++) if (mt[k] && e[k] >= top && sc[k] >= 0.6 * best)
+      printf "%.4f\t%d\t%s\t%s\t%s\t%d\t%d\n", sc[k], (kind[k] == "guide" ? 0 : 1), kind[k], where[k], text[k], nw, mt[k]
+  }' | sort -t $'\t' -k1,1gr -k2,2n | head -8 | awk -F'\t' '
   {
     d = $5; hint = ""
     if ($3 == "skill") { hint = substr(d, 1, index(d, " — ") - 1) }
     else { t = d; while (match(t, /skill \/[a-z0-9-]+/)) { hint = hint (hint == "" ? "" : " ") substr(t, RSTART + 6, RLENGTH - 6); t = substr(t, RSTART + RLENGTH) } }
     if (length(d) > 160) d = substr(d, 1, 157) "..."
-    printf "%-5s %d/%d %s%s\n      %s\n", $3, $1, $6, $4, (hint == "" ? "" : "  → invoke " hint), d; found = 1
+    printf "%-5s %d/%d %s%s\n      %s\n", $3, $7, $6, $4, (hint == "" ? "" : "  → invoke " hint), d; found = 1
   }
   END { exit !found }' || { echo "guide: nothing for \"$*\"; also try: pc explain $*" >&2; exit 1; }

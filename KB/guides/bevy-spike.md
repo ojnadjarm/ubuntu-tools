@@ -22,7 +22,7 @@ Ticket: T70 (Bevy spike) · Last verified: 2026-09-24 by `cargo test --profile f
 
 ## Exact commands
 ```bash
-export PATH=$HOME/.cargo/bin:$PATH; cd ~/agents/research/2026-09-24/T70/bevy/atelier
+export PATH=$HOME/.cargo/bin:$PATH; cd ~/agent-work/research/2026-09-24/T70/bevy/atelier
 cargo build --profile fast                                    # dev loop: 26–37 s incremental, thin-LTO release is 4–7 min
 cargo test --profile fast                                     # 9 pure tests
 cargo build --release --target x86_64-pc-windows-gnu          # 18.6 min on a loaded machine; imports system DLLs only
@@ -51,6 +51,6 @@ DISPLAY=:N WGPU_BACKEND=vulkan WINEPREFIX=$PWD/wp WINEDEBUG=-all wine atelier.ex
 - Subagents may not write `report.md`: the spike's findings live in its StructuredOutput and `architecture.md`.
 
 ## Links
-- Code: `~/agents/research/2026-09-24/T70/bevy/atelier/` (`src/{beats,perf,timeline,kit,materials,voice}.rs`, `Cargo.toml`, `.cargo/config.toml`)
+- Code: `~/agent-work/research/2026-09-24/T70/bevy/atelier/` (`src/{beats,perf,timeline,kit,materials,voice}.rs`, `Cargo.toml`, `.cargo/config.toml`)
 - Runs: `T70/bevy/runs/` (`e2e.json`, `f-*.json`, `m-*.json`, `measure.txt`, build logs, shots)
 - Design / results: `T70/bevy/architecture.md`, `T70/options.md` (scores, rejection reason, critic) · build: `~/drop/t70/bevy/atelier-bevy-win64.zip` is gone since 2026-09-25 (a copy is in `~/.local/share/Trash/files/`)

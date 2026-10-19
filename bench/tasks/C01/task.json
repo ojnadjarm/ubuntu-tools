@@ -8,7 +8,7 @@
     "type": "object",
     "required": ["sink", "how", "rollback"],
     "properties": {
-      "sink": {"type": "string", "description": "the sink the sound is going to now"},
+      "sink": {"type": "string", "description": "the raw sink name exactly as `pactl get-default-sink` prints it, nothing else (no description, no parentheses)"},
       "how": {"type": "string", "description": "the command that moved it"},
       "rollback": {"type": "string", "description": "the exact command that puts it back"},
       "did_it": {"type": "boolean"},

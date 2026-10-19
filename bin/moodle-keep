@@ -3,13 +3,23 @@
 # --weekly also fast-forwards clean core checkouts and runs upgrade + purge_caches.
 set -uo pipefail
 export LC_ALL=C
+# agent@.service's PATH has no sbin dirs, where logrotate lives.
+case ":$PATH:" in *:/usr/sbin:*) ;; *) PATH="$PATH:/usr/sbin:/sbin" ;; esac
 
-ROOT="${MOODLE_ENVS_DIR:-$HOME/moodle-envs}"
+# shellcheck source=/dev/null
+. "$(dirname "$(readlink -f "$0")")/moodlelib.sh"
+ROOT="$(moodle_envs_root)"
 BACKUPS="$HOME/agents/backups/moodle"
 KEEP=14
 WEEKLY=0
-[ "${1:-}" = --weekly ] && WEEKLY=1
-[ "${1:-}" = -h ] || [ "${1:-}" = --help ] && { echo "usage: moodle-keep [--weekly]"; exit 0; }
+DRY=0
+usage() { echo "usage: moodle-keep [--weekly] [--dry-run]"; }
+for a in "$@"; do case "$a" in
+  --weekly) WEEKLY=1 ;;
+  --dry-run) DRY=1 ;;
+  -h|--help) usage; exit 0 ;;
+  *) usage >&2; exit 2 ;;
+esac; done
 
 rc=0
 say() { printf '%s\n' "$*"; }
@@ -23,15 +33,20 @@ for d in "$ROOT"/*/; do
   say "== $ver"
 
   # The Moodle code dir is whatever the compose file mounts at /var/www/html; no such mount means no Moodle.
-  src="$(sed -n 's#^[[:space:]]*-[[:space:]]*"\{0,1\}\([^:"]*\):/var/www/html"\{0,1\}[[:space:]]*$#\1#p' "$d/docker-compose.yml" | head -1)"
-  [ -n "$src" ] || { say "  skipped: not a Moodle env (no mount at /var/www/html)"; continue; }
-  case "$src" in /*) ;; *) src="$d/${src#./}" ;; esac
+  src="$(moodle_src "$d")" || { say "  skipped: not a Moodle env (no mount at /var/www/html)"; continue; }
   cfg="$src/config.php"
 
-  proj="$(sed -n 's/^name:[[:space:]]*//p' "$d/docker-compose.yml" | head -1)"; : "${proj:=$ver}"
+  proj="$(moodle_project "$d")"
+  if [ "$DRY" = 1 ]; then
+    for stage in "compose up" "http check" "pg_dump to $BACKUPS/$ver" "restore check" "retention (keep $KEEP)" "cron (if KEEP_CRON=1)" \
+                 $([ "$WEEKLY" = 1 ] && echo "pull+upgrade+purge_caches"); do
+      say "would: $ver $stage"
+    done
+    continue
+  fi
   ( cd "$d" && docker compose up -d ) >/dev/null 2>&1 || fail "$ver: compose up"
 
-  url="$(sed -n "s/.*\$CFG->wwwroot[[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" "$cfg" 2>/dev/null | head -1)"
+  url="$(moodle_wwwroot "$cfg")"
   code=000
   for _ in $(seq 1 30); do
     code="$(curl -sS -o /dev/null -w '%{http_code}' -m 10 "$url/login/index.php" 2>/dev/null)"
@@ -76,7 +91,11 @@ for d in "$ROOT"/*/; do
   # shellcheck source=/dev/null
   [ -r "$d/agent.env" ] && . "$d/agent.env"
   if [ "$KEEP_CRON" = 1 ] && [ -n "$app" ]; then
-    docker exec "$app" php "$clidir/cron.php" >/dev/null 2>&1 && say "  cron ok" || fail "$ver: cron"
+    cron_out="$(docker exec "$app" php "$clidir/cron.php" 2>&1)" && cron_rc=0 || cron_rc=$?
+    case "$cron_out" in
+      *"upgrade pending"*) fail "$ver: upgrade pending — run: docker exec $app php $clidir/upgrade.php --non-interactive" ;;
+      *) [ "$cron_rc" = 0 ] && say "  cron ok" || fail "$ver: cron" ;;
+    esac
   fi
 
   if [ "$WEEKLY" = 1 ]; then
@@ -99,9 +118,10 @@ done
 
 # Disk hygiene: dangling images and build cache only; never volumes, never images of running envs.
 say "== prune"
+[ "$DRY" = 1 ] && { say "would: prune dangling images and build cache, logrotate"; say "== done (dry-run)"; exit 0; }
 say "  images  $(docker image prune -f 2>/dev/null | tail -1)"
 say "  builder $(docker builder prune -f 2>/dev/null | tail -1)"
-logrotate -s "$HOME/agents/log/.logrotate.state" "$HOME/agents/log/logrotate.conf" 2>/dev/null && say "  logrotate ok"
+if lr="$(logrotate -s "$HOME/agents/log/.logrotate.state" "$HOME/agents/log/logrotate.conf" 2>&1)"; then say "  logrotate ok"; else fail "logrotate: $(printf '%s' "$lr" | tail -1)"; fi
 say "  disk    $(df -h / | awk 'NR==2{print $5" used, "$4" free"}')"
 
 say "== done rc=$rc"

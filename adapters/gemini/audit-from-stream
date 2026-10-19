@@ -13,6 +13,7 @@ _s.loader.exec_module(core)
 
 SESSION = os.environ.get('AGENT_SESSION_ID', '')
 CWD = os.environ.get('PWD', '')
+AGENT = os.environ.get('AGENT_NAME', '')
 
 for line in sys.stdin:
     line = line.strip()
@@ -31,4 +32,4 @@ for line in sys.stdin:
         except ValueError:
             args = {'command': args}
     core.record(ev.get('name') or ev.get('tool') or '?', args,
-                ev.get('cwd', CWD), ev.get('session_id', SESSION))
+                ev.get('cwd', CWD), ev.get('session_id', SESSION), AGENT)

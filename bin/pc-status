@@ -33,6 +33,7 @@ first() {
 ## --- probe cache ------------------------------------------------------------
 # `cached()` and its cache dir live in pclib.sh now (same TTL policy, EF04/EF09).
 . "$BIN/pclib.sh"
+. "$BIN/moodlelib.sh"
 
 ## --- cheap probes (also used by --brief) ------------------------------------
 p_ac=$(first /sys/class/power_supply/A[CD]*/online)
@@ -43,14 +44,14 @@ case "$p_lid" in state:*) p_lid="${p_lid#state:}"; p_lid="${p_lid#"${p_lid%%[![:
 : "${p_lid:=n/a}"
 
 IFS=$'\t' read -r r_disk r_dfree < <(df -Ph / | awk 'NR==2{gsub("%","",$5); printf "%s\t%s\n", $5, $4}')
-IFS=$'\t' read -r r_ramav r_ramtot r_swap < <(awk '/^MemAvailable:/{a=$2} /^MemTotal:/{t=$2}
+IFS=$'\t' read -r r_ramav r_ramtot r_swap r_swpct < <(awk '/^MemAvailable:/{a=$2} /^MemTotal:/{t=$2}
      /^SwapTotal:/{s=$2} /^SwapFree:/{f=$2}
-     END{printf "%d\t%d\t%d MB / %d MB\n", a/1024, t/1024, (s-f)/1024, s/1024}' /proc/meminfo)
+     END{printf "%d\t%d\t%d MB / %d MB\t%d\n", a/1024, t/1024, (s-f)/1024, s/1024, (s>0 ? 100*(s-f)/s : -1)}' "$PC_PROC/meminfo")
 read -r r_load l5 l15 _ </proc/loadavg
 r_temp=$(sensors -j 2>/dev/null | jq -r '[..|objects|to_entries[]|select(.key|test("^temp[0-9]+_input$"))|.value]|max // 0' 2>/dev/null)
 r_temp=${r_temp%%.*}; : "${r_temp:=0}"
 
-# SMART (NVMe) and battery wear — smartctl needs root, passwordless sudo is on; cached 10 min.
+# SMART (NVMe) and battery wear — smartctl needs root, passwordless sudo is on; cached 1 h.
 _smart() {
   pc_timeout 5 sudo -n smartctl -H -A /dev/nvme0 2>/dev/null | awk '
     { i=index($0,":"); if(!i) next
@@ -185,12 +186,15 @@ SERVICES="docker tailscaled ssh ydotoold cron netdata dashboard"
 _svc() {
   systemctl is-active ${SERVICES% dashboard} 2>/dev/null
   systemctl --user is-active agents-dashboard.service 2>/dev/null
+  systemctl is-active ssh.socket 2>/dev/null
 }
 mapfile -t _svst < <(cached services 60 _svc)
+# ssh.socket starts sshd on demand, so SSH is up while either unit is active (T350).
+[ "${_svst[2]:-}" != active ] && [ "${_svst[7]:-}" = active ] && _svst[2]="active (socket)"
 _i=0
 for _s in $SERVICES; do
   SV[$_s]="${_svst[_i]:-}"; _i=$((_i+1)); : "${SV[$_s]:=unknown}"
-  gate "svc_$_s" [ "${SV[$_s]}" != active ]
+  gate "svc_$_s" [ "${SV[$_s]%% *}" != active ]
 done
 # Keepalive (T269): user units that must be active and local sites that must answer 200.
 KEEPALIVE_UNITS=${KEEPALIVE_UNITS:-vass-middleware.service vass-frontend.service vass-frontend-proxy.service moodle45-cron.timer}
@@ -226,6 +230,77 @@ sz=$(cached screenshot 900 _shotkb); : "${sz:=0}"
 gate screenshot [ "$sz" -le 10240 ]
 _orch_bad() { [ "$a_orch" != ok ] && [ "$a_orch" != off ]; }
 gate orchestrator _orch_bad
+
+# Live faults (T347-10): failed units, swap, a pending reboot, netdata alarms, dead fleet
+# units, timer failure loops and the sentinel's last tick. Each is one cheap read, cached 60 s.
+# band <tag> <value> <warn-at> <fail-at> — WARN/FAIL once value reaches the threshold, else OK.
+band() { if [ "$2" -ge "$4" ]; then V[$1]=FAIL; elif [ "$2" -ge "$3" ]; then V[$1]=WARN; else V[$1]=OK; fi; }
+if [ "$r_swpct" -lt 0 ]; then V[swap]=-; else band swap "$r_swpct" 80 95; fi
+# Failed units that are known harmless and stay failed by design; space-separated, empty by default.
+FAILED_UNITS_IGNORE=${FAILED_UNITS_IGNORE:-}
+# One line per failed unit, `[t:][user:]<unit>`; `t:` marks a transient unit (a systemd-run scope).
+_failed() {
+  local u
+  for u in $(systemctl --failed --no-legend --plain 2>/dev/null | awk '{print $1}'); do
+    [ "$(systemctl show -p Transient --value "$u" 2>/dev/null)" = yes ] && echo "t:$u" || echo "$u"
+  done
+  for u in $(systemctl --user --failed --no-legend --plain 2>/dev/null | awk '{print $1}'); do
+    [ "$(systemctl --user show -p Transient --value "$u" 2>/dev/null)" = yes ] && echo "t:user:$u" || echo "user:$u"
+  done
+}
+h_failed=(); h_failed_transient=(); h_apport=()
+while read -r _u; do
+  _n=${_u#t:}
+  [ -n "$_n" ] && [[ " $FAILED_UNITS_IGNORE " != *" ${_n#user:} "* ]] || continue
+  if [ "$_n" != "$_u" ]; then h_failed_transient+=("$_n")
+  elif [[ $_n = apport-autoreport.service || $_n = apport-autoreport.path ]]; then h_apport+=("$_n")
+  else h_failed+=("$_n"); fi
+done < <(cached failed_transient 60 _failed)
+gate failed_units [ "${#h_failed[@]}" -gt 0 ]
+V[failed_transient]=OK; [ "${#h_failed_transient[@]}" -gt 0 ] && V[failed_transient]=WARN
+# A failed crash-report upload (T442) is a WARN naming each /var/crash report, never a host FAIL.
+h_crash=()
+if [ "${#h_apport[@]}" -gt 0 ]; then
+  for _c in "${PC_CRASH_DIR:-/var/crash}"/*.crash; do
+    [ -r "$_c" ] && h_crash+=("$(awk -F': ' '/^Date:/{d=$2} /^ExecutablePath:/{e=$2} d!=""&&e!=""{exit} END{print e, d}' "$_c")")
+  done
+  [ "${#h_crash[@]}" -gt 0 ] || h_crash=("${h_apport[@]} failed, no report in ${PC_CRASH_DIR:-/var/crash}")
+fi
+V[crash_report]=OK; [ "${#h_crash[@]}" -gt 0 ] && V[crash_report]=WARN
+REBOOT_FILE=${PC_REBOOT_FILE:-/run/reboot-required}
+h_reboot=no; h_rbdays=-1
+if [ -e "$REBOOT_FILE" ]; then
+  h_rbdays=$(( (NOW - $(stat -c %Y "$REBOOT_FILE")) / 86400 ))
+  mapfile -t _pk 2>/dev/null <"$REBOOT_FILE.pkgs"
+  h_reboot="$h_rbdays d${_pk[0]:+ (${_pk[*]})}"
+fi
+if [ "$h_rbdays" -lt 0 ]; then V[reboot]=OK; else band reboot "$h_rbdays" 1 7; fi
+# One line per active alarm, "STATUS chart.alarm", or "none"; empty when netdata does not answer.
+_netdata() {
+  curl -s -m 2 "${NETDATA_URL:-http://127.0.0.1:19999}/api/v1/alarms?active" 2>/dev/null |
+    jq -r '(.alarms // {} | to_entries | map("\(.value.status) \(.key)") | .[]), "none"' 2>/dev/null
+}
+h_nd_crit=(); h_nd_warn=(); h_nd_ok=0
+while read -r _s _a; do
+  case $_s in CRITICAL) h_nd_crit+=("$_a");; WARNING) h_nd_warn+=("$_a");; none) h_nd_ok=1;; esac
+done < <(cached netdata_alerts 60 _netdata)
+if [ "$h_nd_ok" = 0 ]; then V[netdata]=-
+elif [ ${#h_nd_crit[@]} -gt 0 ]; then V[netdata]=FAIL
+elif [ ${#h_nd_warn[@]} -gt 0 ]; then V[netdata]=WARN
+else V[netdata]=OK; fi
+_fleet() {
+  local u; mapfile -t u < <(pc_fleet_enabled)
+  pc_fleet_states "${u[@]}" | awk -F'\t' '$4=="FAIL"{print $1 " " $2}'
+}
+mapfile -t a_fleet < <(cached fleet 60 _fleet)
+[ -n "${a_fleet[0]:-}" ] || a_fleet=()
+gate fleet [ "${#a_fleet[@]}" -gt 0 ]
+a_loops=$(cached unit_loops 60 pc_unit_loops)
+gate unit_loops [ -n "$a_loops" ]
+# sentinel-check stamps last-run on every tick it gets the lock; over an hour old = it is not running.
+a_sent=-1
+[ -e "$HOME/agents/sentinel/state/last-run" ] && a_sent=$(( (NOW - $(stat -c %Y "$HOME/agents/sentinel/state/last-run")) / 60 ))
+gate sentinel [ "$a_sent" -lt 0 -o "$a_sent" -gt 60 ]
 
 ## --- brief ------------------------------------------------------------------
 if [ "$MODE" = brief ]; then
@@ -288,9 +363,9 @@ serve_row() {
 # moodle_dirs: each Moodle env dir (trailing /), i.e. a compose stack mounting /var/www/html, as moodle-keep.
 moodle_dirs() {
   local d
-  for d in "${MOODLE_ENVS_DIR:-$HOME/moodle-envs}"/*/; do
+  for d in "$(moodle_envs_root)"/*/; do
     [ "$(basename "$d")" = shared ] || [ ! -f "$d/docker-compose.yml" ] && continue
-    sed -n 's#^[[:space:]]*-[[:space:]]*"\{0,1\}\([^:"]*\):/var/www/html"\{0,1\}[[:space:]]*$#\1#p' "$d/docker-compose.yml" | grep -q . && echo "$d"
+    moodle_src "$d" >/dev/null && echo "$d"
   done
 }
 # moodle_lines: one line per Moodle env (compose mount at /var/www/html, as moodle-keep), read from its running app container.
@@ -300,7 +375,7 @@ moodle_lines() {
   while IFS= read -r d; do
     v=$(basename "$d")
     app=$(docker ps --filter "label=com.docker.compose.project.working_dir=${d%/}" --format '{{.Names}}' 2>/dev/null | grep -- '-app' | head -1)
-    port=; code="${d%/}/www"
+    port=; code=$(moodle_src "$d")
     if [ -n "$app" ]; then
       port=$(docker port "$app" 80/tcp 2>/dev/null | grep -oE '0\.0\.0\.0:[0-9]+' | cut -d: -f2 | head -1)
       code=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/var/www/html"}}{{.Source}}{{end}}{{end}}' "$app" 2>/dev/null)
@@ -410,6 +485,18 @@ add host uptime "$(uptime -p 2>/dev/null | sed 's/^up //')"
 add host load "$r_load $l5 $l15"
 add host kernel "$_kernel"
 add host os "$(. /etc/os-release; echo "$PRETTY_NAME")"
+# joined <array-name> — the array's items joined with ", " (no fork).
+joined() { local -n _a=$1; local o; printf -v o '%s, ' "${_a[@]}"; printf '%s' "${o%, }"; }
+add host failed_units "${#h_failed[@]}$([ ${#h_failed[@]} -gt 0 ] && echo ": $(joined h_failed)")" "${V[failed_units]}"
+add host failed_transient "${#h_failed_transient[@]}$([ ${#h_failed_transient[@]} -gt 0 ] && echo ": $(joined h_failed_transient)")" "${V[failed_transient]}"
+add host crash_report "$([ ${#h_crash[@]} -gt 0 ] && joined h_crash || echo none)" "${V[crash_report]}"
+add host reboot_required "$h_reboot" "${V[reboot]}"
+nd=(); [ ${#h_nd_crit[@]} -gt 0 ] && nd+=("${#h_nd_crit[@]} CRITICAL"); [ ${#h_nd_warn[@]} -gt 0 ] && nd+=("${#h_nd_warn[@]} WARNING")
+if [ "$h_nd_ok" = 0 ]; then nd_v="n/a (netdata did not answer)"
+elif [ ${#nd[@]} = 0 ]; then nd_v=none
+elif [ ${#h_nd_crit[@]} -gt 0 ]; then nd_v="$(joined nd): $(joined h_nd_crit)"
+else nd_v="$(joined nd): $(joined h_nd_warn)"; fi
+add host netdata_alerts "$nd_v" "${V[netdata]}"
 
 add power source "$p_src"
 add power battery "$p_pct%" "${V[battery]}"
@@ -422,7 +509,7 @@ add power profile "$(cached power_profile 60 _profile)"
 add power lid "$p_lid"
 
 add resources ram_available "${r_ramav} MB of ${r_ramtot} MB" "${V[ram]}"
-add resources swap_used "$r_swap"
+add resources swap "$([ "$r_swpct" -ge 0 ] && echo "$r_swpct% ($r_swap)" || echo none)" "${V[swap]}"
 add resources disk_root "${r_disk}% used, ${r_dfree} free" "${V[disk]}"
 add resources temp_max "${r_temp} C" "${V[temp]}"
 
@@ -495,6 +582,9 @@ st=-; [ "$a_tmux" = alive ] && st=OK
 add agents tmux_claude "$a_tmux" "$st"
 add agents orchestrator "$a_orch" "${V[orchestrator]}"
 nt=$(awk 'NF{print $NF" at "$1" "$2" "$3; exit}' <<<"$timers")
+add agents fleet "$([ ${#a_fleet[@]} -gt 0 ] && joined a_fleet || echo "enabled fleet units running")" "${V[fleet]}"
+add agents unit_loops "${a_loops:-no timer-driven unit failing >= 10/h}" "${V[unit_loops]}"
+add agents sentinel_age "$([ "$a_sent" -ge 0 ] && echo "$a_sent min" || echo "no tick recorded")" "${V[sentinel]}"
 add agents user_timers "$a_timers${nt:+ (next: $nt)}"
 _sessions() { claude agents --json 2>/dev/null | jq 'length' 2>/dev/null || echo n/a; }
 add agents claude_sessions "$(cached claude_sessions 60 _sessions)"

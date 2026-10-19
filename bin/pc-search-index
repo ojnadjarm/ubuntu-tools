@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# pc search-index status|exclude <dir> [--apply] — GNOME's file indexer (localsearch-3): its cost, busiest dirs, .trackerignore excludes.
+# shellcheck disable=SC2034,SC2016
+# Design: one verb, two reads (systemd's CPUUsageNSec for cost, a tinysparql query of the index for
+# where it works) and one ledgered write (a .trackerignore file, which localsearch honours through
+# ignored-directories-with-content); `pc undo <id>` removes the file. External tools go through
+# pc_cmd so tests run on recorded fixtures; ~/moodle-envs is refused (owner rule, T450).
+set -uo pipefail
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+
+pc_usage 'usage: pc search-index status [-n N] [--json]
+       pc search-index exclude <dir> [--apply]
+
+status   the indexer unit (CPU seconds, seconds per hour since start, memory), `localsearch status`
+         totals, the dirs that hold a .trackerignore, and the top N (default 8) dirs under $HOME by
+         indexed files changed in the last 24 h.
+exclude  write <dir>/.trackerignore so localsearch drops and skips the dir; ledgered,
+         `pc undo <id>` deletes the file. Refuses ~/moodle-envs (exit 3).' "$@"
+
+PC_SUB='pc search-index'; PC_EXTRA_FLAGS=(-n:)
+pc_opt "$@"; ARGS=("${PC_ARGS[@]}")
+N=${PC_OPT[-n]-8}
+UNIT=localsearch-3.service
+
+status() {
+  local props cpu start mem now since rate total ignored busy cutoff
+  props=$(pc_cmd systemctl --user show "$UNIT" -p CPUUsageNSec -p ActiveEnterTimestamp -p MemoryCurrent -p ActiveState --timestamp=unix)
+  cpu=$(sed -n 's/^CPUUsageNSec=//p' <<<"$props"); cpu=$(( ${cpu:-0} / 1000000000 ))
+  start=$(sed -n 's/^ActiveEnterTimestamp=@//p' <<<"$props")
+  mem=$(sed -n 's/^MemoryCurrent=//p' <<<"$props"); [[ $mem =~ ^[0-9]+$ ]] || mem=0
+  printf -v now '%(%s)T' -1
+  since=$(( now - ${start:-now} )); [ "$since" -gt 0 ] || since=1
+  rate=$(( cpu * 3600 / since ))
+  total=$(pc_cmd localsearch status 2>/dev/null | sed -n 's/^Currently indexed: //p' | head -1)
+  ignored=$(find "$HOME" -maxdepth 3 -name .trackerignore -not -path '*/node_modules/*' -printf '%h\n' 2>/dev/null | sort)
+  cutoff=$(date -u -d '-24 hours' +%Y-%m-%dT%H:%M:%SZ)
+  busy=$(pc_cmd tinysparql query -b org.freedesktop.LocalSearch3 \
+      'SELECT ?u ?m WHERE { ?u a nfo:FileDataObject ; nfo:fileLastModified ?m }' 2>/dev/null \
+    | sed -n 's|^  file://||p' \
+    | awk -F', ' -v h="$HOME/" -v c="$cutoff" 'index($1, h) == 1 { p = substr($1, length(h) + 1); sub(/\/.*/, "", p)
+        n[p]++; if ($2 >= c) r[p]++ } END { for (p in n) printf "%d\t%d\t~/%s\n", r[p], n[p], p }' \
+    | sort -t$'\t' -k1,1nr -k2,2nr | head -n "$N")
+  if [ "$JSON" = 1 ]; then
+    pc_json '{unit:$u, active:$a, cpu_s:$c, uptime_s:$s, cpu_s_per_h:$r, mem_bytes:$m, indexed:$t,
+              excluded:($i | split("\n") | map(select(. != ""))),
+              busiest:($b | split("\n") | map(select(. != "") | split("\t") | {changed_24h:(.[0]|tonumber), indexed:(.[1]|tonumber), dir:.[2]}))}' \
+      --arg u "$UNIT" --arg a "$(sed -n 's/^ActiveState=//p' <<<"$props")" --argjson c "$cpu" --argjson s "$since" \
+      --argjson r "$rate" --argjson m "$mem" --arg t "$total" --arg i "${ignored//$HOME/\~}" --arg b "$busy"
+    return
+  fi
+  printf '%s: %s · cpu %s s over %s s · %s s/h · mem %s MB\n' "$UNIT" "$(sed -n 's/^ActiveState=//p' <<<"$props")" \
+    "$cpu" "$since" "$rate" "$(( mem / 1048576 ))"
+  printf 'indexed: %s\n' "${total:-unknown}"
+  printf 'excluded: %s\n' "$(tr '\n' ' ' <<<"${ignored//$HOME/\~}")" | sed 's/ *$//; s/:$/: none/'
+  printf 'busiest (changed 24 h, indexed, dir):\n'
+  [ -n "$busy" ] && sed 's/^/  /' <<<"$busy"
+  return 0
+}
+
+exclude() {
+  local dir=${1:-} q
+  [ -n "$dir" ] || { echo "pc search-index exclude: need a dir" >&2; exit 2; }
+  dir=$(realpath -m -- "$dir")
+  case "$dir/" in "$HOME/moodle-envs/"*) echo "pc search-index: refused — $dir is under ~/moodle-envs (owner rule, T450)" >&2; exit 3;; esac
+  [ -d "$dir" ] || { echo "pc search-index: $dir is not a directory" >&2; exit 1; }
+  [ -e "$dir/.trackerignore" ] && { echo "already: $dir excluded"; return 0; }
+  printf -v q '%q' "$dir/.trackerignore"
+  PC_READ_CMD="[ -e $q ] && echo excluded || echo indexed" \
+    pc_apply "search-index:$dir" indexed excluded "rm -f -- $q" touch -- "$dir/.trackerignore"
+}
+
+case "${ARGS[0]:-status}" in
+  status) status;;
+  exclude) exclude "${ARGS[1]:-}";;
+  *) echo "pc search-index: unknown verb '${ARGS[0]}' (status|exclude)" >&2; exit 2;;
+esac

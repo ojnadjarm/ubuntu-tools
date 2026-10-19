@@ -1,6 +1,6 @@
 # Research swarm, spikes or mockups in parallel, then a judge and a critic (Workflow scripts)
 
-Ticket: T65, T69, T70, T70b, T71 · Last verified: 2026-09-24 from the 6 workflow scripts and journals, plus a stubbed dry run of the skill template (lanes → judge → critic)
+Ticket: T65, T69, T70, T70b, T71, T391 · Last verified: 2026-09-24 from the 6 workflow scripts and journals, plus a stubbed dry run of the skill template (lanes → judge → critic)
 
 ## When to use
 - A brief asks for several angles at once: research lanes, engine spikes, diagnosis lenses, competing mockups, then a
@@ -31,6 +31,8 @@ jq -Rrn '[inputs|fromjson?]|(map(select(.type=="result").key)) as $d|(map(select
 ```
 
 ## Pitfalls (measured)
+- **Workflow agents get no guides from the SubagentStart hook** (T379: 5 of 105 ran `guide` early). The template's `guide()`
+  line opens every prompt with `First run \`guide <lane words>\``; fill each lane's `guide` words (T391, stubbed dry run 4/4 prompts).
 - **Do not SendMessage to workflow agents.** T69 `diagnose:frame` was messaged and resumed as a plain subagent. It
   ended with a handback instead of StructuredOutput, so `agent()` never resolved and the Diagnose barrier stalled.
   Fix: TaskStop, change that lane's prompt to "ALREADY DONE: read frame.md, return it", resume with `resumeFromRunId`.
@@ -54,6 +56,6 @@ jq -Rrn '[inputs|fromjson?]|(map(select(.type=="result").key)) as $d|(map(select
 
 ## Links
 - Skill: `~/.claude/skills/research-swarm/` (`SKILL.md`, `template.js`)
-- Briefs: `~/agents/briefs/T65-learning-framework.md`, `T69-atelier-winner-perf.md`, `T70-engine-options.md`, `T71-2d-art-direction.md`
-- Outputs: `~/agents/research/2026-09-23/T65/{lanes,mockups,judge,plan.md}`, `T65/perf/{verify.md,fix/results.md}`, `~/agents/research/2026-09-24/T70/options.md`
+- Briefs: `~/agent-work/briefs/T65-learning-framework.md`, `T69-atelier-winner-perf.md`, `T70-engine-options.md`, `T71-2d-art-direction.md`
+- Outputs: `~/agent-work/research/2026-09-23/T65/{lanes,mockups,judge,plan.md}`, `T65/perf/{verify.md,fix/results.md}`, `~/agent-work/research/2026-09-24/T70/options.md`
 - Memory: `~/.claude/projects/-home-<user>/memory/workflow-agents-no-messages.md`

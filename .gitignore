@@ -84,8 +84,7 @@ portfolio/incoming/
 /kits/**/dist/
 /kits/**/out/
 
-# Orchestrator working papers: ticket history (tailnet links) and the claims-board lock.
-/KB/history.md
+# Orchestrator working papers: the claims-board lock (ticket history lives in $AGENT_WORK/history.md).
 /FILE-CLAIMS.md.lock
 
 # Machine-local links into ~/.claude/skills (absolute paths; the skills own these scripts).
@@ -93,3 +92,9 @@ portfolio/incoming/
 /bin/invoice
 /bin/lesson-board
 /bin/new-lesson
+
+# Discord forum bot runtime (T348): venv, sandbox socket, runner ledger, approved-job dirs.
+/discord-bot/.venv/
+/discord-bot/run/
+/discord-bot/runner-state/
+/discord-bot/work/

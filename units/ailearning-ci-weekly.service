@@ -1,0 +1,7 @@
+[Unit]
+Description=Weekly ailearning declutter of every reviewed unit at 1366 (ailearning-ci-daily --full) on a throwaway copy, headless and muted
+
+[Service]
+Type=oneshot
+TimeoutStartSec=14400
+ExecStart=/bin/bash -lc 'exec %h/agents/bin/ailearning-ci-daily --full'

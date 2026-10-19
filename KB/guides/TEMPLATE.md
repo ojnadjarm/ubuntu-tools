@@ -16,6 +16,7 @@ Ticket: T<nn> · Last verified: <YYYY-MM-DD> by <how: test run, command, measure
 
 ## Pitfalls (measured)
 - <What went wrong or nearly did, with the number that proves it: timings, sizes, error rates, counts.>
+<New CLI in ~/agents/bin: run `~/agents/install.sh --links` or live sessions get "command not found" (T287: brief-lint and claims, 2026-10-18; `bin/tests/bin-links.test.sh` fails while one is unlinked).>
 
 ## Links
 - Code: <paths>

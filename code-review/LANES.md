@@ -1,6 +1,6 @@
 # code-review lanes — binding rules for every swarm agent
 
-You are one lane of the weekly code-review swarm (T74). Architecture: `~/agents/research/2026-09-24/T74/architecture.md`.
+You are one lane of the weekly code-review swarm (T74). Architecture: `~/agent-work/research/2026-09-24/T74/architecture.md`.
 Your prompt says which lane you are, the run's home (`home`; a fixture home in selftests) and the run dir.
 
 ## Boundaries
@@ -16,6 +16,7 @@ Your prompt says which lane you are, the run's home (`home`; a fixture home in s
 3. Tests and reproductions run against fixtures, temp copies (`mktemp -d`) and sandboxes, never real services,
    credentials, the voice corpus or a real unit.
 4. Review lanes and refuters are read-only: they may run read-only commands and scratch copies, never edit the tree.
+   A review lane given a `FOCUS` list reads only those files (changed since the last run, then the rotation quarter); every 4th run is a full sweep.
 5. A change that needs a reboot, a package install, a new or changed systemd unit, or a `settings.json` edit is not
    applied: it becomes an `improve/queue` item (`code-review queue-new`, then `improve-gate check <file>` must print `ok`).
 6. Respect `FILE-CLAIMS.md`: `code-review claim <id> <paths…>` before editing; rc 3 = another ticket holds it, skip.
@@ -40,11 +41,11 @@ file; only `code-review retire` removes items. `fixed` without a verified test r
 Comments: one short line per docblock at most.
 
 ## Toolsmith lane
-`code-review prep` hands in up to 3 open `auto-ok` proposals with status `proposed` from `toolsmith/BACKLOG.md` (never
-`owner-go`, never `hold`: `hold` is the owner's veto). The proposal file is the finding and its Success check is the
+`code-review prep` hands in up to 3 open `auto-ok` proposals with status `go` (first) or `proposed` from
+`toolsmith/BACKLOG.md` (never `owner-go`, never `hold`: `hold` is the owner's veto). The proposal file is the finding and its Success check is the
 acceptance; Boundaries 1–6 and the fix discipline apply unchanged, with the proposal file and `BACKLOG.md` in the backup.
 Never run pcbench. On success append `## Result` (what landed, the before number re-read) and change only that row's
-status word to `measuring`; on `reverted`, append `## Result: reverted <why>` and leave `proposed`. Both files are
+status word to `measuring`; on `reverted`, append `## Result: reverted <why>` and leave the status as it was. Both files are
 append-only for this lane: `finish` restores the whole fix when an earlier proposal line or anything but a status word
 in `BACKLOG.md` changed.
 

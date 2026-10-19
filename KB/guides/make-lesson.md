@@ -12,12 +12,12 @@ existing lesson use `/explainer-engine` directly; for the look `/cutaway-style`;
   (`scaffold/`), so a new unit plays the whole route on day one with a placeholder machine.
 - `new-lesson` (skill `scripts/new-lesson.mjs`, on PATH): `--spec-only` notes, `--lint` script shape, the unit scaffold (writes the
   unit, page, test, bundle seed; patches vite input and the test-changed MAP).
-- Architecture: `~/agents/research/2026-09-26/T102/ARCHITECTURE.md` (Template Method route, composition root in `main.ts`).
+- Architecture: `~/agent-work/research/2026-09-26/T102/ARCHITECTURE.md` (Template Method route, composition root in `main.ts`).
 
 ## Exact commands
 ```bash
-new-lesson 02-layers --spec-only --notes ~/agents/research/<date>/<ticket>
-new-lesson --lint ~/agents/research/<date>/<ticket>/script.unit.json
+new-lesson 02-layers --spec-only --notes ~/agent-work/research/<date>/<ticket>
+new-lesson --lint ~/agent-work/research/<date>/<ticket>/script.unit.json
 S=<scratch>/site; rsync -a --exclude node_modules --exclude dist --exclude out --exclude .git --exclude content/.render \
   --exclude .local --exclude CLAUDE.local.md ~/projects/personal/ailearning/ $S/ && ln -s ~/projects/personal/ailearning/node_modules $S/node_modules
 new-lesson 02-layers --narrate --site $S          # real site: drop --site, only in a build ticket
@@ -27,10 +27,12 @@ cd $S && npx tsc --noEmit && node --import ./tests/lib/register.mjs --test tests
 ## Pitfalls (measured)
 - Continuity is a mandate (owner, 2026-09-27): every lesson builds on the previous lesson's central mechanism (U01's neuron, same drawing
   and names); no new metaphor replaces it. T122's toys (fold, wedge stack, crank) were rejected for dropping the neuron; T124 rebuilt
-  the U02 mockups from copies of it (`~/agents/research/2026-09-27/T124/`).
+  the U02 mockups from copies of it (`~/agent-work/research/2026-09-27/T124/`).
 - base-check refused the cutaway kit's `loadFonts` default `'fonts/'` (page-relative): the scaffold's `main.ts` loads fonts through `BASE`.
 - A sandbox copy without `.git` makes hygiene scan every file: `CLAUDE.local.md` failed it; exclude it from the copy.
 - `--force` without `--narrate` once reset `cues.json` to the starter's; the render dir is now seeded only when missing.
+- 06-chain-rule and 07-backpropagation shipped 16 starter A02 clips not in unit.json (~1.6 MB each; the page preloads every cue):
+  `cp -r` of the seeded render dir. Ship with `new-lesson <slug> --ship` (only unit.json's clips; 2026-10-15, F44).
 - Sandbox 02-layers: 9 new clips rendered; bundle 1273 kB opus / 1879 kB m4a, first chapter 79 / 116 kB (cap 600 kB, first chapter only).
 - 2 site tests fail before any T102 change, on a clean copy too: `framing.test` "beside Fig. 1 nothing overlaps", `place.test` "every
   value box… found a clear slot". Not the scaffold's: they were T99's hidden balloons, fixed by T105 (T111). A red test you did not
@@ -41,7 +43,7 @@ cd $S && npx tsc --noEmit && node --import ./tests/lib/register.mjs --test tests
 
 ## Checkpoint postmortem, U01 T76–T110 (T111, measured)
 - 35 tickets: 2,356 agent-min, 890 M context tokens, 128 owner messages. Build 18 %, tests + stills 38 %, orientation 27 %, waiting 11 %.
-  Rework ~300 agent-min (13 %) and 36 owner messages (28 %). Report: `~/agents/research/2026-09-26/T111/POSTMORTEM.md`.
+  Rework ~300 agent-min (13 %) and 36 owner messages (28 %). Report: `~/agent-work/research/2026-09-26/T111/POSTMORTEM.md`.
 - A fresh agent builds a narrated chapter in 6.7 min (T103). Tiny fixes after T98: 29 → 17 min (target 6); medium 102 → 58 min.
 - Top rework causes: tests blind to his hand (synthetic clicks; T99 shipped with no node test and hid 4 balloons): 190 min; relays that
   lost the object or the letter (pick B→A, "the needle"): 74 min; budgets and designs nobody signed off (3 MB audio cap, −1.5 guess
@@ -50,5 +52,5 @@ cd $S && npx tsc --noEmit && node --import ./tests/lib/register.mjs --test tests
 
 ## Links
 - Code: `~/.claude/skills/make-lesson/` (SKILL.md, reference/, scaffold/, scripts/, templates/)
-- Tests: the scaffold's `tests/unit/<slug>.test.mjs`; smoke tools `~/agents/research/2026-09-26/T102/smoke*.mjs`
-- Design / results: `~/agents/research/2026-09-26/T102/`; postmortem T98; shape T101 `moves.md`
+- Tests: the scaffold's `tests/unit/<slug>.test.mjs`; smoke tools `~/agent-work/research/2026-09-26/T102/smoke*.mjs`
+- Design / results: `~/agent-work/research/2026-09-26/T102/`; postmortem T98; shape T101 `moves.md`

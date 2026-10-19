@@ -20,6 +20,7 @@ const F = {
 }
 const agent = async (prompt, opts) => {
   const l = opts.label; calls.push(l)
+  const has = v => (process.env[v] || '').split('|').some(t => t && prompt.includes(t))
   const area = l.split(':')[1]
   if (l.startsWith('review:')) {
     const lens = l.split(':')[2]
@@ -28,11 +29,12 @@ const agent = async (prompt, opts) => {
   }
   if (l === 'merge') {
     const list = JSON.parse(prompt.slice(prompt.indexOf('Findings: ') + 10).split('\n')[0])
-    const id = t => list.find(f => f.title === t).id
-    return { groups: [{ keep: id(F.race.title), merge: [id(F.race2.title)] }],
+    const id = t => (list.find(f => f.title === t) || {}).id
+    return { groups: id(F.race2.title) ? [{ keep: id(F.race.title), merge: [id(F.race2.title)] }] : [],
       seen_before: prompt.includes('already decided findings') ? list.filter(f => f.title === F.reworded.title).map(f => f.id) : [] }
   }
-  if (l.startsWith('verify:')) return { refuted: prompt.includes('walk is slow') || (prompt.includes('restore-config') && l.endsWith(':intent') && prompt.includes('what would a future agent lose')), reason: 'mock' }
+  if (l.startsWith('verify:') && (has('MOCK_NULL') || (!l.endsWith(':retry') && has('MOCK_FLAKY')))) return null
+  if (l.startsWith('verify:')) return { refuted: prompt.includes('walk is slow') || (prompt.includes('restore-config') && l.endsWith(':intent') && prompt.includes('what would a future agent lose')) || (prompt.includes('harness skill typo') && l.endsWith(':intent')), reason: 'mock' }
   const k = prompt.includes(`${H}/agents/bin/`) ? 'bin' : 'other'
   live[k] = (live[k] || 0) + 1; maxLive[k] = Math.max(maxLive[k] || 0, live[k])
   await new Promise(r => setTimeout(r, 20)); live[k]--

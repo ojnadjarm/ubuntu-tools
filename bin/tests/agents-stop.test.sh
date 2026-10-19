@@ -24,6 +24,7 @@ case "$*" in
   *list-units*agent@*.service*) echo "agent@alpha.service loaded active running agent alpha" ;;
   *list-units*) : ;;
   *is-active*agent@alpha.service*) echo active ;;
+  *is-active*ailearning-ci-weekly.*) echo active ;;
   *is-active*) echo inactive ;;
 esac
 exit 0
@@ -66,6 +67,21 @@ kill "$victim" 2>/dev/null; wait "$victim" 2>/dev/null
 case "$out" in *"pid:$victim"*) ;; *) fail "agents-stop did not report pid:$victim — $out" ;; esac
 grep -q 'systemctl .*stop agent@alpha.service' "$CALLS" || fail "agent unit not stopped"
 grep -q '^notify-owner ' "$CALLS" || fail "no push recorded (shim not reached)"
+for u in ailearning-ci-weekly.service ailearning-ci-weekly.timer; do
+  grep -q "systemctl .*stop $u" "$CALLS" || fail "rostered $u not stopped"
+done
+
+# --- stale state/pid (written before its pid's process started, e.g. pre-reboot) is spared --
+sleep 300 & bystander=$!
+printf '%s\n' "$bystander" >"$WORK/agents/alpha/state/pid"
+touch -d '-1 hour' "$WORK/agents/alpha/state/pid"
+out="$(run agents-stop 2>&1)"
+sleep 0.2
+alive=0; kill -0 "$bystander" 2>/dev/null && alive=1
+kill "$bystander" 2>/dev/null; wait "$bystander" 2>/dev/null
+[ "$alive" = 1 ] || fail "agents-stop killed pid $bystander named by a stale state/pid"
+case "$out" in *"pid:$bystander"*) fail "agents-stop reported stale pid:$bystander — $out" ;; esac
+rm -f "$WORK/agents/alpha/state/pid"
 
 # --- guards: -h and an unknown name never start anything -------------------------------
 for cli in agent-now agent-run agent-enable agent-disable; do

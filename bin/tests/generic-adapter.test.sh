@@ -22,4 +22,10 @@ run 'exit 7' >/dev/null; rc=$?
 [ "$rc" = 7 ] && ok 1 "exit code passes through" || ok 0 "exit code passes through (got $rc)"
 out="$(run 'echo late' 5)"
 [ "$out" = "late" ] && ok 1 "AGENT_TIMEOUT wraps the command" || ok 0 "AGENT_TIMEOUT wraps the command (got '$out')"
+# F37: SIGTERM to the adapter (the pid agents-stop kills) stops the agent command too.
+(HARNESS_AGENT_CMD='exec sleep 47472' PROMPT_FILE="$tmp/prompt.md" AGENT_TIMEOUT= \
+  RAW_OUT="$tmp/raw.txt" META_OUT="$tmp/meta.json" exec "$A") >/dev/null 2>&1 &
+ap=$!; sleep 1; kill -TERM "$ap"; wait "$ap" 2>/dev/null; sleep 0.3
+left="$(pgrep -f '[s]leep 47472')"
+[ -z "$left" ] && ok 1 "SIGTERM stops the agent command" || { ok 0 "SIGTERM stops the agent command ($left left)"; kill $left; }
 exit $bad

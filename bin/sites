@@ -21,6 +21,7 @@ sites — local mirror of $PAGES, served like GitHub Pages ($URL/<site>/)
 
   sites publish <site> [--no-build]   npm run build in the repo (ailearning: REVIEW=toggle), then swap dist/ into $ROOT/<site>/ atomically
                                       --no-build: snapshot the repo's current dist/ as it is
+  sites verify <site> [base-url]      served <site>/build.json must equal the repo's dist/build.json (publish runs it; skip without one)
   sites status                        link, build time and source commit of each site
   sites check [base-url]              Pages-behaviour check against the running service (default $URL)
 
@@ -66,7 +67,18 @@ publish() {
   if [[ -d "$ROOT/$name" ]]; then mv --exchange -T "$stage" "$ROOT/$name"; rm -rf "$stage"; else mv -T "$stage" "$ROOT/$name"; fi
   printf 'built=%q\ncommit=%q\n' "$(date '+%Y-%m-%d %H:%M')" "$(git -C "$repo" rev-parse --short HEAD 2>/dev/null || echo none)" > "$STATE/meta/$name.env"
   write_index
+  verify "$name"
   echo "published $name in $(( $(date +%s) - t0 )) s → $URL/$name/"
+}
+
+verify() {
+  local name="${1:-}" base="${2:-$URL}" repo want got
+  repo="${REPO[$name]:-}"; [[ -n "$repo" ]] || die "unknown site '$name' (${!REPO[*]})"
+  [[ -f "$repo/dist/build.json" ]] || return 0
+  want=$(<"$repo/dist/build.json")
+  got=$(curl -sf "$base/$name/build.json") || die "verify: $base/$name/build.json not served"
+  [[ "$got" == "$want" ]] || die "verify: served build $got ≠ fresh build $want"
+  echo "verified $name: $want"
 }
 
 status() {
@@ -98,8 +110,10 @@ check() {
     if [[ -f "$ROOT/$site/404.html" ]]; then
       expect "/$site/nope body = $site/404.html" "$(sha1sum < "$ROOT/$site/404.html")" "$(curl -sS "$base/$site/nope-$$" | sha1sum)"
     fi
-    expect "/$site/ cache-control" "max-age=600" "$(hdr "/$site/" | field cache-control)"
+    expect "/$site/ cache-control" "no-cache" "$(hdr "/$site/" | field cache-control)"
+    [[ -f "$ROOT/$site/build.json" ]] && expect "/$site/build.json cache-control" "no-cache" "$(hdr "/$site/build.json" | field cache-control)"
     asset=$(cd "$ROOT/$site" && find assets -name '*.js' -size +2k | head -1)
+    [[ -n "$asset" ]] && expect "/$site/$asset cache-control" "public, max-age=31536000, immutable" "$(hdr "/$site/$asset" | field cache-control)"
     [[ -n "$asset" ]] && expect "/$site/$asset gzip" gzip "$(hdr "/$site/$asset" -H 'Accept-Encoding: gzip' | field content-encoding)"
     [[ -n "$asset" ]] && expect "/$site/$asset zstd" zstd "$(hdr "/$site/$asset" -H 'Accept-Encoding: zstd' | field content-encoding)"
   done
@@ -116,6 +130,7 @@ check() {
 
 case "${1:-}" in
   publish) shift; publish "$@" ;;
+  verify) shift; verify "$@" ;;
   status) status ;;
   check) shift; check "$@" ;;
   -h|--help|help|"") usage ;;

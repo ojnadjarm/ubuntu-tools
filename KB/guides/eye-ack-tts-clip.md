@@ -44,5 +44,5 @@ curl -s -o /dev/null -w '%{http_code} %{size_download}\n' http://127.0.0.1:8644/
 - Code: `~/the-dark-eye/bridge/relay/eye-tap`, `~/the-dark-eye/bridge/eye.sh` (`ack)`), `body/src/server.js` (`POST /bridge/ack`), `body/src/main.js`
   (clip samples for `local`), `body/src/remote-www/index.html` (`understood`), `body/scripts/understood.js`
 - Tests: `~/the-dark-eye/body/test/remote-ack.test.js`
-- Briefs: `~/agents/briefs/T58-orbiters-instant.md`, `T63-ack-says-understood.md` · backups `~/agents/backups/T63/`
+- Briefs: `~/agent-work/briefs/T58-orbiters-instant.md`, `T63-ack-says-understood.md` · backups `~/agents/backups/T63/`
 - Docs: `~/the-dark-eye/bridge/relay/README.md` (watchdog), `KB/runbooks/eye-relay.md`, skill `eye` (§ ack)

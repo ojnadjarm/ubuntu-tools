@@ -1,0 +1,37 @@
+# query (a real Agent description, last 14 days)	relevant guides/skills ("-" = nothing in the KB fits; /name = skill)
+T379 guides at subagent start	orbit-hook-orbiters
+T378 file claims expire	file-claims,/claims
+T376 wait-for nudge	wait-for-and-stuck-loops
+T381 brief CHECK CLI	brief-check
+T372 owner-todo page	owner-todo,/owner-todo
+T374 swarm tokens visible	research-swarm-and-judge,/research-swarm
+T370 code-review F11	code-review-swarm,/weekly-code-review
+T368 CI declutter speed	lesson-declutter,ailearning-ci-daily
+T364 Sheet 06 covered labels	lesson-declutter
+T361 discord approval gap	discord-bot
+T360 agent-work prune	agent-work-layout
+T348 Discord forum bot	discord-bot
+T336 apply lettering proto 1	lettering-engraved-webgl
+T334 copper metal and fixes	cast-metal-css-svg,lettering-engraved-webgl
+T333 page sound design	web-audio-sound-kit,/ui-sound-design
+T331 ailearning ci green	ailearning-ci-daily
+T278 machine values out of repos	no-machine-values
+T272 lesson board	lesson-board
+T271 ailearning single site	local-sites,learning-site-repo
+T147 finance tracker build	finance-month,/finance-month
+T134 invoicing tool and skill	invoice,/invoice
+T129 context-rot test	context-rot-test,/context-rot
+Vass keepalive (T269)	vass-keepalive
+Need-you resolve verb (T264)	need-resolve,/need-resolve
+Migration runbook (T246)	migration
+Where-am-I trip guide page	trip-guide
+T120 U02 machine mockups	make-lesson,/make-lesson,cutaway-style,/cutaway-style,/frontend-design
+U13 b1 build (T232)	make-lesson,/make-lesson,explainer-engine,/explainer-engine,learning-unit-authoring
+T335 lettering deep research	lettering-engraved-webgl,research-swarm-and-judge,/research-swarm
+Dashboard real agent status (T270)	agents-list-liveness
+T362 LAN exposure	-
+T313 ubuntu-tools health check	-
+Fix JIRA-334 double-click reset	-
+T385 SCORM spike	-
+Run date timestamp command	-
+T329 Sinners teaser video	-

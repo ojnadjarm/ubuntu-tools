@@ -1,6 +1,6 @@
 # Show running agents as orbiters on the Eye (automatic hook, instant push, sweep)
 
-Ticket: T58, T68, T73, T74-F14, T90 · Last verified: 2026-09-25 by `bin/tests/orbit-hook.test.py` 29/29 and Dark Eye `remote-orbiters`/`orbiters` tests (13/13 with sound + ack)
+Ticket: T58, T68, T73, T74-F14, T90, T379, T391, T396 · Last verified: 2026-10-18 by `bin/tests/orbit-hook.test.py` 41/41 and Dark Eye `remote-orbiters`/`orbiters` tests (13/13 with sound + ack)
 
 ## When to use
 - An agent does not appear on the Eye, appears twice, shows the wrong label, or vanishes while still working.
@@ -13,10 +13,10 @@ Ticket: T58, T68, T73, T74-F14, T90 · Last verified: 2026-09-25 by `bin/tests/o
 - `~/.claude/settings.json` runs `$HOME/agents/bin/orbit-hook start|stop` (timeout 5 s) on `SubagentStart`/`SubagentStop`.
 - `orbit-hook` (150 lines, Python stdlib): POSTs `{id: agent_id[:6], state, label}` to the body's `/bridge/status`
   (`127.0.0.1:<port>` and `x-dark-eye-key` from `~/.config/dark-eye/config.json`), timeout 1.5 s, and never fails: a dead Eye is a no-op.
-- Label: the Agent call's own `description` from `agent-<id>.meta.json`, which Claude Code writes just **after** the hook
-  fires. The hook polls it for `META_WAIT_S` 0.5 s (plain agents: 308 of 309 land by then, median 0.11 s), but not at all
-  when the session has a `subagents/workflows/` folder: a workflow agent's meta never lands inside the hook (T74-F14). If it is still
-  missing, the hook lights the orbiter with `agent_type` at once, saves the claim, and spawns a detached `orbit-hook relabel`
+- Label (T391): the Agent call's `description` read from the parent transcript (`spawn_desc()`, the same read as the guides
+  below, polled `SPAWN_WAIT_S` 0.5 s, 0 in a workflow session), cut to 24 chars. The in-hook `meta.json` wait is gone: in CLI 2.1.300
+  the meta lands only after the hook returns. With no Agent call (workflow agents), the hook lights the orbiter with `agent_type`
+  at once, saves the claim, and spawns a detached `orbit-hook relabel`
   (own session, stdio closed) that polls up to `RELABEL_WAIT_S` 30 s and re-posts `working` with the label, only if the
   claim is still there (so an agent that already stopped is never re-lit). A re-post of the same id only renames the orbiter
   on the page (no chime; the renderer ignores labels) (T73).
@@ -32,6 +32,10 @@ Ticket: T58, T68, T73, T74-F14, T90 · Last verified: 2026-09-25 by `bin/tests/o
 - One resolver `subagent_file()` for start, label and sweep: `<session>/subagents/agent-<id>.*`, then any depth under
   `subagents/` (workflow agents live in `subagents/workflows/wf_*/`), then, for the sweep only, a glob over all projects
   (7.6 ms CPU per call vs 0.4 ms for the session glob, measured 2026-09-24; start and relabel poll at 20 Hz so they skip it).
+- Guides at start (T379): `start` also prints `hookSpecificOutput.additionalContext` with the top 3 `guide` hits (2 lines each,
+  ~230 tokens) for the Agent call's `description` (T396: plus the owner-decisions digest, ≤ 300 tokens, of each project the description names; `decisions-ledger.md`), read from the parent transcript: the oldest pending `Agent` tool_use not yet
+  taken (same `subagent_type` first; taken ids in `$XDG_RUNTIME_DIR/dark-eye/orbit-spawns.json`, under the claims lock), polled
+  0.5 s (0 in a workflow session). Printed before the Eye POST, so a dead Eye still hands the guides over. No hit, no output.
 - Page side (T58): the body pushes the orbiter list over the page's existing long-poll (`reply.orbiters` in
   `remote-www/index.html`); the 20 s `/remote/orbiters` poll (`CROWD_MS`) stays as fallback; every agent stays at least
   `CROWD_MIN_MS` 6 s and leaves with the done chime. The body replays working orbiters after a renderer respawn.
@@ -39,7 +43,7 @@ Ticket: T58, T68, T73, T74-F14, T90 · Last verified: 2026-09-25 by `bin/tests/o
 ## Exact commands
 ```bash
 eye status                                          # the Eye's current orbiters (JSON)
-python3 ~/agents/bin/tests/orbit-hook.test.py       # 29 checks, temp HOME/XDG + fake Eye; selftest proves the real one unreachable
+python3 ~/agents/bin/tests/orbit-hook.test.py       # 37 checks, temp HOME/XDG + fake Eye; selftest proves the real one unreachable
 ~/agents/bin/orbit-hook sweep </dev/null            # the sweep by hand (what sentinel-check does)
 cat "$XDG_RUNTIME_DIR/dark-eye/orbit-claims.json"   # what the hook thinks is lit
 cd ~/the-dark-eye/body && node --test test/remote-orbiters.test.js test/orbiters.test.js
@@ -60,6 +64,9 @@ cd ~/the-dark-eye/body && node --test test/remote-orbiters.test.js test/orbiters
   first line, never inside the hook. A `subagents/workflows/` folder now skips the wait: the hook returns in 0.06 s instead of 0.57 s.
   A plain agent in such a session (41 of 663) is lit as `agent_type` and renamed by relabel when its meta lands (about 0.1 s, estimate).
   The old script fails 2 of the 18 checks.
+- Plain agents never got their label in the hook (T391, CLI 2.1.300): the 0.5 s meta wait always timed out, so every plain agent
+  was lit as `agent_type`, held 0.5 s for nothing and renamed later by relabel. Fixture bench, 20 starts each, 2 runs: hook p50
+  0.61–0.65 s before, 0.13–0.17 s after, label right at once. The old script fails 2 of the 37 checks.
 - Stopped agents stayed lit (T90, 2026-09-25): `TaskStop` fires no `SubagentStop`, so a stopped T87 build (`ab28de`) kept its
   orbiter until the idle sweep: 30 min idle + up to 15 min to the next sweep, the owner saw two "BUILD" orbiters. Now 0.11–0.16 s via the
   TaskStop hook, else the next sweep (≤ 15 min). Dry run on the live claims: `ab28de` stopped, the 2 live agents lit. The old script fails 4 of the 29 checks.
@@ -72,5 +79,13 @@ cd ~/the-dark-eye/body && node --test test/remote-orbiters.test.js test/orbiters
 - Code: `~/agents/bin/orbit-hook`, `~/agents/lib/agent_ends.py` (end signals), `~/agents/adapters/claude/hooks/audit-log.py` (TaskStop trigger), `~/agents/bin/sentinel-check` (sweep), hook config `~/.claude/settings.json`,
   page `~/the-dark-eye/body/src/remote-www/index.html` (`crowdSet`, `CROWD_MIN_MS`), body `body/src/main.js` + `body/src/orbiters.js`
 - Tests: `~/agents/bin/tests/orbit-hook.test.py`, `~/the-dark-eye/body/test/{remote-orbiters,orbiters}.test.js`
-- Briefs: `~/agents/briefs/T58-orbiters-instant.md`, `T68-orbit-sweep-workflow-agents.md` · backups `~/agents/backups/T58/`
+- Briefs: `~/agent-work/briefs/T58-orbiters-instant.md`, `T68-orbit-sweep-workflow-agents.md` · backups `~/agents/backups/T58/`
 - Docs: `KB/toolbox.md` (orbiters paragraph), `KB/runbooks/eye-relay.md`
+- Hook-time sources (T379, CLI 2.1.300, measured in `claude -p` probes): the subagent's `meta.json` and transcript land only
+  **after** the hook returns (never seen in a 1.5 s in-hook poll), and the hook input has no prompt (`prompt_id` is the parent
+  turn's). The parent's assistant row with the `Agent` tool_use lands ~0.06 s after the hook fires, so poll it.
+- Workflow agents get no guides from the hook: their prompt is in the script, not an Agent call. Fixed at the source (T391): the
+  `/research-swarm` template prepends `First run \`guide <lane words>\`` to every agent prompt (`agent()` opts have no system/context field). 3-day sample: plain subagents with >= 10 calls
+  already ran `guide` in the first 15 calls 26/31 (84 %), the hook now covers 29/31 (94 %); workflow agents 5/105 (5 %), uncovered.
+- Query is the description only: adding the prompt or the brief head made `guide`'s count-of-words ranking favour the longest
+  index lines (explainer-engine first for unrelated tickets).

@@ -77,8 +77,9 @@ guard_check() {
       *) [ -z "$verb" ] && { verb=$a; continue; }; unit=$a; break ;; esac
     done
     case "$verb" in reboot|poweroff|halt|kexec|soft-reboot) power_check "systemctl $verb" ;; esac
+    # Direct systemctl only meets the power rule: agents-stop and `pc units` stop user units through it.
     case "$verb" in stop|disable|mask)
-      fleet_unit "$unit" && \
+      [ "${0##*/}" = sudo ] && fleet_unit "$unit" && \
         refuse "FLEET.md §5.3 — \`systemctl $verb $unit\` would close a fleet unit or the owner's way in" \
                "read-only \`systemctl status $unit\` instead" "the owner, by hand" ;;
     esac ;;

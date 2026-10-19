@@ -762,7 +762,7 @@ def arm_stats(rows):
     }
 
 
-COLS = [("tasks", "tasks", "{}"), ("pass", "pass", "{:.2f}"), ("cup", "CuP", "{:.2f}"),
+COLS = [("tasks", "tasks", "{}"), ("pass", "pass@1", "{:.2f}"), ("cup", "CuP", "{:.2f}"),
         ("passN", "pass^N", "{:.2f}"), ("wall", "med wall", "{} s"),
         ("turns", "med turns", "{}"), ("tool_calls", "med tool calls", "{}"),
         ("shots", "shots/task", "{}"), ("raw", "raw recipes/task", "{}"),
@@ -794,7 +794,7 @@ def cmd_report(args):
             for k, _, _ in COLS) + " |")
     out.append("")
     out.append("**Per tier**")
-    out.append("| tier | arm | tasks | pass | CuP | med wall | shots/task | raw recipes/task |")
+    out.append("| tier | arm | tasks | pass@1 | CuP | med wall | shots/task | raw recipes/task |")
     out.append("|---|---|---|---|---|---|---|---|")
     for tier in TIERS:
         for a in arms:

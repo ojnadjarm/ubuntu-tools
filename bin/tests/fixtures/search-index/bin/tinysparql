@@ -1,0 +1,6 @@
+#!/bin/sh
+# Recorded index rows under $HOME: three files in agent-work changed now, one old file in sites.
+now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+printf 'Results:\n'
+printf '  file://%s/agent-work/a.txt, %s\n  file://%s/agent-work/b/c.txt, %s\n  file://%s/agent-work/d.txt, %s\n' "$HOME" "$now" "$HOME" "$now" "$HOME" "$now"
+printf '  file://%s/sites/old.html, 2020-01-01T00:00:00Z\n  file:///elsewhere/x, %s\n' "$HOME" "$now"

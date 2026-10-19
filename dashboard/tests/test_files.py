@@ -61,6 +61,16 @@ class Files(unittest.TestCase):
         for i in range(205):
             self.assertEqual(files.plan_excerpt(os.path.join(self.tmp.name, "nope"), str(i)), ("", []))
 
+    def test_text_preview_is_capped(self):
+        from dash.services import files
+        open(os.path.join(self.root, "big.log"), "w").write("a" * (6 << 20))
+        out = {}
+        h = type("H", (), {"send": lambda s, c, b, t: out.update(code=c, body=b)})()
+        files.drop_file(h, "big.log", "md=1")
+        self.assertEqual(out["code"], 200)
+        self.assertLess(len(out["body"]), 3 << 20)
+        self.assertIn(b"/files/big.log?dl=1", out["body"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -64,14 +64,18 @@ export function recorder(o) {
     if (t.ms < 500 || blob.size < 1000) { fail("<b>Too short, nothing saved.</b> Hold it for at least half a second."); return; }
     S.rs = "uploading"; S.up = 0; S.tx0 = Date.now(); clearInterval(tick); tick = setInterval(o.render, 250); o.render();
     xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/voice/clip"); xhr.timeout = 90000;
+    xhr.open("POST", "/api/voice/clip"); xhr.timeout = 160000;
     xhr.setRequestHeader("Content-Type", blob.type || "audio/webm");
     xhr.setRequestHeader("X-Prompt-Id", t.id);
     if (t.sha) xhr.setRequestHeader("X-Prompt-Sha", t.sha);
     xhr.upload.onprogress = function (e) { if (e.lengthComputable) { S.up = Math.round(e.loaded / e.total * 100); o.render(); } };
     xhr.upload.onload = function () { S.up = 100; S.rs = "transcribing"; S.tx0 = Date.now(); o.render(); };
     xhr.onerror = function () { fail("<b>NOT SAVED.</b> The phone could not reach the machine. Check the tailnet link and say it again."); };
-    xhr.ontimeout = function () { fail("<b>NOT SAVED.</b> No answer from the machine after 90 s. Say it again."); };
+    xhr.ontimeout = function () {
+      clearInterval(tick); tick = null; S.rs = "idle"; S.take = null;
+      o.alert("<b>No answer from the machine after 160 s.</b> The clip may still be on disk — " + W.refreshing + " If it is not below, say it again.", false, t.id);
+      o.stats().then(o.render, function () { o.alert("<b>No answer from the machine after 160 s</b> and " + W.list + " could not refresh. Reload the page.", false, t.id); });
+    };
     xhr.onload = function () {
       clearInterval(tick); tick = null;
       var j; try { j = JSON.parse(xhr.responseText); } catch (e) { j = null; }

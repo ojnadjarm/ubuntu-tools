@@ -1,11 +1,11 @@
 // Weekly code-review swarm (T74), started from research-swarm/template.js. Args: state/runs/<date>/args.json (code-review prep).
 export const meta = {
   name: 'code-review-weekly',
-  description: 'Fleet code review: area x lens lanes, 3 refuters per finding, then fix, retire or queue lanes',
+  description: 'Fleet code review: area x lens lanes, 2-3 refuters per finding, then fix, retire or queue lanes',
   phases: [
     { title: 'Review', detail: 'one read-only lane per area x lens' },
     { title: 'Merge', detail: 'one agent groups findings that share a root cause' },
-    { title: 'Verify', detail: '3 independent refuters per fresh finding; survives when 2 cannot refute' },
+    { title: 'Verify', detail: '2 independent refuters per fresh finding, a third refuter on a split; removals get 3; survives when 2 cannot refute' },
     { title: 'Act', detail: 'per area, one fresh agent per confirmed finding: retire first, then fix or queue' },
   ],
 }
@@ -67,10 +67,22 @@ const under = (file, item) => norm(file) === norm(item) || norm(file).startsWith
 
 // ---- Review ------------------------------------------------------------------------------------------
 phase('Review')
-const lanes = A.areas.flatMap(a => A.lenses.map(l => ({ area: a, lens: l })))
+// prep's focus: a focused area (sweep false) reads its focus files only and gets no lanes when nothing is listed.
+const relTo = p => p.startsWith(A.home + '/') ? p.slice(A.home.length + 1) : p
+const focusOf = a => {
+  const list = (a.focus || []).map(relTo).join(', ')
+  if (a.sweep !== false) return a.changed ? `Full sweep: read the whole area, starting with the ${a.changed} file(s) changed since the last run ` +
+    `(paths under ${A.home}): ${list}.\n` : ''
+  return `FOCUS: read only these ${a.focus.length} of the area's ${a.files} files (paths under ${A.home}; the first ${a.changed} changed ` +
+    `since the last run, the rest are this run's rotation quarter): ${list}. Open other files only to follow a call or check ` +
+    `evidence; report a defect outside the focus only when a focus file causes it.\n`
+}
+const lanes = A.areas.filter(a => a.sweep !== false || (a.focus || []).length).flatMap(a => A.lenses.map(l => ({ area: a, lens: l })))
+if (lanes.length < A.areas.length * A.lenses.length) log(`focus: ${A.areas.filter(a => a.sweep === false && !(a.focus || []).length).map(a => a.key).join(', ')} unchanged and off-rotation: no lanes`)
 const open = A.open_items.length ? `Already open elsewhere (skip these): ${JSON.stringify(A.open_items)}.` : ''
 const reviewed = await parallel(lanes.map(({ area, lens }) => () =>
   agent(`${head}\n\nREVIEW LANE — area "${area.key}": ${area.paths.join(', ')}. Lens: ${lens.ask}\n` +
+    focusOf(area) +
     `Audit log: ${JSON.stringify(A.audit)}. Area tests: ${JSON.stringify(area.tests)}. ${open}\n` +
     `Read the code in this area through this lens only; stay read-only. Report real defects you can point at ` +
     `(path:line plus evidence), most severe first, at most 8; put the count of any others in "more". ` +
@@ -147,21 +159,27 @@ const REFUTERS = [
   'Find every caller yourself: `code-review refs <path>`, systemd units and timers (~/.config/systemd/user, agents/units), cron, ' +
     'hooks, other tools, briefs, guides. Any live caller not migrated, or a retire_reason the evidence does not prove = refuted=true.'],
 ]
-const verified = await parallel(distinct.map(f => () =>
-  parallel(REFUTERS.map(([lens, how, removal]) => () =>
-    agent(`${head}\n\nREFUTER (${lens}) for finding ${f.id}: ${JSON.stringify(f)}\nYour job is to REFUTE it. ` +
-      `${removes(f) ? `This finding would REMOVE an item (retire_reason ${f.retire_reason || 'none given, which alone refutes it'}). ${removal}` : how} ` +
-      `Stay read-only on the tree. Default to refuted=true when uncertain. reason: one or two sentences with the fact that decided it.`,
-      { label: `verify:${f.id}:${lens}`, phase: 'Verify', agentType: 'worker', schema: VERDICT })))
-    .then(vs => {
-      const standing = vs.filter(v => v && !v.refuted).length
-      const need = removes(f) ? 3 : 2
-      return { ...f, votes: `${standing}/3`, verdict: standing >= need ? 'confirmed' : 'refuted',
-        reasons: vs.map((v, i) => `${REFUTERS[i][0]}: ${v ? (v.refuted ? 'refuted' : 'stands') + ' — ' + v.reason : 'no answer'}`) }
-    })))
+// A failed refuter is no vote: asked once more; unverified while the missing votes could still change the outcome.
+const refute = (f, lens, how, removal, retry) =>
+  agent(`${head}\n\nREFUTER (${lens}) for finding ${f.id}: ${JSON.stringify(f)}\nYour job is to REFUTE it. ` +
+    `${removes(f) ? `This finding would REMOVE an item (retire_reason ${f.retire_reason || 'none given, which alone refutes it'}). ${removal}` : how} ` +
+    `Stay read-only on the tree. Default to refuted=true when uncertain. reason: one or two sentences with the fact that decided it.`,
+    { label: `verify:${f.id}:${lens}${retry ? ':retry' : ''}`, phase: 'Verify', agentType: 'worker', schema: VERDICT }).catch(() => null)
+const vote = (f, [lens, how, removal]) => refute(f, lens, how, removal).then(v => v || refute(f, lens, how, removal, true))
+// Two refuters first; the third refuter runs only on a split or a missing answer. Removals always get all 3.
+const verified = await parallel(distinct.map(f => async () => {
+  const vs = await parallel(REFUTERS.slice(0, removes(f) ? 3 : 2).map(r => () => vote(f, r)))
+  if (vs.length === 2 && !(vs[0] && vs[1] && vs[0].refuted === vs[1].refuted)) vs.push(await vote(f, REFUTERS[2]))
+  const standing = vs.filter(v => v && !v.refuted).length
+  const missing = vs.filter(v => !v).length
+  const need = removes(f) ? 3 : 2
+  const verdict = standing >= need ? 'confirmed' : standing + missing >= need ? 'unverified' : 'refuted'
+  return { ...f, votes: `${standing}/${vs.length}` + (missing ? ` (${missing} no answer)` : ''), verdict,
+    reasons: vs.map((v, i) => `${REFUTERS[i][0]}: ${v ? (v.refuted ? 'refuted' : 'stands') + ' — ' + v.reason : 'no answer'}`) }
+}))
 const judged = verified.filter(Boolean)
 const confirmed = judged.filter(f => f.verdict === 'confirmed')
-log(`${confirmed.length}/${judged.length} findings survived the refuters`)
+log(`${confirmed.length}/${judged.length} findings survived the refuters · ${judged.filter(f => f.verdict === 'unverified').length} unverified (no answer)`)
 
 // ---- Act -------------------------------------------------------------------------------------------------
 phase('Act')
@@ -230,7 +248,7 @@ const tsItems = (A.toolsmith_backlog || []).map(t => ({
   verdict: 'confirmed', votes: 'backlog', accept: t.accept,
 }))
 const backlog = `${A.home}/agents/toolsmith/BACKLOG.md`
-const toolsmithPrompt = t => `${head}\n\nTOOLSMITH LANE for ${t.id} (toolsmith backlog, class auto-ok, status proposed). ` +
+const toolsmithPrompt = t => `${head}\n\nTOOLSMITH LANE for ${t.id} (toolsmith backlog, class auto-ok, status ${t.status || 'proposed'}). ` +
   `The finding is the proposal ${t.file}; read it whole, every "Evidence update" and "rev." note included (the newest revision ` +
   `wins). Its Success check is the acceptance: ${t.accept || 'see the proposal'}. Follow "Toolsmith lane" in ${A.rules}.\n` +
   `Steps, in order:\n` +
@@ -240,10 +258,10 @@ const toolsmithPrompt = t => `${head}\n\nTOOLSMITH LANE for ${t.id} (toolsmith b
   `3. Failing test or reproduction first (fixtures only), then the change exactly as the proposal says; your test passes.\n` +
   `4. Re-read the Success check's before number with its measured-by command when that is read-only; never run pcbench.\n` +
   `5. Append to ${t.file} a \`## Result\` section (files touched, validation output, before number re-read, ` +
-  `"measurement pending on the next toolsmith run"); in ${backlog} change only the ${t.id} row's status word proposed → measuring. ` +
+  `"measurement pending on the next toolsmith run"); in ${backlog} change only the ${t.id} row's status word ${t.status || 'proposed'} → measuring. ` +
   `Never change an earlier line of either file: finish restores the whole fix if you do.\n` +
   `6. \`code-review tests ${t.id} after\` must print "verified". If not (rc 5): \`code-review restore ${A.run} ${t.id}\`, then ` +
-  `append \`## Result: reverted <why>\` to ${t.file}, leave the row at proposed, status reverted.\n` +
+  `append \`## Result: reverted <why>\` to ${t.file}, leave the row at ${t.status || 'proposed'}, status reverted.\n` +
   `7. \`code-review unclaim ${t.id}\` whatever happened.\n` +
   `Return status, files, test, restore (\`code-review restore ${A.run} ${t.id}\`), guide, note.`
 const toolsmithLanes = async () => {
@@ -281,7 +299,7 @@ const cut = s => String(s || '').slice(0, 300)
 const slim = f => ({
   id: f.id, key: f.key, file: f.file, line: f.line, kind: f.kind, title: f.title, severity: f.severity,
   lenses: f.lenses, evidence: cut(f.evidence), verdict: f.verdict, votes: f.votes, status: f.status || null,
-  note: cut(f.note || (f.verdict === 'refuted' ? f.reasons.join(' · ') : '')), test: cut(f.test), restore: f.restore || '',
+  note: cut(f.note || (['refuted', 'unverified'].includes(f.verdict) ? f.reasons.join(' · ') : '')), test: cut(f.test), restore: f.restore || '',
   queue: f.queue || '', guide: f.guide || '',
 })
 const actedIds = new Set([...done, ...left, ...capped].map(f => f.id))

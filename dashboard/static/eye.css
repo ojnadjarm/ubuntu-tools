@@ -454,6 +454,17 @@ mark { background: var(--gold-w); color: var(--gold); padding: 0 2px; }
 .docs a s { display: block; margin-top: 5px; padding-right: 60px; text-decoration: none; font-size: 10.5px; letter-spacing: var(--ls-label); text-transform: uppercase; color: var(--mute); }
 .docs a s b { font-weight: 400; color: var(--g); }
 
+/* @component .todos .todo — the To do screen: one numbered step per row, its exact steps in a wrapped block, source/date then Copy and Done (44 px targets) */
+.todos { list-style: none; margin: 0; padding: 0; container-type: inline-size; }
+.todo { padding: 12px; border-bottom: 1px solid var(--line); }
+.todo:last-child { border-bottom: 0; }
+.todo h3 { display: flex; gap: 10px; margin: 0; font-weight: 400; font-size: 13px; line-height: 1.4; color: var(--hi); overflow-wrap: anywhere; }
+.todo h3 b { flex: none; min-width: 2ch; color: var(--gold); font-weight: 400; }
+.todo pre { margin: 8px 0 0; padding: 8px 10px; background: var(--bg1); border: 1px solid var(--line2); white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 11.5px; color: var(--txt); }
+.todo .tf { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.todo .tf s { flex: 1 1 12rem; text-decoration: none; font-size: 10.5px; letter-spacing: var(--ls-label); text-transform: uppercase; color: var(--mute); }
+.todo .tf .btn { min-height: 44px; min-width: 72px; }
+
 /* @component .today — screen 05's day: daily note, edited this week, open tasks grouped by note (.gh the note, .tk one task) */
 .today { display: grid; gap: 12px; padding: 10px 12px; }
 .today > div { min-width: 0; }
@@ -468,20 +479,6 @@ mark { background: var(--gold-w); color: var(--gold); padding: 0 2px; }
 .today .tk { color: var(--mid); white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; padding-left: 14px; position: relative; }
 .today .tk:before { content: "☐"; position: absolute; left: 0; color: var(--mute); }
 .today .tk:hover { color: var(--txt); }
-/* @component .audio .al — the notes brain's day: raw lines, refined lines with their idea link, the ideas folder; u is the word to say */
-.audio { display: grid; gap: 12px; padding: 10px 12px; }
-.audio > div { min-width: 0; }
-.audio > div > .k { display: block; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
-.audio .k a { color: var(--g); }
-.audio .empty { padding: 6px 0; line-height: 1.7; }
-.audio .empty u { text-decoration: none; color: var(--gold); border: 1px solid rgba(255, 209, 102, .4); padding: 0 4px; }
-.audio a { display: block; padding: 3px 0; border-bottom: 1px solid var(--line); line-height: 1.5; font-size: 11.5px; }
-.audio a em { display: block; font-style: normal; color: var(--g); }
-.audio a s { text-decoration: none; color: var(--mute); font-size: 10.5px; }
-.al { display: grid; grid-template-columns: 40px 1fr; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 11.5px; color: var(--txt); line-height: 1.5; }
-.al i { font-style: normal; color: var(--mute); font-variant-numeric: tabular-nums; }
-.al a.wl { display: inline; padding: 0; border: 0; border-bottom: 1px solid var(--line3); color: var(--g); font-size: inherit; }
-.al .wl.miss { color: var(--mute); border-bottom: 1px dashed var(--mute); }
 /* @component .outline — a note's headings in the dossier; --l indents by level; tap scrolls the prose */
 .outline { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 6px; }
 .outline a { display: block; color: var(--mid); font-size: 11px; line-height: 1.7; padding-left: calc(8px + var(--l, 0) * 10px); border-left: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -517,7 +514,7 @@ mark { background: var(--gold-w); color: var(--gold); padding: 0 2px; }
   .viewer .im, .viewer .im:has(> img, > video, > iframe) { max-height: none; }
   .lgraph svg { max-height: 240px; }
   .viewer .im img, .viewer .im video { max-height: 78vh; } .viewer .im iframe { height: 78vh; }
-  .today, .audio { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .today { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (min-width: 821px) {
   .grid:has(> .cell.fill) { min-height: 100%; grid-auto-rows: auto; }
@@ -555,7 +552,7 @@ mark { background: var(--gold-w); color: var(--gold); padding: 0 2px; }
   .cell, .cell.q, .cell.third, .cell.half, .cell.two3 { --c: 12; }
   .foot { gap: 0; padding-left: 0; padding-right: 0; }
   .foot > * { display: none; }
-  .foot .tabs { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); flex: 1; height: 100%; }
+  .foot .tabs { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); flex: 1; height: 100%; }
   .foot .tabs button, .foot .tabs a { padding: 0 2px; display: flex; align-items: center; justify-content: center; gap: 5px; overflow: hidden; color: var(--mute); font-size: var(--fs-rail); letter-spacing: var(--ls-rail); text-transform: uppercase; border-right: 1px solid var(--line); position: relative; min-width: 0; }
   .foot .tabs button em, .foot .tabs a em { display: none; }
   .foot .tabs button span, .foot .tabs a span { display: inline; font-size: 10px; letter-spacing: 0; }
@@ -586,7 +583,7 @@ mark { background: var(--gold-w); color: var(--gold); padding: 0 2px; }
   .fbar .btn, .btns .btn { display: inline-flex; align-items: center; }
   .sg-comp { grid-template-columns: 1fr; } .sg-type div { grid-template-columns: 1fr; } .sg-type code { text-align: left; }
   .btn, .facet, [data-sort], .head .right .clear { min-height: 36px; display: inline-flex; align-items: center; padding-inline: 10px; }
-  .today a, .outline a, .links a, .audio a { padding-block: 8px; min-height: 32px; }
+  .today a, .outline a, .links a { padding-block: 8px; min-height: 32px; }
   .lb .top button { min-height: 44px; }
   .cfm { place-items: end stretch; padding: 0; }
   .cfm .card { width: 100%; padding: 16px 16px max(16px, env(safe-area-inset-bottom)); border-width: 1px 0 0; transform: translateY(24px); }

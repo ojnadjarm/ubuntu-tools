@@ -6,4 +6,5 @@ Type=oneshot
 TimeoutStartSec=3600
 Nice=5
 ExecStart=/bin/bash -lc 'exec %h/agents/bin/moodle-keep --weekly'
+ExecStartPost=/bin/bash -lc 'exec %h/.claude/skills/moodle-docs/sync.sh'
 ExecStopPost=/bin/bash -lc 'test "$EXIT_STATUS" = 0 || %h/agents/bin/notify-owner -p high -t moodle-keep "weekly run failed (exit $EXIT_STATUS): journalctl --user -u moodle-keep-weekly"'

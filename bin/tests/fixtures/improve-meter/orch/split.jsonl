@@ -1,0 +1,2 @@
+{"type":"assistant","timestamp":"2026-09-22T11:10:00.000Z","message":{"id":"msg_split","content":[{"type":"text","text":"a"}],"usage":{"input_tokens":0,"cache_read_input_tokens":300000,"cache_creation_input_tokens":0}}}
+{"type":"assistant","timestamp":"2026-09-22T11:10:01.000Z","message":{"id":"msg_split","content":[{"type":"tool_use","name":"Bash"}],"usage":{"input_tokens":0,"cache_read_input_tokens":300000,"cache_creation_input_tokens":0}}}

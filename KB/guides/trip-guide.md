@@ -1,6 +1,8 @@
 # Trip guide: phone page that finds where you are and narrates the place's history (Wikipedia + browser TTS)
 
-Ticket: T141 · Last verified: 2026-09-29 by headless Chromium test (fake GPS Sagrada Família + Milan Duomo, 5 widths)
+Ticket: T141 · Status: code removed by owner (T279, 2026-10-07); rebuild from ~/agent-work/briefs/T141-trip-guide.md.
+Last verified (before removal): 2026-09-29 by headless Chromium test (fake GPS Sagrada Família + Milan Duomo, 5 widths).
+The paths below no longer exist (`~/agents/t141` and the `/t141/where/` drop copy are gone); the pitfalls still hold for a rebuild.
 
 ## When to use
 A standalone phone page (no Eye, no server) that tells the story of a nearby or named place, in Spanish or English.
@@ -30,4 +32,5 @@ drop-link ~/agents/t141/where t141
 - Nested parentheses and "(s." abbreviations cut sentences; spoken text strips parentheses in a loop.
 
 ## Links
-- Code: ~/agents/t141/where/index.html · Test: ~/agents/t141/test.cjs · Shots: ~/agents/t141/shots/
+- Removed (T279, 2026-10-07): ~/agents/t141/where/index.html · ~/agents/t141/test.cjs · ~/agents/t141/shots/
+- Brief to rebuild from: ~/agent-work/briefs/T141-trip-guide.md

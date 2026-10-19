@@ -56,6 +56,25 @@ class Needs(unittest.TestCase):
         self.assertEqual([(e["kind"], e["t"], e["text"]) for e in ev], [
             ("runaway", t, "stuck-wait killed pid 505171 (owner ended; owner agent a51b09): 'until grep -q facts p2.log; do sleep 3; done'")])
 
+    def test_old_high_push_still_needs_with_many_newer_pushes(self):
+        from dash.services import system
+        home = tempfile.mkdtemp()
+        os.makedirs(os.path.join(home, "agents/log"))
+        now = datetime.now().astimezone()
+        with open(os.path.join(home, "agents/log/notify.log"), "w") as f:
+            f.write((now - timedelta(hours=23)).isoformat(timespec="seconds") + "\tfail\thigh\tdark-eye body failed to start\n")
+            for m in range(25):
+                f.write((now - timedelta(minutes=m + 1)).isoformat(timespec="seconds") + "\tok\tdefault\troutine %d\n" % m)
+        with mock.patch.object(system, "HOME", home):
+            ev = system.since_24h()
+            needs = system.verdict({}, [], ev)["needs"]
+            with mock.patch.object(system, "swr", return_value={"status": {}, "agents": [], "events": ev}), \
+                 mock.patch.object(system, "cache_meta", return_value=(False, {}, None)):
+                out = system.payload()
+        self.assertEqual([n["text"] for n in needs], ["dark-eye body failed to start"])
+        self.assertEqual([n["text"] for n in out["verdict"]["needs"]], ["dark-eye body failed to start"])
+        self.assertEqual(len(out["events"]), 20)
+
     def test_all_clear_digests_are_not_asks(self):
         for text in (DIGEST, "All green. 0 incidents, 0 runaways. Nothing to decide.", "No FAIL; nobody needs you today."):
             self.assertFalse(server.asks_owner(text), text)
@@ -86,6 +105,17 @@ class Needs(unittest.TestCase):
         v = server.verdict({"sections": {}}, [], [e])
         self.assertEqual([(n["kind"], n["text"]) for n in v["needs"]], [("push", e["text"])])
         self.assertFalse(v["ok"])
+
+    def test_failed_agent_run_counts_once(self):
+        from dash.services import system
+        e = dict(push("agent code-review failed (exit 1)", "2026-10-15T14:41:07+02:00"), prio="high")
+        ag = [{"name": "code-review", "last": {"end": "2026-10-15T14:41:06+02:00", "exit": "1"}}]
+        with mock.patch.object(system, "resolved", return_value=set()):
+            v = server.verdict({"sections": {}}, ag, [e])
+        self.assertEqual([n["kind"] for n in v["needs"]], ["push"])
+        with mock.patch.object(system, "resolved", return_value={system.push_key(e)}):
+            v = server.verdict({"sections": {}}, ag, [e])
+        self.assertEqual([n["text"] for n in v["needs"]], ["agent code-review exit 1"])
 
     def test_headline_and_list_share_one_source(self):
         st = {"sections": {"disk": {"smart": {"state": "FAIL"}}, "net": {"ts": {"state": "OK"}}}}

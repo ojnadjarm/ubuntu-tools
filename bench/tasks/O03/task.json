@@ -8,8 +8,8 @@
     "type": "object",
     "required": ["pid_or_unit", "container"],
     "properties": {
-      "pid_or_unit": {"type": "string"},
-      "container": {"type": "string"},
+      "pid_or_unit": {"type": "string", "description": "the PID, or the systemd unit name, that owns the port"},
+      "container": {"type": "string", "description": "the container name exactly as `docker ps --format '{{.Names}}'` prints it, nothing else"},
       "unknown": {"type": "boolean"},
       "reason": {"type": "string"}
     }

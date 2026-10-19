@@ -13,7 +13,7 @@
 <body>
 <main class="page">
 <nav><a href="/">&larr; panel</a><span>09 &middot; map</span></nav>
-<p class="meta">read from the machine on 2026-09-22 &middot; 40 things</p>
+<p class="meta">read from the machine on 2026-09-22 &middot; 38 things</p>
 <ul class="toc">
   <li><a href="#map">the map</a></li>
   <li><a href="#moodle">your Moodle work</a></li>
@@ -44,7 +44,7 @@
   <div class="tier"><span class="k">you</span><div class="nodes">
     <div class="node you"><b>phone</b><s>anywhere, over Tailscale</s></div>
     <div class="node you"><b>laptop on the home wifi</b><s>LAN 192.168.1.x</s></div>
-    <div class="node you"><b>your voice</b><s>earbuds or the phone page</s></div>
+    <div class="node you"><b>your voice</b><s>the phone page</s></div>
   </div></div>
   <div class="tier"><span class="k">the door</span><div class="nodes">
     <div class="node door"><b>tailscaled</b><s>the tailnet; everything allowed from it</s></div>
@@ -156,29 +156,13 @@
 <span class="k">if it stops</span><span>no eye, no voice, phone page dead, orbiters gone; the dashboard and Moodle do not care</span>
 <span class="k">stop / start</span><span><code>systemctl --user restart dark-eye</code> &middot; logs <code>journalctl --user -u dark-eye -f</code> &middot; check <code>eye health</code></span></div></div>
 
-<div class="thing"><h3><span class="n"><em>09</em>dark-eye-ptt, earbud push-to-talk</span><code>dark-eye-ptt.service</code><span class="v off">off now</span></h3>
-<div class="body">
-<p>A sidecar that watches the Sony earbuds: a double tap on the right bud opens the mic, and it flips the Bluetooth profile around the mic so the buds can hear you. It is enabled to start with your session but is not running right now; I did not start it, since it takes over the buds' profile and you are using them. If bud taps do nothing, this is the first thing to check.</p>
-</div>
-<div class="facts"><span class="k">needs</span><span>the body, the buds connected</span>
-<span class="k">if it stops</span><span>bud taps do nothing; the phone page and the desktop mic still work</span>
-<span class="k">stop / start</span><span><code>systemctl --user start dark-eye-ptt</code> &middot; <code>&hellip; stop &hellip;</code></span></div></div>
-
-<div class="thing"><h3><span class="n"><em>10</em>dark-eye-failed, the alarm</span><code>dark-eye-failed.service</code><span class="v off">off now</span></h3>
+<div class="thing"><h3><span class="n"><em>09</em>dark-eye-failed, the alarm</span><code>dark-eye-failed.service</code><span class="v off">off now</span></h3>
 <div class="body">
 <p>Not a daemon: a one-shot that systemd fires only when the body gives up starting, and all it does is push "dark-eye body failed to start" to your phone. Inactive is its normal state. It has nothing to switch off.</p>
 </div>
 <div class="facts"><span class="k">if it stops</span><span>a dead eye would go unannounced</span></div></div>
 
-<div class="thing"><h3><span class="n"><em>11</em>notes-brain, the notes session</span><code>notes-brain.service</code><code>tmux notes</code><span class="v stop">stoppable</span></h3>
-<div class="body">
-<p>A second Claude (Sonnet) living in a tmux session called <b>notes</b>, alive since 15 September. You switch your voice to it with <code>eye talk-to notes</code>, think out loud, and it files the distilled idea into your Obsidian vault's <em>audio notes</em> folder through one narrow tool. It cannot touch the machine, code, or the other brains. If you stop talking to it for a while it just idles.</p>
-</div>
-<div class="facts"><span class="k">needs</span><span>the body (it answers through the Eye), the vault folder</span>
-<span class="k">if it stops</span><span>"talk to notes" has nobody on the other end; notes already filed are plain files, untouched</span>
-<span class="k">stop / start</span><span><code>systemctl --user stop notes-brain</code> &middot; <code>&hellip; start &hellip;</code> then <code>eye brains</code> to see it connect</span></div></div>
-
-<div class="thing"><h3><span class="n"><em>12</em>ydotoold, the fake keyboard and mouse</span><code>ydotoold.service (system)</code><code>ydotool.service (user)</code><span class="v">keep</span></h3>
+<div class="thing"><h3><span class="n"><em>10</em>ydotoold, the fake keyboard and mouse</span><code>ydotoold.service (system)</code><code>ydotool.service (user)</code><span class="v">keep</span></h3>
 <div class="body">
 <p>When an agent clicks or types on your real desktop (<code>pc click</code>, <code>pc type</code>, <code>pc key</code>), this is the hand that does it: a small daemon that injects input events as if from a device. Two copies run, one system-wide and one in your session. The system one owns the socket the <code>pc</code> tools use and is the one the sentinel repairs. <span class="unsure">The user one looks redundant; I have not proven that nothing uses it, so it stays.</span></p>
 </div>
@@ -186,7 +170,7 @@
 <span class="k">if it stops</span><span>every desktop action by an agent fails; reading the screen (<code>pc see</code>) still works</span>
 <span class="k">stop / start</span><span><code>sudo systemctl restart ydotoold</code> (the sentinel does this by itself)</span></div></div>
 
-<div class="thing"><h3><span class="n"><em>13</em>The orbit hooks</span><code>SubagentStart / SubagentStop</code><span class="v stop">stoppable</span></h3>
+<div class="thing"><h3><span class="n"><em>11</em>The orbit hooks</span><code>SubagentStart / SubagentStop</code><span class="v stop">stoppable</span></h3>
 <div class="body">
 <p>Not a service: two hooks in the Claude settings that run <code>orbit-hook start|stop</code> when a session spawns or ends a sub-agent. That is what lights an orbiter around the eye per working agent and puts it out when it is done. Pure decoration for you; removing the hooks costs nothing but the view.</p>
 </div>
@@ -198,7 +182,7 @@
 <h2>The agent fleet</h2>
 <p class="why">Agents that wake on a systemd user timer, do one bounded job, write a 5-line <code>REPORT.md</code> in their own folder under <code>~/agents/</code>, and go back to sleep. Most of the work is bash; Claude is only called when bash cannot decide. Kill switch for all of them: <code>agents-stop</code>; back on: <code>agents-start</code>.</p>
 
-<div class="thing"><h3><span class="n"><em>14</em>sentinel-check, every 15 minutes</span><code>sentinel-check.timer</code><span class="v">keep</span></h3>
+<div class="thing"><h3><span class="n"><em>12</em>sentinel-check, every 15 minutes</span><code>sentinel-check.timer</code><span class="v">keep</span></h3>
 <div class="body">
 <p>The machine's immune system, and it is only a bash script. Every 15 minutes it reads <code>pc status</code>, and for a short list of known faults it applies the known fix: docker down, ydotoold down, Tailscale down, a Moodle stack down, the orchestrator session gone. It also kills runaway processes. Only if a fix fails does it call the <b>sentinel</b> agent (Claude) with the incident, and only if that fails do you get a push. Last run at 13:35 today, all clear. This is why things you never touch keep coming back after a hiccup.</p>
 </div>
@@ -206,28 +190,28 @@
 <span class="k">if it stops</span><span>nothing repairs itself any more; a docker or Tailscale wobble stays broken until you notice</span>
 <span class="k">stop / start</span><span><code>systemctl --user stop sentinel-check.timer</code> &middot; <code>&hellip; start &hellip;</code> &middot; the Claude fallback <code>agent@sentinel.timer</code> is disabled on purpose</span></div></div>
 
-<div class="thing"><h3><span class="n"><em>15</em>sentinel-digest, 08:00</span><code>agent@sentinel-digest.timer</code><span class="v stop">stoppable</span></h3>
+<div class="thing"><h3><span class="n"><em>13</em>sentinel-digest, 08:00</span><code>agent@sentinel-digest.timer</code><span class="v stop">stoppable</span></h3>
 <div class="body">
 <p>Reads the last 24 hours (incidents, agent runs, disk, SMART, battery health against yesterday) and sends you one push a day. Read-only. It is the morning line on your phone; if you stop it you just stop getting that line.</p>
 </div>
 <div class="facts"><span class="k">if it stops</span><span>no morning digest; nothing else changes</span>
 <span class="k">stop / start</span><span><code>agent-disable sentinel-digest</code> &middot; <code>agent-enable sentinel-digest</code></span></div></div>
 
-<div class="thing"><h3><span class="n"><em>16</em>maintenance, Sunday 04:00</span><code>agent@maintenance.timer</code><span class="v stop">stoppable</span></h3>
+<div class="thing"><h3><span class="n"><em>14</em>maintenance, Sunday 04:00</span><code>agent@maintenance.timer</code><span class="v stop">stoppable</span></h3>
 <div class="body">
 <p>Runs <code>maintenance-run</code>: apt upgrade with docker packages held back, autoremove, a check of what needs restarting, a docker prune. It never reboots (your rule); when a reboot is pending it pushes and leaves it to you. Ubuntu's own unattended-upgrades also runs underneath, so stopping this only slows the non-security updates.</p>
 </div>
 <div class="facts"><span class="k">if it stops</span><span>updates arrive slower; security patches still come from unattended-upgrades</span>
 <span class="k">stop / start</span><span><code>agent-disable maintenance</code> &middot; <code>agent-enable maintenance</code></span></div></div>
 
-<div class="thing"><h3><span class="n"><em>17</em>toolsmith, Monday and Thursday 03:00</span><code>agent@toolsmith.timer</code><span class="v stop">stoppable</span></h3>
+<div class="thing"><h3><span class="n"><em>15</em>toolsmith, Monday and Thursday 03:00</span><code>agent@toolsmith.timer</code><span class="v stop">stoppable</span></h3>
 <div class="body">
 <p>Reads the benchmark rows, the audit log and outside research and writes ranked one-page proposals for what the agents' toolbox should get next, in <code>~/agents/toolsmith/</code>. Plans only; it never implements. One push a week, Monday, with the top three. If you are not reading the proposals, this is the first agent to switch off.</p>
 </div>
 <div class="facts"><span class="k">if it stops</span><span>no new proposals; nothing depends on them</span>
 <span class="k">stop / start</span><span><code>agent-disable toolsmith</code> &middot; <code>agent-enable toolsmith</code></span></div></div>
 
-<div class="thing"><h3><span class="n"><em>18</em>pcbench-weekly, Sunday 02:00</span><code>pcbench-weekly.timer</code><span class="v stop">stoppable</span></h3>
+<div class="thing"><h3><span class="n"><em>16</em>pcbench-weekly, Sunday 02:00</span><code>pcbench-weekly.timer</code><span class="v stop">stoppable</span></h3>
 <div class="body">
 <p>The A/B benchmark that measures whether the <code>pc</code> toolbox actually makes agents faster: both arms, all tiers, three runs each, then a report against the baseline. It refuses to start while you are at the machine (it drives the desktop) and pushes only after three skips in a row. It exists to keep "the agents got better" an honest claim. It costs a few hours of the machine's Sunday night and nothing of yours.</p>
 </div>
@@ -235,20 +219,20 @@
 <span class="k">if it stops</span><span>the baseline stops moving; no report until you run it by hand</span>
 <span class="k">stop / start</span><span><code>systemctl --user disable --now pcbench-weekly.timer</code> &middot; dry run: <code>pcbench-weekly --dry-run</code></span></div></div>
 
-<div class="thing"><h3><span class="n"><em>19</em>hello, the template</span><code>agent@hello (disabled)</code><span class="v del">disposable</span></h3>
+<div class="thing"><h3><span class="n"><em>17</em>hello, the template</span><code>agent@hello (disabled)</code><span class="v del">disposable</span></h3>
 <div class="body">
 <p>A three-line test agent used once to prove the runner works: print the date, write a report, send a push. Disabled, dated 2027. Kept as the copy-me template for new agents; deleting the folder loses only that convenience.</p>
 </div>
 <div class="facts"><span class="k">if it goes</span><span>nothing</span></div></div>
 
-<div class="thing"><h3><span class="n"><em>20</em>claude-orchestrator, the unused unit</span><code>claude-orchestrator.service (disabled)</code><span class="v del">disposable</span></h3>
+<div class="thing"><h3><span class="n"><em>18</em>claude-orchestrator, the unused unit</span><code>claude-orchestrator.service (disabled)</code><span class="v del">disposable</span></h3>
 <div class="body">
 <p>A unit file that would start the main orchestrator session in a tmux session called <b>claude</b> with Remote Control. It is disabled, and right now that tmux session does not exist at all (<code>pc status</code> says <em>tmux=down, orch=off</em>): the session you are talking to was started from a terminal window by hand. The cleanup survey already marked this file "remove if he starts it by hand". <span class="unsure">Keep it only if you want a one-command way to bring the orchestrator back after a reboot.</span></p>
 </div>
 <div class="facts"><span class="k">if it goes</span><span>nothing today; the sentinel's "orchestrator down" fix would have one less route</span>
 <span class="k">use it</span><span><code>systemctl --user start claude-orchestrator</code></span></div></div>
 
-<div class="thing"><h3><span class="n"><em>21</em>notify-owner, the push channel</span><code>ntfy</code><span class="v">keep</span></h3>
+<div class="thing"><h3><span class="n"><em>19</em>notify-owner, the push channel</span><code>ntfy</code><span class="v">keep</span></h3>
 <div class="body">
 <p>Not a service either, but every agent ends here: <code>notify-owner "…"</code> posts to your ntfy topic and your phone buzzes. Rules: only for an unresolved failure, a decision only you can take, or a scheduled digest; under 200 characters; never a secret. The topic name lives in the config file, not on this page.</p>
 </div>
@@ -260,39 +244,39 @@
 <h2>What you read on the phone</h2>
 <p class="why">The pages you actually open. All of them are reachable from the phone through the tailnet name; the wifi can reach the ones the firewall lists.</p>
 
-<div class="thing"><h3><span class="n"><em>22</em>The dashboard</span><code>19998</code><code>https 8498</code><code>agents-dashboard.service</code><span class="v">keep</span></h3>
+<div class="thing"><h3><span class="n"><em>20</em>The dashboard</span><code>19998</code><code>https 8498</code><code>agents-dashboard.service</code><span class="v">keep</span></h3>
 <div class="body">
-<p>This panel: one python file (<code>~/agents/dashboard/server.py</code>) that every 30 seconds asks <code>pc status</code>, docker, systemd, the agents' logs and netdata, and serves the result as the screens you know. It also serves the plan pages, the notes vault, the drop folder browser, the voice trainer and this map. It restarts itself if it crashes. It reads; it never changes anything on the machine.</p>
+<p>This panel: one python file (<code>~/agents/dashboard/server.py</code>) that every 30 seconds asks <code>pc status</code>, docker, systemd, the agents' logs and netdata, and serves the result as the screens you know. It also serves the plan pages, the drop folder browser, the voice trainer and this map. It restarts itself if it crashes. It reads; it never changes anything on the machine.</p>
 </div>
 <div class="facts"><span class="k">needs</span><span>netdata for the sparklines (optional), tailscaled for the https address</span>
 <span class="k">if it stops</span><span>this page and every screen go away; nothing on the machine notices</span>
 <span class="k">stop / start</span><span><code>systemctl --user restart agents-dashboard</code></span></div></div>
 
-<div class="thing"><h3><span class="n"><em>23</em>The drop folder</span><code>8070</code><code>drop.service</code><span class="v">keep</span></h3>
+<div class="thing"><h3><span class="n"><em>21</em>The drop folder</span><code>8070</code><code>drop.service</code><span class="v">keep</span></h3>
 <div class="body">
-<p>When you ask for a file, it is hard-linked into <code>~/drop</code> and this serves it as a forced download, so you can pull it from the phone. It is Caddy locked inside a bubblewrap sandbox that can see <em>only</em> that folder, read-only, listening on the LAN address, the tailnet address and the loopback. No login: the firewall is the lock. Seven files there right now, the demo video among them.</p>
+<p>When you ask for a file, it is hard-linked into <code>~/drop</code> and this serves it as a forced download, so you can pull it from the phone. It is Caddy locked inside a bubblewrap sandbox that can see <em>only</em> that folder, read-only, listening on the LAN address, the tailnet address and the loopback. No login: the firewall is the lock. Seven files there right now.</p>
 </div>
 <div class="facts"><span class="k">needs</span><span>tailscaled up before it starts (it binds the tailnet address)</span>
 <span class="k">if it stops</span><span>you cannot pull files from the phone; the files themselves stay put</span>
 <span class="k">stop / start</span><span><code>systemctl --user restart drop</code></span></div></div>
 
-<div class="thing"><h3><span class="n"><em>24</em>Portfolio preview</span><code>8071</code><code>no unit</code><span class="v del">disposable</span></h3>
+<div class="thing"><h3><span class="n"><em>22</em>Portfolio preview</span><code>8071</code><code>no unit</code><span class="v del">disposable</span></h3>
 <div class="body">
 <p>A plain <code>python3 -m http.server</code> started by hand from a terminal on 21 September to show you the portfolio build. There is no unit behind it: it dies when that terminal or the session goes, and nothing restarts it. The cleanup survey already noted its copy is older than the repo's real build. The firewall has a wifi rule for it that can go at the same time.</p>
 </div>
 <div class="facts"><span class="k">if it goes</span><span>nothing; the real site is in your repo</span>
 <span class="k">stop</span><span><code>fuser -k 8071/tcp</code> then <code>sudo ufw delete allow 8071/tcp</code></span></div></div>
 
-<div class="thing"><h3><span class="n"><em>25</em>Netdata</span><code>19999</code><code>https 8499</code><code>system service</code><span class="v stop">stoppable</span></h3>
+<div class="thing"><h3><span class="n"><em>23</em>Netdata</span><code>19999</code><code>https 8499</code><code>system service</code><span class="v stop">stoppable</span></h3>
 <div class="body">
 <p>Per-second graphs of the whole machine: CPU, memory, disk, network, docker, temperatures, with a year of history. The dashboard's little sparklines and the gauges in its head are read from it. Critical alarms push to your phone through a small system timer (<code>netdata-alert-drain</code>). No cloud account; it is all local. Port 8125 on the loopback is its statsd intake, unused.</p>
 </div>
 <div class="facts"><span class="k">if it stops</span><span>the dashboard's sparklines go blank and its head loses the live gauges; no alarms; nothing else</span>
 <span class="k">stop / start</span><span><code>sudo systemctl stop netdata</code> &middot; <code>&hellip; start &hellip;</code></span></div></div>
 
-<div class="thing"><h3><span class="n"><em>26</em>The Eye page and MailHog, again</span><code>https 8644</code><code>8025</code><span class="v">keep</span></h3>
+<div class="thing"><h3><span class="n"><em>24</em>The Eye page and MailHog, again</span><code>https 8644</code><code>8025</code><span class="v">keep</span></h3>
 <div class="body">
-<p>Listed above under their owners: the phone page is the body (09) published by Tailscale, and MailHog's inbox (03) is the one Moodle page you open that is not Moodle. Neither has its own process to stop.</p>
+<p>Listed above under their owners: the phone page is the body (08) published by Tailscale, and MailHog's inbox (03) is the one Moodle page you open that is not Moodle. Neither has its own process to stop.</p>
 </div></div>
 </section>
 
@@ -301,83 +285,82 @@
 <h2>The plumbing underneath</h2>
 <p class="why">Things that are not for you directly but everything above stands on. Most are stock Ubuntu; four of them are the reason your phone can reach the laptop at all.</p>
 
-<div class="thing"><h3><span class="n"><em>27</em>tailscaled, the door</span><code>system service</code><code>serve ×5</code><span class="v">keep</span></h3>
+<div class="thing"><h3><span class="n"><em>25</em>tailscaled, the door</span><code>system service</code><code>serve ×5</code><span class="v">keep</span></h3>
 <div class="body">
 <p>Puts this laptop on your private network under its host name with a fixed address, wherever it is and whatever wifi it is on. Four <code>tailscale serve</code> entries give the important pages real https addresses (8452 dev site, 8498 dashboard, 8499 netdata, 8644 the Eye), each bound to the tailnet address only and forwarded to the plain port on the loopback. The four high ports you see it listening on are its own machinery. Tailscale SSH rides on it too. Agents are forbidden from stopping it, because it is your way in.</p>
 </div>
 <div class="facts"><span class="k">if it stops</span><span>from outside the house: nothing reachable, including SSH. On the wifi: the firewall's short list still works</span>
 <span class="k">state</span><span><code>tailscale status</code> &middot; <code>tailscale serve status</code> &middot; repair: <code>sudo tailscale up</code> (the sentinel does this)</span></div></div>
 
-<div class="thing"><h3><span class="n"><em>28</em>ufw, the firewall</span><code>system</code><span class="v">keep</span></h3>
+<div class="thing"><h3><span class="n"><em>26</em>ufw, the firewall</span><code>system</code><span class="v">keep</span></h3>
 <div class="body">
 <p>Default deny from anywhere. Everything is allowed from the tailnet. From the home wifi only nine ports: SSH 22, Selenium 4444, MailHog 8025, Moodle 5.2 8052, the dashboard 19998, netdata 19999, the drop 8070, the portfolio preview 8071, and 8452 (a leftover: that port only exists on the tailnet address anyway). Docker normally punches holes past ufw; here the same list is repeated in docker's chain, so it does not. The database, the proxy, and the Selenium VNC ports are tailnet-only.</p>
 </div>
 <div class="facts"><span class="k">if it stops</span><span>every published port becomes reachable by anyone on your wifi; the internet still sees nothing behind the home router</span>
 <span class="k">read</span><span><code>sudo ufw status</code> &middot; the lockout runbook lives in <code>~/agents/KB/runbooks/</code></span></div></div>
 
-<div class="thing"><h3><span class="n"><em>29</em>sshd</span><code>22</code><span class="v">keep</span></h3>
+<div class="thing"><h3><span class="n"><em>27</em>sshd</span><code>22</code><span class="v">keep</span></h3>
 <div class="body">
 <p>Public-key login only, from the tailnet and the wifi. The sessions you open from the phone's terminal app land here. Agents may not edit its config.</p>
 </div>
 <div class="facts"><span class="k">if it stops</span><span>no terminal from another device; the Eye and the dashboard still work</span></div></div>
 
-<div class="thing"><h3><span class="n"><em>30</em>docker and containerd</span><code>system services</code><code>7 containers, 3 stacks</code><span class="v">keep</span></h3>
+<div class="thing"><h3><span class="n"><em>28</em>docker and containerd</span><code>system services</code><code>7 containers, 3 stacks</code><span class="v">keep</span></h3>
 <div class="body">
 <p>The engine under the Moodle site and the shared toolbox. Two compose projects: <b>moodle52</b> and <b>moodle-shared</b>, both on restart-unless-stopped, so a reboot brings all five containers back without anyone doing anything. Five images, one named volume (the database), all in use; there is nothing to prune. The maintenance agent holds docker's apt packages back so an upgrade never surprises the sites.</p>
 </div>
 <div class="facts"><span class="k">if it stops</span><span>every Moodle thing at once; the sentinel restarts it within 15 minutes</span>
 <span class="k">read</span><span><code>pc docker</code> &middot; <code>docker ps</code></span></div></div>
 
-<div class="thing"><h3><span class="n"><em>31</em>cron, chrony, unattended-upgrades, resolved</span><code>system</code><span class="v">keep</span></h3>
+<div class="thing"><h3><span class="n"><em>29</em>cron, chrony, unattended-upgrades, resolved</span><code>system</code><span class="v">keep</span></h3>
 <div class="body">
 <p>Stock Ubuntu. <b>cron</b> runs system jobs and is one of the seven services the sentinel watches. <b>chrony</b> keeps the clock right, which TLS and Tailscale need. <b>unattended-upgrades</b> installs security updates by itself. <b>systemd-resolved</b> is the DNS resolver on the loopback (port 53). None of these is yours to think about.</p>
 </div></div>
 
-<div class="thing"><h3><span class="n"><em>32</em>Ubuntu's own timers</span><code>17 system timers</code><span class="v stop">stoppable</span></h3>
+<div class="thing"><h3><span class="n"><em>30</em>Ubuntu's own timers</span><code>17 system timers</code><span class="v stop">stoppable</span></h3>
 <div class="body">
 <p>apt-daily and apt-daily-upgrade (package lists and security updates), fstrim (tells the SSD which blocks are free, weekly), logrotate, man-db, e2scrub, systemd-tmpfiles-clean, dpkg-db-backup, fwupd-refresh (firmware catalogue), motd-news, phpsessionclean (harmless leftover from a host PHP), and <b>etckeeper</b>, which commits every change under <code>/etc</code> to a git history daily, so a config change is always diffable. Plus netdata's alert drain. All stock; none needs a decision.</p>
 </div></div>
 
-<div class="thing"><h3><span class="n"><em>33</em>cups, printing</span><code>631 loopback</code><span class="v stop">stoppable</span></h3>
+<div class="thing"><h3><span class="n"><em>31</em>cups, printing</span><code>631 loopback</code><span class="v stop">stoppable</span></h3>
 <div class="body">
 <p>GNOME's print service, listening on the loopback only. There is no printer configured that I could see. Disabling it saves a process and nothing else.</p>
 </div>
 <div class="facts"><span class="k">stop</span><span><code>sudo systemctl disable --now cups cups-browsed</code></span></div></div>
 
-<div class="thing"><h3><span class="n"><em>34</em>The GNOME session</span><code>46 user units</code><span class="v">keep</span></h3>
+<div class="thing"><h3><span class="n"><em>32</em>The GNOME session</span><code>46 user units</code><span class="v">keep</span></h3>
 <div class="body">
 <p>gnome-shell, PipeWire and WirePlumber (audio: the TV and the earbuds), the settings daemons, portals, gvfs, the keyring, IBus, at-spi (the accessibility bus that <code>pc see</code> and <code>pc tree</code> read the screen through). The Services screen folds them away because there is nothing to decide: they are the desktop, and the Eye draws on it.</p>
 </div></div>
 
-<div class="thing"><h3><span class="n"><em>35</em>mpris-proxy</span><code>mpris-proxy.service</code><span class="v del">disposable</span></h3>
+<div class="thing"><h3><span class="n"><em>33</em>mpris-proxy</span><code>mpris-proxy.service</code><span class="v">keep</span></h3>
 <div class="body">
-<p>Would forward Bluetooth media keys to desktop players. Enabled but not running, and the earbud sidecar (10) grabs those keys itself, so this unit has nothing to do. The cleanup survey listed it as masked; it is not masked any more, just dead. <span class="unsure">Safe to remove as far as I can tell; I have not tested what happens to bud media keys with it gone.</span></p>
-</div>
-<div class="facts"><span class="k">remove</span><span><code>systemctl --user disable mpris-proxy</code></span></div></div>
+<p>Forwards Bluetooth media keys to desktop players. Left as Ubuntu ships it.</p>
+</div></div>
 
-<div class="thing"><h3><span class="n"><em>36</em>A scratch copy of the panel</span><code>19977 loopback</code><code>no unit</code><span class="v del">disposable</span></h3>
+<div class="thing"><h3><span class="n"><em>34</em>A scratch copy of the panel</span><code>19977 loopback</code><code>no unit</code><span class="v del">disposable</span></h3>
 <div class="body">
 <p>A second copy of this dashboard's front page, served on the loopback from an agent's scratch folder, about half an hour old at the time of writing. Some agent is testing a panel change against it. It cannot be reached from any other device and it disappears with that session. Nothing depends on it.</p>
 </div></div>
 
-<div class="thing"><h3><span class="n"><em>37</em>The agent runner and the pc toolbox</span><code>~/agents/bin</code><span class="v">keep</span></h3>
+<div class="thing"><h3><span class="n"><em>35</em>The agent runner and the pc toolbox</span><code>~/agents/bin</code><span class="v">keep</span></h3>
 <div class="body">
 <p>Not processes, but the ground every agent walks on: <code>agent-run</code> and <code>agent@.service</code> (the one template every scheduled agent is an instance of), <code>pc</code> and its 60 sub-commands (the machine's senses and hands), <code>harness</code>, the audit log every tool call is written to (<code>~/agents/log/actions.jsonl</code>, read with <code>agents-log</code>), and the contract in <code>~/agents/AGENTS.md</code> that every agent reads first.</p>
 </div></div>
 
-<div class="thing"><h3><span class="n"><em>38</em>The Moodle harness</span><code>~/moodle-harness &rarr; ~/.claude</code><span class="v">keep</span></h3>
+<div class="thing"><h3><span class="n"><em>36</em>The Moodle harness</span><code>~/moodle-harness &rarr; ~/.claude</code><span class="v">keep</span></h3>
 <div class="body">
 <p>Your Moodle coding rules, the <code>/moodle-ci</code> runner, the offline copy of the developer docs, and the session hooks that load them when a Moodle project is opened. It is a repo you edit live in <code>~/.claude</code> and sync back. Nothing runs from it on a timer; it shapes every coding agent's behaviour.</p>
 </div></div>
 
-<div class="thing"><h3><span class="n"><em>39</em>Backups on disk</span><code>~/agents/backups</code><span class="v">keep</span></h3>
+<div class="thing"><h3><span class="n"><em>37</em>Backups on disk</span><code>~/agents/backups</code><span class="v">keep</span></h3>
 <div class="body">
 <p>The nightly Moodle dumps (07), plus config tarballs from the early days of the harness. 16 MB in total. This folder is on the "never delete" list for agents. There is no copy of it anywhere else.</p>
 </div></div>
 
-<div class="thing"><h3><span class="n"><em>40</em>The orchestrator session</span><code>a terminal window</code><span class="v">keep</span></h3>
+<div class="thing"><h3><span class="n"><em>38</em>The orchestrator session</span><code>a terminal window</code><span class="v">keep</span></h3>
 <div class="body">
-<p>The Claude session you talk to, which spawns the one-off agents (this page was written by one). It is not a service: it lives in a terminal on the desktop, not in the tmux session the unit (21) would create. Two Claude sessions exist right now: this one and the notes brain. When you close the terminal it is gone, and the fleet keeps running without it.</p>
+<p>The Claude session you talk to, which spawns the one-off agents (this page was written by one). It is not a service: it lives in a terminal on the desktop, not in the tmux session the unit (18) would create. When you close the terminal it is gone, and the fleet keeps running without it.</p>
 </div></div>
 </section>
 
@@ -389,7 +372,6 @@
   <div class="list"><h4 class="del">delete tomorrow, lose nothing</h4><ol>
     <li><b>Portfolio preview</b> on 8071 and its firewall rule: a hand-started server older than your repo's build.</li>
     <li><b>claude-orchestrator.service</b>: disabled unit for a tmux session you do not use.</li>
-    <li><b>mpris-proxy.service</b>: enabled, dead, the earbud sidecar owns those keys.</li>
     <li><b>Selenium ports 5900 and 7900</b> in the shared compose file: mapped to nothing inside the image.</li>
     <li><b>hello</b> agent folder: the runner template, disabled.</li>
   </ol></div>

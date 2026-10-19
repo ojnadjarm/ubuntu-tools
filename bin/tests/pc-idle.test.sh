@@ -46,11 +46,39 @@ is 'the browser is not fleet' \
 # the fixture's firefox (156 MB) is not one of them.
 is 'browser trees in other_rss_mb' "$(jq '.other_rss_mb' <<<"$J")" 150
 
+# 4c. other_top: the largest browser tree by cgroup leaf, from a fake /proc under mktemp -d (TSP-039).
+FX2="$WORK/fix"; cp -r "$FIX" "$FX2"
+case "$FX2/proc" in "$WORK"/*) ok 'selftest: the fake /proc is under mktemp -d';; *) nok 'selftest: fake /proc' "$FX2/proc";; esac
+now=$(date +%s); clk=$(getconf CLK_TCK)
+printf 'cpu 0 0 0 0\nbtime %s\n' "$((now - 1000))" >"$FX2/proc/stat"
+mkp() {   # mkp <pid> <comm> <start s after boot> <cgroup leaf>
+  printf '%s\n' "$2" >"$FX2/proc/$1/comm"
+  printf '%s (%s) S 1 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 %s 0 0\n' "$1" "$2" "$(($3 * clk))" >"$FX2/proc/$1/stat"
+  printf '0::/user.slice/user-%s.slice/user@%s.service/app.slice/%s\n' "$UID" "$UID" "$4" >"$FX2/proc/$1/cgroup"
+}
+mkdir -p "$FX2/proc/4004"
+printf '/opt/chromium/headless_shell\0--headless=new\0' >"$FX2/proc/4004/cmdline"
+printf '40960 20480 100 10 0 500 0\n' >"$FX2/proc/4004/statm"
+mkp 4001 node 600 tmux-spawn-aaa.scope
+mkp 4002 headless_shell 0 ailearning-ci-daily.service
+mkp 4004 headless_shell 500 ailearning-ci-daily.service
+J2=$(PC_FIXTURE="$FX2" PC_STUB_STATE="$WORK/n" PC_IDLE_INTERVAL=1 XDG_RUNTIME_DIR="$WORK" PC_LEDGER="$WORK/l.jsonl" \
+  "$BIN/pc-idle" --seconds 1 --json)
+is 'other_rss_mb sums all three browser processes' "$(jq '.other_rss_mb' <<<"$J2")" 230
+case "$(jq -r '.other_top' <<<"$J2")" in
+  ailearning-ci-daily.service:chrome-headless:99[89]:130|ailearning-ci-daily.service:chrome-headless:100[01]:130) ok 'other_top names the larger cgroup, its family, oldest age and MB';;
+  *) nok 'other_top names the larger cgroup' "$(jq -r '.other_top' <<<"$J2")";;
+esac
+FX3="$WORK/fix3"; cp -r "$FIX" "$FX3"; rm -rf "$FX3/proc/"*
+is 'no browser tree: other_top is -' "$(PC_FIXTURE="$FX3" PC_STUB_STATE="$WORK/n" PC_IDLE_INTERVAL=1 XDG_RUNTIME_DIR="$WORK" \
+  PC_LEDGER="$WORK/l.jsonl" "$BIN/pc-idle" --seconds 1 --json | jq -r '[.other_rss_mb,.other_top]|@tsv')" "$(printf '0\t-')"
+
 # 5. --tsv: the row pcbench-weekly appends, matching BASELINE-IDLE.tsv's header.
 R=$(fx --seconds 3 --tsv)
 is 'one tsv row'     "$(wc -l <<<"$R")" 1
-is 'eleven columns'  "$(awk -F'\t' '{print NF}' <<<"$R")" 11
-is 'tsv ends with the top waker unit' "$(awk -F'\t' '{print $NF}' <<<"$R")" agent@x.service
+is 'twelve columns'  "$(awk -F'\t' '{print NF}' <<<"$R")" 12
+is 'tsv top waker unit in column 11' "$(cut -f11 <<<"$R")" agent@x.service
+is 'tsv ends with other_top' "$(awk -F'\t' '{print $NF}' <<<"$R")" "$(jq -r .other_top <<<"$J")"
 is 'tsv other_rss_mb' "$(cut -f10 <<<"$R")" 150
 is 'columns match the baseline header' \
   "$(awk -F'\t' '{print NF}' <<<"$R")" \

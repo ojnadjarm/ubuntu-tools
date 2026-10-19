@@ -5,7 +5,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REAL="$HERE/../../toolsmith"
 FIX="$HERE/fixtures/toolsmith-proposals"
-STATUSES='^(proposed|go|building|measuring|done|no-effect|regressed|dropped|blocked)$'
+STATUSES='^(proposed|go|hold|building|measuring|done|no-effect|regressed|dropped|blocked)$'
 
 lint_root() { # lint_root <dir> <backlog> — prints one error per line, returns the error count
   local dir="$1" backlog="$2" errs=0 f id sc sess cls
@@ -14,10 +14,10 @@ lint_root() { # lint_root <dir> <backlog> — prints one error per line, returns
     for s in Problem Evidence Survey "Proposed change" "Success check" Effort Class; do
       grep -q "^## $s\$" "$f" || { echo "$f: missing section '$s'"; errs=$((errs+1)); }
     done
-    # money: `$1` inside a code span is shell, not an amount — strip code spans for the $ test
+    # money: `$1` or `budget` inside a code span is code, not an amount — strip code spans for both tests
     { sed 's/`[^`]*`//g' "$f" | grep -qiE '\$[0-9]|[0-9]\$'; } \
       && { echo "$f: money figure"; errs=$((errs+1)); }
-    grep -qiE '\bcost\b|\bbudget\b' "$f" \
+    { sed 's/`[^`]*`//g' "$f" | grep -qiE '\bcost\b|\bbudget\b'; } \
       && { echo "$f: money word"; errs=$((errs+1)); }
     awk '/^## Evidence/{f=1;next}/^## /{f=0}f' "$f" \
       | grep -qE '`[^`]+:[0-9]+[0-9,-]*`|`[^`]+/[^`]+/[^`]+/[0-9]+`' \
@@ -27,7 +27,7 @@ lint_root() { # lint_root <dir> <backlog> — prints one error per line, returns
       || { echo "$f: Success check missing a before/target number"; errs=$((errs+1)); }
     sess=$(awk '/^## Effort/{f=1;next}/^## /{f=0}f' "$f" | grep -oE 'sessions:[[:space:]]*[^[:space:]]+' | grep -oE '[^[:space:]]+$')
     [[ "$sess" =~ ^[0-9]+$ ]] || { echo "$f: sessions '$sess' not an integer"; errs=$((errs+1)); }
-    cls=$(awk '/^## Class/{f=1;next}/^## /{f=0}f' "$f" | grep -vE '^[[:space:]]*$' | head -1 | xargs)
+    cls=$(awk '/^## Class/{f=1;next}/^## /{f=0}f' "$f" | grep -vE '^[[:space:]]*$' | head -1 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
     [[ "$cls" =~ ^(auto-ok|owner-go)(\ contract-§[0-9]+)?$ ]] || { echo "$f: Class '$cls' invalid"; errs=$((errs+1)); }
   done
   [ -f "$backlog" ] && while IFS='|' read -r _ _ id _ _ status _; do
@@ -54,6 +54,8 @@ if [ "$fix_errs" -gt 0 ]; then
 else
   echo "FAIL fixture should have failed the linter"; bad=1
 fi
+if grep -q "status 'hold' invalid" /tmp/toolsmith-lint-fix.$$; then echo "FAIL fixture: 'hold' (owner veto) must be a valid status"; bad=1
+else echo "ok   fixture: 'hold' accepted"; fi
 rm -f /tmp/toolsmith-lint-fix.$$
 
 [ "$bad" = 0 ] && echo "all toolsmith-proposals cases pass" || echo "FAILURES"

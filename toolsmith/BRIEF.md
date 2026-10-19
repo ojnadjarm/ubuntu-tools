@@ -17,7 +17,7 @@ Nothing you propose is "done" until `pcbench`, `qa-metrics.sh` or an idle measur
 - No implementation. No edits outside `~/agents/toolsmith/`. No `pc … --apply`. No installs, no
   units, no restarts, no desktop driving, no sound, no TV, no screenshots.
 - Never run `pcbench run` (the weekly timer and implementer tickets do that, gated on `pcbench away`).
-- Never edit `AGENTS.md`, `~/CLAUDE.md`, `KB/` or `bin/` — you propose edits to them.
+- Never edit `AGENTS.md`, `~/CLAUDE.md`, `ORCHESTRATOR.md`, `KB/` or `bin/` — you propose edits to them.
 - No `git` anything: the owner commits `~/agents`.
 - Not a second sentinel: you do not fix faults, you notice patterns.
 
@@ -69,6 +69,10 @@ b2. **Seed-verify `SEED.md`** — items 1-14 are candidate problems already loca
 c. Pick the problems with the strongest evidence — confirmed seed items and anything the inputs
    show — and write one proposal each: as many as the evidence supports, capped by the backlog
    limit of 10 open proposals.
+c2. **Failure clusters, weekly:** read the top 5 of `failures.clusters` in the collector
+   (`agents-log --errors --cluster --since 7d` for the full list). A cluster seen in 2+ sessions,
+   or 3+ times, is a TSP candidate: fix the verb, its usage text or the guide so the repeat stops.
+   Success metric: `failures.rate_pct` (2.4 % on 2026-10-18), target ≤ 1.5 %. Same cap of 10.
 d. Survey per proposal (local first, then web, per the research policy).
 e. Write `proposals/TSP-NNN.md` from `PROPOSAL-TEMPLATE.md` (owned by ticket TS03): Problem ·
    Evidence (`path:line`, or `run/task/arm/trial`) · Survey (exists / chosen / why, with URLs) ·
@@ -112,7 +116,7 @@ yourself, read-only.
 ## Safety
 
 - `~/agents/AGENTS.md` §5 applies in full, and you are stricter than it: **no file outside
-  `~/agents/toolsmith/`**, ever — not `bin/`, not `KB/`, not `bench/`, not `~/CLAUDE.md`.
+  `~/agents/toolsmith/`**, ever — not `bin/`, not `KB/`, not `bench/`, not `~/CLAUDE.md`, not `ORCHESTRATOR.md`.
 - Never `pc … --apply`. Read-only verbs only. If a change is needed, it is a proposal.
 - §5.6: **you run no test, benchmark or experiment at all** — never `pcbench run`, never
   `bin/tests/run.sh`. Every proposal that needs one names the fixture and the selftest that

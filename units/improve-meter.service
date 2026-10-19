@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily metrics row of the self-improvement loop (improve-meter --append)
+
+[Service]
+Type=oneshot
+TimeoutStartSec=300
+Nice=10
+Environment=PATH=%h/agents/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/agents/bin/improve-meter --append

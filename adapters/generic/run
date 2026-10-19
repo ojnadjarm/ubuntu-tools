@@ -12,7 +12,10 @@ export PROMPT SYSTEM
 cmd=(bash -c "$HARNESS_AGENT_CMD")
 [ -n "${AGENT_TIMEOUT:-}" ] && cmd=(timeout "$AGENT_TIMEOUT" "${cmd[@]}")
 
-"${cmd[@]}" </dev/null | tee "$RAW_OUT"
-rc=${PIPESTATUS[0]}
+# Background + wait so a SIGTERM from agents-stop reaches the command instead of waiting for it.
+( "${cmd[@]}" </dev/null | tee "$RAW_OUT"; exit "${PIPESTATUS[0]}" ) &
+child=$!
+trap 'pkill -TERM -P "$child"' TERM INT
+until wait "$child"; rc=$?; ! kill -0 "$child" 2>/dev/null; do :; done
 jq -n '{}' >"$META_OUT"
 exit "$rc"

@@ -68,7 +68,7 @@ is 'an undeclared option still exits 2' "$?" 2
 # 9. PT15: the guard covers bare unit names and the D-Bus cases centrally.
 denies() { run "pc_guard $1" >/dev/null 2>&1; [ "$?" = 3 ] && ok "guard denies: $1" || nok "guard denies: $1" "exit $?"; }
 allows() { run "pc_guard $1" >/dev/null 2>&1; [ "$?" = 0 ] && ok "guard allows: $1" || nok "guard allows: $1" "exit $?"; }
-for u in dark-eye ssh ufw tailscaled claude-orchestrator dark-eye-ptt ssh.socket; do
+for u in dark-eye ssh ufw tailscaled claude-orchestrator ssh.socket; do
   denies "systemctl --user restart -- $u"
 done
 denies 'systemctl restart dark-eye.service'
@@ -79,6 +79,15 @@ is 'PC_ORCHESTRATOR=1 lets dark-eye through' \
 is 'pc_unit_why strips the type suffix' "$(run 'pc_unit_why ufw.service')" 'a second access path'
 is 'pc_unit_why is empty for an allowed unit' "$(run 'pc_unit_why moodle-keep-weekly.timer')" ''
 run 'pc_guard_unit tailscaled' >/dev/null 2>&1; is 'pc_guard_unit exits 3' "$?" 3
+# F08: fleet units (docker*, containerd, sentinel*, agent@*) are never stopped, disabled or masked.
+for u in docker.service docker.socket containerd.service sentinel-check.timer agent@sentinel.timer agent@maintenance.service; do
+  for v in stop disable mask; do denies "systemctl --user $v -- $u"; done
+  run "pc_guard_unit $u stop" >/dev/null 2>&1; is "pc_guard_unit refuses stop $u" "$?" 3
+done
+denies 'call org.freedesktop.systemd1 /org/freedesktop/systemd1 StopUnit docker.service replace'
+allows 'systemctl --user restart -- sentinel-check.timer'
+is 'pc_unit_why allows restart of a fleet unit' "$(run 'pc_unit_why agent@hello.service restart')" ''
+allows 'systemctl --user stop -- pt13-test'
 denies 'call org.freedesktop.login1 /org/freedesktop/login1 Manager.HybridSleep true'
 denies 'call org.freedesktop.systemd1 /org/freedesktop/systemd1 StopUnit ssh.service replace'
 denies 'call org.freedesktop.systemd1 /org/freedesktop/systemd1 RestartUnit tailscaled.service replace'

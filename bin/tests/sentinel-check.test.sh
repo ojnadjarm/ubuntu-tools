@@ -19,7 +19,7 @@ CALLS="$WORK/calls.log"
 
 # Shims: everything sentinel-check can reach out to. $HOME/agents/bin is first on the script's
 # own PATH, so these win over the real commands.
-for c in docker systemctl notify-owner agent-run sentinel-runaway sentinel-waits; do
+for c in docker systemctl notify-owner agent-run sentinel-runaway sentinel-waits pc; do
   printf '#!/bin/sh\necho "%s $*" >>"$CALLS"\nexit 0\n' "$c" >"$BIN/$c"
   chmod +x "$BIN/$c"
 done
@@ -91,6 +91,79 @@ while IFS='|' read -r label before after pw settled; do
   } >>"$out"
   rm -f "$ST/sentinel.log" "$ST/incident.json"
 done <"$EVENTS"
+
+# --- T347-10: owner-only faults, the 2 h unit-loop push, the busy lock, the last-run stamp ----
+bad=0
+ok()  { printf 'ok   %s\n' "$1"; }
+nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
+tick() {  # tick <fails_before> [fails_after]: one sentinel run, calls in $CALLS, rc in $rc
+  status_json "$1" >"$TICKDIR/before.json"; status_json "${2-$1}" >"$TICKDIR/after.json"; cp "$TICKDIR/after.json" "$TICKDIR/settled.json"
+  rm -f "$TICKDIR/n" "$TICKDIR/slept" "$ST/last-escalation" "$ST/suppressing"; : >"$CALLS"
+  PW_LEVEL=2 HOME="$WORK" HARNESS_ENV_LOADED=1 HARNESS_HOST=example-host USER=agentuser SENTINEL_STATUS_CMD="$BIN/status-stub" "$SCRIPT"
+  rc=$?
+}
+rm -rf "$ST/tries" "$ST/last-ok" "$ST/last-run"
+OWN='host.reboot_required=11 d,resources.swap=99%,host.failed_units=4,host.netdata_alerts=1 CRITICAL,agents.fleet=dark-eye-old.service inactive'
+tick "$OWN"
+{ [ "$rc" = 0 ] && ! grep -q 'agent-run\|notify-owner' "$CALLS"; } && ok "owner-only faults are never escalated or pushed" || nok "owner-only faults" "rc=$rc $(cat "$CALLS")"
+[ -s "$ST/last-ok" ] && ok "a tick with only owner-only faults is a clean tick (last-ok)" || nok "owner-only tick writes last-ok" "no last-ok"
+[ -s "$ST/last-run" ] && ok "every tick stamps last-run" || nok "last-run stamp" "missing"
+tick "$OWN,network.internet=unreachable"
+grep -q '^agent-run sentinel' "$CALLS" && [ "$(cut -f1 "$ST/last-escalation")" = "network.internet," ] \
+  && ok "a repairable fault next to owner-only ones escalates alone" || nok "mixed escalation" "$(cat "$ST/last-escalation" 2>/dev/null)"
+LOOP='agents.unit_loops=moodle45-cron.service 30 fails/h'
+rm -rf "$ST/tries"; tick "$LOOP"
+{ ! grep -q 'notify-owner' "$CALLS" && ! grep -q agent-run "$CALLS"; } && ok "a fresh unit loop is not pushed yet" || nok "fresh loop push" "$(cat "$CALLS")"
+echo $(( $(date +%s) - 7300 )) >"$ST/tries/agents.unit_loops"
+tick "$LOOP"
+[ "$(grep -c 'notify-owner.*agents.unit_loops' "$CALLS")" = 1 ] && ok "a unit loop failing >= 2 h is pushed once" || nok "2 h loop push" "$(cat "$CALLS")"
+tick "$LOOP"
+grep -q 'notify-owner' "$CALLS" && nok "the loop push is bounded" "$(cat "$CALLS")" || ok "the loop push is bounded (no second push)"
+tick ''
+[ ! -e "$ST/tries/agents.unit_loops" ] && ok "a cleared loop resets its episode" || nok "loop episode reset" "tries file left"
+# T350: pc status FAILs services.ssh only when ssh.service and ssh.socket are both down.
+tick 'services.ssh=inactive'
+grep -q '^agent-run sentinel' "$CALLS" && ok "ssh service + socket down still escalates for repair" || nok "ssh down escalation" "$(cat "$CALLS")"
+tick ''
+grep -q 'agent-run\|notify-owner' "$CALLS" && nok "ssh up via socket is a quiet tick" "$(cat "$CALLS")" || ok "ssh up via socket is a quiet tick"
+# F08: a fault-row glob is not expanded against the cwd (the unit runs in $HOME).
+mkdir -p "$WORK/cwd" && : >"$WORK/cwd/docker.x" && : >"$WORK/cwd/keepalive.x"
+(cd "$WORK/cwd" && tick 'docker.moodle-shared=3/4 up' '')
+grep -q '^docker compose' "$CALLS" && ! grep -q agent-run "$CALLS" \
+  && ok "fault globs ignore files in the cwd" || nok "cwd glob" "$(cat "$CALLS")"
+: >"$ST/sentinel.log"
+exec 8>"$ST/.lock"; flock 8
+tick "$OWN"
+exec 8>&-
+{ [ "$rc" = 0 ] && grep -q 'lock busy' "$ST/sentinel.log"; } && ok "a busy lock is logged, not silent" || nok "busy lock log" "rc=$rc $(cat "$ST/sentinel.log")"
+# TSP-044: a failed transient run-* scope >= 10 min old is reset through pc units; a young one,
+# a non-transient one and a non-run unit are left alone. The systemctl stub answers read-only argv.
+mv "$BIN/systemctl" "$BIN/systemctl.replay"
+cat >"$BIN/systemctl" <<'EOF'
+#!/bin/sh
+echo "systemctl $*" >>"$CALLS"
+now=$(date +%s)
+case "$*" in
+  "--user list-units --state=failed --plain --no-legend")
+    for u in run-old.scope run-young.scope run-static.scope fx.service; do echo "$u loaded failed failed fixture"; done;;
+  "--user show run-old.scope "*)    printf 'Description=[systemd-run] bash -c balloon\nStateChangeTimestamp=@%s\nTransient=yes\n' $((now-1200));;
+  "--user show run-young.scope "*)  printf 'Description=young\nStateChangeTimestamp=@%s\nTransient=yes\n' $((now-60));;
+  "--user show run-static.scope "*) printf 'Description=static\nStateChangeTimestamp=@%s\nTransient=no\n' $((now-1200));;
+esac
+exit 0
+EOF
+chmod +x "$BIN/systemctl"
+: >"$ST/sentinel.log"; tick ''
+[ "$(grep -c '^pc units reset-failed' "$CALLS")" = 1 ] && grep -q '^pc units reset-failed run-old.scope --user --apply$' "$CALLS" \
+  && ok "an old failed transient run-* scope is reset via pc units" || nok "transient reset" "$(grep '^pc ' "$CALLS")"
+grep -q 'reset failed transient run-old.scope .*balloon' "$ST/sentinel.log" \
+  && ok "the reset is one log line with its Description" || nok "transient reset log" "$(cat "$ST/sentinel.log")"
+bad_argv=$(grep '^systemctl' "$CALLS" | grep -v -e '^systemctl --user list-units --state=failed --plain --no-legend$' \
+  -e '^systemctl --user show run-[a-z]*\.scope -p Transient -p Description -p StateChangeTimestamp --timestamp=unix$')
+[ -z "$bad_argv" ] && grep -q '^systemctl --user show run-old' "$CALLS" \
+  && ok "selftest: the systemctl stub saw only read-only argv" || nok "systemctl argv" "${bad_argv:-no show call}"
+mv "$BIN/systemctl.replay" "$BIN/systemctl"
+[ "$bad" = 0 ] || { echo "sentinel-check: FAIL — T347-10 cases" >&2; exit 1; }
 
 if [ -n "$RECORD" ]; then cp "$out" "$RECORD"; echo "recorded $RECORD"; exit 0; fi
 if [ ! -r "$EXPECT" ]; then

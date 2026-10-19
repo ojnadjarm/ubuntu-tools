@@ -9,12 +9,12 @@ from dash.services import sites
 PROJECTS = {
     "vass": {"name": "vass (Moodle 4.5)", "what": "customer Moodle 4.5 site, many custom plugins",
              "folder": "projects/moodle/vass", "repo": "moodle-envs/vass/moodle", "containers": ("moodle45-", "vass-services-"),
-             "port": 8045, "tls": 8445, "mailhog": 8025, "frontend": 8446, "login": "admin / " + os.environ.get("MOODLE_ADMIN_PASSWORD", "<MOODLE_ADMIN_PASSWORD>"),
+             "port": 8045, "tls": 8445, "mailhog": 8025, "frontend": 8446, "login": "admin",
              "db": "localhost:5445 · pgsql 13"},
 }
 HEADING = re.compile(r"^(#+)\s+(.*)$")
 ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(?!\[[xX]\])")
-STATE = re.compile(r"^\s*[-*+]?\s*\**state:?\**:?\s*(.*)$", re.I)
+STATE = re.compile(r"^\s*[-*+]?\s*\**state\**\s*:\s*\**\s*(.*)$", re.I)
 SECTION = re.compile(r"^#{1,2} ")
 H2 = re.compile(r'(<h2 id="[^"]*">(.*?)</h2>)', re.S)
 BACKUPS = 20
@@ -54,6 +54,16 @@ def todo_count(path):
     return n if level is not None else None
 
 
+def fenced(lines):
+    """Per line, True when it sits inside or on a ``` / ~~~ code fence."""
+    out, inside = [], False
+    for line in lines:
+        fence = line.lstrip().startswith(("```", "~~~"))
+        out.append(inside or fence)
+        inside ^= fence
+    return out
+
+
 def open_tickets(path):
     """Tickets ("## " sections) whose state is not just "done"; None when the file is missing."""
     try:
@@ -61,7 +71,9 @@ def open_tickets(path):
     except OSError:
         return None
     states = []
-    for line in lines:
+    for line, code in zip(lines, fenced(lines)):
+        if code:
+            continue
         if line.startswith("## "):
             states.append("")
         elif states and not states[-1] and STATE.match(line):
@@ -71,7 +83,7 @@ def open_tickets(path):
 
 def ticket_sections(lines):
     """(id, start, end, done) per "## " ticket of lines; id is the heading's first word, end the next h1/h2 or EOF."""
-    heads = [i for i, line in enumerate(lines) if SECTION.match(line)] + [len(lines)]
+    heads = [i for i, (line, code) in enumerate(zip(lines, fenced(lines))) if not code and SECTION.match(line)] + [len(lines)]
     out = []
     for i, end in zip(heads, heads[1:]):
         if lines[i].startswith("## "):

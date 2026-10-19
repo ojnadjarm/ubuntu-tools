@@ -53,10 +53,11 @@ case "$out" in *2) ;; esac
 [ -e "$WORK/l.jsonl" ] && nok 'no ledger yet' 'ledger exists' || ok 'no ledger yet'
 
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-  # 7. live: both real Moodle projects, 5 services, in one call.
+  # 7. live: every compose project and service docker reports, in one call.
   L=$(PC_LEDGER="$WORK/l.jsonl" "$BIN/pc-docker" stacks --json)
-  is 'live: two projects' "$(jq 'length' <<<"$L")" 2
-  is 'live: five services' "$(jq '[.[].services[]] | length' <<<"$L")" 5
+  labels=$(docker ps -a --format '{{.Label "com.docker.compose.project"}}' | grep -v '^$')
+  is 'live: every compose project' "$(jq 'length' <<<"$L")" "$(sort -u <<<"$labels" | wc -l)"
+  is 'live: every compose service' "$(jq '[.[].services[]] | length' <<<"$L")" "$(wc -l <<<"$labels")"
 
   # 8. live: health is clean tonight.
   PC_LEDGER="$WORK/l.jsonl" "$BIN/pc-docker" health >/dev/null; is 'live health exit 0' "$?" 0

@@ -29,6 +29,7 @@ Add a watched unit or site: set `KEEPALIVE_UNITS` / `KEEPALIVE_HTTP` (`<project>
 - `pc status` caches docker and keepalive for 60 s; the sentinel's re-check uses `--fresh`, a hand check right after a fix should too.
 - `vass-middleware` orders `After=docker.service`, a system unit the user manager cannot see; at boot it may start before mongo/redis and rely on `Restart=on-failure`.
 - A unit that keeps failing (a broken owner build) gets 3 restarts, then one push; no restart loop.
+- A timer that re-fires a failing oneshot every minute (`moodle45-cron` on "upgrade pending", 2 587 times 10-09 → 10-13) never shows in `pc status`; `pc doctor` row `unit-loops` FAILs at ≥ 10 fails/h and `moodle-keep` prints the owner's `upgrade.php` line (TSP-038).
 
 ## Links
 - Code: `~/agents/bin/pc-status` (keepalive section), `~/agents/bin/sentinel-check` (`bounded`, `fix_keepalive`), `~/agents/dashboard/dash/services/projects.py` (tile lists `moodle45-` and `vass-services-` containers)

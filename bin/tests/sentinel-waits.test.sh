@@ -20,6 +20,72 @@ got = m.owner({1: {"comm": "claude"}, 2: {"ppid": 1}}, 3)
 print(("PASS" if got == (True, "agent wfdone") else "FAIL") + f" workflow agent transcript is the owner (got {got})")
 sys.exit(got != (True, "agent wfdone"))
 PY
+  # owner() with /proc stubbed: a loop forked inside a live tool shell (same snapshot cmdline) belongs to that session.
+  python3 - "$SW" <<'PY' || exit 1
+import importlib.machinery, sys
+m = importlib.machinery.SourceFileLoader("sw5", sys.argv[1]).load_module()
+m.environ = lambda pid, key: ""
+ts = "bash -c source /h/.claude/shell-snapshots/snapshot-bash-1.sh && eval 'until x; do sleep 1; done | cat'"
+procs = {1: {"comm": "claude", "ppid": 0, "cmd": "claude"}, 2: {"comm": "bash", "ppid": 1, "cmd": ts},
+         3: {"comm": "bash", "ppid": 2, "cmd": ts}, 4: {"comm": "sleep", "ppid": 3, "cmd": "sleep 1"}}
+got = m.owner(procs, 3)
+print(("PASS" if got == (False, "session 1") else "FAIL") + f" forked subshell of a live tool shell is not 'session gone' (got {got})")
+sys.exit(got != (False, "session 1"))
+PY
+  # transcript_ended(): a workflow agent whose last line is the StructuredOutput tool_result has handed back.
+  python3 - "$SW" <<'PY' || exit 1
+import importlib.machinery, os, sys, tempfile, time
+m = importlib.machinery.SourceFileLoader("sw4", sys.argv[1]).load_module()
+tx = os.path.join(tempfile.mkdtemp(), "agent-so.jsonl")
+open(tx, "w").write('{"type":"assistant","message":{"content":[{"type":"tool_use","name":"StructuredOutput"}]}}\n'
+  '{"type":"user","message":{"role":"user","content":[{"tool_use_id":"t1","type":"tool_result","content":"Structured output provided successfully"}]},"toolEndsTurn":true}\n')
+os.utime(tx, (time.time() - 300, time.time() - 300))
+got = m.transcript_ended(tx)
+print(("PASS" if got else "FAIL") + f" StructuredOutput tool_result as last line counts as handed back (got {got})")
+sys.exit(not got)
+PY
+  # owner() with /proc stubbed: a subagent whose turn ended (end_turn) while its background wait-for runs is waiting on it, not
+  # ended (T408: two T407 waits killed at 02:34 and 02:49); an unregistered loop keeps the end_turn rule; 3 h idle still ends.
+  python3 - "$SW" <<'PY' || exit 1
+import importlib.machinery, os, sys, tempfile, time
+d = tempfile.mkdtemp(); os.environ["CLAUDE_PROJECTS_DIR"] = d
+m = importlib.machinery.SourceFileLoader("sw6", sys.argv[1]).load_module()
+tx = os.path.join(d, "-proj", "S1", "subagents", "agent-await0000000.jsonl")
+os.makedirs(os.path.dirname(tx))
+open(tx, "w").write('{"type":"user","message":{"content":[{"type":"tool_result","content":"Command running in background with ID: tw1."}]}}\n'
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"Waiting."}],"stop_reason":"end_turn"}}\n')
+m.tool_shell = lambda procs, pid: 2
+m.environ = lambda pid, key: "S1"
+os.readlink = lambda p: "/tmp/claude/-proj/S1/tasks/tw1.output"
+procs = {1: {"comm": "claude"}, 2: {"ppid": 1}}
+bad = 0
+for idle, waiting, want in ((180, True, False), (180, False, True), (2400, True, False), (11000, True, True)):
+    os.utime(tx, (time.time() - idle, time.time() - idle))
+    got = m.owner(procs, 3, waiting=waiting)
+    good = got == (want, "agent await0")
+    bad += not good
+    print(("PASS" if good else "FAIL") + f" end_turn, idle {idle} s, {'registered wait' if waiting else 'unregistered loop'}: ended={want} (got {got})")
+sys.exit(bad)
+PY
+  # transcript_ended(): the SubagentHandback tool *schema* in api-request-shape/attachment records is not a handback (T438:
+  # T429's wait killed at 750 s, 08:22:49); the real assistant tool_use still is.
+  python3 - "$SW" <<'PY' || exit 1
+import importlib.machinery, os, sys, tempfile, time
+m = importlib.machinery.SourceFileLoader("sw7", sys.argv[1]).load_module()
+tx = os.path.join(tempfile.mkdtemp(), "agent-schema.jsonl")
+schema = ('{"type":"api-request-shape","shape":{"tools":[{"name":"SubagentHandback","input_schema":{}}]}}\n'
+  '{"type":"attachment","attachment":{"type":"deferred_tools_record","entries":[{"name":"SubagentHandback"}]}}\n'
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"Waiting."}],"stop_reason":"end_turn"}}\n')
+real = '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t9","name":"SubagentHandback","input":{}}]}}\n'
+bad = 0
+for body, want, what in ((schema, False, "tool schema only"), (schema + real, True, "real SubagentHandback tool_use")):
+    open(tx, "w").write(body)
+    os.utime(tx, (time.time() - 750, time.time() - 750))
+    got = m.transcript_ended(tx, waiting=True)
+    bad += got != want
+    print(("PASS" if got == want else "FAIL") + f" registered wait, idle 750 s, {what}: ended={want} (got {got})")
+sys.exit(bad)
+PY
   # reap() with kill stubbed: a multi-line loop logs as one line, stamped like `date -Is`.
   python3 - "$SW" <<'PY' || exit 1
 import importlib.machinery, os, re, sys, tempfile
@@ -32,6 +98,17 @@ m.reap({9: {"comm": "bash", "ppid": 1, "cmd": "until x;\n  do\n\tsleep 1\ndone"}
 lines = open(os.path.join(m.ST, "sentinel.log")).read().splitlines()
 good = len(lines) == 1 and re.match(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d stuck-wait killed pid 9 \(why\): until x; do sleep 1 done$", lines[0])
 print(("PASS" if good else "FAIL") + f" stuck-wait log is one line with a date -Is stamp (got {lines})")
+sys.exit(not good)
+PY
+  # audit() into a temp HARNESS_HOME: the kill row is filed under agent "sentinel".
+  python3 - "$SW" <<'PY' || exit 1
+import importlib.machinery, json, os, sys, tempfile
+os.environ["HARNESS_HOME"] = tempfile.mkdtemp()
+m = importlib.machinery.SourceFileLoader("sw3", sys.argv[1]).load_module()
+m.audit(9, "why")
+rows = [json.loads(l) for l in open(os.path.join(os.environ["HARNESS_HOME"], "log", "actions.jsonl"))]
+good = len(rows) == 1 and rows[0]["agent"] == "sentinel"
+print(("PASS" if good else "FAIL") + f" audit row is filed under agent sentinel (got {[r['agent'] for r in rows]})")
 sys.exit(not good)
 PY
   exec bwrap --dev-bind / / --unshare-pid --proc /proc --die-with-parent \

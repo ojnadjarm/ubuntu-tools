@@ -1,0 +1,54 @@
+{
+  "id": "D06",
+  "tier": "diagnose",
+  "set": "night",
+  "title": "three buzzes, one cause?",
+  "prompt": "going by the push log in ./work, my phone buzzed three times last night about the same thing - what was it, and was it one problem repeating or three different ones?",
+  "answer_schema": {
+    "type": "object",
+    "required": [
+      "alert",
+      "count",
+      "same_cause",
+      "source",
+      "reason"
+    ],
+    "properties": {
+      "alert": {
+        "type": "string",
+        "description": "what the repeated alert was about"
+      },
+      "count": {
+        "type": "integer",
+        "description": "how many times it actually reached the phone"
+      },
+      "same_cause": {
+        "type": "boolean"
+      },
+      "source": {
+        "type": "string",
+        "description": "which tool sent it"
+      },
+      "unknown": {
+        "type": "boolean"
+      },
+      "reason": {
+        "type": "string",
+        "description": "in the owner's terms"
+      }
+    }
+  },
+  "allowed_side_effects": [],
+  "needs": [],
+  "budget": {
+    "seconds": 480,
+    "usd": 1.5,
+    "screenshots": 0
+  },
+  "oracle_s": 0,
+  "tags": [
+    "duplicate-alert",
+    "notify"
+  ],
+  "note": "Real incident class: duplicate need-you pushes (2026-10-15, 13 stale alarms archived in T349). Default-priority pushes with a changing number are never deduped; dup lines did not buzz. Any push from the trial lands in the arm's sandbox log and fails the task."
+}

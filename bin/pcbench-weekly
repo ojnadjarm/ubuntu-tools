@@ -23,7 +23,7 @@ included), both arms, -n 3, opus. Both arms are rebuilt from the live tree first
 (`pcbench arm build --arm both`), then `pcbench report --baseline` into
 bench/BASELINE-PCBENCH.md and bench/LAST.json.
 
-  --dry-run  print the gate verdict and the command, run nothing
+  --dry-run  print the gate verdict and the command; no run, log, streak or push
   --force    run even if the gate says the owner is present (never used by the timer)
 
 Env: PCBENCH_WEEKLY_N, PCBENCH_WEEKLY_MODEL, PCBENCH_AWAY_IDLE_S,
@@ -39,8 +39,8 @@ for a in "$@"; do case "$a" in
   *) echo "pcbench-weekly: unknown option $a" >&2; exit 2;;
 esac; done
 
-mkdir -p "$STATE" "$(dirname "$LOG")"
 say() { printf '%s %s\n' "$(date -Is)" "$*" | tee -a "$LOG"; }
+if [ "$DRY" = 1 ]; then LOG=/dev/null; else mkdir -p "$STATE" "$(dirname "$LOG")"; fi
 
 # --- the "nobody home" gate ------------------------------------------------
 verdict="$(pcbench away --json 2>/dev/null)"
@@ -49,6 +49,7 @@ present=$(printf '%s' "$verdict" | jq -r 'if has("present") then .present else t
 : "${present:=true}"
 why=$(printf '%s' "$verdict" | jq -r '(.reasons // []) | join("; ")' 2>/dev/null)
 if [ "$present" != false ] && [ "$FORCE" = 0 ]; then
+  [ "$DRY" = 1 ] && { say "would skip: owner present (${why:-unknown})"; exit 0; }
   n=$(( $(cat "$STREAK" 2>/dev/null || echo 0) + 1 ))
   printf '%s\n' "$n" > "$STREAK"
   say "skipped: owner present (${why:-unknown}) — skip $n in a row"

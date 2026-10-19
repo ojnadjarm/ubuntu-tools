@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# ci-window — keep heavy agent runs out of the nightly CI window and let CI wait for a quiet machine (T407).
+set -uo pipefail
+WINDOW="${CI_WINDOW:-00:50-01:50}"
+LOADAVG="${CI_LOADAVG:-/proc/loadavg}"
+BELOW="${CI_QUIET_BELOW:-4}"; CAP="${CI_QUIET_CAP:-1800}"; EVERY="${CI_QUIET_EVERY:-15}"
+NEED="${CI_RUN_NEED:-2700}"   # with CI_DEADLINE (epoch, from ci-autofix): every wait leaves NEED s for the run after it
+
+usage() {
+  cat <<EOF
+usage: ci-window            exit 0 outside the CI window ($WINDOW), 1 inside it: heavy browser/test runs wait (\`ci-window && npm test\`)
+       ci-window --quiet    wait (wait-for, cap ${CAP} s) until the 1-min load is below $BELOW; prints the load; exit 0 quiet, 1 cap reached
+                            with CI_DEADLINE set, the cap shrinks to the shared budget: CI_DEADLINE - now - $NEED s (CI_RUN_NEED)
+EOF
+}
+load1() { awk '{print $1}' "$LOADAVG"; }
+
+case "${1:-}" in
+  -h|--help) usage; exit 0;;
+  --quiet)
+    t0=$(date +%s); why="cap $CAP s"
+    if [ -n "${CI_DEADLINE:-}" ]; then
+      room=$(( CI_DEADLINE - t0 - NEED ))
+      [ "$room" -gt 0 ] || { echo "ci-window: no wait budget left ($(( CI_DEADLINE - t0 )) s to the deadline, a run needs $NEED s); going on"; exit 1; }
+      [ "$room" -lt "$CAP" ] && { CAP=$room; why="cap $CAP s, shared budget: $(( CI_DEADLINE - t0 )) s to the deadline"; }
+    fi
+    timeout "$CAP" "$(dirname "$0")/wait-for" --label "ci-window: 1-min load < $BELOW" --every "$EVERY" \
+      --until "awk -v b=$BELOW '{exit !(\$1 < b)}' '$LOADAVG'" >/dev/null; rc=$?
+    w=$(( $(date +%s) - t0 ))
+    if [ "$rc" -eq 0 ]; then echo "ci-window: 1-min load $(load1) < $BELOW after $w s"; exit 0; fi
+    echo "ci-window: 1-min load $(load1), still ≥ $BELOW after $w s ($why); going on"; exit 1;;
+  "")
+    now="${CI_WINDOW_NOW:-$(date +%H:%M)}"; from="${WINDOW%-*}"; to="${WINDOW#*-}"
+    if [[ ! "$now" < "$from" && "$now" < "$to" ]]; then echo "ci-window: in the CI window $WINDOW; start heavy runs after $to"; exit 1; fi
+    echo "ci-window: clear ($now, window $WINDOW)"; exit 0;;
+  *) usage >&2; exit 2;;
+esac

@@ -15,6 +15,9 @@
 #   pc_root <cmd…>                  pc_timeout ${PC_ROOT_TIMEOUT:-5} sudo -n <cmd…>
 #   pc_cmd <name> [args…]           run $PC_FIXTURE/bin/<name> (recorded stdout) when it exists, else the real binary
 #   cached <name> <ttl> <cmd…>      stdout of cmd, reused while the cache entry is younger than ttl; FRESH=1 bypasses
+#   pc_fleet_enabled                the enabled user units matching PC_FLEET_GLOBS, one per line
+#   pc_fleet_states [--system] <u…> "unit<TAB>active<TAB>sub<TAB>OK|FAIL" per unit (failed, failed oneshot, enabled but down)
+#   pc_unit_loops                   timer-driven user units failing >= 10/h in the last hour; exit 1 when any
 #   pc_guard <cmd-string…>          exit 3 with the FLEET §5 line when the command is on the deny-list
 #   pc_guard_unit <unit>            exit 3 when the unit is guarded, by bare name or with any type suffix
 #   pc_unit_why <unit>              the reason string for a guarded unit, empty when it is allowed
@@ -135,9 +138,49 @@ cached() {
   printf '%s\n' "$data"
 }
 
+## --- fleet unit verdicts (T347-10) -------------------------------------------
+# User units the fleet owns by name (AGENTS.md §5): an enabled one is judged even off a roster.
+PC_FLEET_GLOBS='dark-eye*.service sentinel*.service agent@*.service'
+pc_fleet_enabled() {
+  # shellcheck disable=SC2086  # deliberate: one glob per word
+  pc_cmd systemctl --user list-unit-files --state=enabled --no-legend $PC_FLEET_GLOBS 2>/dev/null | awk '{print $1}'
+}
+# pc_fleet_states [--system] <unit…> — FAIL is a failed unit, a oneshot whose last run failed, or an enabled unit not running.
+pc_fleet_states() {
+  local flag=--user; [ "${1:-}" = --system ] && { flag=; shift; }
+  [ $# -gt 0 ] || return 0
+  pc_cmd systemctl $flag show "$@" -p Id,ActiveState,SubState,Type,Result,UnitFileState 2>/dev/null | awk '
+    function out() {
+      if (id == "") return
+      v = "OK"; a = p["ActiveState"]
+      if (a == "failed") v = "FAIL"
+      else if (p["Type"] == "oneshot") { if (p["Result"] != "" && p["Result"] != "success") v = "FAIL" }
+      else if (p["UnitFileState"] == "enabled" && a !~ /^(active|activating|reloading)$/) v = "FAIL"
+      printf "%s\t%s\t%s\t%s\n", id, a, p["SubState"], v; id = ""; delete p
+    }
+    /^$/ { out(); next }
+    { i = index($0, "="); k = substr($0, 1, i - 1); p[k] = substr($0, i + 1); if (k == "Id") id = p[k] }
+    END { out() }'
+}
+# pc_unit_loops — a timer that re-fires a failing service every tick never stays `failed` (TSP-038):
+# the last hour's unit-failure journal entries per timer-driven user unit, ">= 10" listed.
+pc_unit_loops() {
+  local n svc last bad=
+  declare -A timed
+  for svc in $(pc_cmd systemctl --user list-timers --all -o json 2>/dev/null | jq -r '.[].activates'); do timed[$svc]=1; done
+  while read -r n svc; do
+    [ "$n" -ge 10 ] && [ -n "${timed[$svc]:-}" ] || continue
+    last=$(pc_timeout 2 journalctl --user "_SYSTEMD_USER_UNIT=$svc" --since -1h -n 1 -o cat --no-pager 2>/dev/null)
+    bad="$bad${bad:+ · }$svc $n fails/h${last:+: $last}"
+  done < <(pc_timeout 2 journalctl --user --since -1h MESSAGE_ID=d9b373ed55a64feb8242e02dbe79a49c -o json --no-pager 2>/dev/null |
+           jq -r '.USER_UNIT // .UNIT // empty' | sort | uniq -c)
+  [ -z "$bad" ] && return 0
+  printf '%s\n' "$bad"; return 1
+}
+
 ## --- guard (PLAN-PCTOOLS §1 rule 6 / FLEET §5) ------------------------------
-PC_FLEET_LINE="FLEET §5: monitor config, power state, sshd/ufw/sudoers/tailscaled, the orchestrator tmux session ($ORCHESTRATOR_TMUX_SESSION), dark-eye.service and fan control are not ours to change."
-# pc_unit_why <unit> — the refusal reason for a guarded unit, empty when it is allowed.
+PC_FLEET_LINE="FLEET §5: monitor config, power state, sshd/ufw/sudoers/tailscaled, the orchestrator tmux session ($ORCHESTRATOR_TMUX_SESSION), dark-eye.service, stopping docker/sentinel/agent@ units and fan control are not ours to change."
+# pc_unit_why <unit> [verb] — the refusal reason for a guarded unit, empty when it is allowed.
 # Matched on the bare name, so "ssh", "ssh.service" and "ssh.socket" are all the same unit
 # (pc_guard's command-string patterns only ever saw the spelling the caller happened to use).
 pc_unit_why() {
@@ -146,11 +189,13 @@ pc_unit_why() {
   case $base in
     ssh|sshd|ufw|tailscaled) printf 'a second access path';;
     "$ORCHESTRATOR_UNIT_BASE") printf '%s' "$ORCHESTRATOR_UNIT_BASE";;
-    dark-eye|dark-eye-ptt|dark-eye-failed) [ "${PC_ORCHESTRATOR:-0}" = 1 ] || printf 'dark-eye.service';;
+    dark-eye|dark-eye-failed) [ "${PC_ORCHESTRATOR:-0}" = 1 ] || printf 'dark-eye.service';;
+    docker|docker.*|containerd|sentinel*|agent@*)
+      case ${2:-} in stop|disable|mask|StopUnit) printf 'fleet unit %s' "$base";; esac;;
   esac
 }
 pc_guard_unit() {
-  local why; why=$(pc_unit_why "$1")
+  local why; why=$(pc_unit_why "$1" "${2:-}")
   [ -z "$why" ] && return 0
   printf 'pc: refused (%s) — %s\n' "$why" "$PC_FLEET_LINE" >&2
   exit 3
@@ -178,9 +223,13 @@ pc_guard() {
     case $s in
       *systemctl*|*StopUnit*|*RestartUnit*|*StartUnit*|*ReloadUnit*|*KillUnit*|*"pc units"*)
         read -ra words <<<"$s"
+        local verb=
+        for w in ${words[@]+"${words[@]}"}; do
+          case $w in stop|disable|mask|StopUnit) verb=$w; break;; esac
+        done
         for w in ${words[@]+"${words[@]}"}; do
           case $w in -*|--) continue;; esac
-          why=$(pc_unit_why "$w"); [ -n "$why" ] && break
+          why=$(pc_unit_why "$w" "$verb"); [ -n "$why" ] && break
         done;;
       *dark-eye.service*) [ "${PC_ORCHESTRATOR:-0}" = 1 ] || why='dark-eye.service';;
     esac
@@ -215,8 +264,8 @@ pc_apply() {
   [ -d "${PC_LEDGER%/*}" ] || mkdir -p "${PC_LEDGER%/*}" 2>/dev/null
   local redo=${PC_REDO:-}
   [ -n "$redo" ] || printf -v redo '%q ' "$(readlink -f "$0")" ${PC_ARGV[@]+"${PC_ARGV[@]}"}
-  pc_json '{ts:$ts,id:$id,session:$se,cmd:$c,target:$t,before:$b,after:$a,rollback:$r,redo:$re,read:$rd}' -c \
-    --arg ts "$ts" --arg id "$id" --arg se "${CLAUDE_SESSION_ID:-}" --arg c "$*" \
+  pc_json '{ts:$ts,id:$id,session:$se,agent:$ag,cmd:$c,target:$t,before:$b,after:$a,rollback:$r,redo:$re,read:$rd}' -c \
+    --arg ts "$ts" --arg id "$id" --arg se "${CLAUDE_CODE_SESSION_ID:-${CLAUDE_SESSION_ID:-}}" --arg ag "${AGENT_NAME:-}" --arg c "$*" \
     --arg t "$target" --arg b "$before" --arg a "$after" --arg r "$rollback" --arg re "${redo% }" \
     --arg rd "${PC_READ_CMD:-}" >>"$PC_LEDGER"
   PC_NESTED=1 "$@"; rc=$?

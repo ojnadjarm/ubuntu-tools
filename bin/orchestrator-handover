@@ -4,6 +4,7 @@
 # (default 20) for the last reply, SIGTERMs PID, and starts the unit only once PID is gone (two
 # --continue sessions would fork the conversation). Log: journalctl --user -u orchestrator-handover.
 set -uo pipefail
+case "${1:-}" in -h|--help) awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; exit 0 ;; esac
 export PATH="$HOME/.local/bin:$HOME/agents/bin:$PATH"
 UNIT="${ORCHESTRATOR_UNIT:-claude-orchestrator.service}"
 ST="$HOME/agents/sentinel/state"

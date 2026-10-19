@@ -66,12 +66,15 @@ else:
     adhd = re.sub(r"\A---\n.*?\n---\n", "", read("skills/i-have-adhd/SKILL.md"), count=1, flags=re.S)
     parts = ["=== ADHD OUTPUT MODE — active for this whole session ===", adhd]
     banner = "Harness: ADHD mode on"
+# T347-03: point to the Moodle rule files; inlined they overflow the 10,000-char hook cap.
 if root:
+    p = lambda f: os.path.join(base, f)
     parts += [
-        "=== MOODLE PROJECT DETECTED — these rules are mandatory for this session ===",
-        read("moodle-guidelines.md"),
-        read("moodle-tips.md"),
-        "BEFORE writing or reviewing any PHP, read $HOME/.claude/moodle-coding-style.md.\n"
+        "=== MOODLE PROJECT DETECTED — these rules are mandatory for this session ===\n"
+        f"BEFORE any work here, read with the Read tool:\n"
+        f"- {p('moodle-guidelines.md')} (mandatory rules: docs, style, Docker envs, code checker, tests)\n"
+        f"- {p('moodle-tips.md')} (known gotchas)\n"
+        f"BEFORE writing or reviewing any PHP, read {p('moodle-coding-style.md')}.\n"
         "WHEN code is complete, run the /moodle-ci skill (phpcs + PHPUnit).",
     ]
     banner += f" · Moodle guidelines loaded ({root})"

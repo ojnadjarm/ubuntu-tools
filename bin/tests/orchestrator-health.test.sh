@@ -21,6 +21,7 @@ mkdir -p "$BIN" "$ST" "$WORK/tmux" "$WORK/xdg/pc-status" "$WORK/fxbin"
 REAL_TMUX=$(command -v tmux)
 fx() { env -u TMUX TMUX_TMPDIR="$WORK/tmux" HOME="$WORK" HARNESS_HOME="$WORK/agents" \
        XDG_RUNTIME_DIR="$WORK/xdg" ORCHESTRATOR_TMUX_SESSION="$FXS" ORCHESTRATOR_UNIT="$FXU" \
+       KEEPALIVE_UNITS=fx-keep.service KEEPALIVE_HTTP=fx=http://127.0.0.1:1/ HARNESS_ENV_LOADED=1 \
        PATH="$BIN:$PATH" CALLS="$CALLS" SENTINEL_STATUS_CMD="$BIN/status-real" SENTINEL_ORCH_WAIT=1 SENTINEL_SETTLE=0 FX_UNIT_ENABLED="${FX_UNIT_ENABLED:-enabled}" "$@"; }
 printf 'set -g remain-on-exit on\n' >"$WORK/tmux.conf"
 ftmux() { fx "$REAL_TMUX" -f "$WORK/tmux.conf" "$@"; }
@@ -40,13 +41,17 @@ exit 0
 S
 printf '#!/bin/sh\nexec "%s" --json\n' "$PCS" >"$BIN/status-real"   # --fresh dropped: orch= is never cached
 chmod +x "$BIN"/*
-# A healthy probe cache (copied, timestamps renewed) so only the orchestrator can fail and no
-# real probe (screenshot, smartctl) runs.
-real_cache="${XDG_RUNTIME_DIR:-/run/user/$UID}/pc-status"
-for f in "$real_cache"/*; do
-  [ -r "$f" ] || continue
-  { date +%s; tail -n +2 "$f"; } >"$WORK/xdg/pc-status/$(basename "$f")"
-done
+# A seeded healthy probe cache so only the orchestrator can fail, the real machine's faults never
+# leak in, and no real probe (screenshot, smartctl) runs.
+seed() { printf '%s\n%s\n' "$(date +%s)" "$2" >"$WORK/xdg/pc-status/$1"; }
+seed services "$(printf 'active\n%.0s' 1 2 3 4 5 6 7 8)"
+seed docker 'fx|running|fx-app-1|'; seed docker_expected 'fx|1'
+seed smart "$(printf 'PASSED\t6\t100\t0')"; seed ts_pair "$(printf 'Running\t100.64.0.1')"
+seed tailscale '{"BackendState":"Running"}'; seed internet reachable; seed dns 127.0.0.53
+seed wifi 'fixture-ssid 3'; seed lock unlocked; seed mode agent; seed screenshot 102400
+seed players none; seed power_profile balanced; seed seat_logins 0; seed idle 1.0
+seed time_to_empty ''; seed claude_sessions 1; seed keepalive "$(printf 'fx-keep.service active\nhttp-fx 200')"
+seed failed_units ''; seed fleet ''; seed unit_loops ''; seed netdata_alerts none
 printf '#!/bin/sh\nsleep 300\n' >"$WORK/fxbin/claude"   # comm=claude, as the real pane shows
 cat >"$WORK/fxbin/dialog" <<S
 #!/bin/sh

@@ -1,11 +1,13 @@
 == healthy rc=0
 sentinel-runaway 
 sentinel-waits 
+systemctl --user list-units --state=failed --plain --no-legend
 pw-metadata -n settings 0 log.level
 == pipewire-loud rc=0
 pipewire log.level was 4, reset to 2
 sentinel-runaway 
 sentinel-waits 
+systemctl --user list-units --state=failed --plain --no-legend
 pw-metadata -n settings 0 log.level
 pw-metadata -n settings 0 log.level 2
 == docker-stack rc=0
@@ -13,6 +15,7 @@ FAIL: docker.moodle-shared	3/4 up;
 fixed by bash
 sentinel-runaway 
 sentinel-waits 
+systemctl --user list-units --state=failed --plain --no-legend
 pw-metadata -n settings 0 log.level
 docker compose -f $WORK/moodle-envs/shared/docker-compose.yml up -d
 == ydotoold rc=0
@@ -20,6 +23,7 @@ FAIL: services.ydotoold	inactive;
 fixed by bash
 sentinel-runaway 
 sentinel-waits 
+systemctl --user list-units --state=failed --plain --no-legend
 pw-metadata -n settings 0 log.level
 sudo systemctl restart ydotoold
 == docker-daemon rc=0
@@ -27,6 +31,7 @@ FAIL: services.docker	inactive;
 fixed by bash
 sentinel-runaway 
 sentinel-waits 
+systemctl --user list-units --state=failed --plain --no-legend
 pw-metadata -n settings 0 log.level
 sudo systemctl start docker
 == screenshot rc=0
@@ -35,6 +40,7 @@ no bash fix for desktop.screenshot; re-checking in 30 s
 unresolved, escalating to Claude: desktop.screenshot	0 KB;
 sentinel-runaway 
 sentinel-waits 
+systemctl --user list-units --state=failed --plain --no-legend
 pw-metadata -n settings 0 log.level
 sleep 30
 agent-run sentinel
@@ -44,6 +50,7 @@ FAIL: network.tailscale	Stopped;
 unresolved, escalating to Claude: network.tailscale	Stopped;
 sentinel-runaway 
 sentinel-waits 
+systemctl --user list-units --state=failed --plain --no-legend
 pw-metadata -n settings 0 log.level
 sudo tailscale up --timeout=30s --hostname=example-host --operator=agentuser --ssh
 tailscale up --timeout=30s --hostname=example-host --operator=agentuser --ssh
@@ -54,6 +61,7 @@ FAIL: network.tailscale	Stopped;
 escalation suppressed (same signature network.tailscale, escalated 0 min ago)
 sentinel-runaway 
 sentinel-waits 
+systemctl --user list-units --state=failed --plain --no-legend
 pw-metadata -n settings 0 log.level
 sudo tailscale up --timeout=30s --hostname=example-host --operator=agentuser --ssh
 tailscale up --timeout=30s --hostname=example-host --operator=agentuser --ssh
@@ -64,6 +72,7 @@ FAIL: network.tailscale	Stopped;
 escalation suppressed (same signature network.tailscale, escalated 0 min ago)
 sentinel-runaway 
 sentinel-waits 
+systemctl --user list-units --state=failed --plain --no-legend
 pw-metadata -n settings 0 log.level
 sudo tailscale up --timeout=30s --hostname=example-host --operator=agentuser --ssh
 tailscale up --timeout=30s --hostname=example-host --operator=agentuser --ssh
@@ -73,6 +82,7 @@ FAIL: network.tailscale	Stopped;
 fixed by bash
 sentinel-runaway 
 sentinel-waits 
+systemctl --user list-units --state=failed --plain --no-legend
 pw-metadata -n settings 0 log.level
 sudo tailscale up --timeout=30s --hostname=example-host --operator=agentuser --ssh
 tailscale up --timeout=30s --hostname=example-host --operator=agentuser --ssh
@@ -82,6 +92,7 @@ FAIL: network.tailscale	Stopped;services.docker	inactive;
 escalation suppressed (same signature network.tailscale, escalated 0 min ago)
 sentinel-runaway 
 sentinel-waits 
+systemctl --user list-units --state=failed --plain --no-legend
 pw-metadata -n settings 0 log.level
 sudo tailscale up --timeout=30s --hostname=example-host --operator=agentuser --ssh
 tailscale up --timeout=30s --hostname=example-host --operator=agentuser --ssh
@@ -93,6 +104,7 @@ no bash fix for network.internet; re-checking in 30 s
 cleared on re-check
 sentinel-runaway 
 sentinel-waits 
+systemctl --user list-units --state=failed --plain --no-legend
 pw-metadata -n settings 0 log.level
 sleep 30
 state: suppressing
@@ -104,6 +116,7 @@ status probe failed
 unresolved, escalating to Claude: status.probe	no valid JSON;
 sentinel-runaway 
 sentinel-waits 
+systemctl --user list-units --state=failed --plain --no-legend
 pw-metadata -n settings 0 log.level
 sleep 30
 agent-run sentinel

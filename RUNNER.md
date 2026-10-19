@@ -40,7 +40,7 @@ A non-zero exit sends `notify-owner -p high`.
 
 `sentinel-check`, `moodle-keep-weekly`, `pcbench-weekly` and `ailearning-ci-daily` are plain bash runners on their own
 `.timer`/`.service` pair, not `claude -p` agents — no `BRIEF.md`, no `agent-run`. `agents-stop`
-stops them by name; `agents-start` re-enables them from the roster row's unit name in `~/CLAUDE.md`.
+stops them by name; `agents-start` re-enables them from the roster row's unit name in `~/agents/KB/orchestrator.md`.
 
 `pcbench-weekly` (PB09) runs the whole task pack A/B on Sunday 02:00, then
 `pcbench report --baseline`. It never starts while the owner is at the machine: `pcbench away`
@@ -53,7 +53,7 @@ once at three in a row. `pcbench-weekly --dry-run` prints the verdict and the co
 
 1. `mkdir ~/agents/<name> && $EDITOR ~/agents/<name>/BRIEF.md`
 2. `agent-now <name>` — check `REPORT.md` and `logs/`.
-3. `agent-enable <name> "Mon..Fri 08:00"` and add the row to the roster in `~/CLAUDE.md`.
+3. `agent-enable <name> "Mon..Fri 08:00"` and add the row to the roster in `~/agents/KB/orchestrator.md`.
 
 ## Notes
 

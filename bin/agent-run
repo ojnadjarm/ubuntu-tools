@@ -61,7 +61,8 @@ finish() {
       "$name" "$start" "$end" "$rc" "$secs" "${cost:-}"
     printf '%s\n' "$body"
   } >"$dir/.report.tmp" && mv "$dir/.report.tmp" "$dir/REPORT.md"
-  [ "$rc" = 0 ] || notify-owner -p high -t agent-run "agent $name failed (exit $rc)" >/dev/null 2>&1
+  # AGENT_RUN_NO_PUSH=1: the caller pushes on its own (ci-autofix, T402).
+  [ "$rc" = 0 ] || [ -n "${AGENT_RUN_NO_PUSH:-}" ] || notify-owner -p high -t agent-run "agent $name failed (exit $rc)" >/dev/null 2>&1
   exit "$rc"
 }
 
@@ -78,9 +79,9 @@ fi
 
 cd "$dir" || exit 1
 if [ -n "${HARNESS_AGENT:-}" ]; then
-  "${cmd[@]}" >>"$log" 2>>"$log" </dev/null &
+  "${cmd[@]}" >>"$log" 2>>"$log" </dev/null 8>&- &
 else
-  "${cmd[@]}" >"$out" 2>"$log" </dev/null &
+  "${cmd[@]}" >"$out" 2>"$log" </dev/null 8>&- &
 fi
 child=$!
 trap 'kill "$child" 2>/dev/null; wait "$child" 2>/dev/null; finish 143' TERM

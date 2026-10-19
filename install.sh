@@ -6,11 +6,12 @@ HARNESS_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 # shellcheck source=/dev/null
 . "$HARNESS_DIR/bin/env.sh"
 
-DEV=0
+DEV=0; LINKS=0
 for a in "$@"; do
   case "$a" in
     --dev) DEV=1;;
-    -h|--help) echo "usage: install.sh [--dev]   (--dev also installs the QA tools of GH19)"; exit 0;;
+    --links) LINKS=1;;
+    -h|--help) echo "usage: install.sh [--dev|--links]   (--dev also installs the QA tools of GH19; --links runs only step 3)"; exit 0;;
     *) echo "install.sh: unknown option $a" >&2; exit 2;;
   esac
 done
@@ -18,6 +19,34 @@ done
 changes=0
 note() { echo "  $*"; changes=$((changes + 1)); }
 skip() { [ "${VERBOSE:-0}" = 1 ] && echo "  = $*"; return 0; }
+
+# Step 3, also run alone by --links.
+link_commands() {
+  echo "3. commands -> ~/.local/bin"
+  mkdir -p "$HOME/.local/bin"
+  for f in "$HARNESS_DIR"/bin/*; do
+    [ -f "$f" ] && [ -x "$f" ] || continue
+    n="$(basename "$f")"
+    case "$n" in pc-*|*.sh|*.py) continue;; esac
+    t="$HOME/.local/bin/$n"
+    if [ "$(readlink -f "$t" 2>/dev/null)" = "$(readlink -f "$f")" ]; then skip "$n"; continue; fi
+    ln -sfn "$f" "$t"; note "linked $n"
+  done
+  # nvm loads only in interactive shells: link its default node (alias chain default -> lts/* -> vX) too.
+  nv=default; for _ in 1 2 3 4; do [ -f "$HOME/.nvm/alias/$nv" ] && read -r nv <"$HOME/.nvm/alias/$nv"; done
+  for f in "$HOME/.nvm/versions/node/$nv/bin/"{node,npm,npx}; do
+    [ -x "$f" ] || continue
+    n="$(basename "$f")"; t="$HOME/.local/bin/$n"
+    if [ "$(readlink -f "$t" 2>/dev/null)" = "$(readlink -f "$f")" ]; then skip "$n"; continue; fi
+    ln -sfn "$f" "$t"; note "linked $n (nvm $nv)"
+  done
+  case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo "  advisory: ~/.local/bin is not on PATH";; esac
+}
+if [ "$LINKS" = 1 ]; then
+  link_commands
+  [ "$changes" = 0 ] && echo "install.sh: no changes" || echo "install.sh: $changes change(s) applied"
+  exit 0
+fi
 
 ## 1. Prerequisites -----------------------------------------------------------
 echo "1. prerequisites"
@@ -64,17 +93,7 @@ fi
 ## 3. Commands on PATH --------------------------------------------------------
 # bin/ holds three kinds of file: harness commands, `pc` subcommands (pc-*, dispatched by `pc`,
 # never called directly) and libraries (*.sh, *.py). Only the first kind goes on PATH.
-echo "3. commands -> ~/.local/bin"
-mkdir -p "$HOME/.local/bin"
-for f in "$HARNESS_DIR"/bin/*; do
-  [ -f "$f" ] && [ -x "$f" ] || continue
-  n="$(basename "$f")"
-  case "$n" in pc-*|*.sh|*.py) continue;; esac
-  t="$HOME/.local/bin/$n"
-  if [ "$(readlink -f "$t" 2>/dev/null)" = "$(readlink -f "$f")" ]; then skip "$n"; continue; fi
-  ln -sfn "$f" "$t"; note "linked $n"
-done
-case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo "  advisory: ~/.local/bin is not on PATH";; esac
+link_commands
 
 ## 4. systemd units and the roster --------------------------------------------
 echo "4. units + roster"
@@ -178,4 +197,4 @@ fi
 echo
 [ "$changes" = 0 ] && echo "install.sh: no changes" || echo "install.sh: $changes change(s) applied"
 echo
-"$HARNESS_DIR/bin/pc" doctor --quick
+"$HARNESS_DIR/bin/pc" doctor --quick || echo "  advisory: pc doctor --quick found the failures above"

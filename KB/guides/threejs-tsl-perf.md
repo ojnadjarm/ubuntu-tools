@@ -24,8 +24,8 @@ Ticket: T69 (Atelier perf), T70 web-precompiled · Last verified: 2026-09-24 by 
 
 ## Exact commands
 ```bash
-cd ~/agents/research/2026-09-23/T65/mockups/atelier/dist && python3 -m http.server --bind 127.0.0.1 18795   # background it
-cd ~/agents/research/2026-09-23/T65/perf/frame
+cd ~/agent-work/research/2026-09-23/T65/mockups/atelier/dist && python3 -m http.server --bind 127.0.0.1 18795   # background it
+cd ~/agent-work/research/2026-09-23/T65/perf/frame
 node run.mjs webgl2 2560 1440 gl-1440 && python3 analyze.py frames-gl-1440.json   # full playthrough, per beat
 node bench.mjs webgpu 2560 1440 twist 1       # per-pass GPU cost, A/B variants in one page
 node idle.mjs webgl2 1920 1080 1              # does it render while idle?
@@ -55,8 +55,8 @@ Test on `http://localhost` / `[::1]` (secure) or the https drop (`/drop-link`), 
   Ready: 4.3 → 2.1 s (WebGL2), 4.7 → 2.5 s (WebGPU).
 
 ## Links
-- Code: `~/agents/research/2026-09-23/T65/mockups/atelier-perf/src/{scene/host.ts,scene/gate.ts,directions/atelier/kit.ts,shell/perf.ts}`,
-  `~/agents/research/2026-09-24/T70/web-precompiled/app/src/{scene/host.ts,scene/prewarm.ts,directions/atelier/kit.ts}`
+- Code: `~/agent-work/research/2026-09-23/T65/mockups/atelier-perf/src/{scene/host.ts,scene/gate.ts,directions/atelier/kit.ts,shell/perf.ts}`,
+  `~/agent-work/research/2026-09-24/T70/web-precompiled/app/src/{scene/host.ts,scene/prewarm.ts,directions/atelier/kit.ts}`
 - Tests / benches: `T65/perf/frame/*.mjs`, `T65/perf/fix/{load-ab.sh,frames-ab.sh,same.mjs,diff.py}`, `T65/perf/verify/*.mjs`,
   `T70/web-precompiled/bench/`
 - Design / results: `T65/perf/{load,frame,context,architecture,verify}.md`, `T65/perf/fix/results.md`,

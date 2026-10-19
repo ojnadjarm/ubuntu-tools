@@ -30,4 +30,4 @@ bash ~/the-dark-eye/bridge/relay/tests/latency.test.sh
 ## Links
 - Code: `~/the-dark-eye/bridge/relay/eye-latency`
 - Tests: `~/the-dark-eye/bridge/relay/tests/latency.test.sh` with `tests/fixtures/latency-journal.txt`
-- Design / results: `~/agents/research/2026-09-22/T48-L4-result.md`
+- Design / results: `~/agent-work/research/2026-09-22/T48-L4-result.md`

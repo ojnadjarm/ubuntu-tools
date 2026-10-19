@@ -43,5 +43,27 @@ AGENT_NAME=x "$HARNESS" context --json | grep -q "ADHD OUTPUT MODE" && ok 0 "AGE
 AGENT_NAME=x "$HARNESS" context --json | grep -q '"hookEventName": "SessionStart"' && ok 1 "AGENT_NAME keeps the machine context" || ok 0 "AGENT_NAME keeps the machine context"
 "$HARNESS" bogus >/dev/null 2>&1; [ $? = 2 ] && ok 1 "unknown subcommand exits 2" || ok 0 "unknown subcommand exits 2"
 
+# T347-03: in a Moodle cwd the context stays under Claude Code's 10,000-char hook cap and points to the rules.
+fx=$(mktemp -d); trap 'rm -rf "$fx"' EXIT
+mkdir -p "$fx/home" "$fx/ctx/hooks" "$fx/ctx/skills/i-have-adhd" "$fx/plugin"
+cp "$HOOKS/moodle-detect.sh" "$fx/ctx/hooks/"
+cp "${HARNESS_CONTEXT_DIR:-$HOME/.claude}/skills/i-have-adhd/SKILL.md" "$fx/ctx/skills/i-have-adhd/"
+for f in moodle-guidelines moodle-tips moodle-coding-style; do
+  { echo "FIXTURE-BODY-$f"; head -c 12000 /dev/zero | tr '\0' 'x'; } > "$fx/ctx/$f.md"
+done
+printf '<?php\n$plugin->component = "local_fx";\n' > "$fx/plugin/version.php"
+mctx() { (cd "$fx/plugin" && env -u CLAUDE_PROJECT_DIR HOME="$fx/home" HARNESS_CONTEXT_DIR="$fx/ctx" "$@" "$HARNESS" context --json) |
+  python3 -c 'import json,sys;print(json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"])'; }
+for mode in human headless; do
+  if [ "$mode" = human ]; then c=$(mctx env -u AGENT_NAME); else c=$(mctx env AGENT_NAME=x); fi
+  [ "${#c}" -lt 9500 ] && ok 1 "$mode Moodle context under 9500 chars (${#c})" || ok 0 "$mode Moodle context under 9500 chars (${#c})"
+  for f in moodle-guidelines moodle-tips moodle-coding-style; do
+    case "$c" in *"$fx/ctx/$f.md"*) ok 1 "$mode context points to $f.md";; *) ok 0 "$mode context points to $f.md";; esac
+  done
+  case "$c" in *FIXTURE-BODY-*) ok 0 "$mode context inlines no rule file";; *) ok 1 "$mode context inlines no rule file";; esac
+  case "$c" in *"/moodle-ci"*) ok 1 "$mode context names /moodle-ci";; *) ok 0 "$mode context names /moodle-ci";; esac
+done
+case "$(mctx env -u AGENT_NAME)" in *"ADHD OUTPUT MODE"*) ok 1 "human Moodle context keeps the output rules";; *) ok 0 "human Moodle context keeps the output rules";; esac
+
 [ "$bad" = 0 ] && echo "all harness-context cases pass" || echo "$bad FAILURES"
 exit $([ "$bad" = 0 ] && echo 0 || echo 1)

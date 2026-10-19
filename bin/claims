@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+"""claims — add, release, list and expire rows on the file-claims board (~/agents/FILE-CLAIMS.md)."""
+import argparse, fcntl, os, re, sys
+from datetime import datetime, timedelta
+
+FLOOR_H = 24
+STALE_H = max(FLOOR_H, int(os.environ.get("CLAIMS_STALE_H", "48")))
+PIN = re.compile(r"\b(pin|pinned|do not move)\b", re.I)
+
+
+def board():
+    return os.environ.get("CLAIMS_FILE") or os.path.expanduser("~/agents/FILE-CLAIMS.md")
+
+
+def since_of(field):
+    """The youngest moment a `since` field can mean: a bare date counts as the end of that day."""
+    for fmt, slack in (("%Y-%m-%d %H:%M", timedelta(0)), ("%Y-%m-%dT%H:%M", timedelta(0)), ("%Y-%m-%d", timedelta(days=1))):
+        try:
+            return datetime.strptime(field.strip(), fmt) + slack
+        except ValueError:
+            continue
+    return None
+
+
+def parse(line, now):
+    """A board row as a dict, or None for headers and blank lines."""
+    if not line.startswith("- "):
+        return None
+    parts = [p.strip() for p in line[2:].split(" · ")]
+    t = since_of(parts[-1]) if len(parts) > 1 else None
+    age_h = (now - t).total_seconds() / 3600 if t else None
+    pinned = bool(PIN.search(line))
+    return {"ticket": parts[0], "paths": parts[1] if len(parts) > 2 else "", "line": line, "age_h": age_h, "pinned": pinned,
+            "stale": not pinned and age_h is not None and age_h > STALE_H}
+
+
+class Board:
+    """The board file held under FILE-CLAIMS.md.lock for one read-modify-write."""
+
+    def __enter__(self):
+        self.path = board()
+        self.lock = open(self.path + ".lock", "a")
+        fcntl.flock(self.lock, fcntl.LOCK_EX)
+        self.lines = open(self.path).read().splitlines() if os.path.exists(self.path) else []
+        return self
+
+    def save(self):
+        tmp = self.path + ".tmp"
+        with open(tmp, "w") as f:
+            f.write("".join(l + "\n" for l in self.lines))
+        os.replace(tmp, self.path)
+
+    def __exit__(self, *_):
+        self.lock.close()
+
+
+def paths_of(field):
+    """Normalised paths of a paths field: comma/space separated, `{a,b}` expanded, globs cut to their directory."""
+    words = re.findall(r"(?:\{[^}]*\}|[^,\s{])+", field)
+    out = []
+    while words:
+        w = words.pop()
+        m = re.search(r"\{([^}]*)\}", w)
+        if m:
+            words += [w[:m.start()] + alt + w[m.end():] for alt in m.group(1).split(",")]
+            continue
+        g = re.search(r"[*?\[]", w)
+        if g:
+            w = w[:g.start()].rpartition("/")[0] or "."
+        out.append(os.path.normpath(os.path.expanduser(w)))
+    return out
+
+
+def overlaps(a, b):
+    return a == b or a.startswith(b + "/") or b.startswith(a + "/")
+
+
+def rows(lines, now):
+    return [r for r in (parse(l, now) for l in lines) if r]
+
+
+def fmt(r):
+    age = "?" if r["age_h"] is None else "%dh" % max(0, r["age_h"])
+    mark = "PIN  " if r["pinned"] else "STALE" if r["stale"] else "ok   "
+    return "%s %5s  %s" % (mark, age, r["line"][2:])
+
+
+def main(argv):
+    p = argparse.ArgumentParser(prog="claims", description="Board %s; rows `- <ticket> · <paths> · <since>`; "
+                                "unpinned rows older than %d h are stale." % (board(), STALE_H))
+    sub = p.add_subparsers(dest="cmd")
+    a = sub.add_parser("add", help="claim paths for a ticket")
+    a.add_argument("ticket")
+    a.add_argument("paths")
+    a.add_argument("--pin", action="store_true", help="never stale (owner rows)")
+    a.add_argument("--force", action="store_true", help="add even when a path overlaps another ticket's live row")
+    d = sub.add_parser("done", help="release every row of a ticket")
+    d.add_argument("ticket")
+    sub.add_parser("list", help="every row with its age (default)")
+    sub.add_parser("check", help="one summary line; exit 2 when a row is stale")
+    e = sub.add_parser("expire", help="drop stale rows (dry run without --apply)")
+    e.add_argument("--apply", action="store_true")
+    o = p.parse_args(argv)
+    now = datetime.now()
+    with Board() as b:
+        rs = rows(b.lines, now)
+        if o.cmd == "add":
+            if any(r["ticket"] == o.ticket for r in rs):
+                print("claims: %s already holds a row; `claims done %s` first" % (o.ticket, o.ticket), file=sys.stderr)
+                return 1
+            hits = [(r["ticket"], q) for r in rs if not r["stale"] for q in paths_of(r["paths"])
+                    if any(overlaps(n, q) for n in paths_of(o.paths))]
+            for t, q in hits:
+                print("overlap: %s %s" % (t, q), file=sys.stderr)
+            if hits and not o.force:
+                return 3
+            b.lines.append("- %s · %s%s · %s" % (o.ticket, o.paths, " · pin" if o.pin else "", now.strftime("%Y-%m-%d %H:%M")))
+            b.save()
+            print(b.lines[-1])
+        elif o.cmd == "done":
+            keep = [l for l in b.lines if not (parse(l, now) or {}).get("ticket") == o.ticket]
+            if len(keep) == len(b.lines):
+                print("claims: no row for %s" % o.ticket, file=sys.stderr)
+                return 1
+            b.lines = keep
+            b.save()
+            print("released %s" % o.ticket)
+        elif o.cmd == "check":
+            stale = [r["ticket"] for r in rs if r["stale"]]
+            print("%d claims, %d stale%s, %d pinned (stale > %d h)" % (len(rs), len(stale), " (%s)" % " ".join(stale) if stale else "",
+                                                                      sum(r["pinned"] for r in rs), STALE_H))
+            return 2 if stale else 0
+        elif o.cmd == "expire":
+            stale = [r for r in rs if r["stale"] and r["age_h"] > FLOOR_H]
+            for r in stale:
+                print(("dropped: " if o.apply else "would drop: ") + r["line"])
+            if o.apply and stale:
+                b.lines = [l for l in b.lines if l not in {r["line"] for r in stale}]
+                b.save()
+            if not stale:
+                print("nothing stale")
+        else:
+            for r in rs:
+                print(fmt(r))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

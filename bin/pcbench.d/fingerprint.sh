@@ -13,7 +13,15 @@ f() { local n=$1; shift; ( printf '%s' "$( "$@" 2>/dev/null )" > "$W/$n" ) & }
 f default_sink      "$PC_TIMEOUT_BIN" 2 pactl get-default-sink
 f null_modules      bash -c 'pactl list modules short 2>/dev/null | grep -c module-null-sink'
 f power_profile     "$PC_TIMEOUT_BIN" 2 powerprofilesctl get
-f failed_user_units bash -c 'systemctl --user list-units --state=failed --no-legend 2>/dev/null | wc -l'
+# TSP-036: names, not a count; pcbench-* fixtures and units fired by a <= 5-min timer flap on their own.
+failed_units() {
+  local short
+  short=$(systemctl --user list-timers --all -o json 2>/dev/null |
+    jq -r '.[] | select(.next > 0 and .last > 0 and .next - .last <= 300000000) | .activates')
+  systemctl --user list-units --state=failed --plain --no-legend 2>/dev/null | awk '{print $1}' |
+    grep -v '^pcbench-' | grep -vxF -f <(printf '%s\n' "$short") | sort | paste -sd,
+}
+f failed_user_units failed_units
 f docker            bash -c "docker ps -a --format '{{.Names}}:{{.State}}' 2>/dev/null | sort | md5sum | cut -c1-12"
 f monitors          bash -c 'gdctl show 2>/dev/null | md5sum | cut -c1-12'
 f tailscale         bash -c '"$PC_TIMEOUT_BIN" 3 tailscale status --json 2>/dev/null | jq -r .BackendState'

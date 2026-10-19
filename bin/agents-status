@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Table of persistent agents: enabled, schedule, next/last run, exit, duration.
+# Table of persistent agents: enabled, schedule, next/last run, exit, duration; --owner: the owner's status screen.
 set -uo pipefail
+[ "${1:-}" = --owner ] && { shift; exec python3 "$(dirname "$(realpath "$0")")/../lib/owner_status.py" "$@"; }
 printf '%-14s %-8s %-18s %-17s %-17s %5s %6s\n' NAME ENABLED SCHEDULE NEXT LAST EXIT SECS
 for d in "$HOME"/agents/*/; do
   name="$(basename "$d")"

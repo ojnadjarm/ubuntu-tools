@@ -29,6 +29,77 @@ is 'resolve_scope picks system for a system-only unit' \
   "$(PC_FIXTURE=$FIX "$U" show pt13-system-only --json | jq -r .scope)" system
 is 'resolve_scope prefers user when loaded in both and under ~/.config/systemd/user' \
   "$(PC_FIXTURE=$FIX "$U" show pt13-both --json | jq -r .scope)" user
+PC_FIXTURE=$FIX "$U" show pt13-no-such-unit --json >/dev/null 2>&1
+is 'show of a unit in neither scope exits 2' "$?" 2
+PC_FIXTURE=$FIX "$U" stop pt13-no-such-unit >/dev/null 2>&1
+is 'stop dry run of a unit in neither scope exits 2' "$?" 2
+
+## --- fixture: fleet verdicts (T347-10) ------------------------------------
+FF=$(mktemp -d); mkdir -p "$FF/bin"
+cat >"$FF/bin/systemctl" <<'S'
+#!/bin/sh
+case "$*" in
+  *list-unit-files*) echo "dark-eye-old.service enabled enabled"; echo "dark-eye.service enabled enabled"; exit 0;;
+  *list-timers*) echo '[]'; exit 0;;
+  *show*) ;;
+  *) exit 0;;
+esac
+skip=0
+for a in "$@"; do
+  [ $skip = 1 ] && { skip=0; continue; }
+  case "$a" in -p) skip=1; continue;; -*|show) continue;; esac
+  case "$a" in
+    agent@maintenance.service) set -- inactive dead static oneshot exit-code;;
+    agent@*) set -- inactive dead static oneshot success;;
+    dark-eye-old.service) set -- inactive dead enabled simple success;;
+    *.timer) set -- active waiting enabled "" success;;
+    *) set -- active running enabled simple success;;
+  esac
+  printf 'Id=%s\nActiveState=%s\nSubState=%s\nUnitFileState=%s\nType=%s\nResult=%s\n\n' "$a" "$1" "$2" "$3" "$4" "$5"
+done
+S
+chmod +x "$FF/bin/systemctl"
+fl=$(HOME="$FF" PC_FIXTURE=$FF "$U" fleet --json)
+is 'fleet judges an enabled unit off the roster (dark-eye-old FAIL)' \
+  "$(jq -r '.[]|select(.unit=="dark-eye-old.service")|.state' <<<"$fl")" FAIL
+is 'fleet: a oneshot whose last run failed is FAIL' \
+  "$(jq -r '.[]|select(.unit=="agent@maintenance.service")|.state' <<<"$fl")" FAIL
+is 'fleet: an idle oneshot with Result=success is OK' \
+  "$(jq -r '.[]|select(.unit=="agent@moodle-keeper.service")|.state' <<<"$fl")" OK
+is 'fleet: a running enabled service is OK' \
+  "$(jq -r '.[]|select(.unit=="dark-eye.service")|.state' <<<"$fl")" OK
+is 'fleet: a roster unit discovered twice is listed once' \
+  "$(jq '[.[]|select(.unit=="dark-eye.service")]|length' <<<"$fl")" 1
+HOME="$FF" PC_FIXTURE=$FF "$U" fleet | grep -q 'dark-eye-old.service *inactive *dead *FAIL'
+is 'fleet text shows the verdict column' "$?" 0
+rm -rf "$FF"
+
+## --- fixture: reset-failed (TSP-044) — stubbed systemctl on PATH, never a real unit ----
+RF=$(mktemp -d); mkdir -p "$RF/bin"; echo failed >"$RF/state"
+cat >"$RF/bin/systemctl" <<S
+#!/bin/sh
+echo "\$*" >>"$RF/argv"
+case "\$*" in
+  "--user show run-fixture.scope -p ActiveState --value") cat "$RF/state";;
+  "--user reset-failed -- run-fixture.scope") echo inactive >"$RF/state";;
+  *) exit 1;;
+esac
+S
+chmod +x "$RF/bin/systemctl"
+rf=$(PATH="$RF/bin:$PATH" "$U" reset-failed run-fixture.scope --user)
+is 'reset-failed dry run prints would: failed → inactive' "$rf" 'would: run-fixture.scope failed → inactive'
+is 'reset-failed dry run leaves the unit failed' "$(cat "$RF/state")" failed
+rf=$(PATH="$RF/bin:$PATH" "$U" reset-failed run-fixture.scope --user --apply)
+grep -q '^rollback: pc undo ' <<<"$rf" && ok 'reset-failed --apply prints a rollback line' || nok 'reset-failed --apply rollback line' "$rf"
+is 'reset-failed --apply resets the stub unit' "$(cat "$RF/state")" inactive
+rid=$(sed -n 's/^rollback: pc undo //p' <<<"$rf")
+is 'reset-failed is ledgered and verified' "$(jq -s -r --arg i "$rid" 'map(select(.id==$i and .verified==true))|length' "$PC_LEDGER")" 1
+is 'reset-failed ledger row has a no-op rollback' "$(jq -s -r --arg i "$rid" 'map(select(.id==$i and .rollback))[0].rollback|startswith(":")' "$PC_LEDGER")" true
+PATH="$RF/bin:$PATH" "$U" reset-failed ssh.service --system --apply >/dev/null 2>&1
+is 'reset-failed ssh is refused (guard)' "$?" 3
+is 'selftest: the stub saw only show/reset-failed of run-fixture.scope' \
+  "$(grep -cv -e '^--user show run-fixture.scope -p ActiveState --value$' -e '^--user reset-failed -- run-fixture.scope$' "$RF/argv")" 0
+rm -rf "$RF"
 
 ## --- live: fleet, cost, guard --------------------------------------------
 "$U" fleet --json | jq -e 'map(.unit)|index("sentinel-check.timer")' >/dev/null

@@ -45,11 +45,11 @@ def fmt(v, digits=1):
 
 def orch_ctx():
     """Mean input+cache_read+cache_creation per orchestrator assistant turn in the window."""
-    total, n = 0, 0
+    turns = {}
     for f in glob.glob(os.path.join(ORCH, "*.jsonl")):
         if os.path.getmtime(f) < CUT:
             continue
-        for line in open(f, errors="replace"):
+        for i, line in enumerate(open(f, errors="replace")):
             if '"assistant"' not in line:
                 continue
             try:
@@ -60,20 +60,25 @@ def orch_ctx():
             if r.get("type") != "assistant" or r.get("isSidechain") or t < CUT:
                 continue
             u = (r.get("message") or {}).get("usage") or {}
-            total += (u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0)
-                      + u.get("cache_creation_input_tokens", 0))
-            n += 1
-    return total / n / 1000 if n else None
+            # one reply is split over several lines with the same id and usage
+            key = (r.get("message") or {}).get("id") or (f, i)
+            turns[key] = (u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0)
+                          + u.get("cache_creation_input_tokens", 0))
+    return sum(turns.values()) / len(turns) / 1000 if turns else None
 
 
 def headless_cc():
-    """Mean cache_creation_input_tokens over headless runs whose meta.json was written in the window."""
+    """Mean cache_creation_input_tokens over headless runs in the window; all-zero token rows are unrecorded, skipped."""
     vals = []
     for f in glob.glob(os.path.join(AGENTS, "*", "logs", "*.meta.json")):
         if os.path.getmtime(f) < CUT:
             continue
         try:
-            vals.append(json.load(open(f))["tokens"]["cache_creation_input_tokens"])
+            tokens = json.load(open(f))["tokens"]
+            if not any(tokens.get(k) for k in ("input_tokens", "output_tokens", "cache_read_input_tokens",
+                                               "cache_creation_input_tokens")):
+                continue
+            vals.append(tokens["cache_creation_input_tokens"])
         except (OSError, ValueError, KeyError, TypeError):
             continue
     return sum(vals) / len(vals) / 1000 if vals else None

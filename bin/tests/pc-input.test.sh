@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PT10: pc input against tests/fixtures/input (device parsing, fd holders, the sidecar grab)
+# PT10: pc input against tests/fixtures/input (device parsing, fd holders, the grab guess)
 # plus one live --device-only uinput round trip: the events are read back from the virtual
 # device's own node while it is grabbed, so nothing reaches libinput or gnome-shell.
 set -uo pipefail
@@ -33,18 +33,19 @@ is 'the unit comes from the cgroup' \
   'org.gnome.Shell@wayland.service'
 is 'multiplexers are not a grab guess' \
   "$(jq '.[]|select(.path=="/dev/input/event3")|.grabbed_guess' <<<"$J")" false
-is 'the sidecar on the AVRCP node is a grab guess' \
+is 'a non-multiplexer holder on the AVRCP node is a grab guess' \
   "$(jq '.[]|select(.path=="/dev/input/event20")|.grabbed_guess' <<<"$J")" true
 
-# 3. grabs: only nodes somebody holds, the sidecar flagged.
+# 3. grabs: only nodes somebody holds, a non-multiplexer holder flagged as a grab guess.
 G=$(fx grabs --json)
 is 'grabs is an array'  "$(jq -r 'type' <<<"$G")" array
 is 'grabs lists the three held nodes' "$(jq 'length' <<<"$G")" 3
-is 'the sidecar is flagged' \
-  "$(jq -r '.[]|select(.sidecar)|.path' <<<"$G")" /dev/input/event20
-is 'the sidecar opener is named' \
-  "$(jq -r '.[]|select(.sidecar)|.openers[0].unit' <<<"$G")" dark-eye-ptt.service
-is 'text grabs marks SIDECAR' "$(fx grabs | grep -c SIDECAR)" 1
+is 'the AVRCP node is a grab guess' \
+  "$(jq -r '.[]|select(.grabbed_guess)|.path' <<<"$G")" /dev/input/event20
+is 'the holder opener is named' \
+  "$(jq -r '.[]|select(.path=="/dev/input/event20")|.openers[0].unit' <<<"$G")" evtest.service
+is 'grabs rows carry no sidecar field' "$(jq '[.[]|has("sidecar")]|any' <<<"$G")" false
+is 'text grabs marks GRAB?' "$(fx grabs | grep -c 'GRAB?')" 1
 
 # 4. inject --dry-run: the event list, no device, no ledger.
 out=$(fx inject key KEY_MACRO1 --dry-run)

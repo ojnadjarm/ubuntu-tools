@@ -201,7 +201,7 @@
 
 ## Rollback
 - `/etc` is a git repo (etckeeper); apt hooks auto-commit around every package install. Before editing `/etc`: `sudo etckeeper commit "pre T<NN>"`; undo with `cd /etc && sudo git diff` / `sudo git checkout -- <file>`.
-- `~/agents/bin/baseline.sh` -> timestamped tarball of `$HARNESS_CONTEXT_DIR/{settings.json,hooks,skills,*.md}`, `~/agents/bin`, `~/CLAUDE.md` and `dconf.ini` in `~/agents/backups/` (last 20 kept). Run it before changing user config.
+- `~/agents/bin/baseline.sh` -> timestamped tarball of `$HARNESS_CONTEXT_DIR/{settings.json,hooks,skills,*.md}`, `~/agents/bin`, `~/CLAUDE.md`, `~/agents/ORCHESTRATOR.md` and `dconf.ini` in `~/agents/backups/` (last 20 kept). Run it before changing user config.
 - Restore: `tar xzf ~/agents/backups/<date>.tar.gz -C ~` (dconf: `dconf load / < dconf.ini`).
 
 ## After reboot (T03)

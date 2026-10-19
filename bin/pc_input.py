@@ -117,7 +117,7 @@ def unit_of(pid):
 
 
 def holders():
-    """node path -> list of {pid, comm, unit, sidecar} holding an fd on it."""
+    """node path -> list of {pid, comm, unit} holding an fd on it."""
     root = proc_root()
     out = {}
     for pid in os.listdir(root):
@@ -142,7 +142,6 @@ def holders():
                 "pid": int(pid),
                 "comm": (read_file("%s/%s/comm" % (root, pid)) or "").strip(),
                 "unit": unit,
-                "sidecar": unit == "dark-eye-ptt.service",
             })
     return out
 
@@ -154,7 +153,7 @@ def cmd_devices(args):
         hs = hold.get(d["path"], [])
         d["openers"] = sorted(hs, key=lambda h: h["pid"])
         # A grab is not readable from userspace; a holder that is not one of the known
-        # multiplexers is the only evidence there is (the sidecar names itself).
+        # multiplexers is the only evidence there is.
         d["grabbed_guess"] = any(h["comm"] not in MULTIPLEXERS for h in hs)
     if args.json:
         json.dump(devs, sys.stdout)
@@ -180,7 +179,6 @@ def cmd_grabs(args):
             "name": names.get(node, ""),
             "openers": hs,
             "grabbed_guess": any(h["comm"] not in MULTIPLEXERS for h in hs),
-            "sidecar": any(h["sidecar"] for h in hs),
         })
     if args.json:
         json.dump(rows, sys.stdout)
@@ -190,7 +188,7 @@ def cmd_grabs(args):
         print("%-18s %-30s %s%s" % (
             r["path"], r["name"][:30],
             ",".join("%s(%d)" % (h["comm"], h["pid"]) for h in r["openers"]),
-            "  SIDECAR" if r["sidecar"] else ("  GRAB?" if r["grabbed_guess"] else "")))
+            "  GRAB?" if r["grabbed_guess"] else ""))
     return 0
 
 
@@ -274,10 +272,6 @@ def cmd_readback(args):
     """Internal: open <device>, optionally grab it, announce ready, print events as NDJSON."""
     dev = open_device(args.device)
     if args.grab:
-        # Never steal a node the ptt sidecar holds exclusively (KB quirks: the XM5 AVRCP node).
-        if any(h["sidecar"] for h in holders().get(args.device, [])):
-            sys.stderr.write("pc input: refused — %s is held by dark-eye-ptt.service\n" % args.device)
-            return 3
         fcntl.ioctl(dev.fd, EVIOCGRAB, 1)
     print(json.dumps({"ready": True}), flush=True)
     deadline = time.monotonic() + args.seconds

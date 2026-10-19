@@ -18,7 +18,7 @@ Ticket: T66, T89, T90 · Last verified: 2026-09-25 by `tests/test_agents_live.py
 |---|---|---|---|
 | One-off sub-agent | `<session>/subagents/agent-*.jsonl` | handback, `eye status done\|error`, or `<task-notification>` completed/failed/killed/stopped in the orchestrator transcript | no end event and a transcript write < 15 min (`WORKING_S`) |
 | Workflow agent | `<session>/subagents/workflows/wf_*/` | its `result` (done) or `failed` (error) row in `journal.jsonl`, or the run's task notification | same |
-| Orchestrator | tmux `$ORCHESTRATOR_TMUX_SESSION` + transcript | tmux session gone → `off` | transcript < 60 s → `running`, else `idle` |
+| Orchestrator | tmux `$ORCHESTRATOR_TMUX_SESSION` + newest `PROJ/*.jsonl` (`newest_session`) | tmux session gone → `off` | transcript < 60 s → `running`, else `idle` |
 | Rostered agent | `agent@<name>.service`/`.timer`, or tmux `<name>` | timer disabled, no tmux → `off` | unit active or tmux transcript < 60 s → `running`, else `idle` |
 | Orbiter | `eye status` bridge | — | a hint only: keeps an un-ended agent `working` |
 
@@ -53,10 +53,12 @@ systemctl --user list-units 'agent@*'; eye status                           # cr
   `eye status` lines (F24, 2026-10-03). `feed()` reads and advances under `_feed_lock`; keep any new incremental reader locked too.
 - Workflow agents sit one folder deeper than one-offs; the same miss broke `orbit-hook` (T68). Glob every depth under `subagents/`.
 - `subagents()` reads only the newest session that spawned any; agents of an older session drop out when a new one spawns.
+  The orchestrator session and state come from the newest transcript instead: a new session spawns its first sub-agent hours
+  after it starts (fd9fda5b: 11 h), and the subagents dir showed the old session `idle` meanwhile (F15, 2026-10-17).
 - Tests use fixture transcripts only (paths are module constants the tests repoint); never the real `~/.claude/projects`.
 
 ## Links
-- Code: `~/agents/lib/agent_ends.py` (end signals, shared with `orbit-hook`), `~/agents/dashboard/dash/services/agents.py` (`ends`, `state_of`, `one_offs`, `workflow_agents`, `persistent`, `shown`),
+- Code: `~/agents/lib/agent_ends.py` (end signals, shared with `orbit-hook`), `~/agents/dashboard/dash/services/agents.py` (`ends`, `state_of`, `one_offs`, `workflow_agents`, `newest_session`, `persistent`, `shown`),
   `static/next/js/screens/court.js`, `static/next/next.css`
 - Tests: `~/agents/dashboard/tests/test_agents_live.py`
-- Design: `~/agents/research/2026-09-23/T66/design.md`, shots `T66/shots/` · brief `~/agents/briefs/T66-agents-list-cleanup.md`
+- Design: `~/agent-work/research/2026-09-23/T66/design.md`, shots `T66/shots/` · brief `~/agent-work/briefs/T66-agents-list-cleanup.md`

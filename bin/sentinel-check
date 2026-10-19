@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # 15-min health check: bash fixes for known faults, Claude (agent-run sentinel) only if they fail.
+case "${1:-}" in -h|--help) awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; exit 0 ;; esac
 set -uo pipefail
 export PATH="$HOME/.local/bin:$HOME/agents/bin:$PATH"
 # shellcheck source=/dev/null
 [ -n "${HARNESS_ENV_LOADED:-}" ] || . "$HOME/agents/bin/env.sh"
 st="$HOME/agents/sentinel/state"
 mkdir -p "$st"
-exec 9>"$st/.lock"; flock -n 9 || exit 0
-
 log() { printf '%s %s\n' "$(date -Is)" "$*" >>"$st/sentinel.log"; }
+exec 9>"$st/.lock"; flock -n 9 || { log "lock busy: the previous tick is still running, skipped"; exit 0; }
+# pc status reads this stamp as agents.sentinel_age: a stale one means the sentinel stopped ticking.
+date -Is >"$st/last-run"
 # snapshot [--fresh] — pc status JSON; --fresh bypasses the 60 s probe cache (used
 # after a repair, where a cached docker/tailscale value would hide the fix).
 # Output without a .sections key (probe crashed or printed nothing) becomes a status.probe FAIL.
@@ -34,6 +36,37 @@ FAULTS=(
   'keepalive.*        bounded fix_keepalive'
   'agents.orchestrator fix_orch'
 )
+# Faults only the owner clears (a pending reboot, swap, a dead fleet unit): pc status and the dashboard
+# show them; the sentinel never repairs or escalates them. "<key glob> [push once after N s]".
+OWNER_ONLY=(
+  'host.reboot_required'
+  'host.failed_units'
+  'host.netdata_alerts'
+  'resources.swap'
+  'agents.fleet'
+  'agents.unit_loops 7200'
+)
+# owner_only [--push] — the failure lines on stdin minus the owner-only ones; --push sends the
+# one push a row with a delay is owed once its fault has lasted that long (episode in tries/).
+owner_only() {
+  local push=${1:-} key val row g d f t
+  while IFS=$'\t' read -r key val; do
+    [ -n "$key" ] || continue
+    for row in "${OWNER_ONLY[@]}"; do
+      read -r g d <<<"$row"
+      # shellcheck disable=SC2254  # deliberate: $g is the row's glob
+      case "$key" in $g) ;; *) continue;; esac
+      if [ -n "$push" ] && [ -n "$d" ]; then
+        f="$st/tries/$key"; [ -s "$f" ] || date +%s >"$f"; t=$(cat "$f")
+        [ "$t" != pushed ] && [ $(( $(date +%s) - t )) -ge "$d" ] &&
+          notify-owner -p high -t sentinel "sentinel: $key for $(( ($(date +%s) - t) / 3600 )) h: ${val:0:120}" && echo pushed >"$f"
+      fi
+      continue 2
+    done
+    printf '%s\t%s\n' "$key" "$val"
+  done
+}
+
 # `tailscale up` refuses unless every non-default pref is restated (hostname, operator, ssh).
 fix_tailscale() { sudo tailscale up --timeout=30s --hostname="$HARNESS_HOST" --operator="$USER" --ssh; }
 compose_file() { grep -l "^name: $1\$" "$HOME"/moodle-envs/*/docker-compose.yml 2>/dev/null | head -1; }
@@ -83,6 +116,22 @@ fix_orch() {
 sentinel-runaway || true
 sentinel-waits || true
 
+# A hand-typed `systemd-run` without --collect leaves a failed run-* scope that nothing else clears
+# (pc status lists it apart, no FAIL); one older than SENTINEL_TRANSIENT_AGE s is reset and logged.
+reset_transient() {
+  local u props since desc now; now=$(date +%s)
+  for u in $(systemctl --user list-units --state=failed --plain --no-legend 2>/dev/null | awk '$1 ~ /^run-/{print $1}'); do
+    props=$(systemctl --user show "$u" -p Transient -p Description -p StateChangeTimestamp --timestamp=unix 2>/dev/null)
+    grep -qx 'Transient=yes' <<<"$props" || continue
+    since=$(sed -n 's/^StateChangeTimestamp=@//p' <<<"$props")
+    [ -n "$since" ] && [ $((now - since)) -ge "${SENTINEL_TRANSIENT_AGE:-600}" ] || continue
+    desc=$(sed -n 's/^Description=//p' <<<"$props")
+    pc units reset-failed "$u" --user --apply >/dev/null 2>&1 &&
+      log "reset failed transient $u after $(( (now - since) / 60 )) min: ${desc:0:120}"
+  done
+}
+reset_transient
+
 # pipewire log.level creeps up from debug tools left running; keep it at the default (2).
 pw_lvl=$(pw-metadata -n settings 0 log.level 2>/dev/null | sed -n "s/.*value:'\([0-9]*\)'.*/\1/p")
 if [ -n "$pw_lvl" ] && [ "$pw_lvl" -gt 2 ] 2>/dev/null; then
@@ -94,11 +143,12 @@ fi
 orbit=${ORBIT_HOOK:-$HOME/agents/bin/orbit-hook}
 [ -x "$orbit" ] && "$orbit" sweep </dev/null
 
-json="$(snapshot)"; fails="$(failures "$json")"
+json="$(snapshot)"; all="$(failures "$json")"
 mkdir -p "$st/tries"
 for f in "$st"/tries/*; do
-  [ -e "$f" ] && ! grep -q "^${f##*/}"$'\t' <<<"$fails" && rm -f "$f"
+  [ -e "$f" ] && ! grep -q "^${f##*/}"$'\t' <<<"$all" && rm -f "$f"
 done
+fails="$(owner_only --push <<<"$all")"
 grep -qE '^(agents.orchestrator|status.probe)' <<<"$fails" || rm -f "$st/orch-repaired" "$st/orch-notified"
 if [ -z "$fails" ]; then date -Is >"$st/last-ok"; exit 0; fi
 log "FAIL: $(tr '\n' ';' <<<"$fails")"
@@ -107,8 +157,10 @@ unmatched=""
 while IFS=$'\t' read -r key val; do
   fixed=""
   for row in "${FAULTS[@]}"; do
-    # shellcheck disable=SC2086  # deliberate: the row splits into pattern + fix words
+    set -f
+    # shellcheck disable=SC2086  # deliberate: the row splits into pattern + fix words, unglobbed
     set -- $row
+    set +f
     # shellcheck disable=SC2254  # deliberate: $1 is the row's glob
     case "$key" in $1) shift; "$@"; fixed=1; break ;; esac
   done
@@ -120,7 +172,7 @@ if [ -n "$unmatched" ]; then
   log "no bash fix for $unmatched re-checking in ${SENTINEL_SETTLE:-30} s"
   sleep "${SENTINEL_SETTLE:-30}"
 fi
-json="$(snapshot --fresh)"; left="$(failures "$json")"
+json="$(snapshot --fresh)"; left="$(failures "$json" | owner_only)"
 orch=$(awk -F'\t' '$1=="agents.orchestrator"{print $2}' <<<"$left")
 if [ -n "$orch" ]; then
   if [ ! -e "$st/orch-notified" ]; then
@@ -155,4 +207,4 @@ log "unresolved, escalating to Claude: $(tr '\n' ';' <<<"$left")"
 jq -n --arg t "$(date -Is)" --arg b "$fails" --arg a "$left" --argjson s "$json" \
   '{time:$t, failures_before:($b|split("\n")), failures_after:($a|split("\n")), status:$s}' \
   >"$st/incident.json"
-agent-run sentinel
+agent-run sentinel 9>&-

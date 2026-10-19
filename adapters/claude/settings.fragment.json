@@ -1,10 +1,29 @@
 {
-  "_comment": "Hooks this harness owns in ~/.claude/settings.json. @HARNESS_HOME@ is replaced by adapters/claude/install. Every other settings.json key — permissions, model, effortLevel, the Moodle Stop hook — is left untouched.",
+  "_comment": "Hooks and power-verb deny rules (FLEET.md §5.2) this harness owns in ~/.claude/settings.json. @HARNESS_HOME@ is replaced by adapters/claude/install. Every other settings.json key — other permissions, model, effortLevel, the Moodle Stop hook — is left untouched.",
   "_supersedes": [
     "$HOME/.claude/hooks/machine-status.sh",
     "$HOME/.claude/hooks/moodle-session-start.sh",
     "$HOME/.claude/hooks/audit-log.sh"
   ],
+  "permissions": {
+    "deny": [
+      "Bash(systemctl reboot:*)",
+      "Bash(systemctl poweroff:*)",
+      "Bash(systemctl halt:*)",
+      "Bash(systemctl kexec:*)",
+      "Bash(systemctl soft-reboot:*)",
+      "Bash(reboot:*)",
+      "Bash(shutdown:*)",
+      "Bash(poweroff:*)",
+      "Bash(halt:*)",
+      "Bash(sudo reboot:*)",
+      "Bash(sudo shutdown:*)",
+      "Bash(sudo poweroff:*)",
+      "Bash(sudo halt:*)",
+      "Bash(sudo systemctl reboot:*)",
+      "Bash(sudo systemctl poweroff:*)"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {
@@ -13,11 +32,19 @@
         ]
       }
     ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "@HARNESS_HOME@/hooks/sleep-loop-block.py", "timeout": 5 }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "@HARNESS_HOME@/adapters/claude/hooks/audit-log.py" }
+          { "type": "command", "command": "@HARNESS_HOME@/adapters/claude/hooks/audit-log.py", "async": true }
         ]
       }
     ],

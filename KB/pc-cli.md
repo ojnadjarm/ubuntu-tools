@@ -48,7 +48,7 @@ Regenerate: `pc help --md > ~/agents/KB/pc-cli.md`. Never hand-edit.
 | command | description | usage | bench (warm) |
 |---|---|---|---|
 | `pc audio` | the PipeWire graph as JSON; mutations ledgered. | `pc audio [graph] [--json]` | 0.12 s |
-| `pc bt` | bluez adapter, devices, battery and the sidecar-guarded mutations. | `pc bt [status] [--json]` | — |
+| `pc bt` | bluez adapter, devices, battery and ledgered mutations. | `pc bt [status] [--json]` | — |
 | `pc dbus` | the session, system and a11y buses as JSON. | `pc dbus list [--user\|--system\|--a11y] [--activatable] [--json]` | 0.03 s |
 | `pc input` | the evdev layer: nodes, capabilities, live events, who holds them, uinput injection. | `pc input devices [--json]` | 0.12 s |
 | `pc lid` | lid, panel power save and the lid policy unit (panel off while the lid is closed). | `pc lid [status] [--json]                 lid, PowerSaveMode, eDP dpms, external monitor, unit, reasserts` | — |
@@ -60,15 +60,17 @@ Regenerate: `pc help --md > ~/agents/KB/pc-cli.md`. Never hand-edit.
 |---|---|---|---|
 | `pc docker` | compose stacks, health, stats, logs, events, disk use; ledgered restarts. | `pc docker [stacks] [--json]                    compose project -> services (state/health/ports/uptime)` | 0.05 s |
 | `pc journal` | structured journalctl queries: errors, per-unit digest, unit tail, grep, boots, size. | `pc journal [errors\|digest\|unit\|grep\|boots\|size] [args]` | 0.06 s |
-| `pc units` | systemd units/timers (user+system), per-unit cost, journal tail, guarded restart. | `pc units [list\|timers\|fleet\|show\|cost\|log\|deps\|start\|stop\|restart] [args]` | 0.04 s |
+| `pc search-index` | GNOME's file indexer (localsearch-3): its cost, busiest dirs, .trackerignore excludes. | `pc search-index status [-n N] [--json]` | — |
+| `pc units` | systemd units/timers (user+system), per-unit cost, journal tail, guarded restart and reset-failed. | `pc units [list\|timers\|fleet\|show\|cost\|log\|deps\|start\|stop\|restart\|reset-failed] [args]` | 0.04 s |
 
 ## Safety net — the change ledger, docs, benchmarks, health
 
 | command | description | usage | bench (warm) |
 |---|---|---|---|
 | `pc bench` | wall, CPU and exec count for every read-only pc subcommand, warm and cold. | `pc bench [--cold] [--runs 3] [--save] [--compare] [--only <sub>…] [--json]` | — |
-| `pc doctor` | PASS/FAIL for the whole pc family without opening a window, making a sound or touching the TV. | `pc doctor [--quick] [--json]` | 1.20 s |
+| `pc doctor` | PASS/FAIL for the whole pc family without opening a window, making a sound or touching the TV. | `pc doctor [--quick] [--json] [--brief]` | 1.20 s |
 | `pc explain` | ranked KB lookup: heading > bold lead > exact quoted token > partial quote/backtick > word > substring. | `pc explain <thing…> [-n 3] [--json] [--files]` | — |
+| `pc failures` | every failure of the window on one screen: units, agent runs, CI, crashes, audit. | `pc failures [--since 24h] [--json]` | — |
 | `pc need` | the dashboard "need you" pushes; resolve one as a ledgered, undoable ack. | `pc need [list] [--json]` | — |
 | `pc undo` | the change ledger and its rollbacks. | `pc undo list [-n N] [--json]` | 0.02 s |
 

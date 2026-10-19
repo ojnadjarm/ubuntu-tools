@@ -26,6 +26,7 @@ _subs = {}
 _parent = {}
 _feed = {}
 _feed_lock = threading.Lock()
+_parent_lock = threading.Lock()
 
 
 def tail(path, size):
@@ -108,7 +109,8 @@ def transcript(js):
 
 def parent(js):
     """({task id: (ts, state)} from task notifications and TaskStop calls, {run id: (task id, workflow name)}) of the orchestrator transcript, read incrementally."""
-    m = agent_ends.scan(js, _parent.setdefault(js, agent_ends.memo()))
+    with _parent_lock:
+        m = agent_ends.scan(js, _parent.setdefault(js, agent_ends.memo()))
     return m[1], m[2]
 
 
@@ -238,6 +240,11 @@ def newest_write(folder):
     return max((os.path.getmtime(p) for p in glob.glob(os.path.join(folder, "*.jsonl"))), default=0)
 
 
+def newest_session():
+    """Id of the orchestrator session, from the newest transcript in PROJ, "" when there is none."""
+    return max(glob.glob(os.path.join(PROJ, "*.jsonl")), key=os.path.getmtime, default="")[len(PROJ) + 1:-len(".jsonl")]
+
+
 def persistent(roster, session):
     """Roster rows with state running|idle|off, and the orchestrator's state; running = an active unit or a transcript written < 60 s ago."""
     tmux, units, now = tmux_sessions(), unit_states([r["name"] for r in roster]), time.time()
@@ -278,6 +285,7 @@ def collect():
     orb = orbiters()
     live = {o.get("id", "").lower() for o in orb}
     session, subs = subagents(feed(), live)
+    session = newest_session() or session
     roster = [dict(a, report=report_line(a["name"])) for a in swr({"agents": system.BLOCKS["agents"]})["agents"]]
     roster, orch = cached("agents_persist", 5, lambda: persistent(roster, session), (roster, "idle"))
     return {"orchestrator": {"name": "DarkSaddler", "session": session[:8], "state": orch}, "subagents": subs, "orbiters": orb,

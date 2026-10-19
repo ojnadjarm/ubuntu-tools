@@ -21,7 +21,7 @@ Not for Verifactu-compliant invoicing after 1 Jul 2027: that needs certified sof
 | `invlib/render.py` + `template.html` | record → HTML (A4, Roboto, traced SVG logo) → Chrome `--print-to-pdf` |
 
 - Data flow: `clients.json` defaults → `new` → `drafts/<n>-<client>-draft.{json,pdf}` (number not consumed) → `issue`
-  (under lock: next number, date ≥ last, final `pdf/<n>.pdf`, append `ledger.json`) → tarball in `~/agents/backups/invoices/`.
+  (under lock: read the draft, next number, date ≥ last, final `pdf/<n>.pdf`, append `ledger.json`) → tarball in `~/agents/backups/invoices/`.
 - Records snapshot the client's billing data, so editing `clients.json` never changes old invoices.
 - Logo: `potrace` trace of `logo-onj.png` (crop, 4× upscale, threshold 128, colour #1e2e39) → `assets/logo-onj.svg`, 16 KB.
 
@@ -40,6 +40,10 @@ invoice list --unpaid ; invoice paid 2026-C-11 ; invoice check
 - Python's default User-Agent gets HTTP 403 from api.frankfurter.app; use `api.frankfurter.dev/v1` with a UA header.
 - A future date returns the latest ECB rate (2026-09-28 for 2026-10-01): re-run `new` on the issue day.
 - Decimal is not JSON-serialisable: store amounts as strings, qty as int/float.
+- Every amount (base, IVA, IRPF, EUR total, PDF line) rounds ROUND_HALF_UP; bare `.quantize()` is half-even and made
+  10.05 x 2.5 hours bill 25.12 (F49, 2026-10-15; selftest case "half-cent rounds half-up").
+- `issue` reads the draft under the lock: a second concurrent `issue` of the same draft exits "already issued"
+  instead of taking a second number (F47, 2026-10-15; selftest case "concurrent issue of one draft").
 - Chrome needs its own `--user-data-dir` per run or it clashes with an open profile; the HTML temp lives in `~/invoices/.tmp`.
 - His original invoices carry no NIF and no IVA-exemption reason; `config.json` `issuer.tax_id` and client `defaults.notes`
   print them when filled.

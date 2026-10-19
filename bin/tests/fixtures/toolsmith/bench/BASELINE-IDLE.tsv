@@ -1,4 +1,4 @@
 # pc idle fixture: two rows, the collector cites the last one.
-#t	seconds	samples	package_w	psys_w	psys_sd	top_waker	wake_s	fleet_rss_mb	other_rss_mb	top_waker_unit
+#t	seconds	samples	package_w	psys_w	psys_sd	top_waker	wake_s	fleet_rss_mb	other_rss_mb	top_waker_unit	other_top
 2026-01-04T02:00:00+01:00	60	30	3.66	4.16	0.61	kworker/u64:4	33.3	1762.6	0	-
-2026-01-11T02:00:00+01:00	60	30	4.54	5.59	1	rcu_preempt	76.7	1556.9	489.8	-
+2026-01-11T02:00:00+01:00	60	30	4.54	5.59	1	rcu_preempt	76.7	1556.9	489.8	-	agent@x.service:chrome-headless:3600:455

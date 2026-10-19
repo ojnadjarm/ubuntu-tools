@@ -49,6 +49,12 @@ class Projects(unittest.TestCase):
         self.assertEqual(t["frontend"], "https://%s:8446/" % P.PUBLIC_HOST)
         self.assertEqual(t["tickets_url"], "/projects/vass/tickets")
 
+    def test_login_is_the_user_name_only(self):
+        with mock.patch.object(P.sites, "http_code", return_value=200), mock.patch.object(P, "run", fake_run()):
+            t = P.project("vass", P.PROJECTS["vass"], DOCKER)
+        self.assertEqual(t["login"], "admin")
+        self.assertNotIn("PASSWORD", open(P.__file__).read())
+
     def test_tile_states_down_and_warn(self):
         with mock.patch.object(P.sites, "http_code", return_value=None), mock.patch.object(P, "run", fake_run(log="")):
             down = P.project("vass", P.PROJECTS["vass"], [dict(c, state="exited") for c in DOCKER])
@@ -126,6 +132,18 @@ class TicketEdits(unittest.TestCase):
         P.edit_ticket("vass", "JIRA-4", "close")
         self.assertTrue(self.text().endswith("## JIRA-4 — bare\n\n- **State:** done\n\nbody\n"))
         self.assertEqual(P.open_tickets(self.path), 2)
+
+    def test_close_skips_prose_that_starts_with_state(self):
+        open(self.path, "a").write("\n## JIRA-5 — prose\n\nStateless handler loses the token.\n- **State:** open\n")
+        self.assertEqual(P.edit_ticket("vass", "JIRA-5", "close")[0], 200)
+        self.assertTrue(self.text().endswith("Stateless handler loses the token.\n- **State:** done\n"))
+        self.assertEqual(P.open_tickets(self.path), 2)
+
+    def test_delete_and_count_ignore_headings_inside_code_fences(self):
+        open(self.path, "a").write("\n## JIRA-6 — fenced\n\n- **State:** done\n\n```sh\n# reproduce\n## not a ticket\ncurl x\n```\n\nnotes\n")
+        self.assertEqual(P.open_tickets(self.path), 2)
+        self.assertEqual(P.edit_ticket("vass", "JIRA-6", "delete")[0], 200)
+        self.assertEqual(self.text(), TICKETS)
 
     def test_backups_keep_the_newest_twenty(self):
         for _ in range(12):

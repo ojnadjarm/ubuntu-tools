@@ -156,6 +156,22 @@ class Voice(unittest.TestCase):
         finally:
             voice._corpus_stats = real
 
+    def test_stats_body_survives_a_concurrent_invalidation(self):
+        from dash.services import voice
+
+        class Racy(dict):
+            def __setitem__(self, k, v):
+                super().__setitem__(k, v)
+                self.pop(k)
+
+        os.makedirs(server.CORPUS)
+        real = voice._memo
+        voice._memo = Racy()
+        try:
+            self.assertEqual(json.loads(voice.stats_body()[0])["clips"], 0)
+        finally:
+            voice._memo = real
+
     def test_stats_change_after_save_and_after_delete(self):
         raw = subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-i", WAV, "-t", "1", "-c:a", "libopus", "-f", "webm", "-"], capture_output=True).stdout
         self.assertEqual(server.corpus_stats()["clips"], 0)
@@ -216,13 +232,23 @@ class Voice(unittest.TestCase):
     def test_refusals(self):
         self.assertEqual(server.save_clip(b"x", "audio/webm", "nope")[0], 400)
         self.assertEqual(server.save_clip(b"", "audio/webm", "p01")[0], 400)
-        for bad in ("../x", "/etc/passwd", "", "20260922-094742-1afd/../a", None):
+        for bad in ("../x", "/etc/passwd", "", "20260922-094742-1afd/../a", None, 5, [1], {"a": 1}):
             self.assertEqual(server.delete_clip(bad)[0], 400, bad)
         self.assertEqual(server.delete_clip("20260922-094742-1afd")[0], 404)
 
     def test_bad_audio_keeps_source(self):
         code, out = server.save_clip(b"not audio at all" * 100, "audio/webm", "p01")
         self.assertEqual(code, 500)
+        self.assertTrue(os.path.isfile(os.path.join(server.CORPUS, out["kept"])))
+
+    def test_ffmpeg_timeout_answers_500_and_keeps_source(self):
+        from unittest import mock
+        from dash.services import voice
+        hang = mock.Mock(side_effect=subprocess.TimeoutExpired("ffmpeg", 60))
+        with mock.patch.object(voice.subprocess, "run", hang):
+            code, out = server.save_clip(b"slow audio" * 100, "audio/webm", "p01")
+        self.assertEqual(code, 500, out)
+        self.assertIn("timed out", out["error"])
         self.assertTrue(os.path.isfile(os.path.join(server.CORPUS, out["kept"])))
 
 

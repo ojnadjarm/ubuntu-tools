@@ -14,8 +14,15 @@ ap.add_argument('--raw', action='store_true',
                 help='raw tool calls (op at command position) by class: covered, by-design, gap')
 ap.add_argument('--kind', choices=('agent', 'bench', 'interactive'),
                 help='only rows of one kind: rostered agent runs, pcbench trials, interactive sessions')
+ap.add_argument('--errors', action='store_true', help='only failed calls (ok: false rows)')
+ap.add_argument('--cluster', action='store_true',
+                help='failed calls grouped by the command that failed + the line naming the error (paths, ids, digits '
+                     'folded), with the failure rate from the first call that logged an outcome')
+ap.add_argument('--agent', help='match agent_id prefix (a subagent or workflow lane)')
 ap.add_argument('--tokens', action='store_true',
-                help='context/token cost per Claude session, read from the transcripts')
+                help='context/token cost per Claude session (subagents and workflow lanes rolled in), from the transcripts')
+ap.add_argument('--by', choices=('kind',),
+                help='with --tokens: totals per kind (interactive, headless, worker, workflow)')
 a = ap.parse_args()
 
 cut = 0.0
@@ -25,76 +32,114 @@ if a.since:
         sys.exit('bad --since (use 30m, 2h, 3d)')
     cut = time.time() - int(m[1]) * {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}[m[2]]
 
-def tokens_view(session, cut):
-    """One row per transcript session: turns, context carried, results, re-reads."""
-    import calendar, glob, statistics
+def transcripts(root):
+    """(path, parent session, kind) for top-level transcripts and every subagent or workflow lane under them."""
+    import glob
+    for f in sorted(glob.glob(os.path.join(root, '*', '*.jsonl'))):
+        yield f, os.path.basename(f)[:8], None
+    for f in sorted(glob.glob(os.path.join(root, '*', '*', 'subagents', '**', 'agent-*.jsonl'),
+                              recursive=True)):
+        sub = f[len(root):].split(os.sep)
+        i = sub.index('subagents')
+        yield f, sub[i - 1][:8], 'workflow' if 'workflows' in sub[i:] else 'worker'
+
+
+def scan(f):
+    """One transcript: turns keyed by message id, result bytes per tool, images, Read paths, last stamp, entrypoint."""
+    import calendar
+    res, names, imgs, reads, turns, stamps = Counter(), {}, 0, [], {}, {}
+    last, entry = 0.0, None
+    for i, line in enumerate(open(f, errors='replace')):
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if entry is None and r.get('entrypoint'):
+            entry = r['entrypoint']
+        t = r.get('timestamp', '')[:19]
+        stamp = 0.0
+        if t:
+            try:
+                stamp = calendar.timegm(
+                    time.strptime(t, '%Y-%m-%dT%H:%M:%S'))
+            except ValueError:
+                stamp = 0.0
+        last = max(last, stamp)
+        if r.get('type') == 'assistant':
+            u = (r.get('message') or {}).get('usage') or {}
+            # one reply is split over several lines with the same id and usage
+            key = (r.get('message') or {}).get('id') or i
+            stamps[key] = stamp
+            turns[key] = (
+                time.strftime('%Y-%m-%d', time.localtime(stamp)) if stamp else t[:10],
+                u.get('input_tokens', 0)
+                + u.get('cache_read_input_tokens', 0)
+                + u.get('cache_creation_input_tokens', 0),
+                u.get('cache_read_input_tokens', 0), u.get('output_tokens', 0))
+            for b in (r.get('message') or {}).get('content') or []:
+                if isinstance(b, dict) and b.get('type') == 'tool_use':
+                    names[b.get('id')] = b.get('name', '?')
+                    if b.get('name') == 'Read':
+                        reads.append((b.get('input') or {}).get('file_path'))
+        elif r.get('type') == 'user':
+            c = (r.get('message') or {}).get('content')
+            for b in c if isinstance(c, list) else []:
+                if not isinstance(b, dict):
+                    continue
+                if b.get('type') == 'image':
+                    imgs += 1
+                elif b.get('type') == 'tool_result':
+                    body = b.get('content')
+                    if isinstance(body, list):
+                        n = 0
+                        for x in body:
+                            if isinstance(x, dict) and x.get('type') == 'image':
+                                imgs += 1
+                                n += len(((x.get('source') or {})
+                                          .get('data') or ''))
+                            elif isinstance(x, dict):
+                                n += len(x.get('text') or '')
+                    else:
+                        n = len(body or '')
+                    res[names.get(b.get('tool_use_id'), '?')] += n
+    return turns, stamps, res, imgs, reads, last, entry
+
+
+def tokens_view(session, cut, by=None):
+    """One row per session (its subagents and workflow lanes rolled in): turns, context, results, re-reads."""
+    import statistics
     root = os.environ.get('CLAUDE_PROJECTS_DIR',
                           os.path.expanduser('~/.claude/projects'))
-    rows, days = [], {}
-    for f in sorted(glob.glob(os.path.join(root, '*', '*.jsonl'))):
-        sid = os.path.basename(f)[:8]
+    sess, days, kinds = {}, {}, {}
+    for f, sid, kind in transcripts(root):
         if session and not sid.startswith(session):
             continue
-        res, names, imgs, reads, turns = Counter(), {}, 0, [], {}
-        last = 0.0
-        for i, line in enumerate(open(f, errors='replace')):
-            try:
-                r = json.loads(line)
-            except ValueError:
+        if cut and os.path.getmtime(f) < cut:
+            continue
+        turns, stamps, res, imgs, reads, last, entry = scan(f)
+        for k, (d, c, _, _) in turns.items():
+            if cut and stamps[k] < cut:
                 continue
-            t = r.get('timestamp', '')[:19]
-            stamp = 0.0
-            if t:
-                try:
-                    stamp = calendar.timegm(
-                        time.strptime(t, '%Y-%m-%dT%H:%M:%S'))
-                except ValueError:
-                    stamp = 0.0
-            last = max(last, stamp)
-            if r.get('type') == 'assistant':
-                u = (r.get('message') or {}).get('usage') or {}
-                # one reply is split over several lines with the same id and usage
-                turns[(r.get('message') or {}).get('id') or i] = (
-                    t[:10], u.get('input_tokens', 0)
-                    + u.get('cache_read_input_tokens', 0)
-                    + u.get('cache_creation_input_tokens', 0),
-                    u.get('cache_read_input_tokens', 0), u.get('output_tokens', 0))
-                for b in (r.get('message') or {}).get('content') or []:
-                    if isinstance(b, dict) and b.get('type') == 'tool_use':
-                        names[b.get('id')] = b.get('name', '?')
-                        if b.get('name') == 'Read':
-                            reads.append((b.get('input') or {}).get('file_path'))
-            elif r.get('type') == 'user':
-                c = (r.get('message') or {}).get('content')
-                for b in c if isinstance(c, list) else []:
-                    if not isinstance(b, dict):
-                        continue
-                    if b.get('type') == 'image':
-                        imgs += 1
-                    elif b.get('type') == 'tool_result':
-                        body = b.get('content')
-                        if isinstance(body, list):
-                            n = 0
-                            for x in body:
-                                if isinstance(x, dict) and x.get('type') == 'image':
-                                    imgs += 1
-                                    n += len(((x.get('source') or {})
-                                              .get('data') or ''))
-                                elif isinstance(x, dict):
-                                    n += len(x.get('text') or '')
-                        else:
-                            n = len(body or '')
-                        res[names.get(b.get('tool_use_id'), '?')] += n
-        ctx = [c for _, c, _, _ in turns.values()]
-        cread = sum(r for _, _, r, _ in turns.values())
-        out = sum(o for _, _, _, o in turns.values())
-        for d, c, _, _ in turns.values():
             days[d] = days.get(d, [0, 0])
             days[d][0] += 1
             days[d][1] += c
-        if not ctx or (cut and last < cut):
+        if not turns or (cut and last < cut):
             continue
-        rereads = len(reads) - len({p for p in reads if p})
+        kind = kind or ('interactive' if entry == 'cli' else 'headless')
+        kt = kinds.setdefault(kind, [0, 0, 0])
+        kt[0] += len(turns)
+        kt[1] += sum(r for _, _, r, _ in turns.values())
+        kt[2] += sum(o for _, _, _, o in turns.values())
+        m = sess.setdefault(sid, [[], Counter(), 0, 0])
+        m[0].extend(turns.values())
+        m[1].update(res)
+        m[2] += imgs
+        m[3] += len(reads) - len({p for p in reads if p})
+    rows = []
+    for sid, (turns, res, imgs, rereads) in sess.items():
+        ctx = [c for _, c, _, _ in turns]
+        cread = sum(r for _, _, r, _ in turns)
+        out = sum(o for _, _, _, o in turns)
         rows.append((sid, len(ctx), statistics.mean(ctx),
                      statistics.median(ctx), max(ctx), cread, out,
                      res, imgs, max(rereads, 0)))
@@ -121,10 +166,17 @@ def tokens_view(session, cut):
     for d in sorted(days):
         n, c = days[d]
         print(f'{d}  turns {n:5}  mean ctx {c / n:9,.0f}')
+    if by == 'kind':
+        allr = sum(r for _, r, _ in kinds.values())
+        print(f"{'kind':12} {'turns':>6} {'cacheR M':>9} {'out k':>7} {'share':>6}")
+        for k in ('interactive', 'headless', 'worker', 'workflow'):
+            n, r, o = kinds.get(k, (0, 0, 0))
+            print(f'{k:12} {n:6} {r / 1e6:9.1f} {o / 1000:7.1f} '
+                  f'{(100 * r / allr if allr else 0):5.0f}%')
 
 
 if a.tokens:
-    tokens_view(a.session, cut)
+    tokens_view(a.session, cut, a.by)
     sys.exit(0)
 
 def stamp(r):
@@ -154,6 +206,10 @@ for r in src:
         continue
     if a.kind and row_kind(r) != a.kind:
         continue
+    if a.errors and not a.cluster and r.get('ok') is not False:
+        continue
+    if a.agent and not r.get('agent_id', '').startswith(a.agent):
+        continue
     blob = f"{r.get('tool')} {r.get('op')} {r.get('summary')}"
     if a.grep and not re.search(a.grep, blob):
         continue
@@ -162,7 +218,25 @@ for r in src:
 PIXEL = re.compile(r'\bpc (?:shot|find|click-text)\b|\bpc wait [0-9]')
 TEXT = re.compile(r'\bpc (?:see|wait-for|tree|a11y-click)\b|\bpc win (?:list|focused)\b')
 
-if a.raw:
+if a.cluster:
+    from auditlib import error_cluster
+    bad = [r for r in rows if r.get('ok') is False]
+    counts, sessions = Counter(), {}
+    for r in bad:
+        k = error_cluster(r)
+        counts[k] += 1
+        sessions.setdefault(k, set()).add(r.get('session', ''))
+    print(f"{'count':>5} {'sess':>4}  cluster")
+    for k, n in counts.most_common():
+        print(f'{n:5} {len(sessions[k]):4}  {k}')
+    first = next((i for i, r in enumerate(rows) if 'ok' in r), len(rows))
+    if first:
+        since = rows[first]['ts'][:16] if first < len(rows) else 'none yet'
+        print(f'note: rate counts calls from {since}, the first with a logged outcome ({first} older left out)')
+    calls = len(rows) - first
+    pct = 100 * len(bad) / calls if calls else 0
+    print(f'TOTAL {len(bad)} failed of {calls} calls ({pct:.1f}%) \u00b7 {len(counts)} clusters')
+elif a.raw:
     from auditlib import raw_call
     counts, sessions, kind = Counter(), {}, {}
     for r in rows:
@@ -203,5 +277,6 @@ elif a.stats:
         print(sess, ' '.join(f'{k}={v}' for k, v in c.most_common()))
 else:
     for r in rows:
+        err = f"  \u2717 {r['error'][:80]}" if r.get('ok') is False else ''
         print(f"{r['ts'][11:19]}  {r.get('session',''):8}  {r.get('tool',''):12} "
-              f"{r.get('op',''):18} {r.get('summary','')[:120]}")
+              f"{r.get('op',''):18} {(r.get('summary','')[:120] + err).replace('\n', '\u23ce')}")

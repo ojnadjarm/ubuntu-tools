@@ -1,0 +1,1 @@
+^(?![\s\S]*\bunshare\b)[\s\S]*?(?:(?:^|[|;&(]\s*|sudo\s+(?:-\S+\s+)*)sysctl\s+(?:-\w*w|[^-\s]\S*=)|\bpc\s+kernel\s+sysctl\b[^|;&\n]*--apply|(?:>|\btee\s+(?:-a\s+)?)\s*/proc/sys/|/etc/sysctl\.(?:conf|d))

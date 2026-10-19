@@ -32,8 +32,35 @@ hits() { # hits <label> <ere> [file list]
   if [ -z "$out" ]; then ok 1 "no $1"; else ok 0 "no $1"; printf '%s\n' "$out" | cut -c1-160 | head -8; fi
 }
 
+# Intentional samples, one `file:line` each with its reason.
+ALLOW_HOME='
+discord-bot/tests/test_bot.py:45 redaction sample the bot must scrub from replies
+discord-bot/tests/test_bot.py:186 redaction sample the bot must scrub from replies
+discord-bot/tests/test_bot.py:188 asserts the redaction sample is gone
+discord-bot/tests/test_bot.py:229 asserts the redaction sample is gone
+bin/tests/auditlib.test.py:53 fake error text for the audit error classifier
+'
+HOME_RE='/home/[A-Za-z0-9._-]+'
+
+home_hits() { # home_hits <dir> <file list>: /home/<user> literals, minus $VAR/home fixtures and ALLOW_HOME
+  local allow
+  allow="$(printf '%s\n' "$ALLOW_HOME" | awk 'NF {print $1 ":"}')"
+  (cd "$1" && printf '%s\n' "$2" | tr '\n' '\0' | xargs -0 grep -nIE --devices=skip "$HOME_RE" 2>/dev/null) \
+    | grep -vF -f <(printf '%s\n' "$allow") \
+    | sed -E 's#\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/home/[A-Za-z0-9._-]*##g' | grep -E "$HOME_RE"
+}
+
+sbx="$(mktemp -d)"; trap 'rm -rf "$sbx"' EXIT
+printf '%s\n' 'mkdir -p "$SBX/home/agents" "${WORK}/home/x"' >"$sbx/fixture.sh"
+u=realuser
+printf '%s\n' 'cd "$SBX/home/a" && cat /home/'"$u/notes" >"$sbx/mixed.sh"
+printf '%s\n' "LOG=/home/$u/agents/x.log" >"$sbx/real.sh"
+ok "$([ -z "$(home_hits "$sbx" fixture.sh)" ] && echo 1 || echo 0)" "selftest: \$VAR/home fixture prefixes are ignored"
+ok "$([ "$(home_hits "$sbx" "$(printf 'real.sh\nmixed.sh')" | wc -l)" = 2 ] && echo 1 || echo 0)" "selftest: a real /home/<user> literal still fails"
+
 code="$(printf '%s\n' "$files" | grep -vE "$SKIPSHAPE")"
-hits "absolute home path"      '/home/[A-Za-z0-9._-]+' "$code"
+out="$(home_hits "$DIR" "$code")"
+if [ -z "$out" ]; then ok 1 "no absolute home path"; else ok 0 "no absolute home path"; printf '%s\n' "$out" | cut -c1-160 | head -8; fi
 hits "hardcoded uid"           '/run/user/[0-9]+|user-[0-9]+\.slice|user@[0-9]+\.service' "$code"
 hits "Linux user name"         "(^|[^A-Za-z0-9_-])$(id -un)([^A-Za-z0-9_-]|$)"
 [ -n "${HARNESS_HOST:-}" ]          && hits "host name"    "(^|[^A-Za-z0-9_-])$HARNESS_HOST([^A-Za-z0-9_-]|$)"

@@ -1,0 +1,9 @@
+[Unit]
+Description=Nightly fleet suite (02:10, after the 00:50-01:50 CI window)
+
+[Timer]
+OnCalendar=*-*-* 02:10
+Persistent=true
+
+[Install]
+WantedBy=timers.target

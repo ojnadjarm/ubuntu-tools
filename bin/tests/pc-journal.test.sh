@@ -18,13 +18,16 @@ kcount=$(jq -r '[.[]|select(.unit=="kernel")][0].count // 0' <<<"$out")
 [ "${kcount:-0}" -ge 1 ] 2>/dev/null && ok 'digest has a kernel row with count>=1' \
   || nok 'digest has a kernel row with count>=1' "$kcount"
 
+# The busiest user service in the newest 200 lines, so the unit always has 5 entries.
+u=$(journalctl --user -n 200 -o json -q | jq -r '._SYSTEMD_USER_UNIT // empty' | grep '\.service$' | sort | uniq -c | sort -rn | awk 'NR==1{print $2}')
+u=${u%.service}
 t0=$(date +%s.%N)
-n=$("$J" unit dark-eye -n 5 | wc -l)
+n=$("$J" unit "$u" -n 5 | wc -l)
 t1=$(date +%s.%N)
-is 'unit dark-eye -n 5 prints 5 lines' "$n" 5
+is "unit $u -n 5 prints 5 lines" "$n" 5
 awk -v a="$t0" -v b="$t1" 'BEGIN{exit !(b-a<=0.3)}' \
-  && ok 'unit dark-eye -n 5 runs in <= 0.3 s' \
-  || nok 'unit dark-eye -n 5 runs in <= 0.3 s' "$(awk -v a="$t0" -v b="$t1" 'BEGIN{printf "%.3f", b-a}')"
+  && ok "unit $u -n 5 runs in <= 0.3 s" \
+  || nok "unit $u -n 5 runs in <= 0.3 s" "$(awk -v a="$t0" -v b="$t1" 'BEGIN{printf "%.3f", b-a}')"
 
 "$J" boots --json | jq -e 'type=="array" and length>=1' >/dev/null
 is 'boots --json lists at least one boot' "$?" 0

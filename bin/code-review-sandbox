@@ -2,8 +2,8 @@
 # code-review-sandbox [--fixture <home>] [--post] [--selftest] -- <cmd…> — run the code-review swarm in an allowlist sandbox
 # (bwrap): the whole home read-only, writable only where the swarm may write; no network except the Claude API (through
 # code-review-netproxy); no D-Bus, systemd, docker, ssh-agent or tmux sockets; secrets and the voice corpus hidden; its own
-# pid namespace, so nothing outlives it. Real mode: ~/agents writable except .git, research, backups (but code-review/ and
-# retired/) and the swarm's own containment. Fixture mode: only the fixture home and the audit log are writable.
+# pid namespace, so nothing outlives it. Real mode: ~/agents writable except .git, backups (but code-review/ and
+# retired/) and the swarm's own containment; $AGENT_WORK read-only. Fixture mode: only the fixture home and the audit log are writable.
 # --post: after the session, also on timeout, drop stale claims, restore unverified backups and deliver the report outside.
 # --selftest proves every read-only, hidden and blocked path before anything runs.
 set -uo pipefail
@@ -19,6 +19,10 @@ while [ $# -gt 0 ]; do
     *) break ;;
   esac
 done
+if [ "$selftest" = 1 ] && [ -z "$fixture" ] && [ -e "$ME/.lock" ] && ! flock -n "$ME/.lock" true 2>/dev/null; then
+  echo "code-review-sandbox: real-mode selftest skipped (a code-review run holds $ME/.lock)"
+  selftest=0; [ $# -eq 0 ] && exit 0
+fi
 if [ -n "$fixture" ]; then
   case "$fixture" in "$ME"/state/selftest/*) ;; *)
     echo "code-review-sandbox: fixture must live under $ME/state/selftest/" >&2; exit 2 ;; esac
@@ -27,7 +31,8 @@ if [ -n "$fixture" ]; then
 else
   work="$ME/state/sandbox"; crhome="$H"
 fi
-mkdir -p "$work/shims" "$work/net"
+mkdir -p "$work/shims"
+net="$(mktemp -d "$work/net.XXXX")"
 attempts="${fixture:-$ME/state}/attempts.log"
 
 # Claude's own state stays writable (auth refresh, session files); every other entry of ~/.claude is read-only.
@@ -36,7 +41,7 @@ internal=".credentials.json .last-cleanup .last-update-result.json backups cache
 slug="$(printf '%s' "$PWD" | sed 's/[^a-zA-Z0-9]/-/g')"
 mkdir -p "$H/.claude/projects/$slug"
 
-ro=("$A/.git" "$A/AGENTS.md" "$A/FLEET.md" "$A/research" "$A/backups" "$work")
+ro=("$A/.git" "$A/AGENTS.md" "$A/FLEET.md" "${AGENT_WORK:-$H/agent-work}" "$A/backups" "$work")
 while IFS= read -r p; do ro+=("$p"); done < <(python3 "$B/code-review" containment)
 for e in "$H"/.claude/* "$H"/.claude/.[!.]*; do
   n="${e##*/}"; case " $(echo $internal) " in *" $n "*) continue ;; esac
@@ -74,7 +79,7 @@ if [ -f "$B/pc" ]; then
   shims+=(--ro-bind "$B/pc" /tmp/.cr-bin/pc --ro-bind "$work/shims/pc" "$B/pc")
 fi
 
-port=18474; sock="$work/net/proxy.sock"
+port=18474; sock="$net/proxy.sock"
 args=(--dev-bind / / --ro-bind "$H" "$H")
 for p in "${rw[@]}"; do [ -e "$p" ] && args+=(--bind "$p" "$p"); done
 args+=(--bind "$H/.claude" "$H/.claude")
@@ -84,7 +89,7 @@ for p in "${rw_after[@]}"; do [ -e "$p" ] && args+=(--bind "$p" "$p"); done
 args+=(--tmpfs /tmp)
 for p in "${hide_dirs[@]}"; do [ -d "$p" ] && args+=(--tmpfs "$p"); done
 for p in "${hide_files[@]}"; do [ -e "$p" ] && args+=(--ro-bind /dev/null "$p"); done
-args+=(--bind "$work/net" /tmp/.cr-net "${shims[@]}")
+args+=(--bind "$net" /tmp/.cr-net "${shims[@]}")
 args+=(--unshare-net --unshare-pid --proc /proc --die-with-parent
        --unsetenv DBUS_SESSION_BUS_ADDRESS --unsetenv SSH_AUTH_SOCK --unsetenv TMUX --unsetenv TMUX_PANE
        --setenv XDG_RUNTIME_DIR "/run/user/$U" --setenv HTTPS_PROXY "http://127.0.0.1:$port"
@@ -94,9 +99,9 @@ inner='"$0" relay /tmp/.cr-net/proxy.sock '"$port"' 2>/dev/null &
 for _ in $(seq 100); do (exec 3<>/dev/tcp/127.0.0.1/'"$port"') 2>/dev/null && break; sleep 0.05; done
 exec "$@"'
 
-python3 "$B/code-review-netproxy" serve "$sock" 2>>"$work/net/proxy.log" & proxy=$!
+python3 "$B/code-review-netproxy" serve "$sock" 2>>"$work/proxy.log" & proxy=$!
+trap 'kill "$proxy" 2>/dev/null; rm -rf "$net"' EXIT
 for _ in $(seq 100); do [ -S "$sock" ] && break; sleep 0.05; done
-trap 'kill "$proxy" 2>/dev/null' EXIT
 
 if [ "$selftest" = 1 ]; then
   wr=("${ro[@]}" "$H" "$H/Documents" "$H/obsidian-vault" "$H/drop" "$H/.moodle-devdocs" "$H/.bashrc" "$H/.local/bin"

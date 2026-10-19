@@ -1,5 +1,5 @@
 """HTTP transport: one-write send() with gzip, ETag/304 and TCP_NODELAY; route dispatch; pages and static files."""
-import gzip, hashlib, html, json, os, socket, threading
+import gzip, hashlib, html, json, os, socket, threading, urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from dash import routes
 from dash.env import BINDS, BRAND, HERE, PORT
@@ -92,7 +92,16 @@ class Handler(BaseHTTPRequestHandler):
         fn = routes.find(method, path)
         if not fn:
             return self.send(404, b"not found\n", "text/plain")
+        if method == "POST" and self.cross_site():
+            return self.json({"error": "cross-site request refused"}, 403)
         fn(self, path)
+
+    def cross_site(self):
+        """True when Fetch Metadata says another site sent the request, or its Origin is not this Host."""
+        if self.headers.get("Sec-Fetch-Site", "") in ("cross-site", "same-site"):
+            return True
+        origin = self.headers.get("Origin")
+        return origin is not None and urllib.parse.urlsplit(origin).netloc != self.headers.get("Host", "")
 
     def redirect(self, loc):
         """302 to loc; the browser carries the #fragment over."""
@@ -106,7 +115,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send(code, json.dumps(obj).encode(), "application/json")
 
     def body_json(self, limit, empty):
-        """The request body as JSON, read up to limit bytes; empty when there is none or it does not parse."""
+        """The request body as JSON, read up to limit bytes; empty when it is not application/json, missing or does not parse."""
+        if self.headers.get_content_type() != "application/json":
+            return empty
         try:
             raw = self.rfile.read(min(int(self.headers.get("Content-Length") or 0), limit))
             return json.loads(raw) if raw else empty
@@ -192,6 +203,5 @@ def tts_route(h, path):
 
 @route("GET", "/plans/", prefix=True)
 @route("GET", "/static/", prefix=True)
-@route("GET", "/mockups/", prefix=True)
 def static_route(h, path):
     h.static(path)

@@ -24,13 +24,14 @@
 | Path | What |
 |---|---|
 | `~/agents/bin` | all CLIs (`harness`, `pc`, `notify-owner`, `agent-*`, `agents-*`, `moodle-keep`); on PATH |
-| `~/agents/KB/` | machine facts, quirks, runbooks, `history.md`, `guides/` (search with `guide <words>`) |
+| `~/agents/KB/` | machine facts, quirks, runbooks, `guides/` (search with `guide <words>`) |
 | `~/agents/<name>/` | one agent: `BRIEF.md`, `agent.env`, `state/`, `logs/`, `REPORT.md` |
 | `~/agents/secrets/` | credentials (mode 600): read, never print, never push |
 | `~/agents/log/actions.jsonl` | audit log of every tool call; read with `agents-log` |
 | `~/agents/backups/` | config baselines and Moodle DB dumps |
 | `~/agents/config.example.env` | every machine value; the real file is `~/.config/pc-harness/config.env` |
 | `~/agents/adapters/<agent>/` | what is specific to one agent CLI (paths, flags, hooks) |
+| `~/agent-work` (`$AGENT_WORK`) | agent working papers outside every repo: `history.md`, `briefs/`, `research/<date>/<ticket>/`, `evidence/`, `archive/`, `owner/` (owner material, move only) |
 | `~/moodle-envs/<ver>` | Moodle Docker envs; `~/moodle-harness` is the Moodle coding harness source |
 
 ## 3. Act, then verify
@@ -53,7 +54,7 @@
   Load a matching skill (a line ending `→ invoke /<name>`, or one in your skill list) with the Skill tool, then read
   the guide for its pitfalls. Say which guide and skill you used, or that none matched.
 - **New repeatable work leaves a guide and a skill or tool (owner, 2026-09-24).** Package it as a skill
-  (`~/.claude/skills/<name>/SKILL.md`, scripts beside it) or a CLI in `~/agents/bin`; then `guide new <slug>`
+  (`~/.claude/skills/<name>/SKILL.md`, scripts beside it) or a CLI in `~/agents/bin`; then `guide --new <slug>`
   (template `KB/guides/TEMPLATE.md`), one line in `KB/guides/INDEX.md` with trigger words and `skill /<name>`,
   measured pitfalls, today's date as last verified. A guide alone is only for one-off knowledge.
 - **Architecture before implementation (owner mandate, 2026-09-23).** Write it down first: modules, interfaces,
@@ -81,7 +82,7 @@
    (`$ORCHESTRATOR_TMUX_SESSION`, `claude` on this install).
 3. Editing the global instruction file of the agent CLI you run on (`adapters/<agent>/README.md` names it),
    `sshd_config`, `ufw`, `sudoers`, or any second access path.
-4. Deleting or moving owner data (`~/moodle-envs` sources, `~/agents/backups`, `~/Documents`).
+4. Deleting or moving owner data (`~/moodle-envs` sources, `~/agents/backups`, `~/agent-work/owner`, `~/Documents`).
 5. Writing outside your own `~/agents/<name>/` unless your brief says so.
 6. **Tests, benchmarks and experiments never run against a real owner repo, real credentials, real network
    services or real units.** Anything that exercises a forbidden action runs against a throwaway fixture inside a

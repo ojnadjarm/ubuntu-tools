@@ -35,3 +35,6 @@ tj() { jq -r --arg k "$2" '.[$k] // 0' <<<"$1"; }
 ATTEMPTS="${PCBENCH_ATTEMPTS:-${PCBENCH_TRIALDIR:-$PWD}/attempts.jsonl}"
 attempts_new()  { [ -r "$ATTEMPTS" ] && jq -sc . "$ATTEMPTS" 2>/dev/null || echo '[]'; }
 attempts_list() { attempts_new | jq -r '[.[].cmd] | join("; ")'; }
+
+# The per-trial fixture tree for tasks that build their own world (C06–C08, D06, O06, S07).
+WORK="${PCBENCH_TRIALDIR:-$PWD}/work"

@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# sandbox [--selftest] [-- <cmd…>] — run the Discord bot in bwrap: an empty home except its code (read-only), state/
+# (writable) and its own token (read-only); no secrets, sudo, D-Bus, systemd, docker or tmux; network only to Discord
+# hosts on 443 through netproxy. --selftest proves it from inside and checks from outside that nothing was written.
+set -uo pipefail
+ME="$(cd "$(dirname "$0")/.." && pwd)"; H="$HOME"; U="$(id -u)"
+TOKEN="${DISCORD_TOKEN_FILE:-$H/agents/secrets/discord-bot-token}"
+PY="$ME/.venv/bin/python"; port="${DISCORD_PROXY_PORT:-18471}"
+selftest=0
+while [ $# -gt 0 ]; do
+  case "$1" in --selftest) selftest=1; shift ;; --) shift; break ;;
+    -h|--help) sed -n '2,4p' "$0" | sed 's/^# //'; exit 0 ;; *) break ;; esac
+done
+mkdir -p "$ME/state" "$ME/run"; sock="$ME/run/proxy.sock"
+args=(--unshare-all --die-with-parent --new-session --cap-drop ALL --clearenv
+      --ro-bind /usr /usr --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib64 /lib64 --symlink usr/sbin /sbin
+      --dev /dev --proc /proc --tmpfs /tmp --tmpfs /run --tmpfs /home)
+for e in ssl ca-certificates hosts passwd group nsswitch.conf localtime ld.so.cache ld.so.conf ld.so.conf.d; do
+  [ -e "/etc/$e" ] && args+=(--ro-bind "/etc/$e" "/etc/$e")
+done
+args+=(--dir "$H" --ro-bind "$ME/discordbot" "$ME/discordbot" --ro-bind "$ME/.venv" "$ME/.venv"
+       --bind "$ME/state" "$ME/state" --ro-bind "$TOKEN" "$TOKEN" --bind "$ME/run" /run/dbot --chdir "$ME"
+       --setenv HOME "$H" --setenv PATH /usr/bin --setenv LANG C.UTF-8 --setenv PYTHONDONTWRITEBYTECODE 1
+       --setenv DISCORD_PROXY "http://127.0.0.1:$port" --setenv DISCORD_TOKEN_FILE "$TOKEN"
+       --setenv DISCORD_STATE_DIR "$ME/state")
+while IFS='=' read -r k v; do args+=(--setenv "$k" "$v"); done < <(env | grep -E '^DISCORD_(GUILD_ID|FORUM_ID|OWNER_ID|ALLOWLIST|REQUESTS_PER_DAY|JOBS_PER_DAY|POLL_SECONDS)=')
+inner='"$0" -m discordbot.netproxy relay /run/dbot/proxy.sock '"$port"' 2>/dev/null &
+for _ in $(seq 100); do (exec 3<>/dev/tcp/127.0.0.1/'"$port"') 2>/dev/null && break; sleep 0.05; done
+exec "$@"'
+
+"$PY" -c 'import sys; sys.path.insert(0, sys.argv[1]); import runpy; sys.argv = ["netproxy", "serve", sys.argv[2]]; runpy.run_module("discordbot.netproxy", run_name="__main__")' "$ME" "$sock" 2>>"$ME/run/proxy.log" & proxy=$!
+for _ in $(seq 100); do [ -S "$sock" ] && break; sleep 0.05; done
+trap 'kill "$proxy" 2>/dev/null' EXIT
+
+if [ "$selftest" = 1 ]; then
+  others=(); for f in "$H"/agents/secrets/* "$H"/agents/secrets/.[!.]*; do [ -e "$f" ] && [ "$f" != "$TOKEN" ] && others+=("$f"); done
+  stamp="dbot-selftest-$$"
+  targets=("$H/$stamp" "$H/agents/$stamp" "$ME/$stamp" "$ME/discordbot/$stamp" "$ME/.venv/$stamp" "$H/.claude/$stamp"
+           "$H/agents/secrets/$stamp" "/usr/$stamp" "/etc/$stamp")
+  probe='bad=0; say() { echo "FAIL $1"; bad=1; }
+  n=$1; shift; i=0
+  while [ $i -lt "$n" ]; do f=$1; shift; i=$((i+1)); cat "$f" >/dev/null 2>&1 && say "readable secret ${f##*/}"; done
+  ls "$HOME/agents/secrets" | grep -qv "^discord-bot-token$" && say "secrets dir lists other files"
+  for p in "$@"; do touch "$p" 2>/dev/null; done
+  for p in "$@"; do case "$p" in /usr/*|*/discordbot/*|*/.venv/*) [ -e "$p" ] && say "wrote $p" ;; esac; done
+  [ -r "$DISCORD_TOKEN_FILE" ] || say "own token not readable"
+  touch "$DISCORD_STATE_DIR/.selftest" && rm "$DISCORD_STATE_DIR/.selftest" || say "state dir not writable"
+  [ -e "$HOME/.claude" ] && say "~/.claude visible"
+  [ -e "$HOME/.ssh" ] && say "~/.ssh visible"
+  [ -e "/run/user/'"$U"'/bus" ] && say "user bus visible"
+  [ -e /run/docker.sock ] || [ -e /var/run/docker.sock ] && say "docker socket visible"
+  [ -e "/tmp/tmux-'"$U"'" ] && say "tmux socket visible"
+  sudo -n true 2>/dev/null && say "sudo works"
+  [ "$(cat /proc/1/comm)" = bwrap ] || say "no pid namespace"
+  P=$DISCORD_PROXY
+  curl -s -m 5 -o /dev/null https://discord.com/ && say "direct network reachable"
+  curl -s -m 8 -o /dev/null -x "$P" https://github.com/ && say "github.com reachable through proxy"
+  curl -s -m 8 -o /dev/null -x "$P" https://api.anthropic.com/ && say "Claude API reachable (bot needs none)"
+  c=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -x "$P" https://discord.com/api/v10/gateway); [ "$c" = 200 ] || say "discord.com not reachable through proxy ($c)"
+  exit $bad'
+  out="$(bwrap "${args[@]}" bash -c "$inner" "$PY" bash -c "$probe" _ "${#others[@]}" "${others[@]}" "${targets[@]}" 2>&1)"; rc=$?
+  for p in "${targets[@]}"; do [ -e "$p" ] && { out="$out
+FAIL wrote outside the sandbox: $p"; rm -f "$p"; rc=1; }; done
+  [ -n "$out" ] && echo "$out"
+  [ "$rc" = 0 ] || { echo "discord-bot sandbox: selftest FAILED" >&2; exit 1; }
+  echo "discord-bot sandbox: selftest ok — ${#others[@]} other secrets unreadable, ${#targets[@]} write targets refused, token ro, state rw, no sudo/bus/docker/tmux, network only Discord"
+  [ $# -eq 0 ] && exit 0
+fi
+[ $# -gt 0 ] || { echo "usage: sandbox [--selftest] -- <cmd…>" >&2; exit 2; }
+bwrap "${args[@]}" bash -c "$inner" "$PY" "$PY" "$@" & bw=$!
+trap 'kill -TERM "$bw" 2>/dev/null; kill "$proxy" 2>/dev/null' TERM INT EXIT
+wait "$bw"

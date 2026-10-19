@@ -48,6 +48,7 @@ check_absent() {
   fi
 }
 
+# A dry run prints its "would" lines on stdout; the helpers append them to the fixture sentinel.log the checks read.
 # Fixture globs, never the machine's own config (FLEET §5.6). $GLOBS overrides per section.
 DEFAULT_GLOBS='/tmp/claude-1000/*/*/scratchpad'
 GLOBS=""
@@ -56,7 +57,7 @@ run() {
   sync_uptime
   AGENT_SCRATCH_GLOBS="${GLOBS:-$DEFAULT_GLOBS}" SENTINEL_RUNAWAY_NOW="$NOW" \
   SENTINEL_STATE_DIR="$WORK/state" SENTINEL_RUNAWAY_PROC="$PROC" SENTINEL_RUNAWAY_TMPROOT="$TMP" \
-    "$SCRIPT" --dry-run
+    "$SCRIPT" --dry-run >>"$WORK/state/sentinel.log"
 }
 
 # ---------- Rule 1: sleep loop under a scratchpad, > 60 min, owner session gone ----------
@@ -85,15 +86,22 @@ BOOT=$(( $(date +%s) - UPTIME )); sync_uptime
 mkproc 201 tail 2000 1 500 tail -f /var/log/syslog;            setfd 201 1 'pipe:[9001]'
 mkproc 202 tail 2000 1 500 tail -f /var/log/syslog;            setfd 202 1 'pipe:[9002]'
 mkproc 203 cat  2000 1 500 cat;                                setfd 203 3 'pipe:[9002]'
-mkproc 204 journalctl 2000 1 500 journalctl --user -u dark-eye-ptt -f
+mkproc 204 journalctl 2000 1 500 journalctl --user -u dark-eye -f
 setfd 204 1 "$TMP/gone-$$"
 mkproc 205 tail 1000 1 500 tail -f /var/log/syslog;            setfd 205 1 'pipe:[9005]'
+mkproc 206 journalctl 2000 1 500 journalctl --user -f;          setfd 206 1 'socket:[7777]'
+mkproc 207 systemd-journal 2000 1 500 systemd-journald;         setfd 207 4 'socket:[7777]'
+mkproc 208 tail 2000 1 500 tail -f /var/log/syslog;            setfd 208 1 'socket:[7778]'
+mkproc 209 tail 2000 1 500 tail -f /var/log/syslog;            setfd 209 1 'anon_inode:[eventfd]'
 run
 check        "rule2: unread pipe killed"            "would kill pid 201 (rule2"
 check_absent "rule2: pipe with a reader spared"     "would kill pid 202"
 check_absent "rule2: reader itself untouched"       "would kill pid 203"
 check        "rule2: capture into a deleted file killed" "would kill pid 204 (rule2"
 check_absent "rule2: young capture spared"          "would kill pid 205"
+check_absent "rule2: socket with a reader spared"   "would kill pid 206"
+check_absent "rule2: socket stdout never judged"   "would kill pid 208"
+check_absent "rule2: anon_inode stdout spared"     "would kill pid 209"
 
 # ---------- Rule 3: hand-run eye-render/main.js outside dark-eye.service, > 2h ----------
 PROC="$WORK/proc3"; TMP="$WORK/tmp3"; mkdir -p "$PROC" "$TMP"
@@ -221,7 +229,7 @@ tick4b() {  # tick4b <epoch> <cpu_seconds> [--dry-run]
   setunit 403 session.slice/org.gnome.SettingsDaemon.Color.service
   sync_uptime "$at"
   SENTINEL_RUNAWAY_NOW="$NOW" SENTINEL_STATE_DIR="$WORK/state" SENTINEL_RUNAWAY_PROC="$PROC" SENTINEL_RUNAWAY_TMPROOT="$TMP" \
-    "$SCRIPT" "$@"
+    "$SCRIPT" "$@" >>"$WORK/state/sentinel.log"
 }
 PROC="$WORK/proc4b"; TMP="$WORK/tmp4b"; mkdir -p "$PROC" "$TMP"
 BOOT=$(( $(date +%s) - UPTIME )); sync_uptime
@@ -270,6 +278,23 @@ check_absent "rule5: --continue session with a fresh transcript spared" "uuid-co
 check_absent "rule5: old dir mtime but a fresh file inside spared"      "uuid-busy/scratchpad"
 check        "rule5: stale transcript and stale files still removed"    "would rm -rf $TMP/claude-1000/-home-x/uuid-stale/scratchpad"
 
+# F02 (10-07): a --continue orchestrator idle 25 h. Its uuid is the newest transcript of a project where a claude runs.
+PROC="$WORK/proc5c"; TMP="$WORK/tmp5c"; PROJ="$WORK/projects5c"; mkdir -p "$PROC" "$TMP" "$WORK/hm/x/log"
+BOOT=$(( $(date +%s) - UPTIME )); sync_uptime
+SLUG=$(echo "$WORK/hm/x" | sed 's/[^a-zA-Z0-9]/-/g')
+for su in "$SLUG uuid-old 200000" "$SLUG uuid-idle 90000" "-home-y uuid-gone 90000"; do
+  read -r p u a <<<"$su"
+  mkdir -p "$TMP/claude-1000/$p/$u/scratchpad" "$PROJ/$p"
+  touch "$TMP/claude-1000/$p/$u/scratchpad/f" "$PROJ/$p/$u.jsonl"
+  touch -d '@'"$(( $(date +%s) - a ))" "$TMP/claude-1000/$p/$u/scratchpad/f" "$TMP/claude-1000/$p/$u/scratchpad" "$PROJ/$p/$u.jsonl"
+done
+mkproc 504 claude 999999 5 5000 claude --continue --remote-control "Command Center"
+setcwd 504 "$WORK/hm/x/log"
+SENTINEL_RUNAWAY_PROJECTS="$PROJ" run
+check_absent "rule5: idle 25 h, newest transcript where a claude runs, spared" "uuid-idle/scratchpad"
+check        "rule5: an older transcript in that project still removed"    "would rm -rf $TMP/claude-1000/$SLUG/uuid-old/scratchpad"
+check        "rule5: newest transcript of a project with no claude removed" "would rm -rf $TMP/claude-1000/-home-y/uuid-gone/scratchpad"
+
 # ---------- GH12: a second scratch glob, from AGENT_SCRATCH_GLOBS ----------
 PROC="$WORK/proc7"; TMP="$WORK/tmp7"; mkdir -p "$PROC" "$TMP"
 BOOT=$(( $(date +%s) - UPTIME )); sync_uptime
@@ -313,7 +338,7 @@ tick6() {  # tick6 <epoch> <gpu_cpu_seconds> <actions_file> [--dry-run]
   sync_uptime "$at"
   AGENT_SCRATCH_GLOBS="$DEFAULT_GLOBS" SENTINEL_RUNAWAY_NOW="$NOW" SENTINEL_RUNAWAY_ACTIONS="$actions" \
   SENTINEL_STATE_DIR="$WORK/state" SENTINEL_RUNAWAY_PROC="$PROC" SENTINEL_RUNAWAY_TMPROOT="$TMP" \
-    "$SCRIPT" "$@"
+    "$SCRIPT" "$@" >>"$WORK/state/sentinel.log"
 }
 T6=$(date +%s)   # the rule-6 clock: the dry tick runs at T6, actions-log ages count back from it
 pwline() { printf '{"ts": "%s", "session": "abcd1234", "cwd": "/x", "tool": "%s", "op": "x", "summary": "{}"}\n' "$(date -d "@$(( T6 - $1 ))" +%Y-%m-%dT%H:%M:%S%z)" "$2"; }

@@ -6,6 +6,7 @@
 html #stage { right: var(--side-w); }
 #shell { --mid: calc(50% - var(--side-w) / 2); --span: calc(100% - var(--side-w) - 2 * var(--gutter)); }
 #shell > .card, #shell > .caption, #shell > .cta, #shell > .instruction, #shell > .pop { left: var(--mid); }
+#shell > .cta { position: absolute; }
 #shell > .caption { width: min(var(--span), 46rem); pointer-events: none; }
 #shell > .card { width: min(var(--span), 36rem); }
 #shell > .card.end:not([hidden]) { display: flex; flex-direction: column; align-items: center; max-height: calc(100% - var(--bottom) - var(--bar-h) - 48px); }
@@ -51,7 +52,7 @@ body.in-section #shell [data-k="section"] { display: none; }
 #shell > .instruction { position: absolute; bottom: calc(var(--bottom) + var(--bar-h) + 14px); transform: translateX(-50%); display: flex; flex-wrap: wrap; align-items: center;
   gap: 8px 18px; width: max-content; max-width: min(var(--span), 52rem); padding: 10px 6px 4px 8px; border-top: 1.5px solid var(--ink); border-bottom: 1px solid var(--ink);
   background: var(--paper); }
-.instruction p { flex: 1 1 16rem; margin: 0; font: 600 14px/1.3 "Plex Cond", system-ui, sans-serif; letter-spacing: 0.08em; text-transform: uppercase; }
+.instruction p { flex: 1 1 0; margin: 0; font: 600 14px/1.3 "Plex Cond", system-ui, sans-serif; letter-spacing: 0.08em; text-transform: uppercase; }
 .instruction .acts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
 .instruction .acts:not(:has(> :not([hidden]))) { display: none; }
 .instruction button { flex: none; white-space: nowrap; }

@@ -10,7 +10,7 @@ usage() {
   cat <<'EOF'
 usage: drop-link <file|dir> <sub>    hard-link (copy across filesystems) into ~/drop/<sub>/, print the https URL, check it answers 200
        drop-link <path-in-drop>      print and check the URL of something already in ~/drop
-Folders and index.html get a trailing-slash URL (a page opens); any other file downloads.
+Folders and index.html get a trailing-slash URL; other .html files open as pages; any other file downloads.
 exit 0 link answers 200 · 1 link does not answer · 2 usage
 EOF
 }
@@ -33,7 +33,6 @@ fi
 rel=${dest#"$drop"/}
 case "$rel" in
   */index.html|index.html) rel=${rel%index.html} ;;
-  *.html|*.htm) echo "drop-link: $rel is served as a download; link its folder with an index.html to open it as a page" >&2 ;;
 esac
 [ -d "$dest" ] && rel="$rel/"
 url="$BASE/$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1]))' "$rel")"

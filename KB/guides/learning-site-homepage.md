@@ -49,7 +49,7 @@ node --import ./tests/lib/register.mjs --test tests/unit/content.test.mjs   # ea
 ## Mockups (ticket 1b)
 
 ### A · Key Plan (T78 1b)
-Source `~/agents/research/2026-09-24/T78/home-a/` (`node build.mjs <out>`: validator → pure renderers → one inline HTML, 3.1 kB gz JS).
+Source (mockups deleted, T320) (`node build.mjs <out>`: validator → pure renderers → one inline HTML, 3.1 kB gz JS).
 Drop `~/drop/t76/home-a/` + `ledger/` (gone since 2026-09-25; rebuild from source). Checks: `node tools/shots.mjs <url> <dir>` (18 viewport×state rows, exit 1 on a fault),
 `node tools/perf.mjs <url>`, `node tools/interact.mjs <url> <png>`.
 - **Walls with no double lines:** each room pads only top+left with the hatch showing through; the plan container pads right+bottom.
@@ -61,7 +61,7 @@ Drop `~/drop/t76/home-a/` + `ledger/` (gone since 2026-09-25; rebuild from sourc
 - Details row as flex-wrap (not auto-fit grid): a 2+1 grid left a dead cell at 768.
 
 ### C · Folio (T78 1b)
-Source `~/agents/research/2026-09-24/T78/home-c/` (`node build.mjs <out>`: pure part modules in `lib/` → one inline HTML, JS 3.0 kB gz).
+Source (mockups deleted, T320) (`node build.mjs <out>`: pure part modules in `lib/` → one inline HTML, JS 3.0 kB gz).
 Drop `~/drop/t76/home-c/` + `ledger/` (gone since 2026-09-25; rebuild from source). Checks: `node tools/shots.mjs <url> <dir>` (18 rows, exit 1 on a fault), `node tools/perf.mjs <url> <w> <h>`
 (FCP, LCP element, CLS, bytes, DrawFrames in 3 s over a trace), `node tools/interact.mjs <url> <png>` (keys, drag, first-touch callout).
 - **T71 plate as static SVG:** porting `layout.ts`/`meters.ts`/`sheet.ts` geometry to strings (y-up helpers, hatch = clipPath even-odd)
@@ -75,7 +75,7 @@ Drop `~/drop/t76/home-c/` + `ledger/` (gone since 2026-09-25; rebuild from sourc
 - CLS 0.0008 → 0 by preloading all 5 kit fonts. The drop server does not gzip: count 271 kB raw, 39.2 kB gz document.
 
 ### B · Exploded Assembly (T78 1b)
-Source `~/agents/research/2026-09-24/T78/home-b/` (`node build/build.mjs`: pure `draft`/`parts`/`layout`/`figures` modules → one inline HTML, JS 2.7 kB gz;
+Source (mockups deleted, T320) (`node build/build.mjs`: pure `draft`/`parts`/`layout`/`figures` modules → one inline HTML, JS 2.7 kB gz;
 `src/assembly.js` is shared by build and runtime). Drop `~/drop/t76/home-b/` + `stills/` (gone since 2026-09-25; rebuild from source). Checks: `node tools/shots.mjs <url> out` (18 rows,
 exit 1 on a fault), `node tools/perf.mjs <url> <state>`, `node tools/dial-check.mjs <url>`, `node tools/frames-selftest.mjs <url>`.
 - **Draw each part once, reuse by `<use>`:** parts live in a hidden defs SVG; phantom/ink/seated looks are custom properties on the slot
@@ -87,7 +87,7 @@ exit 1 on a fault), `node tools/perf.mjs <url> <state>`, `node tools/dial-check.
 - HTML lettering looked small at 2560: `@media (min-width:2200px){.sheet{zoom:1.32}}` fixed it without a second composition.
 
 ### Port into the repo (T82, plan ticket 8, 2026-09-24)
-Live at `~/projects/personal/ailearning/src/site/homepage/`; drop https://<tailnet-fqdn>:8470/ailearning/. Notes `~/agents/research/2026-09-24/T82/ARCHITECTURE.md`.
+Live at `~/projects/personal/ailearning/src/site/homepage/`; preview https://<tailnet-fqdn>:8472/ailearning/ (guide local-sites). Notes `~/agent-work/research/2026-09-24/T82/ARCHITECTURE.md`.
 - **Vite plugin, not B's build.mjs:** `plugin.mjs` fills `<!--home:head-->`/`<!--home:body-->` in the root `index.html` with `transformIndexHtml`
   `order:'pre'`, so Vite's own HTML pass hashes the thumbnail `<img>` and puts `/fonts/` preloads under the base. Dev = build, no generated file in git.
 - **Live rule:** `status:"drawn"` + `u/<slug>/index.html` exists → `href`; otherwise a phantom, never a link (plugin throws on a drawn unit with no page).
@@ -104,7 +104,7 @@ Live at `~/projects/personal/ailearning/src/site/homepage/`; drop https://<tailn
   first visit 136.7 kB / 10 requests, idle DrawFrames 0 (counter selftest 2), 0 audio/three.js. `tests/e2e/home.mjs`: 3 states × 6 views + 8 behaviours.
 
 ### Sheet set + sheet change (T83, 2026-09-24)
-Notes `~/agents/research/2026-09-24/T83/ARCHITECTURE.md`. Every page of the set shares one frame: `src/site/sheet/{sheet.css,frame.mjs,plugin.mjs}`.
+Notes `~/agent-work/research/2026-09-24/T83/ARCHITECTURE.md`. Every page of the set shares one frame: `src/site/sheet/{sheet.css,frame.mjs,plugin.mjs}`.
 - **New unit page = a sheet for free:** link `../../src/site/sheet/sheet.css` before the unit CSS, body `<div class="sheet app"><!--sheet:frame--><div class="field">`
   `#stage` + `#shell` `</div></div>`. `sheetPlugin()` fills the rail from `content/homepage.json` by slug ("Sheet I · The neuron", back link, "Sheet 1 of 43")
   and throws on an unknown slug. The way back is `back(base)` in `frame.mjs`: a drawn outline button ("← Sheet 0", sibling of `.primary`, ink fill on hover,
@@ -141,7 +141,7 @@ Notes `~/agents/research/2026-09-24/T83/ARCHITECTURE.md`. Every page of the set 
 - The homepage zooms the whole `.sheet` at ≥ 2200 px; a unit sheet cannot (WebGL canvas + pointer maths): scale inset/padding by 1.32 and zoom only `.top` and `.zones`.
 
 ### Smooth sheet changes (T96, 2026-09-25)
-Notes and numbers `~/agents/research/2026-09-25/T96/` (`ARCHITECTURE.md`, `tools/measure.mjs` + `tools/analyze.py`: CDP screencast of every
+Notes and numbers `~/agent-work/research/2026-09-25/T96/` (`ARCHITECTURE.md`, `tools/measure.mjs` + `tools/analyze.py`: CDP screencast of every
 frame, page events, first-press trials by fold geometry; `tools/run.sh <dist> <label>`). Code: `src/site/sheet/{turn.js,press.js}` inlined by
 `plugin.mjs`, `sheet.css` (`html.hold`, `.leaf`, `.btn.pressed`); e2e `tests/e2e/transitions.mjs` (written, not yet run).
 - **Hold:** the new page adds `html.hold` at `pagereveal` (all `::view-transition-*` animations `paused`) and removes it after two frames +
@@ -166,5 +166,5 @@ frame, page events, first-press trials by fold geometry; `tools/run.sh <dist> <l
 ## Links
 - Content: `~/projects/personal/ailearning/content/{homepage.json,homepage.schema.json}` + `tools/content-check.mjs`
 - Tests: `~/projects/personal/ailearning/tests/unit/content.test.mjs` (in `npm test`)
-- History (T78, drifted, do not edit): `~/agents/research/2026-09-24/T78/content/{homepage.json,validate.py,tests/}`
-- Design: `~/agents/research/2026-09-24/T76/plan.md` §3, §5.1, Owner decisions; brief `~/agents/briefs/T78-ailearning-home-mockups.md`
+- History (T78, drifted, do not edit): `~/agent-work/research/2026-09-24/T78/content/{homepage.json,validate.py,tests/}`
+- Design: `~/agent-work/research/2026-09-24/T76/plan.md` §3, §5.1, Owner decisions; brief `~/agent-work/briefs/T78-ailearning-home-mockups.md`

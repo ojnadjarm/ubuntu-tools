@@ -101,5 +101,44 @@ is 'ack line why' "$(jq -r .why <<<"$a")" "known non-issue"
 [ -n "$(jq -r .ts <<<"$a")" ] && ok 'ack line has a ts' || nok 'ack line has a ts' 'empty'
 jq -e 'has("session")' <<<"$a" >/dev/null && ok 'ack line has a session field' || nok 'ack line has a session field' "$a"
 
+# 9. verify re-runs the stored read: equal appends one late-verify row and exits 0, else exits 1 (TSP-034).
+VL="$WORK/verify.jsonl"
+cat >"$VL" <<'EOF'
+{"ts":"2026-01-01T00:00:00+0000","id":"fakelate1","session":"s1","cmd":"foo","target":"t","before":"a","after":"b","rollback":"r","read":"echo b"}
+{"id":"fakelate1","verified":false,"observed":"a"}
+{"ts":"2026-01-01T00:00:00+0000","id":"fakestill1","session":"s1","cmd":"foo","target":"t","before":"a","after":"b","rollback":"r","read":"echo a"}
+{"id":"fakestill1","verified":false,"observed":"a"}
+EOF
+out=$(PC_LEDGER="$VL" "$BIN/pc-undo" verify fakelate1); rc=$?
+is 'verify of a now-true row exits 0' "$rc" 0
+is 'verify prints after / at apply / now' "$out" 'after: b · observed at apply: a · observed now: b'
+is 'verify appends one late-verify row' "$(tail -1 "$VL")" '{"id":"fakelate1","verified":true,"observed":"b","late":true}'
+PC_LEDGER="$VL" "$BIN/pc-undo" verify fakestill1 >/dev/null; rc=$?
+is 'verify of a still-false row exits 1' "$rc" 1
+is 'a false verify appends nothing' "$(wc -l <"$VL")" 5
+
+# 10. apply and ack rows record who: session from CLAUDE_CODE_SESSION_ID (old name as fallback) and agent (TSP-035).
+SL="$WORK/who.jsonl"; printf red >"$FAKE_FILE"
+env -u CLAUDE_SESSION_ID PC_LEDGER="$SL" AGENT_NAME=fx CLAUDE_CODE_SESSION_ID=abc12345 "$FAKE" blue --apply >/dev/null
+w=$(head -1 "$SL")
+is 'apply row session from CLAUDE_CODE_SESSION_ID' "$(jq -r .session <<<"$w")" abc12345
+is 'apply row agent from AGENT_NAME' "$(jq -r .agent <<<"$w")" fx
+env -u CLAUDE_CODE_SESSION_ID -u AGENT_NAME PC_LEDGER="$SL" CLAUDE_SESSION_ID=old99999 "$FAKE" red --apply >/dev/null
+is 'old CLAUDE_SESSION_ID still fills session' "$(grep -F '"cmd"' "$SL" | tail -1 | jq -r .session)" old99999
+env -u CLAUDE_SESSION_ID PC_LEDGER="$SL" AGENT_NAME=fx CLAUDE_CODE_SESSION_ID=abc12345 "$BIN/pc-undo" ack fakewho1 --why x >/dev/null
+is 'ack row session and agent' "$(tail -1 "$SL" | jq -r '.session + " " + .agent')" 'abc12345 fx'
+is 'list shows the agent in the by column' \
+  "$(PC_LEDGER="$SL" "$BIN/pc-undo" list | awk 'END{print $NF}')" fx
+is 'list falls back to the session prefix' \
+  "$(PC_LEDGER="$SL" "$BIN/pc-undo" list | awk 'NR==1{print $NF}')" old99999
+
+# 11. entries span logrotate's compressed rotations, so an id from before the last rotation still resolves (F08).
+RL="$WORK/rot.jsonl"
+printf '%s\n' '{"ts":"2026-01-01T00:00:00+0000","id":"rotold2","cmd":"c","target":"t","before":"a","after":"b","rollback":"r"}' | gzip >"$RL.2.gz"
+printf '%s\n' '{"ts":"2026-01-02T00:00:00+0000","id":"rotold1","cmd":"c","target":"t","before":"b","after":"c","rollback":"r"}' '{"id":"rotold1","verified":true,"observed":"c"}' | gzip >"$RL.1.gz"
+printf '%s\n' '{"ts":"2026-01-03T00:00:00+0000","id":"rotlive","cmd":"c","target":"t","before":"c","after":"d","rollback":"r"}' >"$RL"
+is 'show finds an id in a rotated .gz' "$(PC_LEDGER="$RL" "$BIN/pc-undo" show rotold1 --json | jq -r '.after + " " + (.verified|tostring)')" 'c true'
+is 'list orders live then rotations, newest first' "$(PC_LEDGER="$RL" "$BIN/pc-undo" list --json | jq -r 'map(.id) | join(",")')" 'rotlive,rotold1,rotold2'
+
 [ $bad = 0 ] && echo 'PASS pc-undo' || echo 'FAIL pc-undo'
 exit $bad

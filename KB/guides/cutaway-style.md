@@ -32,7 +32,7 @@ To reach the bar:
   geometry, `framing`, `Stage`, `OnDemand`, motion, a dial spring, parts) with a runnable starter ("The Regulator"); every new plate copies it.
 - **T81**: title-block signatures (DRAWN / APPROVED; the owner chose `drawn: 'Claude', approved: 'Oscar Nadjar'`).
 - **T91**: the button system. The owner chose B "hatched section" over A (title-block cells) and C (keyed labels) from
-  `~/agents/research/2026-09-25/T91/mockups/buttons.html` (its `~/drop/t91/` copy is gone).
+  `~/agent-work/research/2026-09-25/T91/mockups/buttons.html` (its `~/drop/t91/` copy is gone).
 - **T95 → T97**: readouts. The owner rejected loose centred text rows under the gauges, and a free-text tally, as "lazy and out of tone". He
   first typed "B", then corrected it to "IS A": T95 built B, T97 switched to A, data plates. Cue layering (`Z.cue`) came in T95.
 - **T96**: one transition language for sheet changes (site `src/site/sheet/`).
@@ -93,5 +93,5 @@ node tools/perf.mjs http://127.0.0.1:18975/
 - Code: `~/agents/kits/cutaway/` (kit), `~/agents/kits/cutaway/starter/` (template plate); readouts in the site repo
   `units/01-neuron/plate/parts/readout.ts`; sheet change `src/site/sheet/`
 - Skill: `~/.claude/skills/cutaway-style/SKILL.md` + `reference/{start-a-plate,drawing-rules,parts-and-readouts,buttons,sheet-change}.md`
-- Reference: `~/agents/research/2026-09-24/T71/mockups/cutaway-plate/` (the `~/drop/t71/` copy is gone)
-- Design / results: `~/agents/research/2026-09-24/T71/` (directions.md, stack.md), `~/agents/research/2026-09-24/T75/findings.md`
+- Reference: `~/agent-work/research/2026-09-24/T71/mockups/cutaway-plate/` (the `~/drop/t71/` copy is gone)
+- Design / results: `~/agent-work/research/2026-09-24/T71/` (directions.md, stack.md), `~/agent-work/research/2026-09-24/T75/findings.md`

@@ -1,6 +1,6 @@
 # Runaway processes the sentinel kills, and forgotten headless browsers
 
-Ticket: T113, T114, T115 (rules 1-5: EF03, T67, TSP-016) · Last verified: 2026-10-03 by `sentinel-runaway.test.sh` (57 checks, 8 for rule 6, 4 for the rule-3 read-back, 10 for rule 4), `sentinel-check.test.sh`; real `sentinel-runaway --dry-run` last run 2026-09-26 (0.12 s, no rule-3 or rule-6 line)
+Ticket: T113, T114, T115 (rules 1-5: EF03, T67, TSP-016) · Last verified: 2026-10-15 by `sentinel-runaway.test.sh` (63 checks, 8 for rule 6, 4 for the rule-3 read-back, 10 for rule 4), `sentinel-check.test.sh`; real `sentinel-runaway --dry-run` last run 2026-09-26 (0.12 s, no rule-3 or rule-6 line)
 
 ## When to use
 - A process burned CPU or memory for hours and the sentinel did not catch it: add or tune a rule in `bin/sentinel-runaway`.
@@ -12,12 +12,15 @@ Ticket: T113, T114, T115 (rules 1-5: EF03, T67, TSP-016) · Last verified: 2026-
   samples in `state/runaway.tsv` give each process a `pct` (% of one core since the last run).
 - Rules: legacy kill-list and (4) portal/gsd restarts at >= 90% for 2 runs; (1) orphan scratchpad sleep loops; (2) capture
   commands with no reader; (3) hand-run Dark Eye bodies; (5) dead sessions' scratchpads; (6) idle hot Chrome trees.
+- Rule 2 (F10): stdout `pipe:[N]` with no other holder, or an absolute path that no longer exists, marks a capture orphaned.
+  `socket:[N]` and `anon_inode:` stdout are never judged (a socket's peer has its own inode; a dead peer gives SIGPIPE).
 - Rule 4 (F07): the unit is the last `*.service` under `user@N.service` in `/proc/<pid>/cgroup`, never `<comm>.service`
   (gsd-power runs as `org.gnome.SettingsDaemon.Power.service`). A refused restart (gsd units set `RefuseManualStop=true`)
   is logged `could not restart <unit> … left running`; only a helper in no user unit is killed instead.
 - Rule 5 (F02): a scratchpad is wiped when its newest file (not the dir's mtime) is > 24 h old and the session is not
-  live. Live = a process argv or claude fd names the uuid, or `~/.claude/projects/*/<uuid>.jsonl` changed within 24 h
-  (`SENTINEL_RUNAWAY_PROJECTS` overrides the root in fixtures).
+  live. Live = a process argv or claude fd names the uuid, or `~/.claude/projects/*/<uuid>.jsonl` changed within 24 h,
+  or the uuid is among the k newest transcripts of its project dir (`/tmp/claude-1000/<slug>/`), k = claude processes
+  whose cwd is that project dir or below it (`SENTINEL_RUNAWAY_PROJECTS` overrides the root in fixtures).
 - Rule 3 (T114): a body carrying `DARK_EYE_SANDBOX=<name>` gets `body-sandbox down --name <name>` once per run, then each
   body pid is read back in `/proc`. `down` exits 0 on a pid it cannot see, so a survivor is logged `failed to take down
   sandbox <name>: pid N survived` and killed by pid (`stop_pid 3`). "took down" is logged only when the pid is gone.
@@ -33,8 +36,8 @@ Ticket: T113, T114, T115 (rules 1-5: EF03, T67, TSP-016) · Last verified: 2026-
 
 ## Exact commands
 ```bash
-sentinel-runaway --dry-run                               # log "would …" lines to sentinel.log, kill nothing
-SENTINEL_RUNAWAY_DRYRULES=6 sentinel-runaway             # rule 6 log-only, the others live
+sentinel-runaway --dry-run                               # print "would …" lines to stdout, kill nothing, write no state
+SENTINEL_RUNAWAY_DRYRULES=6 sentinel-runaway             # rule 6 log-only, the others live; logs to sentinel.log, updates runaway*.tsv
 bash ~/agents/bin/tests/sentinel-runaway.test.sh         # fake /proc + fake actions log + pinned clock, ~1 s
 bash ~/agents/bin/tests/sentinel-check.test.sh
 grep 'rule6' ~/agents/sentinel/state/sentinel.log        # past browser closes
@@ -62,6 +65,8 @@ grep 'rule6' ~/agents/sentinel/state/sentinel.log        # past browser closes
 
 - 2026-09-30 and 10-02 (F02): rule 5 wiped the live orchestrator's scratchpad twice as a "dead session". It runs
   `claude --continue`, so the uuid is in no argv, and the dir's mtime stayed old while files inside were written.
+- 2026-10-07 13:40 and 10-08 (F02 again): the 10-03 fix still wiped it after the orchestrator idled > 24 h (transcript
+  silent 10-06 11:36Z → 10-07 15:14Z, same process). Fix 10-10: the newest-transcript-per-running-claude check above.
 
 ## Links
 - Code: `~/agents/bin/sentinel-runaway`, called by `~/agents/bin/sentinel-check`

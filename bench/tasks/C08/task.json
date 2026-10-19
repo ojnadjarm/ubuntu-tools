@@ -1,0 +1,49 @@
+{
+  "id": "C08",
+  "tier": "change",
+  "set": "night",
+  "title": "clear a stale file claim",
+  "prompt": "I need to edit lib/a.py in ./work but the claims board there says someone holds it - if that claim is stale, clear it",
+  "answer_schema": {
+    "type": "object",
+    "required": [
+      "stale",
+      "holder",
+      "cleared",
+      "reason"
+    ],
+    "properties": {
+      "stale": {
+        "type": "boolean"
+      },
+      "holder": {
+        "type": "string",
+        "description": "who held the claim"
+      },
+      "cleared": {
+        "type": "boolean",
+        "description": "did you remove the claim line"
+      },
+      "unknown": {
+        "type": "boolean"
+      },
+      "reason": {
+        "type": "string",
+        "description": "in the owner's terms"
+      }
+    }
+  },
+  "allowed_side_effects": [],
+  "needs": [],
+  "budget": {
+    "seconds": 480,
+    "usd": 1.5,
+    "screenshots": 0
+  },
+  "oracle_s": 0,
+  "tags": [
+    "stale-claim",
+    "FILE-CLAIMS"
+  ],
+  "note": "Real incident class: claims left on ~/agents/FILE-CLAIMS.md after the ticket finished. Evidence is the done line in history.md; the live claim and the code must stay untouched."
+}

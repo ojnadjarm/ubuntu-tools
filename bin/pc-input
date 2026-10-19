@@ -17,7 +17,7 @@ pc_usage 'usage: pc input devices [--json]
 devices/caps/watch/grabs read /dev/input and /proc/*/fd through `sudo -n` (the input group is
 on the user but not in shells started before it was granted). A grab is not readable from
 userspace: `grabbed_guess` means a holder that is not one of the known multiplexers
-(systemd, systemd-logind, gnome-shell, upowerd); the ptt sidecar is named as `sidecar`.
+(systemd, systemd-logind, gnome-shell, upowerd).
 
 inject builds its own `pc-input-virtual` uinput device, emits the events, reads them back from
 that device'"'"'s node and destroys it. --device-only grabs the node first, so nothing reaches

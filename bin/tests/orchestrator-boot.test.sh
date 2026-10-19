@@ -108,8 +108,8 @@ b_on=$(ts basic.target ActiveEnterTimestampMonotonic)
   || nok "graphical-session" "$(ts graphical-session.target ActiveState)"
 
 tmux -L "$SOCK" has-session -t "$SESS" 2>/dev/null && ok "tmux session $SESS created" || nok "tmux session" "missing"
-grep -q -- '^argv=--continue --remote-control DarkSaddler Command Center --mcp-config .*server:eye-main$' "$WORK/log" \
-  && ok "stub ran with the real argv (--continue, Remote Control name, eye-main channel)" || nok "stub argv" "$(cat "$WORK/log")"
+grep -q -- '^argv=--continue --remote-control DarkSaddler Command Center --mcp-config .*server:eye-main --append-system-prompt-file .*/agents/ORCHESTRATOR\.md$' "$WORK/log" \
+  && ok "stub ran with the real argv (--continue, Remote Control name, eye-main channel, ORCHESTRATOR.md)" || nok "stub argv" "$(cat "$WORK/log")"
 [ "$(grep -c '^picked=' "$WORK/log")" = 2 ] && grep -q 'picked=Yes, I trust this folder' "$WORK/log" \
   && grep -q 'picked=1. I am using this for local development' "$WORK/log" \
   && ok "ExecStartPost answered trust + channels dialogs" || nok "dialogs" "$(grep picked "$WORK/log")"

@@ -101,3 +101,5 @@ spans, back sentence, keys, re-watch with dials kept, tap vs grab, callout hold 
 request, end, resume with a throwing store, volumes, lint), `bench.test.ts` (command log and rests, flow policy, hint ladder, walks, pencil/slot/locked hands, pass and
 miss with refutation and contrast, Show me and the skip offer, the last case completing the beat, lintPlay) `lesson.test.ts` (asserts, lint, notes, chapter stops, peek vs pin), `landing.test.ts` (beat chapters with clips, `isFinished`, `landing`,
 `resumeLine`, `lessonPoint`, `BeatMachine.left`), `voice.test.ts` and the section tests: 58 tests (2026-09-25) on `ManualClock` + `NullVoice` and a stub shell.
+Units built on the kit meet the declutter budget (≤ 7 labelled things per step, a chapter end keeps only its result, no leftovers): the
+site's `npm run declutter -- <NN>` checks every step (guide lesson-declutter, T325).

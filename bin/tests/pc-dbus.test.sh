@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # PT08: `pc dbus`. Sections 1-4 run against the recorded bus in fixtures/dbus (no bus contact);
-# section 5 is live and read-only; section 6 is the one mutation (OverviewActive to its current
-# value — nothing moves on screen) on a temp ledger. No window, no sound, no monitor config.
+# section 5 is live and read-only; section 6 is the one mutation, on a private dbus-run-session bus
+# with a fake service and a temp ledger. No window, no sound, no monitor config, no real-bus write.
 set -uo pipefail
 BIN="$HOME/agents/bin"
 PC="$BIN/pc-dbus"
@@ -103,18 +103,62 @@ if busctl --user list --no-pager >/dev/null 2>&1; then
     || ok 'monitor leaves no busctl behind'
   "$PC" monitor --seconds 999 >/dev/null 2>&1; is 'monitor caps --seconds at 120' "$?" 2
 
-  # 6. the one mutation: OverviewActive set to the value it already has, then rolled back.
-  before=$("$PC" get org.gnome.Shell /org/gnome/Shell org.gnome.Shell.OverviewActive)
-  out=$(PC_LEDGER="$WORK/changes.jsonl" "$PC" set org.gnome.Shell /org/gnome/Shell \
-        org.gnome.Shell.OverviewActive "$before" --apply)
-  id=$(printf '%s\n' "$out" | tail -1 | sed -n 's/^rollback: pc undo //p')
-  [ -n "$id" ] && ok 'set --apply prints the rollback line' || nok 'set --apply prints the rollback line' "$out"
-  is 'the ledger verified the write' "$(PC_LEDGER="$WORK/changes.jsonl" "$BIN/pc-undo" show "$id" --json | jq -r .verified)" true
-  PC_LEDGER="$WORK/changes.jsonl" "$BIN/pc-undo" --last --apply >/dev/null 2>&1
-  is 'undo restores the property' "$("$PC" get org.gnome.Shell /org/gnome/Shell org.gnome.Shell.OverviewActive)" "$before"
 else
   ok 'live checks skipped (no session bus in this shell)'
 fi
 
+# 6. the one mutation, on a private dbus-run-session bus with a fake pc.test.Overview service.
+# env.sh pins DBUS_SESSION_BUS_ADDRESS to the real bus, so a busctl shim first on PATH turns
+# `--user` into `--address=$PC_TEST_BUS` and refuses when that is unset or the real bus.
+export PC_REAL_BUS="unix:path=${XDG_RUNTIME_DIR:-/run/user/$UID}/bus"
+mkdir -p "$WORK/shim"
+cat >"$WORK/shim/busctl" <<'SH'
+#!/usr/bin/env bash
+[ -n "${PC_TEST_BUS:-}" ] && [ "$PC_TEST_BUS" != "$PC_REAL_BUS" ] \
+  || { echo 'busctl shim: no private bus, refusing' >&2; exit 97; }
+case " $* " in *' --user '*) ;; *) echo 'busctl shim: only --user is redirected, refusing' >&2; exit 97;; esac
+a=(); for x; do [ "$x" = --user ] && x="--address=$PC_TEST_BUS"; a+=("$x"); done
+exec /usr/bin/busctl "${a[@]}"
+SH
+chmod +x "$WORK/shim/busctl"
+PC_TEST_BUS="$PC_REAL_BUS" "$WORK/shim/busctl" --user list >/dev/null 2>&1
+is 'selftest: the shim refuses the real bus' "$?" 97
+env -u PC_TEST_BUS "$WORK/shim/busctl" --user list >/dev/null 2>&1
+is 'selftest: the shim refuses with no private bus' "$?" 97
+if command -v dbus-run-session >/dev/null && python3 -c 'from gi.repository import Gio' 2>/dev/null; then
+  cat >"$WORK/fake.py" <<'PY'
+import warnings; warnings.simplefilter("ignore")
+from gi.repository import Gio, GLib
+XML = '<node><interface name="pc.test.Overview"><property name="OverviewActive" type="b" access="readwrite"/></interface></node>'
+state = {"v": False}
+def get_prop(c, s, p, i, n): return GLib.Variant("b", state["v"])
+def set_prop(c, s, p, i, n, v): state.update(v=v.unpack()); return True
+def on_bus(conn, name):
+    conn.register_object("/pc/test", Gio.DBusNodeInfo.new_for_xml(XML).interfaces[0], None, get_prop, set_prop)
+Gio.bus_own_name(Gio.BusType.SESSION, "pc.test.Overview", 0, on_bus, None, None)
+GLib.MainLoop().run()
+PY
+  export -f ok nok is; export PC BIN WORK
+  XDG_RUNTIME_DIR="$WORK" dbus-run-session -- bash -c '
+    bad=0; export PC_TEST_BUS="$DBUS_SESSION_BUS_ADDRESS" PATH="$WORK/shim:$PATH"
+    { [ -n "$PC_TEST_BUS" ] && [ "$PC_TEST_BUS" != "$PC_REAL_BUS" ] \
+      && ! /usr/bin/busctl --address="$PC_TEST_BUS" status org.gnome.Shell >/dev/null 2>&1; } \
+      || { nok "selftest: the bus is private" "$PC_TEST_BUS, refusing"; exit 1; }
+    ok "selftest: the bus is private"
+    python3 "$WORK/fake.py" & fake=$!; trap "kill $fake" EXIT
+    gdbus wait --session --timeout 5 pc.test.Overview || { nok "fake service up" timeout; exit 1; }
+    L="$WORK/changes.jsonl"; g() { "$PC" get pc.test.Overview /pc/test pc.test.Overview.OverviewActive; }
+    is "fake starts false" "$(g)" false
+    out=$(PC_LEDGER="$L" "$PC" set pc.test.Overview /pc/test pc.test.Overview.OverviewActive true --apply)
+    id=$(printf "%s\n" "$out" | tail -1 | sed -n "s/^rollback: pc undo //p")
+    [ -n "$id" ] && ok "set --apply prints the rollback line" || nok "set --apply prints the rollback line" "$out"
+    is "set wrote the private bus" "$(/usr/bin/busctl --address="$PC_TEST_BUS" get-property pc.test.Overview /pc/test pc.test.Overview OverviewActive)" "b true"
+    is "the ledger verified the write" "$(PC_LEDGER="$L" "$BIN/pc-undo" show "$id" --json | jq -r .verified)" true
+    PC_LEDGER="$L" "$BIN/pc-undo" --last --apply >/dev/null 2>&1
+    is "undo restores the property" "$(g)" false
+    exit $bad' || bad=1
+else
+  ok 'private-bus mutation skipped (no dbus-run-session or python3 gi)'
+fi
 [ $bad = 0 ] && echo 'PASS pc-dbus' || echo 'FAIL pc-dbus'
 exit $bad

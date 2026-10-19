@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# push-ready <repo>: read-only "can I push?" verdict for a git repo (T394). Never runs a git write command.
+# Prints "READY (<n> files)" or "NOT READY: <n> issues" plus one "kind<TAB>where<TAB>detail" line per issue.
+# Exit 0 ready, 1 not ready, 2 usage. Guide: ~/agents/KB/guides/push-ready.md
+set -uo pipefail
+HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+SECRETS_DIR="${PUSH_READY_SECRETS_DIR:-$HOME/agents/secrets}"
+ALLOW="${PUSH_READY_ALLOW:-$HOME/.config/pc-harness/push-ready.allow}"
+MAX_KB="${PUSH_READY_MAX_KB:-5120}"
+JUNK_SEG='^(node_modules|dist|mocks?|mockups?|qa|reviews?|__pycache__|\.pytest_cache|\.vite|coverage|\.env(\..+)?|\.DS_Store|.*\.(log|pyc|swp))$'
+JUNK_OK='^\.env\.(example|sample|template)$'
+
+usage() { echo "usage: push-ready <repo-dir>" >&2; exit 2; }
+[ $# -eq 1 ] || usage
+case "$1" in -h|--help) usage ;; esac
+REPO="$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" || { echo "push-ready: not a git repo: $1" >&2; exit 2; }
+NAME="$(basename "$REPO")"
+tmp="$(mktemp -d)"; chmod 700 "$tmp"; trap 'rm -rf "$tmp"' EXIT
+
+(cd "$REPO" && git ls-files -z --cached --others --exclude-standard | tr '\0' '\n' | sort -u \
+  | while IFS= read -r f; do [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n' "$f"; done) > "$tmp/files"
+git -C "$REPO" ls-files --cached | sort -u > "$tmp/tracked"
+
+grep_files() { # grep_files <grep args…>: grep over the pushable files, run from the repo root
+  (cd "$REPO" && tr '\n' '\0' < "$tmp/files" | xargs -0 -r grep -nIH -D skip -d skip "$@" 2>/dev/null)
+}
+
+check_machine() {
+  local out
+  [ -r "$HERE/tests/no-machine-values.test.sh" ] || { printf 'machine\t-\tno-machine-values check missing (%s)\n' "$HERE/tests"; return; }
+  out="$(NO_MACHINE_VALUES_SKIP="${NO_MACHINE_VALUES_SKIP:-^$}" bash "$HERE/tests/no-machine-values.test.sh" "$REPO" 2>&1)"
+  printf '%s\n' "$out" | grep -E '^FAIL ' | grep -vqE '^FAIL no machine values in ' \
+    && printf 'machine\t-\tno-machine-values check itself failed\n'
+  printf '%s\n' "$out" | awk '/^FAIL no machine values in /{on=1; next} on && /^ +[0-9]+ [^ ]/ {n=$1; sub(/^ *[0-9]+ /,""); printf "machine\t%s\t%s hits of a config.env/private value\n", $0, n}'
+  grep_files -E '/run/user/[0-9]+|user-[0-9]+\.slice|user@[0-9]+\.service' | cut -d: -f1,2 \
+    | while IFS= read -r w; do printf 'machine\t%s\thardcoded uid path\n' "$w"; done
+}
+
+check_secrets() {
+  local re='-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{35}|[MN][A-Za-z0-9_-]{23,25}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}'
+  grep_files -E -e "$re" | cut -d: -f1,2 | while IFS= read -r w; do printf 'secret\t%s\ttoken pattern\n' "$w"; done
+  [ -d "$SECRETS_DIR" ] || return 0
+  python3 -I - "$SECRETS_DIR" > "$tmp/lit" <<'PY'
+import json, os, re, sys
+vals = set()
+def walk(o):
+    if isinstance(o, dict): [walk(v) for v in o.values()]
+    elif isinstance(o, list): [walk(v) for v in o]
+    elif isinstance(o, str): vals.add(o.strip())
+for root, _, names in os.walk(sys.argv[1]):
+    for n in names:
+        try: text = open(os.path.join(root, n), errors='ignore').read()
+        except OSError: continue
+        try: walk(json.loads(text)); continue
+        except ValueError: pass
+        for line in text.splitlines():
+            m = re.match(r'\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=\s*(.*)$', line)
+            vals.add((m.group(1) if m else line).strip().strip('"\''))
+print('\n'.join(v for v in vals if len(v) >= 12 and '://' not in v and '\n' not in v))
+PY
+  [ -s "$tmp/lit" ] || return 0
+  grep_files -F -f "$tmp/lit" | cut -d: -f1,2 | while IFS= read -r w; do printf 'secret\t%s\tliteral from secrets dir\n' "$w"; done
+}
+
+junk_of() { # junk_of <path>: the path prefix up to its first junk segment, or nothing
+  local p="" seg IFS=/
+  for seg in $1; do
+    p="${p:+$p/}$seg"
+    [[ "$seg" =~ $JUNK_SEG ]] && ! [[ "$seg" =~ $JUNK_OK ]] && { printf '%s\n' "$p"; return; }
+  done
+}
+
+check_junk() {
+  [ -f "$REPO/.gitignore" ] || printf 'junk\t.gitignore\tmissing\n'
+  local f j
+  while IFS= read -r f; do j="$(junk_of "$f")"; [ -n "$j" ] && printf 'T\t%s\n' "$j"; done < "$tmp/tracked"
+  comm -23 "$tmp/files" "$tmp/tracked" | while IFS= read -r f; do
+    j="$(junk_of "$f")"; [ -n "$j" ] && printf 'U\t%s\n' "$j"
+  done
+} 2>/dev/null
+
+check_large() {
+  (cd "$REPO" && tr '\n' '\0' < "$tmp/files" | xargs -0 -r stat -c '%s %n') \
+    | awk -v max="$MAX_KB" '$1 > max*1024 {kb=int($1/1024); sub(/^[0-9]+ /,""); printf "large\t%s\t%d KB > %d KB\n", $0, kb, max}'
+}
+
+{
+  check_machine
+  check_secrets
+  check_junk | sort -u | awk -F'\t' '{printf "junk\t%s\t%s\n", $2, ($1=="T" ? "tracked, should be gitignored" : "untracked and not gitignored")}'
+  check_large
+} > "$tmp/issues"
+
+if [ -r "$ALLOW" ]; then
+  awk -v r="$NAME" '$1 == r {sub(/^[^ \t]+[ \t]+/,""); print}' "$ALLOW" > "$tmp/allow"
+  if [ -s "$tmp/allow" ]; then grep -vEf "$tmp/allow" "$tmp/issues" > "$tmp/kept"; mv "$tmp/kept" "$tmp/issues"; fi
+fi
+
+n="$(grep -c . "$tmp/issues")"
+if [ "$n" = 0 ]; then echo "READY ($(wc -l < "$tmp/files") files checked in $NAME)"; exit 0; fi
+echo "NOT READY: $n issues in $NAME"
+sed 's/^/  /' "$tmp/issues"
+exit 1

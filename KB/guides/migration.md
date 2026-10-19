@@ -15,7 +15,7 @@ someone touched `/etc`, apt, snaps or user units. Not for one service down (`KB/
 |---|---|
 | `bin/machine-inventory` | lists `/etc` changes (etckeeper diff since the baseline + the pre-etckeeper window since the installer, minus installer/package-generated and pristine package files), hand-installed apt packages, extra snaps, user units |
 | `machine-inventory --check [DOC]` | every item must appear in the runbook (`/etc` paths as backticked tokens, globs allowed); exit 1 and one `GAP` line each |
-| `machine-inventory --etc-list` | absolute paths for `sudo tar -czf … -T` on the old box |
+| `machine-inventory --etc-list` | absolute paths, piped into `sudo tar -czf … -T -` on the old box (not `-T <(…)`: sudo closes the process-substitution fd) |
 | `KB/runbooks/migration.md` | the ordered rebuild, each step with a verify line |
 | `KB/machine.md` "System changes" | one-table summary (hand-maintained) |
 
@@ -23,7 +23,7 @@ someone touched `/etc`, apt, snaps or user units. Not for one service down (`KB/
 ```bash
 machine-inventory                       # all sections, ~9 s
 machine-inventory --check               # gaps: 0 or the GAP list, rc 1
-sudo tar -czf ~/etc-fleet.tgz -T <(machine-inventory --etc-list | grep -vE '^/etc/(passwd|group|shadow|gshadow)$')
+machine-inventory --etc-list | grep -vE '^/etc/(passwd|group|shadow|gshadow)$' | sudo tar -czf ~/etc-fleet.tgz -T -
 ```
 
 ## Pitfalls (measured)
@@ -37,4 +37,4 @@ sudo tar -czf ~/etc-fleet.tgz -T <(machine-inventory --etc-list | grep -vE '^/et
 ## Links
 - Code: `~/agents/bin/machine-inventory`
 - Tests: `MI_ETC=<fixture git dir> MI_SUDO= MI_INSTALL_END=$(date +%s) machine-inventory --etc` (fixture, no sudo); `machine-inventory --check <stripped copy of the runbook>` must list the removed items
-- Design / results: `~/agents/KB/runbooks/migration.md`, `~/agents/research/2026-10-05/T246/timing.md`
+- Design / results: `~/agents/KB/runbooks/migration.md`, `~/agent-work/research/2026-10-05/T246/timing.md`

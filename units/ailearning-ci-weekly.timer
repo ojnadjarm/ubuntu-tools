@@ -1,0 +1,9 @@
+[Unit]
+Description=Weekly ailearning full declutter (Sun 05:30, after pcbench, maintenance and moodle-keep-weekly)
+
+[Timer]
+OnCalendar=Sun *-*-* 05:30
+Persistent=true
+
+[Install]
+WantedBy=timers.target

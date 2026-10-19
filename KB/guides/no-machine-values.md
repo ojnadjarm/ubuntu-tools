@@ -23,4 +23,4 @@ echo '<new literal>' >> ~/.config/pc-harness/private-values   # deny a new value
 
 ## Links
 - Code: `bin/tests/no-machine-values.test.sh`, `~/moodle-harness/tests/no-machine-values.test.sh` (identical copy)
-- Design: `~/agents/research/2026-10-07/T278/ARCHITECTURE.md`
+- Design: `~/agent-work/research/2026-10-07/T278/ARCHITECTURE.md`

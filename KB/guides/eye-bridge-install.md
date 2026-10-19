@@ -7,8 +7,8 @@ Installing the voice channel on a box, adding a brain, or moving its files. Not 
 
 ## The path we took
 - The bridge is generic, so it lives in `~/the-dark-eye/bridge/relay/` with one idempotent `install.sh` (`--dry-run`, `--uninstall`).
-- ubuntu-tools keeps only gitignored links: `~/agents/eye-relay/mcp-{main,notes}.json` → `~/.config/dark-eye/` (the
-  orchestrator and notes units read them) and the legacy `eye-relay/state` link.
+- ubuntu-tools keeps only gitignored links: `~/agents/eye-relay/mcp-main.json` → `~/.config/dark-eye/` (read by
+  `claude-orchestrator.service`; one more `mcp-<brain>.json` per brain added to `EYE_RELAY_BRAINS`) and the legacy `eye-relay/state` link.
 - Config `~/.config/dark-eye/relay.env` (brains, `EYE_UNANSWERED_S`, `EYE_NOTIFY`); state `~/.local/state/dark-eye/relay/`.
 
 ## Exact commands
@@ -28,4 +28,4 @@ ln -sfn ~/.config/dark-eye/mcp-main.json ~/agents/eye-relay/mcp-main.json   # fl
 ## Links
 - Code: `~/the-dark-eye/bridge/relay/` (`README.md` there), runbook `KB/runbooks/eye-relay.md`
 - Tests: `~/the-dark-eye/bridge/relay/tests/run.sh`
-- Design: `~/agents/research/2026-10-07/T280/ARCHITECTURE.md`
+- Design: `~/agent-work/research/2026-10-07/T280/ARCHITECTURE.md`

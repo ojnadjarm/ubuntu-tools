@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 /** The explainer kit is imported as TypeScript source; dedupe keeps one gsap. */
 const KIT = process.env.EXPLAINER_KIT ?? join(homedir(), 'agents/kits/explainer');
 const CUT = process.env.CUTAWAY_KIT ?? join(homedir(), 'agents/kits/cutaway');
-const cert = (f: string): Buffer => readFileSync(resolve(join(homedir(), 'agents/research/2026-09-24/T71/stack/web/cert'), f));
+const cert = (f: string): Buffer => readFileSync(resolve(join(homedir(), '.local/share/dev-cert'), f));
 export default defineConfig({
   base: './',
   resolve: {

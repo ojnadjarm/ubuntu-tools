@@ -51,6 +51,35 @@ case "$rc" in
 esac
 grep -q 'shutdown' "$CALLS" && nok 'switch=1 dry-run never calls shutdown' "$(cat "$CALLS")" || ok 'switch=1 dry-run never calls shutdown'
 
+# 2b. T347-10: the pending reboot itself never blocks the reboot; any other pc status FAIL does.
+# maintenance-run puts $HOME/agents/bin first on PATH, so the pc stub lives in a fake HOME.
+GH="$WORK/gate-home"; mkdir -p "$GH/agents/bin" "$GH/agents/maintenance/state"
+cp "$BIN/fleetlib.sh" "$BIN/env.sh" "$GH/agents/bin/"
+pcstub() { printf '#!/bin/sh\necho "pc $*" >>"%s"\nprintf "%%b\\n" "%s"\nexit %s\n' "$CALLS" "$1" "$2" >"$GH/agents/bin/pc"; chmod +x "$GH/agents/bin/pc"; }
+gate_mr() { printf 'HARNESS_HOST=fixture\nMAINT_AUTO_REBOOT=1\n' >"$WORK/config.env"
+  HOME="$GH" HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" --assume-reboot --dry-run --dry-run-ignore-window 2>&1; }
+pcstub 'FAIL host.reboot_required: 11 d (linux-image)' 1
+out=$(gate_mr)
+{ grep -q 'REBOOT REFUSED' <<<"$out" && ! grep -q 'pc-status-check' <<<"$out"; } \
+  && ok 'a pending reboot alone passes the health gate' || nok 'a pending reboot alone passes the health gate' "$(grep REBOOT <<<"$out")"
+pcstub 'FAIL host.reboot_required: 11 d (linux-image)\nFAIL services.docker: inactive' 1
+has 'another FAIL still refuses the reboot' "$(gate_mr)" 'pc-status-check'
+pcstub '' 1
+has 'a pc status that prints nothing still refuses' "$(gate_mr)" 'pc-status-check'
+
+# 2c. T443: the refusal names the failed checks (at most 3) in the REFUSED line and the push (<= 200 chars).
+pcstub 'FAIL host.reboot_required: 11 d (linux-image)\nFAIL host.failed_units: 1: pcbench-fail-fixture.service' 1
+out=$(gate_mr)
+has 'refusal names the failed fixture unit' "$(grep 'REBOOT REFUSED' <<<"$out")" 'pc-status-check(host.failed_units: 1: pcbench-fail-fixture.service)'
+has 'refusal names the failed unit in the push' "$(grep 'would run: notify-owner' <<<"$out")" 'pcbench-fail-fixture.service'
+grep -q 'REBOOT REFUSED.*reboot_required' <<<"$out" && nok 'refusal names skip the pending reboot' "$out" || ok 'refusal names skip the pending reboot'
+long=$(printf 'x%.0s' $(seq 80))
+pcstub "FAIL a.one: $long\nFAIL b.two: $long\nFAIL c.three: $long\nFAIL d.four: $long" 1
+out=$(gate_mr)
+grep -q 'd\.four' <<<"$out" && nok 'refusal names at most 3 checks' "$out" || ok 'refusal names at most 3 checks'
+push=$(sed -n 's/^would run: notify-owner -t maintenance "\(.*\)"$/\1/p' <<<"$out")
+[ -n "$push" ] && [ "${#push}" -le 200 ] && ok 'refusal push with names stays <= 200 chars' || nok 'refusal push with names stays <= 200 chars' "${#push}: $push"
+
 # 3. Unset: fails safe to 0, a missing switch never reboots (T116).
 printf 'HARNESS_HOST=fixture\n' >"$WORK/config.env"
 out=$(HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" --assume-reboot --dry-run 2>&1)

@@ -15,13 +15,14 @@ def cached(key, ttl, fn, empty=None):
         hit = _cache.get(key)
         if hit and time.time() - hit["tried"] < ttl:
             return hit["val"]
+    tried = time.time()
     try:
         val, err = fn(), None
     except Exception as e:
         val, err = (hit["val"] if hit else ({} if empty is None else empty)), str(e)
     with lock:
         _cache[key] = {"at": time.time() if err is None else (hit["at"] if hit else 0),
-                       "tried": time.time(), "val": val, "error": err}
+                       "tried": tried, "val": val, "error": err}
     return val
 
 

@@ -1,5 +1,6 @@
 #!/bin/bash
 # Timestamped tarball of the agent-relevant user config; keeps the last 20.
+case "${1:-}" in -h|--help) awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; exit 0 ;; esac
 set -euo pipefail
 
 BACKUP_DIR="$HOME/agents/backups"
@@ -12,7 +13,7 @@ mkdir -p "$BACKUP_DIR"
 dconf dump / > "$STAGE/dconf.ini"
 
 FILES=()
-for p in .claude/settings.json .claude/hooks .claude/skills CLAUDE.md agents/bin; do
+for p in .claude/settings.json .claude/hooks .claude/skills CLAUDE.md agents/ORCHESTRATOR.md agents/bin; do
     [ -e "$HOME/$p" ] && FILES+=("$p")
 done
 for f in "$HOME"/.claude/*.md; do

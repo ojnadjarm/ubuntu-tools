@@ -28,13 +28,13 @@ several examples, then exercises after the concept; a callout on every number an
 
 ## Exact commands
 ```bash
-cd ~/agents/research/2026-09-24/T84/tools && python3 build.py && python3 md.py && python3 unit_json.py   # design → checked unit.json
+cd ~/agent-work/research/2026-09-24/T84/tools && python3 build.py && python3 md.py && python3 unit_json.py   # design → checked unit.json
 cd ~/projects/personal/ailearning
 npm test                                   # lint, words vs numbers, display exactness, hand check, framing (5 stages)
 npm run test:changed                       # only the checks covering what you changed (use this per change)
 npm run ci                                 # + build checks (audio budget, base, links, hygiene) + e2e under pages-sim (once a day)
-node tests/e2e/unit.mjs https://<tailnet-fqdn>:8470/ailearning/u/01-neuron/   # on the drop
-HYGIENE_DENY=~/agents/research/2026-09-24/T79/hygiene-deny.txt npm run hygiene
+node tests/e2e/unit.mjs https://<tailnet-fqdn>:8472/ailearning/u/01-neuron/
+HYGIENE_DENY=~/agent-work/research/2026-09-24/T79/hygiene-deny.txt npm run hygiene
 .local/drop.sh                             # rebuild the https preview
 ```
 
@@ -76,4 +76,4 @@ HYGIENE_DENY=~/agents/research/2026-09-24/T79/hygiene-deny.txt npm run hygiene
 ## Links
 - Code: `~/projects/personal/ailearning/units/01-neuron/` (`unit.json`, `unit/`, `plate/`, `sim/`, `entry.ts`), `src/site/sheet/narrow.mjs`
 - Tests: `tests/unit/{lesson,framing,play}.test.mjs`, `tests/lib/{lesson,framing,solve}.mjs`, `tests/e2e/{site,unit,lesson}.mjs`
-- Design / results: `~/agents/research/2026-09-24/T84/{lesson-design.md,ARCHITECTURE.md,build-2.md,build-3.md,findings.md,stills-2/,stills-3/,stills-4/}`, brief `~/agents/briefs/T84-u01-full-lesson.md`
+- Design / results: `~/agent-work/research/2026-09-24/T84/{lesson-design.md,ARCHITECTURE.md,build-2.md,build-3.md,findings.md,stills-2/,stills-3/,stills-4/}`, brief `~/agent-work/briefs/T84-u01-full-lesson.md`

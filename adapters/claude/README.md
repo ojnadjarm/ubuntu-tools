@@ -25,7 +25,9 @@ Cost comes from `.total_cost_usd`, tokens from `.usage`, the result text from `.
 
 ## What `install` writes
 
-Only the `hooks` key of `~/.claude/settings.json`, and only these four events:
+The `hooks` key of `~/.claude/settings.json`, only these four events, plus the fragment's
+`permissions.deny` power-verb rules (`systemctl reboot`, `reboot`, `shutdown`, … — FLEET.md §5.2, every
+session and subagent):
 
 | Event | Command | Replaces |
 |---|---|---|
@@ -33,7 +35,7 @@ Only the `hooks` key of `~/.claude/settings.json`, and only these four events:
 | `PostToolUse` | `adapters/claude/hooks/audit-log.py` | `~/.claude/hooks/audit-log.sh` (a symlink to the same file since GH09; `install` deletes it) |
 | `SubagentStart` / `SubagentStop` | `bin/orbit-hook start` / `stop` | — (the Eye's orbiters; Claude-only, see `~/the-dark-eye`) |
 
-`permissions` (including `defaultMode`, `allow` and `deny`), `model`, `effortLevel`,
+The rest of `permissions` (`defaultMode`, `allow`, the owner's own `deny` rules), `model`, `effortLevel`,
 `outputStyle`, the `Stop` hook owned by the Moodle harness and every other key are preserved
 untouched. A second `install` prints `no changes`.
 

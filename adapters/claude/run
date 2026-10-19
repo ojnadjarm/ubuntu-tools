@@ -21,8 +21,11 @@ cmd+=(--output-format stream-json --verbose)
 stream="$(mktemp "${TMPDIR:-/tmp}/agent-stream.XXXXXX")"
 trap 'rm -f "$stream"' EXIT
 
-"${cmd[@]}" >"$stream" </dev/null
-rc=$?
+# Background + wait so a SIGTERM from agents-stop reaches the CLI instead of waiting for it.
+"${cmd[@]}" >"$stream" </dev/null &
+child=$!
+trap 'kill -TERM "$child" 2>/dev/null' TERM INT
+until wait "$child"; rc=$?; ! kill -0 "$child" 2>/dev/null; do :; done
 
 # Only the `result` line carries final usage; per-turn usage in the stream is a placeholder.
 jq -Rc 'fromjson? | select(.type == "result")' "$stream" 2>/dev/null | tail -1 >"$RAW_OUT"

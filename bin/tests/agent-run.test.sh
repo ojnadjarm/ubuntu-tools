@@ -29,6 +29,9 @@ cat >"$SB/agents/bin/claude" <<'EOS'
 #!/usr/bin/env bash
 # Canned stream stub: no model, no network. Records its flags for the test.
 printf '%s\n' "$*" >>"$HOME/claude-args.log"
+[ -e /proc/$$/fd/8 ] && echo fd8 >>"$HOME/fd.log"
+[ -e "$HOME/sleep-mode" ] && exec sleep 47471
+[ -e "$HOME/fail-mode" ] && exit 3
 case "$*" in
   *"stream-json"*)
     cat <<'JSON'
@@ -46,7 +49,7 @@ chmod +x "$SB/agents/bin/notify-owner" "$SB/agents/bin/claude"
 
 run_agent() {  # run_agent [HARNESS_AGENT value]
   env -i HOME="$SB" PATH=/usr/bin:/bin TERM=dumb \
-      HARNESS_CONFIG=/nonexistent HARNESS_HOME="$SB/agents" HARNESS_AGENT="${1:-claude}" \
+      HARNESS_CONFIG=/nonexistent HARNESS_HOME="$SB/agents" HARNESS_AGENT="${1:-claude}" ${NO_PUSH:+AGENT_RUN_NO_PUSH=1} \
       bash "$SB/agents/bin/agent-run" demo >/dev/null 2>&1
 }
 idx="$SB/agents/demo/logs/index.tsv"
@@ -121,6 +124,25 @@ t "toolsmith-inputs reports the columns from the produced index"
      .tokens.agents.demo.tool_histogram.Bash]')" = '[true,1234,2]' ] \
   && ok || no "$(TOOLSMITH_ROOT="$SB/agents" HARNESS_HOME=/nonexistent "$BIN/toolsmith-inputs" \
      --since 9999d 2>/dev/null | jq -c .tokens)"
+
+t "F07: the lock fd never reaches the agent (adapter and direct)"
+: >"$SB/fd.log"; run_agent claude; run_agent ""
+[ ! -s "$SB/fd.log" ] && ok || no "agent saw fd 8 in $(wc -l <"$SB/fd.log") runs"
+
+t "a failed agent pushes once"
+touch "$SB/fail-mode"; : >"$SB/notify.log"; run_agent ""
+[ "$(grep -c 'agent demo failed (exit 3)' "$SB/notify.log")" = 1 ] && ok || no "$(cat "$SB/notify.log")"
+
+t "T402: AGENT_RUN_NO_PUSH=1 (ci-autofix) skips that push"
+: >"$SB/notify.log"; NO_PUSH=1 run_agent ""; rm -f "$SB/fail-mode"
+[ "$(tail -1 "$idx" | cut -f3)" = 3 ] && [ ! -s "$SB/notify.log" ] && ok || no "$(cat "$SB/notify.log"; tail -1 "$idx")"
+
+t "F37: SIGTERM to the claude adapter stops the agent CLI"
+touch "$SB/sleep-mode"; printf 'x\n' >"$SB/p.md"
+env -i HOME="$SB" PATH="$SB/agents/bin:/usr/bin:/bin" PROMPT_FILE="$SB/p.md" MODEL=m \
+  RAW_OUT="$SB/raw.json" META_OUT="$SB/meta.json" bash "$SB/agents/adapters/claude/run" >/dev/null 2>&1 &
+ap=$!; sleep 1; kill -TERM "$ap"; wait "$ap" 2>/dev/null; sleep 0.3; rm -f "$SB/sleep-mode"
+left="$(pgrep -f '[s]leep 47471')"; [ -z "$left" ] && ok || { no "sleep 47471 still running ($left)"; kill $left; }
 
 [ $fail = 0 ] && echo "agent-run.test.sh: all green" || echo "agent-run.test.sh: FAILURES"
 exit $fail

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from dash.cache import cache_meta, swr
 from dash.env import BIN, BRAND, HOME, HOST, PUBLIC_HOST, run
 from dash.routes import route
-from dash.services import files, projects, runners, sites
+from dash.services import files, projects, runners, sites, todo
 
 NETDATA = "http://127.0.0.1:19999"
 
@@ -29,10 +29,6 @@ def unit_props(props, units):
     return out
 
 
-def unix_iso(v):
-    return datetime.fromtimestamp(int(v[1:])).astimezone().isoformat(timespec="seconds") if v.startswith("@") else v
-
-
 def agents():
     out = []
     root = os.path.join(HOME, "agents")
@@ -43,12 +39,8 @@ def agents():
         unit = "agent@%s" % name
         p = props.get(unit + ".timer", {})
         enabled = p.get("UnitFileState") or "no"
-        nxt = unix_iso(p.get("NextElapseUSecRealtime", ""))
-        sched = ""
-        conf = os.path.join(HOME, ".config/systemd/user", unit + ".timer.d", "schedule.conf")
-        if os.path.exists(conf):
-            m = re.findall(r"^OnCalendar=(.+)$", open(conf).read(), re.M)
-            sched = m[-1] if m else ""
+        nxt = runners.iso(p.get("NextElapseUSecRealtime", ""))
+        sched = human_cal(runners.calendar(unit + ".timer"))
         last = {}
         idx = os.path.join(d, "logs", "index.tsv")
         if os.path.exists(idx):
@@ -69,9 +61,10 @@ def since_24h():
 
     def when(s):
         try:
-            return datetime.fromisoformat(s.strip())
+            t = datetime.fromisoformat(s.strip())
         except ValueError:
             return None
+        return t if t.tzinfo else None
 
     log = os.path.join(HOME, "agents/log/notify.log")
     if os.path.exists(log):
@@ -112,10 +105,11 @@ def since_24h():
             n = e.pop("n")
             ev.append(dict(e, text=e["text"] + (" x%d" % n if n > 1 else "")))
     ev.sort(key=lambda e: e["t"], reverse=True)
-    return ev[:20]
+    return ev
 
 
-FLEET = re.compile(r"^(dark-eye|docker|sentinel|agent@|notes-brain|agents-dashboard|moodle-keep)")
+FLEET = re.compile(r"^(dark-eye|docker|sentinel|agent@|agents-dashboard|moodle-keep|%s$)"
+                   % re.escape(os.environ.get("ORCHESTRATOR_UNIT") or "claude-orchestrator.service"))
 DESKTOP = re.compile(r"^(gvfs-|org\.gnome\.|org\.freedesktop\.|evolution-|xdg-|pipewire|wireplumber|dbus|at-spi|gnome-|gcr-|dconf|localsearch|filter-chain|snap\.)")
 
 
@@ -130,7 +124,7 @@ def user_units():
         since = p.get("ActiveEnterTimestamp", "") if u["active"] == "active" else ""
         rss = p.get("MemoryCurrent", "")
         out.append({"unit": u["unit"], "what": u["description"][:1].lower() + u["description"][1:], "active": u["active"], "sub": u["sub"],
-                    "since": unix_iso(since),
+                    "since": runners.iso(since),
                     "group": "fleet" if FLEET.match(u["unit"]) else "desktop" if DESKTOP.match(u["unit"]) else "his",
                     "rss": int(rss) if rss.isdigit() else None})
     order = {"fleet": 0, "his": 1, "desktop": 2}
@@ -139,24 +133,16 @@ def user_units():
 
 
 def user_timers():
-    def iso(us):
-        return datetime.fromtimestamp(us / 1e6).astimezone().isoformat(timespec="seconds") if us else ""
     out = []
     for t in json.loads(run(["systemctl", "--user", "list-timers", "--all", "-o", "json"], 10) or "[]"):
-        conf = os.path.join(HOME, ".config/systemd/user", t["unit"] + ".d", "schedule.conf")
-        cal = ""
-        for p in (os.path.join(HOME, ".config/systemd/user", t["unit"]), conf):
-            if os.path.exists(p):
-                m = re.findall(r"^On(?:Calendar|UnitActiveSec|BootSec)=(.+)$", open(p).read(), re.M)
-                cal = m[-1] if m else cal
-        out.append({"unit": t["unit"], "activates": t["activates"], "next": iso(t.get("next")),
-                    "last": iso(t.get("last")), "every": human_cal(cal)})
+        out.append({"unit": t["unit"], "activates": t["activates"], "next": runners.iso(t.get("next") or 0),
+                    "last": runners.iso(t.get("last") or 0), "every": human_cal(runners.calendar(t["unit"]))})
     out.sort(key=lambda t: t["next"] or "9")
     return out
 
 
 def human_cal(cal):
-    """systemd OnCalendar / OnUnitActiveSec -> words: daily 04:30, Mon + Thu 03:00, every minute."""
+    """systemd OnCalendar / OnUnitActiveSec -> words: daily 04:30, hourly at :07, once 2027-01-01 03:00, parked."""
     if not cal:
         return ""
     m = re.match(r"^(\d+)(min|h|s|d)$", cal)
@@ -171,6 +157,13 @@ def human_cal(cal):
         if not days:
             return "daily " + m.group(2)
         return " + ".join(d[:3] for d in days.split(",")) + " " + m.group(2)
+    m = re.match(r"^\*-\*-\* \*:(\d\d)(?::\d\d)?$", cal)
+    if m:
+        return "hourly at :" + m.group(1)
+    m = re.match(r"^(\d{4}-\d\d-\d\d) (\d\d:\d\d)(?::\d\d)?$", cal)
+    if m:
+        when = datetime.strptime(m.group(1) + " " + m.group(2), "%Y-%m-%d %H:%M")
+        return "parked" if when - datetime.now() > timedelta(days=365) else "once %s %s" % m.groups()
     return cal
 
 
@@ -257,26 +250,38 @@ def resolved():
     return {k for k, s in state.items() if s == "resolved"}
 
 
-def verdict(st, ag, ev):
-    """What needs the owner: unresolved pushes that ask him or are high-priority, pc status failures, agents whose last run failed; `needs` is the one list the headline counts."""
+def verdict(st, ag, ev, todos=()):
+    """What needs the owner: unresolved pushes that ask him or are high-priority, open owner to-dos, pc status failures, agents whose last run failed; `needs` is the one list the headline counts."""
     done = resolved()
     pushes = [e for e in ev if e["kind"] == "push" and push_key(e) not in done]
     asks = [e for e in pushes if asks_owner(e["text"])]
     needs = [{"kind": "ask", "t": e["t"], "text": e["text"], "id": push_key(e)} for e in asks]
     needs += [{"kind": "push", "t": e["t"], "text": e["text"], "id": push_key(e)} for e in pushes
               if e.get("prio") == "high" and e not in asks]
+    needs += [{"kind": "todo", "todo": i["id"], "text": i["text"]} for i in todos]
     for sec, items in st.get("sections", {}).items():
         for k, v in items.items():
             if v.get("state") == "FAIL":
                 needs.append({"kind": "fail", "text": "%s.%s" % (sec, k)})
     for a in ag:
         if a["last"].get("exit") not in (None, "", "0"):
+            if any(n["kind"] == "push" and n["text"] == "agent %s failed (exit %s)" % (a["name"], a["last"]["exit"])
+                   and a["last"].get("end") and datetime.fromisoformat(n["t"]) >= datetime.fromisoformat(a["last"]["end"])
+                   for n in needs):
+                continue
             needs.append({"kind": "agent", "text": "agent %s exit %s" % (a["name"], a["last"]["exit"])})
-    bad = [("ask: " + n["text"][:80]) if n["kind"] == "ask" else n["text"] for n in needs]
+    bad = [(n["kind"] + ": " + n["text"][:80]) if n["kind"] in ("ask", "todo") else n["text"] for n in needs]
     return {"ok": not needs, "problems": bad, "asks": asks, "needs": needs}
 
 
-BLOCKS = {"status": (pc_status, {}), "envs": (envs, []), "agents": (agents, []), "events": (since_24h, []),
+def owner_counts():
+    """The four counts of `agents-status --owner`, done counted from today."""
+    import owner_status
+    d = owner_status.collect(HOME, since_date=datetime.now().strftime("%Y-%m-%d"))
+    return {"running": len(d["running"]), "done": len(d["done"]), "waiting": len(d["waiting"]), "queued": len(d["queued"])}
+
+
+BLOCKS = {"status": (pc_status, {}), "owner": (owner_counts, {}), "envs": (envs, []), "agents": (agents, []), "events": (since_24h, []),
           "sites": (sites.sites, []), "drop": (files.drop, {}), "units": (user_units, []), "timers": (user_timers, []),
           "docker": (sites.docker_ps, []), "plans": (files.plans, []), "sentinel_last_ok": (sentinel_last_ok, ""),
           "sparks": (sparks, {}), "projects": (projects.projects, [])}
@@ -286,11 +291,14 @@ def payload():
     out = {"now": datetime.now().astimezone().isoformat(timespec="seconds")}
     out.update(swr(BLOCKS))
     out["stale"], out["errors"], out["stale_since"] = cache_meta(BLOCKS)
-    out["verdict"] = verdict(out["status"], out["agents"], out["events"])
+    out["todo"], out["todo_error"] = todo.checked()
+    out["verdict"] = verdict(out["status"], out["agents"], out["events"], out["todo"])
+    out["events"] = out["events"][:20]
     out["host"] = HOST
     out["brand"] = BRAND
     out["netdata"] = f"http://{PUBLIC_HOST}:19999"
     out["voice_url"] = "https://%s:%d/voice" % (PUBLIC_HOST, sites.SITES[19998][3])
+    out["test_site"] = sites.test_site()
     return out
 
 

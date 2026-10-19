@@ -32,12 +32,12 @@ adding a page or unit, re-syncing the kits, fixing a Pages URL, the hygiene chec
 ## Exact commands
 ```bash
 cd ~/projects/personal/ailearning
-npm run ci                                            # typecheck, kit:verify, node tests, build (+hygiene, base-check), e2e (tests/run-e2e.mjs, parallel lanes)
+npm run ci                                            # once a day (timer), not per change: typecheck, kit:verify, node tests, build (+hygiene, base-check), e2e (tests/run-e2e.mjs, parallel lanes)
 npm run test:changed [-- --dry] [path ...]           # only the checks covering the changed files (default: git status); map in tools/test-changed.mjs
-HYGIENE_DENY=~/agents/research/2026-09-24/T79/hygiene-deny.txt npm run hygiene     # plus private names (keep the file outside the repo)
-CUTAWAY_KIT=~/agents/kits/cutaway EXPLAINER_KIT=~/agents/kits/explainer npm run kit:sync   # after a kit change; then npm run ci
+HYGIENE_DENY=~/agent-work/research/2026-09-24/T79/hygiene-deny.txt npm run hygiene     # plus private names (keep the file outside the repo)
+CUTAWAY_KIT=~/agents/kits/cutaway EXPLAINER_KIT=~/agents/kits/explainer npm run kit:sync   # after a kit change; then npm run test:changed
 .local/drop.sh                                        # https://<tailnet-fqdn>:8472/ailearning/ (sites publish, review switch ?review; T271)
-node tests/e2e/unit.mjs https://<tailnet-fqdn>:8470/ailearning/u/01-neuron/   # 0 failed requests
+node tests/e2e/unit.mjs https://<tailnet-fqdn>:8472/ailearning/u/01-neuron/   # 0 failed requests
 node ~/agents/kits/explainer/tools/e2e.mjs <u01 url> out/run.json                  # full watch → drive → end run
 npm run cue-check -- --clip c4b --mark graph --key graph --part graph                # one cue: key changes on the word, part drawn
 KOKORO_PY=… KOKORO_RENDER=… tools/narrate.sh 01-neuron c4c                         # render + merge only the named clips (/kokoro-narration)
@@ -73,9 +73,9 @@ New page: `u/<NN-slug>/index.html` (relative `../../units/...` paths) + one line
 ## Links
 - Code: `~/projects/personal/ailearning` (`tools/`, `tests/`, `CLAUDE.md`)
 - Tests: `npm test` (hygiene selftest, pages-sim), `npm run e2e`
-- Design / results: `~/agents/research/2026-09-24/T79/{architecture.md,findings.md}`, plan `~/agents/research/2026-09-24/T76/plan.md` §4, §5.1
+- Design / results: `~/agent-work/research/2026-09-24/T79/{architecture.md,findings.md}`, plan `~/agent-work/research/2026-09-24/T76/plan.md` §4, §5.1
 - Owner push steps: `~/drop/AILEARNING-PUSH-STEPS.txt` is gone since 2026-09-25 (a copy is in `~/.local/share/Trash/files/`)
-- Critic reports: `~/agents/research/2026-09-24/T79/critic-{public,pages}.md`
+- Critic reports: `~/agent-work/research/2026-09-24/T79/critic-{public,pages}.md`
 - **Credits (T81, 2026-09-24, owner's choice):** "Drawn by Claude · Directed by Oscar Nadjar" (name → https://<github-user>.github.io/portfolio/,
   `rel="author"`) in README, title sheet and 404 title blocks; plates sign DRAWN Claude / APPROVED Oscar Nadjar; `LICENSE` and
   `LICENSE-content` name him as holder. The deny-list still blocks `oscar`/`nadjar`: its `allow <path-glob> <regex>` lines exempt only

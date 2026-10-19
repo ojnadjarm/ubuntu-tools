@@ -198,6 +198,71 @@ class Live(unittest.TestCase):
         cache.forget("agents_persist")
         self.assertEqual(agents.collect()["orchestrator"]["state"], "off")
 
+    def test_orchestrator_follows_newest_session_without_subagents(self):
+        os.makedirs(os.path.join(self.proj, "sess5678-y", "subagents"), exist_ok=True)
+        jl(self.parent, [{}])
+        os.utime(self.parent, (self.now - 3600, self.now - 3600))
+        jl(os.path.join(self.proj, "newer999-z.jsonl"), [{}])
+        d = agents.collect()
+        self.assertEqual(d["orchestrator"], {"name": "DarkSaddler", "session": "newer999", "state": "running"})
+
+    def test_parent_scan_concurrent_keeps_offset(self):
+        n = self.now
+        jl(self.parent, [note("par%d" % i, "completed", n - 100) for i in range(5)])
+        size = os.path.getsize(self.parent)
+        gate = threading.Barrier(2, timeout=1)
+
+        class Gated(io.FileIO):
+            def read(self, n=-1):
+                out = super().read(n)
+                try:
+                    gate.wait()
+                except threading.BrokenBarrierError:
+                    pass
+                return out
+        agents.agent_ends.open = Gated
+        try:
+            ts = [threading.Thread(target=agents.parent, args=(self.parent,)) for _ in range(2)]
+            [t.start() for t in ts]
+            [t.join() for t in ts]
+        finally:
+            del agents.agent_ends.open
+        self.assertEqual(agents._parent[self.parent][0], size)
+        jl(self.parent, [note("late", "completed", n)], "a")
+        self.assertEqual(agents.parent(self.parent)[0].get("late", (0, ""))[1], "done")
+
+    def test_scan_chunks_keep_lines_across_boundaries(self):
+        n = self.now
+        rows = [note("ch%d" % i, "completed", n - 100) for i in range(40)]
+        jl(self.parent, rows)
+        whole = agents.agent_ends.scan(self.parent, agents.agent_ends.memo())
+        chunk = agents.agent_ends.CHUNK
+        agents.agent_ends.CHUNK = 97
+        try:
+            small = agents.agent_ends.scan(self.parent, agents.agent_ends.memo())
+            with open(self.parent, "a") as f:
+                f.write(json.dumps(note("tail", "completed", n))[:-5])
+            part = agents.agent_ends.scan(self.parent, small)
+            self.assertEqual(part[0], whole[0])
+            self.assertNotIn("tail", part[1])
+        finally:
+            agents.agent_ends.CHUNK = chunk
+        self.assertEqual(small, whole)
+        self.assertEqual(len(whole[1]), 40)
+
+    def test_scan_cold_50mb_peak_rss_under_100mb(self):
+        import subprocess
+        big = os.path.join(self.tmp.name, "big.jsonl")
+        pad = json.dumps({"timestamp": "2026-10-15T00:00:00Z", "message": {"content": "x" * 2000}}) + "\n"
+        with open(big, "w") as f:
+            for i in range((50 << 20) // len(pad)):
+                f.write(json.dumps(note("big%d" % i, "completed", self.now)) + "\n" if i % 5000 == 0 else pad)
+        code = ("import resource, sys; sys.path.insert(0, %r); import agent_ends as a; m = a.scan(%r, a.memo()); "
+                "print(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss, len(m[1]))") % (os.path.dirname(agents.agent_ends.__file__), big)
+        rss, notes = map(int, subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout.split())
+        self.assertGreater(notes, 0)
+        self.assertLess(rss, 100 * 1024)
+
 
 if __name__ == "__main__":
     unittest.main()

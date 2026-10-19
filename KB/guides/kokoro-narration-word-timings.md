@@ -20,11 +20,11 @@ Ticket: T65 (narration lane), used by T65 mockups, T69, T70 ports · Last verifi
 
 ## Exact commands
 ```bash
-PY=~/agents/research/2026-09-23/T65/tts/envs/kokoro/bin/python
+PY=~/.local/opt/kokoro/bin/python
 $PY ~/.claude/skills/kokoro-narration/render_narration.py unit.json out/bundle [clip-id…]   # skill copy, paths as args; clip ids re-render only those, plus any clip missing from cues.json, at the sheet's kbps
 ffmpeg -loglevel error -i out/bundle/audio/w1.opus -c:a libvorbis -q:a 4 w1.ogg             # Godot wants Ogg
 # score a new voice/model the way the lane did (WER, MOS, consistency, table):
-cd ~/agents/research/2026-09-23/T65/tts/scripts && cat run_all.sh     # r_*.py renderers, score.py, table.py
+cd ~/agent-work/research/2026-09-23/T65/tts/scripts && cat run_all.sh     # r_*.py renderers, score.py, table.py
 ```
 
 ## Pitfalls (measured)
@@ -38,7 +38,11 @@ cd ~/agents/research/2026-09-23/T65/tts/scripts && cat run_all.sh     # r_*.py r
 - A clip-id re-render without `NARRATION_KBPS` used to fall back to 64k/96k beside 24k clips (ailearning c8a–c9b,
   2026-09-26, F52). The bitrate is now kept in `cues.json` and reused; a differing `NARRATION_KBPS` stops the render.
   `new-lesson --narrate` once rendered at 64/96k (`kbps` null: ailearning 02-layers, 03-loss), so `tools/narrate.sh` (24 by default)
-  stops on them; it now passes `NARRATION_KBPS` (default 24). One clip there: run `render_narration.py` directly without `NARRATION_KBPS` (2026-10-03, F49).
+  stops on them; it now passes `NARRATION_KBPS` (default 24), so an empty value still means 24. One clip there:
+  `NARRATION_KBPS=default tools/narrate.sh 02-layers <clip>` (`default` = the 64/96k pair; 2026-10-03, F49; 2026-10-15, F45).
+- `KPipeline` calls `hf_hub_download` for config, model and voice on every render; with no network it crashed (httpx 403)
+  although all three sit in `~/.cache/huggingface/hub`. The renderer now sets `HF_HUB_OFFLINE=1` unless the caller set it;
+  on a fresh machine run once with `HF_HUB_OFFLINE=0` to fetch the model (2026-10-10, F53; offline: import 4.9 s, init 2.2 s).
 - Native Kokoro word starts sit a constant **61 ms early** vs the MMS_FA forced aligner (57–63 ms per voice, SD 19 ms,
   1,089 words). Hence the +40 ms bias; p95 residual after it 41 ms. Cue on starts: word *ends* jitter ~110 ms.
 - The Eye's **int8 sherpa-onnx Kokoro** scored UTMOSv2 2.26 vs 3.55 for the same voice in fp32, and was slower here
@@ -58,8 +62,8 @@ cd ~/agents/research/2026-09-23/T65/tts/scripts && cat run_all.sh     # r_*.py r
 
 ## Links
 - Skill: `~/.claude/skills/kokoro-narration/` (SKILL.md + `render_narration.py`)
-- Code: `~/agents/research/2026-09-23/T65/mockups/atelier/tools/render_narration.py` (original),
+- Code: `~/agent-work/research/2026-09-23/T65/mockups/atelier/tools/render_narration.py` (original),
   `…/atelier/src/core/clock.ts`, `…/atelier/src/audio/voice.ts`, unit `…/atelier/content/a01.unit.json`
-- Scoring: `~/agents/research/2026-09-23/T65/tts/scripts/` (`r_kokoro.py`, `score.py`, `table.py`, `mixdemo.py`)
-- Design / results: `~/agents/research/2026-09-23/T65/lanes/narration.md`, `T65/tts/table.md`, `T65/plan.md` §8
-- Listening set: `~/agents/research/2026-09-23/T65/audio/` (renders; scores in `T65/tts/table.md`, `T65/tts/scores.jsonl`)
+- Scoring: `~/agent-work/research/2026-09-23/T65/tts/scripts/` (`r_kokoro.py`, `score.py`, `table.py`, `mixdemo.py`)
+- Design / results: `~/agent-work/research/2026-09-23/T65/lanes/narration.md`, `T65/tts/table.md`, `T65/plan.md` §8
+- Listening set: `~/agent-work/research/2026-09-23/T65/audio/` (renders; scores in `T65/tts/table.md`, `T65/tts/scores.jsonl`)

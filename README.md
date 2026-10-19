@@ -19,11 +19,10 @@ that wire it to whichever agent CLI is installed.
 | `KB/` | toolbox, quirks, audit, runbooks, `guides/` (search with `guide <words>`) |
 | `<agent>/` | one persistent agent: `BRIEF.md` + `agent.env` (`hello/` is the template) |
 | `dashboard/` | the status page (`server.py`, `static/`, `tests/`) |
-| `eye-relay/` | machine-local links to the Dark Eye bridge install (`mcp-<brain>.json` for the orchestrator and notes units); the bridge itself is `~/the-dark-eye/bridge/relay` (`install.sh`) |
+| `eye-relay/` | machine-local links to the Dark Eye bridge install (`mcp-<brain>.json` for the orchestrator unit); the bridge itself is `~/the-dark-eye/bridge/relay` (`install.sh`) |
 | `kits/` | `explainer` (narrated learning-unit engine) and `cutaway` (its art-style kit), each with a starter |
 | `bench/` | pcbench task pack and arms; `code-review/`, `improve/`, `toolsmith/` the self-improvement agents |
 | `skills/`, `hooks/`, `lib/` | fleet skills, the audit hook, shared Python helpers |
-| `t141/` | the trip-guide page (`KB/guides/trip-guide.md`) |
 
 ## Install
 
@@ -89,7 +88,7 @@ is the only place that knows an adapter exists; `agent-run` and the units are ag
 | Orchestrator | `orchestrator-pulse`, `orchestrator-handover`, `orbit-hook`, `plan-usage`, `plan-publish` |
 | Health and care | `sentinel-check`, `sentinel-runaway`, `sentinel-waits`, `maintenance-run`, `power-profile-auto`, `machine-inventory`, `moodle-envs`, `moodle-keep`, `moodle-login-check` |
 | Knowledge | `guide`, `toolsmith-inputs`, `improve-gate`, `improve-meter`, `code-review`, `code-review-sandbox`, `code-review-netproxy`, `pcbench`, `pcbench-weekly`, `ctxrot` |
-| Voice and Eye | `notes-file`, `notes-brain-arm`, `voice-progress`, `buds-capture`, `buds-recover` (the Eye bridge CLIs `eye-relay`, `eye-channel`, `eye-channel-accept`, `eye-tap`, `eye-latency` come from `~/the-dark-eye/bridge/relay/install.sh`) |
+| Voice and Eye | `voice-progress` (the Eye bridge CLIs `eye-relay`, `eye-channel`, `eye-channel-accept`, `eye-tap`, `eye-latency` come from `~/the-dark-eye/bridge/relay/install.sh`) |
 | Sites and lessons | `drop-link`, `sites`, `ailearning-ci-daily`, `playwright-mcp` |
 | Skill links (untracked) | `new-lesson`, `lesson-board`, `invoice`, `finance-month`: symlinks into `~/.claude/skills/<skill>/scripts/` |
 
@@ -110,8 +109,10 @@ git commit && git push
 
 `.gitignore` keeps out credentials (`secrets/`, `config.env`), run artefacts (`log/`, `backups/`,
 `browser/`, `state/`, every agent's `logs/`, `state/`, `REPORT.md`), working papers (`briefs/`,
-`research/`, `KB/history.md`, `KB/orchestrator.md`), the generated `KB/machine.md`, build output
+`research/`, `KB/orchestrator.md`), the generated `KB/machine.md`, build output
 (`node_modules/`, `kits/**/dist/`, `kits/**/out/`) and `__pycache__/`.
+Agent working papers (briefs, research, evidence, archive, owner material) live outside the repo in `$AGENT_WORK`
+(default `~/agent-work`, guide `agent-work-layout`).
 
 ---
 
@@ -143,7 +144,7 @@ git commit && git push
    - Exactly what each of those stops and starts: `RUNNER.md` "Commands".
 
 4. **Where the rest is**
-   - Roster and orchestrator rules: `~/CLAUDE.md`. Rules every agent follows: `~/agents/AGENTS.md`.
+   - Roster: `~/agents/KB/orchestrator.md`; orchestrator rules: `~/agents/ORCHESTRATOR.md`. Rules every agent follows: `~/agents/AGENTS.md`.
    - Machine facts and runbooks: `~/agents/KB/`. Desktop control: `~/agents/README-pc-control.md`.
    - Benchmark and QA results: `~/agents/bench/BASELINE-PCBENCH.md`, `~/agents/bench/QA-REPORT.md`.
    - How an agent is built and added: `~/agents/RUNNER.md` (`~/agents/hello/` is the template).

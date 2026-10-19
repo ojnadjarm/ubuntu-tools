@@ -1,7 +1,7 @@
 /* Hash router, screen swap with in-place patching, and the seen badges on the nav. */
 import {getJSON,postJSON} from "./api.js";
 
-export var ORDER=["sites","services","files","docs","notes","machine","style"];
+export var ORDER=["sites","services","files","docs","machine","style"];
 export var cur=null;
 export var SEEN={};
 var S={},O=null,grid=document.getElementById("grid"),board=document.getElementById("board");
@@ -9,7 +9,7 @@ var S={},O=null,grid=document.getElementById("grid"),board=document.getElementBy
 /* o: {screens, ready(), keys() raw new-item keys per screen, hash(to), enter(to,force), read() screen from location.hash} */
 export function start(o){S=o.screens;O=o;
   getJSON("/api/seen").then(function(j){Object.assign(SEEN,j||{});if(O.ready())go(cur,true);badges();}).catch(function(){});
-  window.addEventListener("hashchange",function(){var h=O.read();if(ORDER.indexOf(h)>=0)go(h,h==="notes"&&h===cur);});
+  window.addEventListener("hashchange",function(){var h=O.read();if(ORDER.indexOf(h)>=0)go(h);});
   var first=O.read();
   go(ORDER.indexOf(first)>=0?first:"sites");}
 

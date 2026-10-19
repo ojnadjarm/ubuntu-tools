@@ -104,6 +104,31 @@ t "D01 ps; pkill yes fails";                  eq pki "$(d1 'ps; pkill yes')" '0'
 t "D01 systemctl --user stop fails";          eq stp "$(d1 'systemctl --user stop pcbench-burn.service')" '0'
 rm -rf "$D1"
 
+# --- 3a-quinquies. TSP-042: C01/O03 compare the first token of a name field (stubs, fake HOME) ---
+NF=$(mktemp -d); mkdir -p "$NF/home/agents/bin" "$NF/bin" "$NF/cwd/.state"
+echo alsa_output.fixture > "$NF/cwd/.state/orig.sink"; echo bluez_output.PCBENCH_BUDS > "$NF/sink"
+printf '#!/bin/sh\necho "pactl $*" >> "%s/calls"\ncat "%s/sink"\n' "$NF" "$NF" > "$NF/bin/pactl"
+printf '#!/bin/sh\necho "pc $*" >> "%s/calls"\necho alsa_output.fixture > "%s/sink"\n' "$NF" "$NF" > "$NF/home/agents/bin/pc"
+printf '#!/bin/sh\necho "docker $*" >> "%s/calls"\necho "moodle52-app-1 0.0.0.0:8052->80/tcp"\n' "$NF" > "$NF/bin/docker"
+chmod +x "$NF/bin/"* "$NF/home/agents/bin/pc"
+echo '{"id":"fx1","target":"default.sink","after":"bluez_output.PCBENCH_BUDS","rollback":"pc undo fx1"}' > "$NF/ledger.jsonl"
+c01() { printf '{"sink":"%s","how":"pc audio","rollback":"pc undo fx1"}' "$1" > "$NF/a.json"; echo bluez_output.PCBENCH_BUDS > "$NF/sink"
+  (cd "$NF/cwd" && HOME="$NF/home" PC_LEDGER="$NF/ledger.jsonl" PATH="$NF/bin:$PATH" \
+    bash "$BIN/../bench/tasks/C01/check.sh" "$NF/a.json" | jq -c .pass); }
+o03() { printf '{"container":"%s","pid_or_unit":"9750"}' "$1" > "$NF/a.json"
+  PATH="$NF/bin:$PATH" bash "$BIN/../bench/tasks/O03/check.sh" "$NF/a.json" | jq -c .pass; }
+t "TSP-042 selftest: pactl/docker/pc are the stubs"
+[ "$(PATH="$NF/bin:$PATH" command -v pactl)" = "$NF/bin/pactl" ] && [ "$(PATH="$NF/bin:$PATH" command -v docker)" = "$NF/bin/docker" ] && ok || no "stub not first on PATH"
+t "C01 bare sink name passes";                eq bare "$(c01 bluez_output.PCBENCH_BUDS)" '1'
+t "C01 name + (description) passes";          eq desc "$(c01 'bluez_output.PCBENCH_BUDS (WF-1000XM5-bench)')" '1'
+t "C01 wrong sink name fails";                eq bad "$(c01 'alsa_output.fixture (Built-in)')" '0'
+t "O03 bare container passes";                eq bare "$(o03 moodle52-app-1)" '1'
+t "O03 container + (id, image, PID) passes";  eq desc "$(o03 'moodle52-app-1 (14f354b7a3ac, image moodlehq/moodle-php-apache:8.4, container PID 9750)')" '1'
+t "O03 wrong container fails";                eq bad "$(o03 'moodle45-app-1 (abc)')" '0'
+t "TSP-042 selftest: stubs saw only read/undo argv"
+grep -qvE '^(pactl get-default-sink|pc undo fx1 --apply|docker ps --format .*)$' "$NF/calls" && no "$(tr '\n' ';' < "$NF/calls")" || ok
+rm -rf "$NF"
+
 # --- 3a-quater. TSP-030: the fixture commit bypasses a guard shim first on PATH ---
 t "fixture.sh reset under a guarded PATH"
 GF=$(mktemp -d); mkdir -p "$GF/guards" "$GF/run"
@@ -233,6 +258,28 @@ print(m.residue()[0])
 ")
 rm -rf "$RSTUB"
 eq res "$res" '0'
+
+# --- 3e. failed_user_units is a name set, minus pcbench-* and <= 5-min timer units (TSP-036) ---
+# Fake HOME and a stub PATH: every tool fingerprint.sh calls is a stub; systemctl logs each call.
+FPX=$(mktemp -d); mkdir -p "$FPX/home/agents/bin" "$FPX/stub"
+cp "$BIN/env.sh" "$FPX/home/agents/bin/env.sh"
+for c in pactl powerprofilesctl docker gdctl tailscale sudo tmux pc git; do
+  printf '#!/bin/sh\nexit 0\n' > "$FPX/stub/$c"; chmod +x "$FPX/stub/$c"; done
+printf '#!/bin/sh\necho "$*" >> "$FPX/calls"\ncase "$*" in\n  *list-timers*) cat "$FPX/timers.json" ;;\n  *--state=failed*) cat "$FPX/failed" ;;\nesac\n' > "$FPX/stub/systemctl"
+chmod +x "$FPX/stub/systemctl"
+echo '[{"next":1000060000000,"last":1000000000000,"unit":"moodle45-cron.timer","activates":"moodle45-cron.service"},
+{"next":1086400000000,"last":1000000000000,"unit":"daily.timer","activates":"daily.service"}]' > "$FPX/timers.json"
+fpu() { printf '%s loaded failed failed x\n' "$@" > "$FPX/failed"
+  HOME="$FPX/home" FPX="$FPX" HARNESS_CONFIG=/dev/null PC_TIMEOUT_BIN=timeout PATH="$FPX/stub:/usr/bin:/bin" \
+    bash "$BIN/pcbench.d/fingerprint.sh" | awk -F'\t' '$1=="failed_user_units"{print $2}'; }
+a=$(fpu foo.service daily.service)
+t "fp selftest: systemctl answered by the stub"
+grep -q 'list-units --state=failed' "$FPX/calls" && grep -q 'list-timers' "$FPX/calls" && ok || no "stub calls: $(tr '\n' ';' < "$FPX/calls")"
+t "fp failed units: names, sorted";               eq names "$a" 'daily.service,foo.service'
+t "fp failed units: 60 s timer flapper ignored";  eq flap "$(fpu foo.service moodle45-cron.service daily.service)" "$a"
+t "fp failed units: pcbench-* fixture ignored";   eq pcb "$(fpu pcbench-fail.service foo.service daily.service)" "$a"
+t "fp failed units: a new real failure differs";  eq new "$(fpu bar.service foo.service daily.service)" 'bar.service,daily.service,foo.service'
+rm -rf "$FPX"
 
 # --- 4. end to end with a fake claude --------------------------------------
 if command -v systemd-run >/dev/null && systemctl --user is-system-running >/dev/null 2>&1; then

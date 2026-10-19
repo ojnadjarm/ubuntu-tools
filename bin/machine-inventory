@@ -8,7 +8,7 @@ usage() {
 usage: machine-inventory [--etc|--etc-list|--packages|--snaps|--units] [--check [DOC]]
   (no flag)   every section: etc, packages, snaps, units
   --etc       /etc paths we added, changed or removed: "<A|M|D> <path>"
-  --etc-list  the same paths, absolute, existing files only (for: sudo tar -czf x.tgz -T <(machine-inventory --etc-list))
+  --etc-list  the same paths, absolute, existing files only (for: machine-inventory --etc-list | sudo tar -czf x.tgz -T -)
   --packages  apt packages installed by hand after the OS install
   --snaps     snaps beyond the Ubuntu desktop defaults
   --units     user units and drop-ins in ~/.config/systemd/user

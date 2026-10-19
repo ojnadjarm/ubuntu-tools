@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# fleet-ci-daily — the nightly fleet suite (bin/tests/run.sh -j 8) once the machine is quiet; output in ~/agents/log/fleet-ci/<date>.txt (T459).
+# Red ends the log with `✖ fleet ci red: <files>` (ci-autofix's cause line) and `ci-load: contention …` when the 1-min load was > 6.
+set -uo pipefail
+B="$HOME/agents/bin"
+LOG="$HOME/agents/log/fleet-ci/$(date +%F).txt"
+LOADAVG="${CI_LOADAVG:-/proc/loadavg}"
+
+case "${1:-}" in
+  -h|--help) echo "usage: fleet-ci-daily   (waits for ci-window --quiet, runs $B/tests/run.sh -j 8, writes ${LOG/#$HOME/\~}; nightly via fleet-ci-daily.timer)"; exit 0;;
+  "") ;;
+  *) echo "usage: fleet-ci-daily   (unknown argument $1; see --help)" >&2; exit 2;;
+esac
+mkdir -p "${LOG%/*}" "$HOME/agents/state"
+exec 9>"$HOME/agents/state/fleet-ci.lock"
+flock -n 9 || { echo "fleet-ci-daily: a run is already going" >&2; exit 75; }
+
+exec >"$LOG" 2>&1
+echo "fleet-ci-daily $(date -Is)"
+"$B/ci-window" --quiet
+read -r l0 _ <"$LOADAVG"
+bash "$B/tests/run.sh" -j 8; rc=$?
+[ "$rc" -eq 0 ] && exit 0
+read -r l1 _ <"$LOADAVG"
+awk -v a="$l0" -v b="$l1" 'BEGIN {exit !(a > 6 || b > 6)}' && echo "ci-load: contention (1-min load $l0 before, $l1 after)"
+red="$(sed -nE 's/^FAIL ([^ ]+) [0-9.]+( timeout)?$/\1/p' "$LOG" | paste -sd ' ')"
+echo "✖ fleet ci red: ${red:-run.sh rc $rc}"
+exit "$rc"

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Fires one orchestrator pulse just after each 5-hour plan window resets (checks every 10 min; state: last seen reset time).
+case "${1:-}" in -h|--help) awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; exit 0 ;; esac
+set -uo pipefail
+STATE=${PULSE5H_STATE:-$HOME/agents/state/pulse-5h-reset}
+mkdir -p "$(dirname "$STATE")"
+reset=$(plan-usage --json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["5h"].get("resets_at") or "")' 2>/dev/null)
+prev=$(cat "$STATE" 2>/dev/null || true)
+now=$(date +%s)
+[ -n "$reset" ] && [ "$(date -d "$reset" +%s 2>/dev/null || echo 0)" -le "$now" ] && reset=
+if [ -z "$prev" ]; then [ -n "$reset" ] && echo "$reset" >"$STATE"; exit 0; fi
+[ "$now" -ge "$(date -d "$prev" +%s 2>/dev/null || echo 0)" ] || exit 0
+PULSE_FLOOR_H=0 PULSE_TURN='Pulse (5h window reset): check plan-usage and that every running/queued agent is ok; continue ~/agent-work/research/2026-10-18/night/PLAN.md if active, else report nothing.' orchestrator-pulse
+if [ -n "$reset" ] && [ "$reset" != "$prev" ]; then echo "$reset" >"$STATE"; else rm -f "$STATE"; fi

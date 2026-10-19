@@ -1,0 +1,8 @@
+[Unit]
+Description=Nightly fleet suite (bin/tests/run.sh -j 8) once the machine is quiet; red goes to one ci-fix attempt first (T459)
+
+[Service]
+Type=oneshot
+TimeoutStartSec=7200
+Environment=CI_BUDGET=6900 CI_RUN_NEED=900
+ExecStart=/bin/bash -lc 'exec %h/agents/bin/ci-autofix --repo %h/agents --log %h/agents/log/fleet-ci/$$(date +%%F).txt "fleet nightly" -- %h/agents/bin/fleet-ci-daily'

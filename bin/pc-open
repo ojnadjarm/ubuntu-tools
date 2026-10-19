@@ -1,7 +1,7 @@
 #!/bin/bash
 # pc open <url|file|app.desktop|app> — launch in the desktop session and return immediately.
 . "$(dirname "$(readlink -f "$0")")/env.sh"
-[ "${1:-}" = -h ] || [ $# -eq 0 ] && { echo "usage: pc open <url|file|app>"; exit 0; }
+[ "${1:-}" = -h ] || [ "${1:-}" = --help ] || [ $# -eq 0 ] && { echo "usage: pc open <url|file|app>"; exit 0; }
 t="$1"
 case "$t" in
   *://*|/*|./*) setsid xdg-open "$t" >/dev/null 2>&1 & ;;

@@ -1,7 +1,7 @@
 #!/bin/bash
 # pc selftest — drives gnome-calculator with type/key/clip and a screenshot; prints PASS or FAIL.
 d="$(dirname "$(readlink -f "$0")")"; pc="$d/pc"
-[ "${1:-}" = -h ] && { echo "usage: pc selftest"; exit 0; }
+[ "${1:-}" = -h ] || [ "${1:-}" = --help ] && { echo "usage: pc selftest"; exit 0; }
 fail=0
 say() { printf '%-10s %s\n' "$1" "$2"; [ "$1" = FAIL ] && fail=1; return 0; }
 

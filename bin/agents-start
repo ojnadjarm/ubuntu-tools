@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Resume after the kill switch: enable+start exactly the units the roster in KB/orchestrator.md lists (else ~/CLAUDE.md).
+case "${1:-}" in -h|--help) awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; exit 0 ;; esac
 set -uo pipefail
 . "$HOME/agents/bin/fleetlib.sh"
 fleet_path
@@ -18,5 +19,4 @@ while IFS= read -r line; do
 done <"$roster"
 
 systemctl --user list-timers --no-pager 'agent@*' sentinel-check.timer moodle-keep-weekly.timer pcbench-weekly.timer ailearning-ci-daily.timer orchestrator-pulse.timer
-systemctl --user list-units --no-pager --no-legend notes-brain.service
 echo "agents-start:${started:- nothing}"

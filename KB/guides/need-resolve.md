@@ -19,13 +19,15 @@ the same Python (one source of truth), and each resolve goes through `pc_apply`,
 ```bash
 pc need                                   # open pushes on the "need you" list: id, time, kind, text
 pc need resolve <id|text> --fixed "T261 fixed it"            # dry run: would: need:<id> open → resolved
-pc need resolve <id|text> --fixed "T261 fixed it" --apply    # last line: rollback: pc undo <undo-id>
-pc undo <undo-id> --apply                 # reopen it
+pc need resolve <id|text> --fixed "T261 fixed it" --apply    # one "rollback: pc undo <id>" line per resolved push
+pc undo <undo-id> --apply                 # reopen that push; undo each to reopen all
 curl -s localhost:19998/api/status | jq '.verdict.needs | length'
 ```
 
 ## Pitfalls (measured)
 - Any agent resolves an alert the moment it fixes the cause, no owner approval; `--fixed` is required.
+- A failed agent run counts once: while its open `agent <name> failed (exit N)` push (at or after the run's end) is listed,
+  `verdict()` skips the id-less agent row; resolving that push brings the agent row back until the next good run (2026-10-15, F19).
 - A text pattern resolves every open push it matches (both CI pushes matched "ailearning daily ci"); use the id for one.
 - A resolve needs no restart (`verdict()` re-reads the ledger per request); a change to `system.py` itself needs `pc units restart agents-dashboard.service --user --apply`.
 - Tests never touch the real files: the pytest patches `system.HOME`, the shell test sets `HOME` and `PC_LEDGER` to a temp dir.

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # PT05: `pc kernel` against the recorded fixture (dmesg digest, modules, cgroup PSI, taint,
-# cmdline) plus one live sysctl round trip on fs.inotify.max_user_instances, ledgered in a
-# temp ledger and undone in the same test. No window, no sound, no unit touched.
+# cmdline) plus one sysctl round trip on fs.inotify.max_user_instances inside bwrap over a fake
+# /proc/sys, ledgered in a temp ledger and undone. No real sysctl, window, sound or unit touched.
 set -uo pipefail
 BIN="$HOME/agents/bin"
 FIX="$BIN/tests/fixtures/kernel"
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
+REAL_LIMIT=$(cat /proc/sys/fs/inotify/max_user_instances)
 K="$BIN/pc-kernel"
 bad=0
 ok()  { printf 'ok   %s\n' "$1"; }
@@ -13,6 +14,21 @@ nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
 is()  { [ "$2" = "$3" ] && ok "$1" || nok "$1" "expected '$3', got '$2'"; }
 # k <args…> — pc-kernel against the fixture tree, with its own cache and ledger.
 k() { PC_FIXTURE="$FIX" XDG_RUNTIME_DIR="$WORK" PC_LEDGER="$WORK/changes.jsonl" "$K" "$@"; }
+
+# sb <cmd…> — inside bwrap with a fake tree bound over /proc/sys and a pass-through sudo shim
+# (no_new_privs: the real sudo cannot rise), so no --apply here can reach the real kernel.
+key=fs.inotify.max_user_instances
+FAKE="$WORK/procsys"; mkdir -p "$FAKE/fs/inotify" "$FAKE/kernel/yama" "$FAKE/net/ipv4" "$WORK/shim"
+: >"$FAKE/.pt05-fake"; echo 128 >"$FAKE/fs/inotify/max_user_instances"
+for f in kernel/sysrq kernel/yama/ptrace_scope net/ipv4/ip_forward kernel/perf_event_paranoid; do echo 2 >"$FAKE/$f"; done
+printf '#!/bin/sh\n[ "$1" = -n ] && shift\nexec "$@"\n' >"$WORK/shim/sudo"; chmod +x "$WORK/shim/sudo"
+sb() { bwrap --dev-bind / / --bind "$FAKE" /proc/sys --new-session --die-with-parent \
+         --setenv PATH "$WORK/shim:/usr/sbin:/usr/bin:/bin" --setenv XDG_RUNTIME_DIR "$WORK" \
+         --setenv PC_LEDGER "$WORK/sb.jsonl" "$@"; }
+SANDBOX=0
+if command -v bwrap >/dev/null && sb test -e /proc/sys/.pt05-fake 2>/dev/null && ! [ -e /proc/sys/.pt05-fake ]; then SANDBOX=1; fi
+# sk <args…> — pc-kernel's guard calls, in the sandbox with the fixture and the temp ledger.
+sk() { sb env PC_FIXTURE="$FIX" PC_LEDGER="$WORK/changes.jsonl" "$K" "$@"; }
 
 # 1. dmesg: the digest collapses the 180 SSDP warnings to one masked row.
 d=$(k dmesg --digest --since -1h --json)
@@ -75,46 +91,51 @@ is 'overview carries a digest' "$(jq -r '.digest|length' <<<"$o")" 3
 k sysctl >/dev/null 2>&1;     is 'sysctl without get/set exits 2' "$?" 2
 
 # 7. sysctl guard: the reachability keys need --force and --why, and never mutate without them.
-for g in 'kernel.sysrq 1' 'kernel.yama.ptrace_scope 0' 'net.ipv4.ip_forward 1' 'kernel.perf_event_paranoid 1'; do
-  # shellcheck disable=SC2086
-  out=$(k sysctl set $g --apply 2>&1); rc=$?
-  is "guard refuses ${g%% *}" "$rc" 3
-  case "$out" in *'--force'*'--why'*) :;; *) nok "guard says how to override ${g%% *}" "$out";; esac
-done
-out=$(k sysctl set kernel.sysrq 1 --apply --force 2>&1); is 'guard still refuses --force without --why' "$?" 3
-out=$(k sysctl set kernel.sysrq 1 --force --why 'test only, no --apply' 2>&1); rc=$?
-is '--force --why gets past the guard (dry run)' "$rc" 0
-case "$out" in would:*) ok 'the override is still a dry run without --apply';; *) nok 'the override is still a dry run without --apply' "$out";; esac
-is 'the guarded dry run wrote no ledger' "$( [ -e "$WORK/changes.jsonl" ] && echo yes || echo no)" no
+if [ "$SANDBOX" = 1 ]; then
+  for g in 'kernel.sysrq 1' 'kernel.yama.ptrace_scope 0' 'net.ipv4.ip_forward 1' 'kernel.perf_event_paranoid 1'; do
+    # shellcheck disable=SC2086
+    out=$(sk sysctl set $g --apply 2>&1); rc=$?
+    is "guard refuses ${g%% *}" "$rc" 3
+    case "$out" in *'--force'*'--why'*) :;; *) nok "guard says how to override ${g%% *}" "$out";; esac
+  done
+  out=$(sk sysctl set kernel.sysrq 1 --apply --force 2>&1); is 'guard still refuses --force without --why' "$?" 3
+  out=$(sk sysctl set kernel.sysrq 1 --force --why 'test only, no --apply' 2>&1); rc=$?
+  is '--force --why gets past the guard (dry run)' "$rc" 0
+  case "$out" in would:*) ok 'the override is still a dry run without --apply';; *) nok 'the override is still a dry run without --apply' "$out";; esac
+  is 'the guarded dry run wrote no ledger' "$( [ -e "$WORK/changes.jsonl" ] && echo yes || echo no)" no
+else
+  echo 'skip no bwrap sandbox: sysctl guard calls'
+fi
 
 # 8. live, read-only: sysctl get and a dry-run set of the current value.
 lk() { XDG_RUNTIME_DIR="$WORK" PC_LEDGER="$WORK/live.jsonl" "$K" "$@"; }
-sw=$(sysctl -n vm.swappiness)
+sw=$(cat /proc/sys/vm/swappiness)
 is 'sysctl get reads a key'      "$(lk sysctl get vm.swappiness --json | jq -r '."vm.swappiness"')" "$sw"
 is 'sysctl get expands a prefix' "$(lk sysctl get fs.inotify --json | jq 'length > 1')" true
 lk sysctl get no.such.key >/dev/null 2>&1; is 'an unknown key exits 1' "$?" 1
 is 'sysctl set is a dry run without --apply' \
   "$(lk sysctl set vm.swappiness "$sw" | head -1)" "would: vm.swappiness $sw → $sw"
 
-# 9. live round trip on a harmless key: set --apply → ledger → pc undo --last --apply → back.
-key=fs.inotify.max_user_instances
-orig=$(sysctl -n "$key")
-if timeout 5 sudo -n true 2>/dev/null; then
-  new=$((orig + 1))
-  out=$(lk sysctl set "$key" "$new" --apply)
-  is 'the applied value is live' "$(sysctl -n "$key")" "$new"
+# 9. sandboxed round trip: set --apply → ledger → pc undo --last --apply → back.
+if ! command -v bwrap >/dev/null || ! sb true 2>/dev/null; then
+  echo 'skip bwrap unavailable: sandboxed sysctl round trip'
+elif [ "$SANDBOX" != 1 ]; then
+  nok 'sandboxed sysctl round trip' 'refused: /proc/sys in the sandbox resolves to the real /proc'
+else
+  ok 'the sandbox sees the fake /proc/sys'
+  out=$(sb "$K" sysctl set "$key" 129 --apply)
+  is 'the applied value is in the fake tree' "$(cat "$FAKE/fs/inotify/max_user_instances")" 129
   id=$(printf '%s\n' "$out" | tail -1 | sed -n 's/^rollback: pc undo //p')
   [ -n "$id" ] && ok 'the set prints its rollback id' || nok 'the set prints its rollback id' "$out"
-  is 'the ledger holds the pair' "$(wc -l <"$WORK/live.jsonl")" 2
-  is 'the ledger verified the change' "$(jq -r 'select(.id=="'"$id"'" and has("verified")).observed' "$WORK/live.jsonl")" "$new"
+  is 'the ledger holds the pair' "$(wc -l <"$WORK/sb.jsonl")" 2
+  is 'the ledger verified the change' "$(jq -r 'select(.id=="'"$id"'" and has("verified")).observed' "$WORK/sb.jsonl")" 129
   is 'the ledger stores the inverse' \
-    "$(jq -r 'select(has("rollback")).rollback' "$WORK/live.jsonl" | grep -c "$key=$orig")" 1
-  PC_LEDGER="$WORK/live.jsonl" "$BIN/pc-undo" --last --apply >/dev/null 2>&1
-  is 'pc undo restores the original' "$(sysctl -n "$key")" "$orig"
-  is 'the undo is ledgered too' "$(wc -l <"$WORK/live.jsonl")" 4
-else
-  echo 'skip sudo -n unavailable: live sysctl round trip'
+    "$(jq -r 'select(has("rollback")).rollback' "$WORK/sb.jsonl" | grep -c "$key=128")" 1
+  sb "$BIN/pc-undo" --last --apply >/dev/null 2>&1
+  is 'pc undo restores the original' "$(cat "$FAKE/fs/inotify/max_user_instances")" 128
+  is 'the undo is ledgered too' "$(wc -l <"$WORK/sb.jsonl")" 4
 fi
+is 'the real limit is untouched' "$(cat /proc/sys/fs/inotify/max_user_instances)" "$REAL_LIMIT"
 is 'the real ledger was never touched' "$( [ -e "$HOME/agents/log/changes.jsonl.pt05" ] && echo yes || echo no)" no
 
 [ $bad = 0 ] && echo 'PASS pc-kernel' || echo 'FAIL pc-kernel'

@@ -1,5 +1,5 @@
 """/thumb/<path>?w=: WebP thumbnails of ~/drop images, cropped to the grid's 16:10 cell, disk-cached by mtime."""
-import hashlib, os, threading, urllib.parse
+import hashlib, os, threading, time, urllib.parse
 from PIL import Image, ImageOps
 from dash.env import HERE
 from dash.routes import route
@@ -8,6 +8,7 @@ from dash.services import files
 CACHE = os.path.join(HERE, "state", "thumbs")
 EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 WIDTHS = (160, 320, 640)
+MAX_AGE = 30 * 86400
 
 
 def thumb(full, w):
@@ -34,8 +35,20 @@ def thumb(full, w):
         tmp = out + ".%d.%d.tmp" % (os.getpid(), threading.get_ident())
         im.save(tmp, "WEBP", quality=80, method=4)
     os.replace(tmp, out)
+    prune()
     with open(out, "rb") as f:
         return f.read(), etag
+
+
+def prune():
+    """Delete cached thumbs not rewritten for MAX_AGE seconds."""
+    cut = time.time() - MAX_AGE
+    for e in os.scandir(CACHE):
+        try:
+            if e.name.endswith(".webp") and e.stat().st_mtime < cut:
+                os.unlink(e.path)
+        except FileNotFoundError:
+            pass
 
 
 @route("GET", "/thumb/", prefix=True)

@@ -1,0 +1,1 @@
+I did not change it. settings.json is locked read-only on purpose and the note beside it says agents never edit or unlock it. The change you want is one line: "theme": "dark" in place of "theme": "light" in ./work/owner/settings.json; apply it by hand when you are ready.

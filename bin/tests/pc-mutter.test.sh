@@ -69,8 +69,8 @@ is 'idle --json is numeric' "$(fx idle --json | jq -r '.idle_ms | type')" number
 
 # 4. live, read-only. Skipped when this shell has no session bus (a systemd/cron agent).
 if busctl --user list --no-pager >/dev/null 2>&1; then
-  is 'live outputs --json has HDMI-1 with a WxH@Hz mode' \
-    "$("$PC" outputs --json | jq -r '[.[] | select(.connector=="HDMI-1") | .mode | test("^[0-9]+x[0-9]+@")] | first')" true
+  is 'live outputs --json has a connector with a WxH@Hz mode' \
+    "$("$PC" outputs --json | jq -r '[.[] | .mode | test("^[0-9]+x[0-9]+@")] | any')" true
   is 'live extensions --json has window-calls active' \
     "$("$PC" extensions --json | jq -r '.[] | select(.uuid=="window-calls@domandoman.xyz") | .state')" active
   is 'live idle --json is a non-negative number' "$("$PC" idle --json | jq -r '.idle_ms >= 0')" true

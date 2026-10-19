@@ -9,21 +9,21 @@ together if the session is busy (code.claude.com/docs/en/channels-reference).
 
 - Code, unit template, tests and docs: `~/the-dark-eye/bridge/relay/` (`README.md` there is the generic manual).
   Install/upgrade: `~/the-dark-eye/bridge/relay/install.sh [--dry-run|--uninstall]` (idempotent).
-- This machine: `~/.config/dark-eye/relay.env` (brains `main notes`, `EYE_NOTIFY=~/agents/bin/notify-owner`),
-  `~/.config/dark-eye/mcp-{main,notes}.json`, state `~/.local/state/dark-eye/relay/`.
-- Fleet glue kept in ubuntu-tools (gitignored links): `~/agents/eye-relay/mcp-{main,notes}.json` → `~/.config/dark-eye/`
-  (read by `claude-orchestrator.service` and `units/notes-brain.service`), and `~/agents/eye-relay/state` → the new
-  state dir (the old path the pre-T280 channel processes still hold; drop it once both sessions have restarted).
-- Both session units run `ExecStartPost=%h/.local/bin/eye-channel-accept <session>`.
+- This machine: `~/.config/dark-eye/relay.env` (brain `main`, `EYE_NOTIFY=~/agents/bin/notify-owner`),
+  `~/.config/dark-eye/mcp-main.json`, state `~/.local/state/dark-eye/relay/`.
+- Fleet glue kept in ubuntu-tools (gitignored links): `~/agents/eye-relay/mcp-main.json` → `~/.config/dark-eye/`
+  (read by `claude-orchestrator.service`), and `~/agents/eye-relay/state` → the new
+  state dir (the old path the pre-T280 channel processes still hold; drop it once the session has restarted).
+- The session unit runs `ExecStartPost=%h/.local/bin/eye-channel-accept <session>`.
 - Undo: `~/.local/state/agents-archive/2026-10-07/eye-bridge/UNDO.sh`.
 
 ## Pieces
 
 | Piece | What |
 |---|---|
-| `eye-relay.service` (user unit rendered by `install.sh`) | `eye-relay main notes`: one long-poll (50 s) per brain on `/bridge/listen`, each line appended + fsynced to `<state>/<brain>.spool`. It polls a brain **only while that brain's `eye-channel` holds `state/<brain>.lock`**, so `eye brains` keeps its old meaning (connected = a session is really listening). While unsubscribed, the Eye's bus holds up to 200 lines as before. A stop waits for the in-flight poll (≤ 50 s, `TimeoutStopSec=70`), so a restart loses nothing. |
+| `eye-relay.service` (user unit rendered by `install.sh`) | `eye-relay main`: one long-poll (50 s) per brain on `/bridge/listen`, each line appended + fsynced to `<state>/<brain>.spool`. It polls a brain **only while that brain's `eye-channel` holds `state/<brain>.lock`**, so `eye brains` keeps its old meaning (connected = a session is really listening). While unsubscribed, the Eye's bus holds up to 200 lines as before. A stop waits for the in-flight poll (≤ 50 s, `TimeoutStopSec=70`), so a restart loses nothing. |
 | `eye-channel <brain>` | Stdlib MCP stdio server that Claude Code spawns. Declares `claude/channel` and takes the brain's lock (one consumer per brain). It streams the spool from `state/<brain>.offset` and saves the offset after each push. Lines use the `eye listen-loop` format (`VOICE:`, `VOICE [remote]:`, `EVENT:`, `EYE OFFLINE/BACK`), unsplit. |
-| `~/.config/dark-eye/mcp-<brain>.json` | The `--mcp-config` for one brain (`eye-main`, `eye-notes`); `~/agents/eye-relay/mcp-<brain>.json` links to it. |
+| `~/.config/dark-eye/mcp-<brain>.json` | The `--mcp-config` for one brain (`eye-main`); `~/agents/eye-relay/mcp-<brain>.json` links to it. |
 | `eye-channel-accept <tmux-target>` | Confirms the "Loading development channels" dialog, which Claude Code shows on **every** launch with `--dangerously-load-development-channels`, and the workspace trust dialog in either order (T45). Trust: moves to "Yes, I trust this folder" and presses Enter only after reading that line back as selected (the default "No, exit" kills the session); exits 1 otherwise. After channels it waits `ACCEPT_GRACE` (3 s) for a trust dialog. Test: `bridge/relay/tests/channel-accept.test.sh` (fake TUI on a private `TMUX_SOCKET`). |
 
 ## Subscribe a session (launch flags; no settings.json change)
@@ -40,21 +40,14 @@ Only the brain's own session gets the flag. Workers must not get it: a session t
 1. `~/.config/systemd/user/claude-orchestrator.service`: in **both** `claude` commands of `ExecStart`, add
    `--mcp-config %h/agents/eye-relay/mcp-main.json --dangerously-load-development-channels server:eye-main`,
    and add the line `ExecStartPost=%h/agents/bin/eye-channel-accept claude`.
-2. `~/agents/units/notes-brain.service` (then copy to `~/.config/systemd/user/`): in both `claude` commands add
-   `--mcp-config %h/agents/eye-relay/mcp-notes.json --dangerously-load-development-channels server:eye-notes`. Add
-   `ExecStartPost=%h/agents/bin/eye-channel-accept notes` **above** the `notes-brain-arm` line.
-3. `~/agents/notes/BRIEF.md` rule 1 ("Arm the ear"): replace the Monitor step with "The ear is the `eye-notes` channel,
-   already on at launch; never arm `eye listen-loop`. Check `eye health`, then say one line that the ear is up."
-   Keep `Monitor` in `--tools`: the settle timer (rule 4) still uses it.
-4. `/eye` skill (live `~/.claude/skills/eye/`, then `~/moodle-harness/sync.sh`): "if this session was launched with
-   the `eye-main`/`eye-notes` channel, do not arm the Monitor listen-loop."
-5. `systemctl --user daemon-reload`, restart the two sessions at a quiet moment, then check: `eye brains` shows both
-   connected, `ss -tnp | grep "pid=$(systemctl --user show -p MainPID --value eye-relay),"` shows 2 long-polls.
+2. `/eye` skill (live `~/.claude/skills/eye/`, then `~/moodle-harness/sync.sh`): "if this session was launched with
+   the `eye-main` channel, do not arm the Monitor listen-loop."
+3. `systemctl --user daemon-reload`, restart the session at a quiet moment, then check: `eye brains` shows `main`
+   connected, `ss -tnp | grep "pid=$(systemctl --user show -p MainPID --value eye-relay),"` shows 1 long-poll.
 
 ## Switch-over applied (T38b, 2026-09-22)
 
-- Steps 1–4 done. `notes` runs on the channel: `eye-channel notes` holds `notes.lock`, the relay holds 1 long-poll, the
-  notes session armed no Monitor. The orchestrator runs outside the unit (`claude --continue` in his terminal), so `main`
+- Steps 1–2 done. The orchestrator runs outside the unit (`claude --continue` in his terminal), so `main`
   switches when he relaunches it from `~` with:
   `claude --continue --mcp-config ~/agents/eye-relay/mcp-main.json --dangerously-load-development-channels server:eye-main`
   then picks `1. I am using this for local development` + Enter on the channels dialog (once per launch).
@@ -64,7 +57,7 @@ Only the brain's own session gets the flag. Workers must not get it: a session t
   lines as prompt injection; the brain's brief must say the ear is the channel.
 - `--continue` does not resume a `claude -p` conversation ("No conversation found to continue").
 - A launch shows every dialog in turn: trust (new dir only), channels, then any `settings.json` warning. An invalid
-  `permissions.allow` rule shows a "Settings Warning" on every launch, which blocks `notes-brain-arm` (it waits for the prompt box).
+  `permissions.allow` rule shows a "Settings Warning" on every launch.
 
 ## Trust dialog in `~` (T45, 2026-09-22)
 

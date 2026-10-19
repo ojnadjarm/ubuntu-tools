@@ -102,9 +102,33 @@ c = importlib.util.module_from_spec(s); s.loader.exec_module(c)
 c.record('Bash', {'command': 'x'}); c.record('Bash', ['not', 'a', 'dict'])" 2>/dev/null \
   && ok 1 "record() never raises" || ok 0 "record() never raises"
 
+# F38: rows carry $AGENT_NAME, and the ses_ prefix does not eat half the 8-char session.
+f38() {
+  printf '{"type":"tool_use","sessionID":"%s","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"x"}}}}\n' "$2" \
+    | HARNESS_HOME="$tmp/f38" AGENT_NAME=hello "$A/../$1/audit-from-stream" >/dev/null 2>&1
+  tail -1 "$tmp/f38/log/actions.jsonl" 2>/dev/null
+}
+[ "$(f38 opencode ses_f842e3f3ffeAbCdEfGhIjKlMn | jq -r '.agent + " " + .session')" = "hello f842e3f3" ] \
+  && ok 1 "opencode rows carry AGENT_NAME and the id after ses_" \
+  || ok 0 "opencode rows carry AGENT_NAME and the id after ses_"
+for s in codex gemini; do
+  printf '{"type":"tool_call","name":"Bash","arguments":{"command":"x"}}\n' \
+    | HARNESS_HOME="$tmp/f38" AGENT_NAME=hello "$A/../$s/audit-from-stream" >/dev/null 2>&1
+  [ "$(tail -1 "$tmp/f38/log/actions.jsonl" 2>/dev/null | jq -r .agent)" = hello ] \
+    && ok 1 "$s rows carry AGENT_NAME" || ok 0 "$s rows carry AGENT_NAME"
+done
+
 # F46: budget caps are gone fleet-wide, so the README must not list one as lost.
 ! grep -q -- '--max-budget-usd' "$A/README.md" \
   && ok 1 "README lists no budget cap as lost" || ok 0 "README lists no budget cap as lost"
+
+# F37: SIGTERM to the adapter (the pid agents-stop kills) stops opencode too.
+printf '#!/bin/sh\nexec sleep 47473\n' >"$tmp/oc-sleep"; chmod +x "$tmp/oc-sleep"
+(OPENCODE_BIN="$tmp/oc-sleep" HARNESS_HOME="$tmp" PROMPT_FILE="$tmp/prompt.md" SYSTEM_FILE= MODEL= \
+  AGENT_NAME= AGENT_TIMEOUT= RAW_OUT="$tmp/raw3.json" META_OUT="$tmp/meta3.json" exec "$A/run") >/dev/null 2>&1 &
+ap=$!; sleep 1; kill -TERM "$ap"; wait "$ap" 2>/dev/null; sleep 0.3
+left="$(pgrep -f '[s]leep 47473')"
+[ -z "$left" ] && ok 1 "SIGTERM stops opencode" || { ok 0 "SIGTERM stops opencode ($left left)"; kill $left; }
 
 [ "$bad" = 0 ] && echo "all opencode-adapter cases pass" || echo "$bad FAILURES"
 exit $([ "$bad" = 0 ] && echo 0 || echo 1)

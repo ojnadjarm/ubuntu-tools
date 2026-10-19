@@ -6,6 +6,7 @@ relay (inside, where only loopback exists): 127.0.0.1:<port> → that unix socke
 """
 import asyncio
 import os
+import socket
 import sys
 
 ALLOW = ('anthropic.com', 'claude.ai', 'claude.com')
@@ -56,9 +57,21 @@ async def handle_relay(sock, r, w):
     await asyncio.gather(pipe(r, uw), pipe(ur, w))
 
 
+def live(path):
+    """True when something still listens on the unix socket at path."""
+    with socket.socket(socket.AF_UNIX) as s:
+        try:
+            s.connect(path)
+            return True
+        except OSError:
+            return False
+
+
 async def main(argv):
     if len(argv) == 2 and argv[0] == 'serve':
         if os.path.exists(argv[1]):
+            if live(argv[1]):
+                sys.exit(f'netproxy: {argv[1]} still accepts connections; refusing to replace it')
             os.unlink(argv[1])
         srv = await asyncio.start_unix_server(handle_connect, argv[1])
         os.chmod(argv[1], 0o600)

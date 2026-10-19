@@ -61,7 +61,7 @@ t "pcbench run --require-away exists and skips"
 W=$(mktemp -d); export PCBENCH_WEEKLY_STATE="$W" PCBENCH_WEEKLY_LOG="$W/log"
 
 t "runner skips and counts when the owner is present"
-PATH="$FIX:$BIN:$PATH" PCFAKE_STATUS="$FIX/present-player.json" bash "$RUNNER" --dry-run >"$W/o1" 2>&1
+PATH="$FIX:$BIN:$PATH" PCFAKE_STATUS="$FIX/present-player.json" bash "$RUNNER" >"$W/o1" 2>&1
 rc=$?
 { [ "$rc" = 0 ] && grep -q 'skipped: owner present' "$W/o1" && [ "$(cat "$W/weekly-skips")" = 1 ]; } &&
   ok || no "rc=$rc streak=$(cat "$W/weekly-skips" 2>/dev/null) $(cat "$W/o1")"
@@ -69,9 +69,13 @@ rc=$?
 t "streak reaches 3 and stops there"
 for _ in 2 3 4; do
   PATH="$FIX:$BIN:$PATH" PCFAKE_STATUS="$FIX/present-player.json" \
-    bash "$RUNNER" --dry-run >>"$W/o1" 2>&1
+    bash "$RUNNER" >>"$W/o1" 2>&1
 done
 [ "$(cat "$W/weekly-skips")" = 4 ] && ok || no "streak=$(cat "$W/weekly-skips")"
+
+t "a present dry run prints the skip and leaves the streak alone"
+PATH="$FIX:$BIN:$PATH" PCFAKE_STATUS="$FIX/present-player.json" bash "$RUNNER" --dry-run >"$W/o3" 2>&1
+{ grep -q 'would skip: owner present' "$W/o3" && [ "$(cat "$W/weekly-skips")" = 4 ]; } && ok || no "streak=$(cat "$W/weekly-skips") $(cat "$W/o3")"
 
 t "runner passes the gate when away and would run every tier"
 PATH="$FIX:$BIN:$PATH" PCFAKE_STATUS="$FIX/away.json" bash "$RUNNER" --dry-run >"$W/o2" 2>&1
@@ -84,7 +88,7 @@ w=$(sed -n 's/.*would run: //p' "$W/o2")
 t "the idle row is sampled after the gate, never on a dry run"
 { grep -q 'pc idle --seconds 60 --tsv >>"$BENCH/BASELINE-IDLE.tsv"' "$RUNNER" &&
   ! grep -q 'BASELINE-IDLE' "$W/o2" &&
-  [ "$(sed -n '2s/^#//p' "$BIN/../bench/BASELINE-IDLE.tsv" | awk -F'\t' '{print NF}')" = 11 ]
+  [ "$(sed -n '2s/^#//p' "$BIN/../bench/BASELINE-IDLE.tsv" | awk -F'\t' '{print NF}')" = 12 ]
 } && ok || no "idle line missing, sampled on --dry-run, or the header is not 9 columns"
 
 t "the weekly selection includes the confirming C02/C04 re-run"

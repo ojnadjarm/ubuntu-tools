@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Kill switch: stop every running agent unit, every fleet timer and every background claude run.
 # Timers are stopped, not disabled: `agents-start` (or `agents-stop --resume`) brings the roster back.
+case "${1:-}" in -h|--help) awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; exit 0 ;; esac
 set -uo pipefail
 . "$HOME/agents/bin/fleetlib.sh"
 fleet_path
@@ -18,10 +19,10 @@ stop_if_running() {
   stopped="$stopped ${1%.*}"
 }
 
-for u in $(units 'agent@*.service') sentinel-check.service moodle-keep-weekly.service pcbench-weekly.service ailearning-ci-daily.service orchestrator-pulse.service notes-brain.service; do
+for u in $(units 'agent@*.service') sentinel-check.service moodle-keep-weekly.service pcbench-weekly.service ailearning-ci-daily.service ailearning-ci-weekly.service fleet-ci-daily.service orchestrator-pulse.service improve-meter.service discord-bot.service; do
   stop_if_running "$u"
 done
-for u in $(units 'agent@*.timer') sentinel-check.timer moodle-keep-weekly.timer pcbench-weekly.timer ailearning-ci-daily.timer orchestrator-pulse.timer; do
+for u in $(units 'agent@*.timer') sentinel-check.timer moodle-keep-weekly.timer pcbench-weekly.timer ailearning-ci-daily.timer ailearning-ci-weekly.timer fleet-ci-daily.timer orchestrator-pulse.timer improve-meter.timer; do
   stop_if_running "$u"
 done
 
@@ -35,9 +36,15 @@ kill_pid() {
   kill "$1" 2>/dev/null && stopped="$stopped pid:$1"
 }
 
+# A pid file older than its pid's process is stale (run SIGKILLed, then pid reused): skip it.
 for f in "$HARNESS_HOME"/*/state/pid; do
   [ -r "$f" ] || continue
-  kill_pid "$(cat "$f" 2>/dev/null)"
+  p="$(cat "$f" 2>/dev/null)"
+  case "$p" in ''|*[!0-9]*) continue ;; esac
+  age="$(ps -o etimes= -p "$p" 2>/dev/null | tr -d ' ')"
+  [ -n "$age" ] || continue
+  [ $(( $(date +%s) - age )) -le $(( $(stat -c %Y "$f") + 2 )) ] || continue
+  kill_pid "$p"
 done
 
 # Fallback: background runs the agent CLI knows about and no pid file covers.

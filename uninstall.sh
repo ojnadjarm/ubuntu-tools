@@ -24,6 +24,8 @@ for d in "$HARNESS_DIR"/*/; do
   n="$(basename "$d")"
   systemctl --user disable --now "agent@$n.timer" >/dev/null 2>&1 && echo "  disabled agent@$n.timer"
   [ -d "$UD/agent@$n.timer.d" ] && rm -rf "$UD/agent@$n.timer.d" && echo "  removed agent@$n.timer.d"
+  [ -f "$UD/agent@$n.service.d/timeout.conf" ] && rm -f "$UD/agent@$n.service.d/timeout.conf" \
+    && rmdir --ignore-fail-on-non-empty "$UD/agent@$n.service.d" && echo "  removed agent@$n.service.d/timeout.conf"
 done
 for u in "$HARNESS_DIR"/units/*; do
   n="$(basename "$u")"

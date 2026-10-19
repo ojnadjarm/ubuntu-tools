@@ -116,12 +116,12 @@ t "-h documents --kind; a bad kind exits non-zero"
 
 t "hook: AGENT_NAME lands in the row's agent field (fake HOME + HARNESS_HOME)"
 HOOK="$BIN/../adapters/claude/hooks/audit-log.py"
-live="$HOME/agents/log/actions.jsonl"; n0=$(wc -l < "$live" 2>/dev/null || echo 0)
+live="$HOME/agents/log/actions.jsonl"; n0=$(grep -c hook0001 "$live" 2>/dev/null)
 ev='{"tool_name": "Bash", "tool_input": {"command": "pactl list"}, "cwd": "/w", "session_id": "hook0001xx"}'
 printf '%s' "$ev" | env -u PCBENCH_RUN HOME="$K" HARNESS_HOME="$K/agents" AGENT_NAME=toolsmith python3 "$HOOK"
 printf '%s' "$ev" | env -u PCBENCH_RUN -u AGENT_NAME HOME="$K" HARNESS_HOME="$K/agents" python3 "$HOOK"
 printf '%s' "$ev" | HOME="$K" HARNESS_HOME="$K/agents" AGENT_NAME=toolsmith PCBENCH_RUN=r1 python3 "$HOOK"
-n1=$(wc -l < "$live" 2>/dev/null || echo 0)
+n1=$(grep -c hook0001 "$live" 2>/dev/null)
 [ "$(tail -3 "$K/agents/log/actions.jsonl" | jq -r '.agent' | tr '\n' ' ')" = "toolsmith  bench " ] && [ "$n0" = "$n1" ] &&
   ok || no "$(tail -3 "$K/agents/log/actions.jsonl" | jq -c .agent | tr '\n' ' ') live $n0→$n1"
 rm -rf "$K"
@@ -171,11 +171,11 @@ mkdir -p "$P/-fixture-project"
 tstamp() { date -u -d "$1" +%Y-%m-%dT%H:%M:%S.000Z; }
 big="$(head -c 2048 /dev/zero | tr '\0' x)"
 {
-  printf '{"type":"assistant","timestamp":"%s","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":90000,"cache_creation_input_tokens":9990,"output_tokens":1000},"content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/w/a.md"}}]}}\n' "$(tstamp '-2 hours')"
-  printf '{"type":"user","timestamp":"%s","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"%s"}]}}\n' "$(tstamp '-2 hours')" "$big"
-  printf '{"type":"assistant","timestamp":"%s","message":{"usage":{"input_tokens":0,"cache_read_input_tokens":180000,"cache_creation_input_tokens":20000,"output_tokens":2000},"content":[{"type":"tool_use","id":"t2","name":"Read","input":{"file_path":"/w/a.md"}}]}}\n' "$(tstamp '-1 hour')"
-  printf '{"type":"user","timestamp":"%s","message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":[{"type":"image","source":{"type":"base64","data":"AAAA"}}]}]}}\n' "$(tstamp '-1 hour')"
-  printf '{"type":"queue-operation","timestamp":"%s","note":"an unknown line the reader must tolerate"}\n' "$(tstamp '-1 hour')"
+  printf '{"type":"assistant","timestamp":"%s","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":90000,"cache_creation_input_tokens":9990,"output_tokens":1000},"content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/w/a.md"}}]}}\n' "$(tstamp 'yesterday 12:00')"
+  printf '{"type":"user","timestamp":"%s","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"%s"}]}}\n' "$(tstamp 'yesterday 12:00')" "$big"
+  printf '{"type":"assistant","timestamp":"%s","message":{"usage":{"input_tokens":0,"cache_read_input_tokens":180000,"cache_creation_input_tokens":20000,"output_tokens":2000},"content":[{"type":"tool_use","id":"t2","name":"Read","input":{"file_path":"/w/a.md"}}]}}\n' "$(tstamp 'yesterday 13:00')"
+  printf '{"type":"user","timestamp":"%s","message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":[{"type":"image","source":{"type":"base64","data":"AAAA"}}]}]}}\n' "$(tstamp 'yesterday 13:00')"
+  printf '{"type":"queue-operation","timestamp":"%s","note":"an unknown line the reader must tolerate"}\n' "$(tstamp 'yesterday 13:00')"
   printf 'not json at all\n'
 } > "$P/-fixture-project/abcd1234-0000-0000-0000-000000000000.jsonl"
 tok() { CLAUDE_PROJECTS_DIR="$P" "$CLI" --tokens "$@"; }
@@ -235,7 +235,142 @@ o="$(tok --session eeee 2>/dev/null | grep '^eeee5555')"
 printf '%s\n' "$o" | grep -qE '^eeee5555 +1 +1,000,000 +1,000,000 +1,000,000 +1\.0 +50\.0 ' &&
   ok || no "${o:-no row}"
 
+t "--tokens keys day lines by local date, not UTC"
+L="$(mktemp -d)"; mkdir -p "$L/-tz"
+for w in 2026-10-16T22:30:00.000Z 2026-10-17T00:30:00.000Z; do
+  printf '{"type":"assistant","timestamp":"%s","message":{"id":"m%s","usage":{"input_tokens":0,"cache_read_input_tokens":1000,"cache_creation_input_tokens":0,"output_tokens":10},"content":[]}}\n' "$w" "${w//[^0-9]/}"
+done > "$L/-tz/7777bbbb-0000-0000-0000-000000000000.jsonl"
+o="$(TZ=Europe/Madrid CLAUDE_PROJECTS_DIR="$L" "$CLI" --tokens 2>/dev/null)"
+{ printf '%s\n' "$o" | grep -qE '^2026-10-17 +turns +2 ' &&
+  ! printf '%s\n' "$o" | grep -q '^2026-10-16 '; } && ok || no "$(printf '%s\n' "$o" | tail -2)"
+rm -rf "$L"
+
 rm -rf "$P"
+
+# --- T347: one line per audit row; --tokens --since keeps its day lines inside the window ---
+N="$(mktemp -d)"; mkdir -p "$N/agents/log"
+printf '{"ts": "%s", "session": "nl000001", "tool": "Bash", "op": "python3 -c", "summary": "python3 -c \\"\\nimport json\\nprint(1)\\""}\n' "$(now '-1 hour')" > "$N/agents/log/actions.jsonl"
+t "the default view prints a multi-line summary as one line"
+[ "$(HOME="$N" "$CLI" --since 1d 2>/dev/null | wc -l)" = 1 ] && ok || no "$(HOME="$N" "$CLI" --since 1d 2>&1)"
+rm -rf "$N"
+
+Q="$(mktemp -d)"; mkdir -p "$Q/-old"
+for w in '-3 days' '-1 hour'; do
+  printf '{"type":"assistant","timestamp":"%s","message":{"id":"m%s","usage":{"input_tokens":0,"cache_read_input_tokens":1000,"cache_creation_input_tokens":0,"output_tokens":10},"content":[]}}\n' "$(tstamp "$w")" "${w//[^0-9]/}"
+done > "$Q/-old/9999aaaa-0000-0000-0000-000000000000.jsonl"
+old=$(date -d '-3 days' +%F)
+t "--tokens --since prints day lines only inside the window"
+{ CLAUDE_PROJECTS_DIR="$Q" "$CLI" --tokens 2>/dev/null | grep -q "^$old " &&
+  ! CLAUDE_PROJECTS_DIR="$Q" "$CLI" --tokens --since 1d 2>/dev/null | grep -q "^$old "; } &&
+  ok || no "$(CLAUDE_PROJECTS_DIR="$Q" "$CLI" --tokens --since 1d 2>&1 | tail -3)"
+
+t "--tokens --since skips transcripts last written before the window"
+f="$Q/-old/9999aaaa-0000-0000-0000-000000000000.jsonl"
+touch -d '-2 days' "$f"; chmod 000 "$f"
+o="$(CLAUDE_PROJECTS_DIR="$Q" "$CLI" --tokens --since 1d 2>&1)"; rc=$?
+chmod 600 "$f"
+{ [ $rc = 0 ] && printf '%s\n' "$o" | grep -qE '^TOTAL +0 '; } && ok || no "rc=$rc: $(printf '%s\n' "$o" | tail -2)"
+rm -rf "$Q"
+
+# --- T347-07: failed calls (PostToolUseFailure), agent_id/agent_type, --errors and --agent ---
+F="$(mktemp -d)"; mkdir -p "$F/agents/log"
+HOOK="$BIN/../adapters/claude/hooks/audit-log.py"
+live="$HOME/agents/log/actions.jsonl"; n0=$(grep -c fail0001 "$live" 2>/dev/null)
+hk() { printf '%s' "$1" | env -u PCBENCH_RUN -u AGENT_NAME HOME="$F" HARNESS_HOME="$F/agents" "$HOOK"; }
+hk '{"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": "true"}, "cwd": "/w", "session_id": "fail0001xx"}'
+hk '{"hook_event_name": "PostToolUseFailure", "tool_name": "Bash", "tool_input": {"command": "echo probe; exit 3"}, "cwd": "/w", "session_id": "fail0001xx", "error": "Exit code 3 token=abc123secret '"$(head -c 400 /dev/zero | tr '\0' y)"'"}'
+hk '{"hook_event_name": "PostToolUse", "tool_name": "Read", "tool_input": {"file_path": "/w/a.md"}, "cwd": "/w", "session_id": "fail0001xx", "agent_id": "agt9876543", "agent_type": "worker"}'
+L="$F/agents/log/actions.jsonl"
+n1=$(grep -c fail0001 "$live" 2>/dev/null)
+
+t "selftest: hook rows land in the fixture log, not the live one"
+{ [ "$(wc -l < "$L")" = 3 ] && [ "$n0" = "$n1" ]; } && ok || no "fixture $(wc -l < "$L") rows, live $n0→$n1"
+
+t "hook: a success row carries ok:true and no error"
+[ "$(sed -n 1p "$L" | jq -c '[.ok, has("error")]')" = '[true,false]' ] && ok || no "$(sed -n 1p "$L")"
+
+t "hook: a PostToolUseFailure row carries ok:false and the error"
+[ "$(sed -n 2p "$L" | jq -c '[.ok, (.error|startswith("Exit code 3"))]')" = '[false,true]' ] && ok || no "$(sed -n 2p "$L")"
+
+t "hook: the error is redacted and at most 403 chars (head + … + tail)"
+{ sed -n 2p "$L" | jq -r .error | grep -q '<redacted>' && ! grep -q abc123secret "$L" &&
+  [ "$(sed -n 2p "$L" | jq -r '.error|length')" -le 403 ]; } && ok || no "$(sed -n 2p "$L" | jq -c .error)"
+
+t "hook: agent_id and agent_type kept when present, absent otherwise"
+{ [ "$(sed -n 3p "$L" | jq -c '[.agent_id,.agent_type]')" = '["agt9876543","worker"]' ] &&
+  [ "$(sed -n 1p "$L" | jq -c '[has("agent_id"),has("agent_type")]')" = '[false,false]' ]; } &&
+  ok || no "$(sed -n 3p "$L" | jq -c .)"
+
+t "--errors lists only the failed calls"
+o="$(HOME="$F" "$CLI" --errors 2>/dev/null)"
+{ [ "$(printf '%s\n' "$o" | grep -c .)" = 1 ] && printf '%s\n' "$o" | grep -q 'exit 3'; } && ok || no "$o"
+
+t "the plain view shows a failed call's error"
+HOME="$F" "$CLI" 2>/dev/null | grep 'exit 3' | grep -q 'Exit code 3' && ok || no "$(HOME="$F" "$CLI" 2>&1)"
+
+t "--agent ID filters on the agent_id prefix"
+o="$(HOME="$F" "$CLI" --agent agt98 2>/dev/null)"
+{ [ "$(printf '%s\n' "$o" | grep -c .)" = 1 ] && printf '%s\n' "$o" | grep -q 'a.md' &&
+  [ -z "$(HOME="$F" "$CLI" --agent zzz 2>/dev/null)" ]; } && ok || no "$o"
+
+t "-h documents --errors and --agent"
+{ "$CLI" -h 2>&1 | grep -q -- '--errors' && "$CLI" -h 2>&1 | grep -q -- '--agent'; } && ok || no "usage"
+
+t "both audit files start python isolated: #!/usr/bin/python3 -IS"
+{ [ "$(head -1 "$HOOK")" = '#!/usr/bin/python3 -IS' ] &&
+  [ "$(head -1 "$BIN/../hooks/audit-log.py")" = '#!/usr/bin/python3 -IS' ]; } && ok || no "$(head -1 "$HOOK")"
+rm -rf "$F"
+
+# --- T374: subagent and workflow-lane transcripts roll up under their parent session; --by kind ---
+W="$(mktemp -d)"; S="$W/-proj/5e550001-0000-0000-0000-000000000000"
+mkdir -p "$S/subagents/workflows/wf_1"
+tr() { printf '{"type":"assistant","timestamp":"%s","entrypoint":"%s","message":{"id":"%s","usage":{"input_tokens":0,"cache_read_input_tokens":%s,"cache_creation_input_tokens":0,"output_tokens":1000},"content":[]}}\n' "$(tstamp '-1 hour')" "$1" "$2" "$3"; }
+tr cli m1 1000000 > "$S.jsonl"
+tr cli w1 2000000 > "$S/subagents/agent-a1.jsonl"
+{ tr cli l1 3000000; tr cli l2 4000000; } > "$S/subagents/workflows/wf_1/agent-b1.jsonl"
+printf '{"type":"launched"}\n' > "$S/subagents/workflows/wf_1/journal.jsonl"
+tr sdk-cli h1 500000 > "$W/-proj/4ead0001-0000-0000-0000-000000000000.jsonl"
+wt() { CLAUDE_PROJECTS_DIR="$W" "$CLI" --tokens "$@" 2>/dev/null; }
+
+t "lanes roll up: one parent row with 4 turns and 10.0 M cache-read"
+{ [ "$(wt | grep -cE '^5e550001 ')" = 1 ] && wt | grep -qE '^5e550001 +4 .* 10\.0 +4\.0 '; } &&
+  ok || no "$(wt | grep -E '^(5e55|TOTAL)')"
+
+t "the TOTAL counts every lane: 5 turns, 10.5 M"
+wt | grep -qE '^TOTAL +5 .* 10\.5 +5\.0 ' && ok || no "$(wt | grep '^TOTAL')"
+
+t "--by kind splits interactive, headless, worker, workflow"
+o="$(wt --by kind)"
+{ printf '%s\n' "$o" | grep -qE '^interactive +1 +1\.0 ' && printf '%s\n' "$o" | grep -qE '^headless +1 +0\.5 ' &&
+  printf '%s\n' "$o" | grep -qE '^worker +1 +2\.0 ' && printf '%s\n' "$o" | grep -qE '^workflow +2 +7\.0 +2\.0 +67%$'; } &&
+  ok || no "$(printf '%s\n' "$o" | tail -5)"
+
+t "--session on the parent id keeps its lanes; --since drops old lane files"
+touch -d '-3 days' "$S/subagents/workflows/wf_1/agent-b1.jsonl"
+{ wt --session 5e55 | grep -qE '^5e550001 +4 ' && wt --since 1d | grep -qE '^5e550001 +2 '; } &&
+  ok || no "$(wt --since 1d | grep '^5e55')"
+
+t "-h documents --by"
+"$CLI" -h 2>&1 | grep -q -- '--by' && ok || no "no --by in usage"
+rm -rf "$W"
+
+# --- T380/T386: --errors --cluster groups repeats by the failing command + the line naming the error ---
+C="$(mktemp -d)"; mkdir -p "$C/agents/log"
+{ printf '{"ts": "%s", "session": "c0", "tool": "Bash", "op": "ls", "summary": "ls"}\n' "$(now '-2 hour')"
+  printf '{"ts": "%s", "session": "c1", "tool": "Bash", "op": "cat a", "summary": "cat a; grep -E x /a", "ok": false, "error": "Exit code 1\\nleftover 12"}\n' "$(now '-1 hour')"
+  printf '{"ts": "%s", "session": "c2", "tool": "Bash", "op": "sed -n", "summary": "sed -n 1p b; grep foo /c", "ok": false, "error": "Exit code 1\\nother leftover"}\n' "$(now '-1 hour')"
+  printf '{"ts": "%s", "session": "c2", "tool": "Bash", "op": "pc status", "summary": "pc status", "ok": false, "error": "Exit code 3"}\n' "$(now '-1 hour')"
+  printf '{"ts": "%s", "session": "c2", "tool": "Bash", "op": "ls", "summary": "ls", "ok": true}\n' "$(now '-1 hour')"; } > "$C/agents/log/actions.jsonl"
+o="$(HOME="$C" "$CLI" --errors --cluster 2>/dev/null)"
+t "--cluster: one row per cluster with count and sessions, biggest first"
+{ printf '%s\n' "$o" | sed -n 2p | grep -qE '^ +2 +2  grep · exit 1$' &&
+  printf '%s\n' "$o" | grep -qE '^ +1 +1  pc status · exit 3$'; } && ok || no "$o"
+t "--cluster: rate only over calls from the first logged outcome, and says so"
+{ printf '%s\n' "$o" | grep -qE '^note: rate counts calls from .*\(1 older left out\)$' &&
+  printf '%s\n' "$o" | tail -1 | grep -qE '^TOTAL 3 failed of 4 calls \(75\.0%\) · 2 clusters$'; } && ok || no "$o"
+t "-h documents --cluster"
+"$CLI" -h 2>&1 | grep -q -- '--cluster' && ok || no "no --cluster in usage"
+rm -rf "$C"
 
 [ $fail = 0 ] && echo "agents-log.test.sh: all green" || echo "agents-log.test.sh: FAILURES"
 exit $fail

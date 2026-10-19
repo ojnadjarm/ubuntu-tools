@@ -1,0 +1,1 @@
+\bchmod\b|\bchattr\b|\bsudo\b|\b(?:cp|mv|install|rsync|ln)\b[^|;&\n]*settings\.json|\bsed\s+-i[^|;&\n]*settings\.json|>\s*\S*settings\.json

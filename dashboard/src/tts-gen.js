@@ -1,6 +1,7 @@
 /**
  * Pre-generate one wav per drill sentence and per distinct target word with the
  * Eye's own Kokoro (sherpa-onnx), so the page never synthesizes on request.
+ * A wav is remade when its text differs from the one recorded in state/tts/texts.json.
  * Usage: node src/tts-gen.js [--force]
  */
 const fs = require("node:fs");
@@ -74,13 +75,25 @@ const tts = new sherpa.OfflineTts({
   maxNumSentences: 1,
 });
 
+const TEXTS = path.join(OUT, "texts.json");
+let texts = {};
+if (fs.existsSync(TEXTS)) {
+  try {
+    texts = JSON.parse(fs.readFileSync(TEXTS, "utf8"));
+  } catch (e) {
+    texts = {};
+  }
+}
+
 const t0 = Date.now();
 let made = 0;
 for (const j of jobs) {
   const full = path.join(OUT, j.file);
-  if (!force && fs.existsSync(full)) continue;
+  if (!force && fs.existsSync(full) && texts[j.file] === j.text) continue;
   const audio = tts.generate({ text: j.text, sid: SID, speed: SPEED, enableExternalBuffer: false });
   fs.writeFileSync(full, wav(new Float32Array(audio.samples), audio.sampleRate));
+  texts[j.file] = j.text;
   made++;
 }
+fs.writeFileSync(TEXTS, JSON.stringify(texts, null, 1) + "\n");
 console.log(jobs.length + " wavs (" + drills.length + " sentences, " + seen.size + " words), " + made + " generated in " + ((Date.now() - t0) / 1000).toFixed(1) + " s");

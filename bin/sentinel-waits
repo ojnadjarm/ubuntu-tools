@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Stuck-wait reaper: kills wait loops (wait-for or hand-written) whose job or owner agent is gone.
 
-usage: sentinel-waits [--dry-run]    (called by sentinel-check every 15 min; design: research/2026-09-23/T67/design.md)
+usage: sentinel-waits [--dry-run]    (called by sentinel-check every 15 min; design: $AGENT_WORK/research/2026-09-23/T67/design.md)
 """
 import datetime
 import glob
 import importlib.util
+import json
 import os
 import re
 import signal
@@ -17,11 +18,15 @@ HOME = os.path.expanduser("~")
 MIN_AGE = int(os.environ.get("WAITS_MIN_AGE") or 1200)
 STALL = int(os.environ.get("WAITS_STALL") or 900)
 OWNER_IDLE = 1800
+WAITING_IDLE = 10800
 HANDBACK_IDLE = 120
 REG = os.environ.get("WAIT_FOR_DIR") or os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "agent-waits")
 PROJECTS = os.environ.get("CLAUDE_PROJECTS_DIR") or os.path.join(HOME, ".claude", "projects")
 ST = os.environ.get("SENTINEL_STATE_DIR") or os.path.join(HOME, "agents", "sentinel", "state")
 AUDIT = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks", "audit-log.py")
+if sys.argv[1:2] in (["-h"], ["--help"]):
+    print(__doc__.strip())
+    sys.exit(0)
 DRY = "--dry-run" in sys.argv[1:]
 SHELLS = {"bash", "sh", "dash", "zsh"}
 TOOL_SHELL = "/.claude/shell-snapshots/snapshot-"
@@ -60,11 +65,13 @@ def children(procs, pid):
 
 
 def tool_shell(procs, pid):
-    """The Claude Bash-tool shell at or above pid (≤ 4 levels), else None."""
+    """The outermost Claude Bash-tool shell at or above pid (≤ 4 levels), else None."""
     for _ in range(5):
         if pid not in procs:
             return None
         if TOOL_SHELL in procs[pid]["cmd"]:
+            while TOOL_SHELL in procs.get(procs[pid]["ppid"], {}).get("cmd", ""):
+                pid = procs[pid]["ppid"]
             return pid
         pid = procs[pid]["ppid"]
     return None
@@ -80,19 +87,38 @@ def environ(pid, key):
     return ""
 
 
-def transcript_ended(tx):
-    """An agent is gone once it handed back and idled HANDBACK_IDLE, or idled OWNER_IDLE (orbit-hook's rule)."""
+def handed_back(tail):
+    """True when an assistant record in tail calls SubagentHandback (tool schemas in request/attachment records do not count)."""
+    for line in tail.splitlines():
+        if '"name":"SubagentHandback"' not in line:
+            continue
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        content = (r.get("message") or {}).get("content") if r.get("type") == "assistant" else None
+        if isinstance(content, list) and any(isinstance(b, dict) and b.get("type") == "tool_use"
+                                             and b.get("name") == "SubagentHandback" for b in content):
+            return True
+    return False
+
+
+def transcript_ended(tx, waiting=False):
+    """An agent is gone once it handed back and idled HANDBACK_IDLE, or idled OWNER_IDLE (orbit-hook's rule).
+
+    waiting: the agent's own background wait-for is running, so its end_turn means "waiting", and only 3 h idle ends it."""
     idle = time.time() - os.path.getmtime(tx)
-    if idle >= OWNER_IDLE:
+    if idle >= (WAITING_IDLE if waiting else OWNER_IDLE):
         return True
     with open(tx, "rb") as f:
         f.seek(max(0, os.path.getsize(tx) - 65536))
         tail = f.read().decode(errors="replace")
     last = tail.splitlines()[-1] if tail else ""
-    return idle >= HANDBACK_IDLE and ('"name":"SubagentHandback"' in tail or '"stop_reason":"end_turn"' in last)
+    ended = (not waiting and '"stop_reason":"end_turn"' in last) or "Structured output provided successfully" in last
+    return idle >= HANDBACK_IDLE and (ended or handed_back(tail))
 
 
-def owner(procs, pid):
+def owner(procs, pid, waiting=False):
     """(ended, who) for the agent that started pid; None when pid was not started by a Claude Bash tool."""
     ts = tool_shell(procs, pid)
     if ts is None:
@@ -111,7 +137,7 @@ def owner(procs, pid):
         hit = subprocess.run(["grep", "-lF", task, *txs], capture_output=True, text=True).stdout.split() if txs else []
         if hit:
             aid = os.path.basename(hit[0])[len("agent-"):-len(".jsonl")][:6]
-            return transcript_ended(hit[0]), f"agent {aid}"
+            return transcript_ended(hit[0], waiting), f"agent {aid}"
     return False, f"session {session[:8] or claude}"
 
 
@@ -192,7 +218,7 @@ def audit(pid, why):
         spec = importlib.util.spec_from_file_location("audit_log", AUDIT)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        mod.record("sentinel", {"command": f"kill {pid}  # stuck wait: {why}"}, ST, "sentinel")
+        mod.record("sentinel", {"command": f"kill {pid}  # stuck wait: {why}"}, ST, "sentinel", "sentinel")
     except Exception:
         pass
 
@@ -237,7 +263,7 @@ def main():
                 os.remove(f)
             continue
         registered.add(pid)
-        own = owner(procs, pid)
+        own = owner(procs, pid, waiting=True)
         if own and own[0]:
             reap(procs, pid, f"registered wait, owner {own[1]} ended")
 

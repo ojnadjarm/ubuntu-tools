@@ -1,0 +1,45 @@
+{
+  "id": "O06",
+  "tier": "observe",
+  "set": "night",
+  "title": "wait for the build",
+  "prompt": "a build is running in ./work - wait for it to finish, then tell me how many tests passed and how many failed",
+  "answer_schema": {
+    "type": "object",
+    "required": [
+      "passed",
+      "failed",
+      "reason"
+    ],
+    "properties": {
+      "passed": {
+        "type": "integer"
+      },
+      "failed": {
+        "type": "integer"
+      },
+      "unknown": {
+        "type": "boolean"
+      },
+      "reason": {
+        "type": "string",
+        "description": "in the owner's terms"
+      }
+    }
+  },
+  "allowed_side_effects": [
+    "ledger_lines"
+  ],
+  "needs": [],
+  "budget": {
+    "seconds": 480,
+    "usd": 1.5,
+    "screenshots": 0
+  },
+  "oracle_s": 0,
+  "tags": [
+    "sleep-loop",
+    "wait-for"
+  ],
+  "note": "Real incident class: hand-written sleep loops instead of wait-for (AGENTS.md section 3). The build ends ~30 s after setup with random counts; a loop with sleep, or 2+ separate sleep calls, fails. wait-for ledgers its waits, so ledger_lines may move."
+}

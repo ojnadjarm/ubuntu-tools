@@ -29,7 +29,7 @@ Parts list T92, section head framing T93, pencils and cue layers T95, sheet chan
   list and callouts; **T92 removed it** with the Parts list (owner: the numbered badge and its callout name a part).
 - **T91** chapters then a Practice section (`sections`, `SectionHead`), grow-only saved progress, one voice at a time, the hatched button roles.
 - **T92** Practice from anywhere (`Beat.leaving()` + `BeatMachine.left`, Memento), landing states, the closing chapter, bar status that wraps.
-  Design: `~/agents/research/2026-09-25/T92/ARCHITECTURE.md`.
+  Design: `~/agent-work/research/2026-09-25/T92/ARCHITECTURE.md`.
 - **T95** learner pencils, first-drag cue, hint arrows on top; kit `layoutFaults` takes `z`, `kind: 'cue'` and `clip` (59 kit tests).
 - **T96** the site holds the page turn until the plate draws (`sheet:ready`).
 - **T100** cleanup: the Cutaway kit's motion, loop and captions re-export this engine; U01 imports the kit's `geom` and `parts/part`; site e2e
@@ -113,4 +113,4 @@ Gates and e2e actions: skill `reference/testing.md`.
 - Code: `~/agents/kits/explainer/{src,adapters/cutaway,tools}`; starter `~/agents/kits/explainer/starter/`; proof `example/`
 - Skill: `~/.claude/skills/explainer-engine/SKILL.md` + `reference/{new-unit,components,exercises,lesson-flow,layout,narration-sync,testing,pitfalls}.md`
 - Tests: `~/agents/kits/explainer/test/{engine,player,bench,lesson,place,landing,voice}.test.ts`, starter `test/{framing,content}.test.ts`
-- Design / results: `~/agents/kits/explainer/ARCHITECTURE.md`, `~/agents/research/2026-09-24/T77/`, `~/agents/research/2026-09-25/{T92,T100}/ARCHITECTURE.md`
+- Design / results: `~/agents/kits/explainer/ARCHITECTURE.md`, `~/agent-work/research/2026-09-24/T77/`, `~/agent-work/research/2026-09-25/{T92,T100}/ARCHITECTURE.md`

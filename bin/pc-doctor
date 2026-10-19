@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# pc doctor [--quick] [--json] — PASS/FAIL for the whole pc family without opening a window, making a sound or touching the TV.
+# pc doctor [--quick] [--json] [--brief] — PASS/FAIL for the whole pc family without opening a window, making a sound or touching the TV.
 set -uo pipefail
 export LC_ALL=C
 BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 . "$BIN/pclib.sh"
 . "$BIN/env.sh"
 
-pc_usage 'usage: pc doctor [--quick] [--json]
+pc_usage 'usage: pc doctor [--quick] [--json] [--brief]
 
 Night-safe complement to `pc selftest` (which opens a calculator): doctor never opens a window,
 never makes a sound, never touches the TV, restarts nothing and runs no verb that needs --apply.
@@ -15,14 +15,15 @@ One row per check — `OK|WARN|FAIL|SKIP <name> <detail> <ms>` — then `PASS n/
 
   --quick   the <= 2 s subset: no subcommand sweep, no trace, no stats
   --json    the rows as an array of {status,name,detail,ms}
+  --brief   only the rows that are not OK, then the PASS/FAIL line
 
 Budget: <= 10 s full, <= 2 s --quick. `pc status --check` is read **warm** — that is what the
 sentinel sees — and the cache age is reported with it.' "$@"
 
-QUICK=0
-PC_EXTRA_FLAGS=(--quick)
+QUICK=0; BRIEF=0
+PC_EXTRA_FLAGS=(--quick --brief)
 pc_opt "$@"
-for f in ${PC_EXTRA[@]+"${PC_EXTRA[@]}"}; do [ "$f" = --quick ] && QUICK=1; done
+for f in ${PC_EXTRA[@]+"${PC_EXTRA[@]}"}; do [ "$f" = --quick ] && QUICK=1; [ "$f" = --brief ] && BRIEF=1; done
 
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 T0=$EPOCHREALTIME
@@ -35,7 +36,7 @@ ms_since() { local a=${1/./} b=${EPOCHREALTIME/./}; printf '%d' $(( (10#$b - 10#
 # line of stdout becomes the detail. A run over budget is retried up to twice and the fastest
 # kept, so one cold or loaded sample is not a FAIL (TSP-023).
 # Checks whose exit 2 is a WARN — a pattern worth reporting, never a broken machine.
-WARN_CHECKS=' browsers usage '
+WARN_CHECKS=' browsers usage agent-work claims fleet-ci '
 check() {
   local name=$1 budget=$2 t out rc ms first n=1 o r m load note=; shift 2
   t=$EPOCHREALTIME
@@ -60,7 +61,7 @@ check() {
 # A script over 100 ms is timed twice more and judged on its fastest run: FAIL only when even
 # that is over, WARN when only a loaded or cold sample was (TSP-023).
 usage_sweep() {
-  local f n=0 slow= worst=0 wmax=0 t ms min max load bad="" warn=""
+  local f n=0 slow= worst=0 wmax=0 t ms min max load np over="" busy="" bad="" warn=""
   for f in "$BIN"/pc-*; do
     [ -x "$f" ] || { bad="$bad ${f##*/}:not-exec"; continue; }
     case ${f##*/} in pc-bt) continue;; esac   # PT12 still being written by another agent
@@ -74,14 +75,17 @@ usage_sweep() {
       [ "$ms" -lt "$min" ] && min=$ms; [ "$ms" -gt "$max" ] && max=$ms
     done
     [ "$min" -gt "$worst" ] && { worst=$min; wmax=$max; slow=${f##*/}; }
-    if [ "$min" -gt 100 ]; then bad="$bad ${f##*/}:${min}ms"
+    if [ "$min" -gt 100 ]; then over="$over ${f##*/}:${min}ms"
     elif [ "$max" -gt 100 ]; then warn="$warn ${f##*/}:${max}/${min}ms"; fi
   done
-  read -r load _ </proc/loadavg
-  printf '%d scripts, slowest -h %s min %d/max %dms, load %s%s%s\n' "$n" "$slow" "$worst" "$wmax" "$load" \
-    "${bad:+ — BAD:$bad}" "${warn:+ — SLOW ONCE:$warn}"
+  read -r load _ <"${PC_LOADAVG:-/proc/loadavg}"; np=${PC_NPROC:-$(nproc)}
+  # Over 0.25 load per CPU an over-budget -h is a busy machine, not a broken script (T432).
+  if [ -n "$over" ] && [ $((10#${load/./} * 4)) -gt $((np * 100)) ]; then busy=$over
+  else bad="$bad$over"; fi
+  printf '%d scripts, slowest -h %s min %d/max %dms, load %s/%d cpu%s%s%s\n' "$n" "$slow" "$worst" "$wmax" "$load" "$np" \
+    "${bad:+ — BAD:$bad}" "${busy:+ — SLOW UNDER LOAD:$busy}" "${warn:+ — SLOW ONCE:$warn}"
   [ -n "$bad" ] && return 1
-  [ -z "$warn" ] || return 2
+  [ -z "$busy$warn" ] || return 2
 }
 check usage 3000 usage_sweep
 check pclib 300 bash -c '. "'"$BIN"'/pclib.sh" && echo "sources; guard+ledger+cache loaded"'
@@ -122,11 +126,18 @@ check status-check 2000 status_check
 
 ## --- 4. the change ledger ---------------------------------------------------
 # Two faults an agent leaves behind: a change that never verified, and one recorded without a
-# rollback (nothing to hand `pc undo`).
+# rollback (nothing to hand `pc undo`). A row whose stored read equals `after` now is verified late.
 ledger_audit() {
-  local f=$PC_LEDGER
+  local f=$PC_LEDGER id after rd
   [ -e "$f" ] || { echo "no ledger yet at $f"; return 0; }
   [ -w "$f" ] || { echo "$f is not writable"; return 1; }
+  while IFS= read -r -d '' id && IFS= read -r -d '' after && IFS= read -r -d '' rd; do
+    [ "$(pc_timeout 2 bash -c '. "$1"; eval "$2"' _ "$BIN/pclib.sh" "$rd" 2>/dev/null)" = "$after" ] &&
+      pc_json '{id:$id,verified:true,observed:$o,late:true}' -c --arg id "$id" --arg o "$after" >>"$f"
+  done < <(jq -s -j '
+    (map(select(.verified != null)) | INDEX(.id)) as $vf | (map(select(.ack == true)) | map(.id)) as $ackd |
+    .[] | select(.cmd and (.read // "") != "" and ($vf[.id].verified // false) != true and (.id as $i | $ackd | index($i)) == null)
+    | .id, "\u0000", .after, "\u0000", .read, "\u0000"' "$f")
   jq -s -r '
     (map(select(.cmd)) )                                as $ap |
     (map(select(.verified != null)) | INDEX(.id))       as $vf |
@@ -134,8 +145,9 @@ ledger_audit() {
     ($ap | map(select(($vf[.id].verified // false) != true))) as $unver |
     ($unver | map(select(.id as $i | ($ackd | index($i)) == null))) as $unack |
     ($unver | map(select(.id as $i | ($ackd | index($i)) != null))) as $acked |
+    ($ap | map(select($vf[.id].late == true)))          as $late |
     ($ap | map(select((.rollback // "") == "")))        as $noroll |
-    "\($ap|length) changes · \($unver|length) unverified\(if ($acked|length)>0 then ", acked" else "" end)\(if ($unack|length)>0 then " (" + ($unack|map(.id)|join(",")) + ")" else "" end) · \($noroll|length) without rollback\(if ($noroll|length)>0 then " (" + ($noroll|map(.id)|join(",")) + ")" else "" end)"
+    "\($ap|length) changes · \($unver|length) unverified\(if ($acked|length)>0 then ", acked" else "" end)\(if ($unack|length)>0 then " (" + ($unack|map(.id)|join(",")) + ")" else "" end)\(if ($late|length)>0 then " (\($late|length) verified late: " + ($late|map(.id)|join(",")) + ")" else "" end) · \($noroll|length) without rollback\(if ($noroll|length)>0 then " (" + ($noroll|map(.id)|join(",")) + ")" else "" end)"
   ' "$f"
   jq -s -e '
     (map(select(.cmd))) as $ap | (map(select(.verified != null)) | INDEX(.id)) as $vf |
@@ -155,7 +167,7 @@ residue() {
   for p in bpftrace perf evtest bpftool; do
     pgrep -x "$p" >/dev/null 2>&1 && bad="$bad $p"
   done
-  grep -q 'pc-input-virtual' /proc/bus/input/devices 2>/dev/null && bad="$bad pc-input-virtual"
+  grep -q 'pc-input-virtual' "$PC_PROC/bus/input/devices" 2>/dev/null && bad="$bad pc-input-virtual"
   # eye-render belongs to dark-eye.service; a hand-run one is EF03 residue.
   local pid stray=0
   for pid in $(pgrep -x eye-render 2>/dev/null); do
@@ -220,6 +232,44 @@ browsers() {
 }
 check browsers 600 browsers
 
+# Timer-driven units in a failure loop (TSP-038); the probe is pclib's pc_unit_loops, shared with pc status.
+unit_loops() { pc_unit_loops || return 1; echo "no timer-driven unit failing >= 10/h"; }
+check unit-loops 500 unit_loops
+
+# A netdata alarm left in the retry spool never reached the phone (T347-01).
+alert_spool() {
+  local d=${PC_ALERT_SPOOL:-/var/spool/netdata-alerts-retry} log=${PC_ALERT_LOG:-/var/log/netdata-alert.log} n last
+  n=$( { ls -A "$d" 2>/dev/null || pc_timeout 2 sudo -n ls -A "$d" 2>/dev/null; } | wc -l)
+  last=$(awk -F'\t' '$2=="ok"{t=$1} END{print t}' "$log" 2>/dev/null)
+  printf '%s queued in %s, last ok push %s\n' "$n" "${d##*/}" "${last:-never}"
+  [ "$n" = 0 ]
+}
+check alert-spool 500 alert_spool
+
+# $AGENT_WORK over its size cap: lossless intermediates and node_modules left behind (T360).
+agent_work_size() {
+  local max=${PC_AGENT_WORK_MAX_MB:-25600} mb
+  mb=$(pc_timeout 3 du -sm "$AGENT_WORK" 2>/dev/null | cut -f1)
+  printf '%s MB in AGENT_WORK (warn > %s MB)\n' "${mb:-?}" "$max"
+  [ "${mb:-0}" -le "$max" ] || return 2
+}
+check agent-work 1500 agent_work_size
+
+# A file claim older than 48 h without a pin blocks parallel agents on a dead row (T378).
+check claims 500 "$BIN/claims" check
+
+# The last nightly fleet suite (T459): its PASS/FAIL line; red, cut short or older than 48 h is a WARN.
+fleet_ci() {
+  local d=${PC_FLEET_CI_DIR:-$HOME/agents/log/fleet-ci} f last now
+  f=$(ls "$d"/*.txt 2>/dev/null | tail -1)
+  [ -n "$f" ] || { echo "no fleet ci run yet in ${d/#$HOME/\~}"; return 2; }
+  last=$(grep -E '^(PASS|FAIL) [0-9]+/[0-9]+ files' "$f" | tail -1)
+  printf -v now '%(%s)T' -1
+  echo "${f##*/}: ${last:-no summary line (running or cut short)}"
+  [ "${last%% *}" = PASS ] && [ $(( now - $(stat -c %Y "$f") )) -le 172800 ] || return 2
+}
+check fleet-ci 300 fleet_ci
+
 ## --- 6. the layers each pc-* sits on ----------------------------------------
 if [ "$QUICK" = 0 ]; then
   check pipewire 1000 bash -c 'n=$("$PC_TIMEOUT_BIN" 3 pw-dump 2>/dev/null | jq length) && echo "pw-dump parses, $n objects" && [ "$n" -gt 0 ]'
@@ -272,9 +322,10 @@ if [ "$JSON" = 1 ]; then
   jq -R -s -c 'split("\n")|map(select(length>0)|split("\t")|{status:.[0],name:.[1],detail:.[2],ms:(.[3]|tonumber)})' "$WORK/rows"
 else
   while IFS=$'\t' read -r st name detail ms; do
+    [ "$BRIEF" = 1 ] && [ "$st" = OK ] && continue
     printf '%-4s %-14s %-72s %5s ms\n' "$st" "$name" "$detail" "$ms"
   done <"$WORK/rows"
-  printf -- '---\n'
+  [ "$BRIEF" = 1 ] || printf -- '---\n'
   if [ "$n_bad" = 0 ]; then printf 'PASS %s/%s in %s.%03d s%s%s\n' "$n_ok" "$n_all" "$((TOTAL_MS / 1000))" "$((TOTAL_MS % 1000))" "$([ "$QUICK" = 1 ] && echo ' (--quick)')" "$WARNS"
   else printf 'FAIL %s/%s in %s.%03d s — %s%s\n' "$n_ok" "$n_all" "$((TOTAL_MS / 1000))" "$((TOTAL_MS % 1000))" "$(awk -F'\t' '$1=="FAIL"{printf "%s ",$2}' "$WORK/rows")" "$WARNS"; fi
 fi

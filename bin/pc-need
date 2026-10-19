@@ -18,7 +18,7 @@ notify.log is never edited. A new push, even with the same text, has a new id an
 PC_SUB='pc need'; PC_EXTRA_FLAGS=(--fixed:)
 pc_opt "$@"; ARGS=(${PC_ARGS[@]+"${PC_ARGS[@]}"})
 FIXED=${PC_OPT[--fixed]-}
-BY=${AGENT_NAME:-${CLAUDE_SESSION_ID:-$USER}}
+BY=${AGENT_NAME:-${CLAUDE_CODE_SESSION_ID:-${CLAUDE_SESSION_ID:-$USER}}}
 RES="$HOME/agents/log/notify-resolved.jsonl"
 
 # open_json — the push items of verdict()'s needs list, as JSON, from the dashboard's own code.

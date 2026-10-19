@@ -1,0 +1,3 @@
+- Declare files in `~/agents/FILE-CLAIMS.md` before editing.
+- Time box ~40 min.
+- Report: max 6 lines, numbers only.

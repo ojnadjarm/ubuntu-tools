@@ -1,0 +1,7 @@
+[Unit]
+Description=Daily ailearning full suite (npm run ci) on a throwaway copy, headless and muted; red goes to one ci-fix attempt first (T402)
+
+[Service]
+Type=oneshot
+TimeoutStartSec=10800
+ExecStart=/bin/bash -lc 'exec %h/agents/bin/ci-autofix --repo %h/projects/personal/ailearning --log %h/agents/log/ailearning-ci.log "ailearning nightly" -- %h/agents/bin/ailearning-ci-daily'

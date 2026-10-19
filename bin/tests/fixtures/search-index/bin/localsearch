@@ -1,0 +1,2 @@
+#!/bin/sh
+printf 'Currently indexed: 12 files, 3 folders\nRemaining space on database partition: 1 GB (50%%)\n'

@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""pc failures [--since 24h] [--json] — every failure of the window on one screen: units, agent runs, CI, crashes, audit."""
+import glob, json, os, re, subprocess, sys, time
+
+USAGE = """usage: pc failures [--since 24h] [--json]
+
+One read-only screen of what failed in the window (default 24h; 30m, 6h, 7d):
+  unit    failed now (user + system) and journal "Failed with result" counts with the last time
+  agent   ~/agents/*/logs/index.tsv runs with exit != 0
+  ci      ~/agents/state/ci-fix/*.md "red at" entries
+  crash   /var/crash/*.crash written in the window
+  audit   ~/agents/log/actions.jsonl failed tool calls / calls with an outcome
+  need    open "need you" pushes (pc need)
+Units the fleet must never touch (moodle45*, vass*) are tagged `not ours`."""
+
+HOME = os.path.expanduser('~')
+FIX = os.environ.get('PC_FIXTURE', '')
+CRASH_DIR = os.environ.get('PC_CRASH_DIR', '/var/crash')
+BIN = os.path.dirname(os.path.realpath(__file__))
+NOT_OURS = re.compile(r'^(moodle45|vass)')
+UNIT_FAILED = 'MESSAGE_ID=d9b373ed55a64feb8242e02dbe79a49c'
+
+
+def cmd(name, *args):
+    """Stdout of $PC_FIXTURE/bin/<name> when it exists, else of the real binary."""
+    stub = os.path.join(FIX, 'bin', name) if FIX else ''
+    own = os.path.join(BIN, name)
+    exe = stub if stub and os.access(stub, os.X_OK) else own if os.access(own, os.X_OK) else name
+    return subprocess.run([exe, *args], capture_output=True, text=True, timeout=10).stdout
+
+
+def stamp(t):
+    return time.strftime('%m-%d %H:%M', time.localtime(t)) if t else '-'
+
+
+def units(since):
+    rows = {}
+    for scope, flag in (('user', ['--user']), ('system', [])):
+        for u in json.loads(cmd('systemctl', *flag, 'list-units', '--failed', '--output=json') or '[]'):
+            rows[u['unit']] = {'unit': u['unit'], 'scope': scope, 'failed_now': True, 'count': 0, 'last': 0, 'result': 'failed'}
+    for line in cmd('journalctl', '--since', '@%d' % since, '-o', 'json', UNIT_FAILED).splitlines():
+        e = json.loads(line)
+        name = e.get('UNIT') or e.get('USER_UNIT')
+        if not name:
+            continue
+        r = rows.setdefault(name, {'unit': name, 'scope': 'user' if e.get('USER_UNIT') else 'system',
+                                   'failed_now': False, 'count': 0, 'last': 0, 'result': ''})
+        t = int(e.get('__REALTIME_TIMESTAMP', 0)) / 1e6
+        r['count'] += 1
+        if t >= r['last']:
+            r['last'], r['result'] = t, e.get('UNIT_RESULT', r['result'])
+    for r in rows.values():
+        r['ours'] = not NOT_OURS.match(r['unit'])
+        r['last'] = int(r['last'])
+    return sorted(rows.values(), key=lambda r: (not r['failed_now'], -r['count']))
+
+
+def iso(s):
+    try:
+        return int(time.mktime(time.strptime(s[:19], '%Y-%m-%dT%H:%M:%S')))
+    except ValueError:
+        return 0
+
+
+def agents(since):
+    out = []
+    for f in glob.glob(f'{HOME}/agents/*/logs/index.tsv'):
+        name = f.split('/')[-3]
+        for line in open(f, errors='replace').read().splitlines()[1:]:
+            c = line.split('\t')
+            if len(c) > 2 and c[2] != '0' and iso(c[0]) >= since:
+                out.append({'agent': name, 'start': iso(c[0]), 'exit': c[2], 'log': c[5] if len(c) > 5 else ''})
+    return sorted(out, key=lambda r: -r['start'])
+
+
+def ci(since):
+    out = []
+    for f in glob.glob(f'{HOME}/agents/state/ci-fix/*.md'):
+        for m in re.finditer(r'^## (.+?) red at (\S+) \(rc (\w+)\)', open(f, errors='replace').read(), re.M):
+            if iso(m[2]) >= since:
+                out.append({'what': m[1], 'at': iso(m[2]), 'rc': m[3], 'note': f})
+    return sorted(out, key=lambda r: -r['at'])
+
+
+def exe_of(f):
+    """The ExecutablePath line of an apport report, else the file's name."""
+    try:
+        m = re.search(r'^ExecutablePath: (.+)$', open(f, errors='replace').read(65536), re.M)
+    except OSError:
+        m = None
+    return m[1] if m else os.path.basename(f)
+
+
+def crashes(since):
+    out = []
+    for f in glob.glob(f'{CRASH_DIR}/*.crash'):
+        t = int(os.stat(f).st_mtime)
+        if t >= since:
+            out.append({'file': f, 'at': t, 'exe': exe_of(f)})
+    return sorted(out, key=lambda r: -r['at'])
+
+
+def audit(since):
+    calls = failed = 0
+    path = f'{HOME}/agents/log/actions.jsonl'
+    if os.path.exists(path):
+        for line in open(path, errors='replace'):
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if 'ok' in r and iso(r.get('ts', '')) >= since:
+                calls += 1
+                failed += r['ok'] is False
+    return {'calls': calls, 'failed': failed, 'rate': round(failed / calls, 3) if calls else 0.0}
+
+
+def needs(_since):
+    return json.loads(cmd('pc-need', 'list', '--json') or '[]')
+
+
+COLLECTORS = {'units': units, 'agents': agents, 'ci': ci, 'crashes': crashes, 'audit': audit, 'needs': needs}
+
+
+def table(d):
+    rows = []
+    for u in d['units']:
+        note = ('not ours' if not u['ours'] else '') + (' FAILED NOW' if u['failed_now'] else '')
+        rows.append(('unit', f"{u['unit']} ({u['scope']})", u['count'], stamp(u['last']), (u['result'] + note).strip()))
+    rows += [('agent', a['agent'], 1, stamp(a['start']), f"exit {a['exit']}") for a in d['agents']]
+    rows += [('ci', c['what'], 1, stamp(c['at']), f"rc {c['rc']}") for c in d['ci']]
+    rows += [('crash', c['exe'], 1, stamp(c['at']), c['file']) for c in d['crashes']]
+    rows += [('need', n.get('text', '').split('\n')[0][:60], 1, n.get('t', '-')[5:16].replace('T', ' '), n.get('kind', ''))
+             for n in d['needs']]
+    a = d['audit']
+    rows.append(('audit', 'tool calls failed', a['failed'], '-', f"{a['rate'] * 100:.1f}% of {a['calls']}"))
+    rows += [('error', k, 0, '-', v) for k, v in d['errors'].items()]
+    w = max(len(r[1]) for r in rows)
+    print(f"{'SOURCE':<6} {'WHAT':<{w}} {'N':>4} {'LAST':<11} NOTE   (since {stamp(d['since'])})")
+    for r in rows:
+        print(f'{r[0]:<6} {r[1]:<{w}} {r[2]:>4} {r[3]:<11} {r[4]}')
+
+
+def main(argv):
+    if '-h' in argv or '--help' in argv:
+        print(USAGE)
+        return 0
+    js, span = False, '24h'
+    it = iter(argv)
+    for a in it:
+        if a == '--json':
+            js = True
+        elif a == '--since':
+            span = next(it, '')
+        elif a.startswith('--since='):
+            span = a.split('=', 1)[1]
+        else:
+            print(f'pc failures: unknown option {a}', file=sys.stderr)
+            return 2
+    m = re.fullmatch(r'(\d+)([mhd])', span)
+    if not m:
+        print('pc failures: bad --since (use 30m, 24h, 7d)', file=sys.stderr)
+        return 2
+    since = int(time.time()) - int(m[1]) * {'m': 60, 'h': 3600, 'd': 86400}[m[2]]
+    d = {'since': since, 'errors': {}}
+    for k, fn in COLLECTORS.items():
+        try:
+            d[k] = fn(since)
+        except Exception as e:  # one broken source must not hide the others
+            d[k] = {'calls': 0, 'failed': 0, 'rate': 0.0} if k == 'audit' else []
+            d['errors'][k] = f'{type(e).__name__}: {e}'
+    print(json.dumps(d, indent=1)) if js else table(d)
+    return 0
+
+
+sys.exit(main(sys.argv[1:]))

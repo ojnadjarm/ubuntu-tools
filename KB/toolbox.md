@@ -38,9 +38,9 @@ re-derive it. Deeper detail: `~/agents/KB/machine.md`, `~/agents/KB/quirks.md`,
 | wait | `pc wait-for --window\|--focus\|--text\|--gone SUB [--timeout S] [--see]`, `pc wait S` | never `sleep`; animations are off, windows appear at once |
 | profile | `pc mode [agent\|human\|status]`, `pc selftest`, `pc spotify …` | agent mode = no animations, one workspace, no overview |
 | kernel | `pc top`, `pc io`, `pc power`, `pc idle`, `pc thermal`, `pc trace`, `pc kernel`, `pc net`, `pc hw` | CPU/wake/IO, watts/RAPL/GPU, `pc idle` for the idle-power baseline (median package/psys watts, top wakers, fleet RSS; the weekly row lands in `bench/BASELINE-IDLE.tsv`), thermal zones, eBPF/perf one-liners, dmesg/sysctl/cgroups, sockets/tailscale/fw, PCI/USB/DMI — `pc mutter` replaces a screenshot for window/monitor geometry, `pc trace` replaces guessing who wakes the CPU or writes the disk |
-| session | `pc dbus`, `pc mutter`, `pc input`, `pc audio`, `pc bt` | the session/system bus, compositor state (read-only), evdev, PipeWire, bluez |
+| session | `pc dbus`, `pc mutter`, `pc input`, `pc audio`, `pc bt`, `pc lid` | the session/system bus, compositor state (read-only), evdev, PipeWire, bluez, panel off with the lid closed (`KB/runbooks/lid-panel-off.md`) |
 | services | `pc units`, `pc journal`, `pc docker` | systemd units/timers, structured journal queries, compose stacks |
-| safety | `pc undo`, `pc explain <thing>`, `pc bench`, `pc doctor` | the change ledger and rollback, ranked KB lookup (`pc explain` before opening `toolbox.md`/`quirks.md` whole; `guide <words>` ranks `KB/guides/` and the installed skills — how the fleet did it before), timing table, night-safe PASS/FAIL |
+| safety | `pc undo`, `pc explain <thing>`, `pc bench`, `pc doctor`, `pc need`, `pc failures` | the change ledger and rollback, ranked KB lookup (`pc explain` before opening `toolbox.md`/`quirks.md` whole; `guide <words>` ranks `KB/guides/` and the installed skills — how the fleet did it before), timing table, night-safe PASS/FAIL, `pc need` lists and resolves stale "need you" alerts (skill /need-resolve), `pc failures [--since 24h] [--json]` every failed unit (now + journal counts; moodle45*/vass* = `not ours`), agent run, CI red, crash and the audit failure rate on one screen |
 
 Full reference, one row per command with its usage and warm bench time: `~/agents/KB/pc-cli.md`
 (generated — `pc help --md > ~/agents/KB/pc-cli.md`, never hand-edited). Every mutating verb is
@@ -75,8 +75,7 @@ read-only without `--apply`; the ledger, `pc undo` and the guard exits are in
   mode and `eye health` carries it. Persisted across a restart. The Samsung keeps HPD, EDID and
   ELD up in standby, so no sysfs/DDC/ELD rung can see it (EF10, `KB/quirks.md`).
 - Units: `dark-eye.service` (node `body/src/main.js` → bridge on 127.0.0.1:8642, forked voice worker,
-  spawned `render/target/release/eye-render`), `dark-eye-ptt.service` (earbud push-to-talk sidecar),
-  `dark-eye-failed.service` (pushes the owner). Logs: `journalctl --user -u dark-eye -f`.
+  spawned `render/target/release/eye-render`), `dark-eye-failed.service` (pushes the owner). Logs: `journalctl --user -u dark-eye -f`.
 - Render socket: `$XDG_RUNTIME_DIR/dark-eye/render.sock`, one JSON object per line; override with
   `DARK_EYE_RENDER_SOCK`. Env flags: `DARK_EYE_IDLE_FPS` (60 on the GPU, 30 in software),
   `DARK_EYE_STATS=1` (fps/ms lines), `DARK_EYE_DEBUG=1` (unredacted speech), `DARK_EYE_GPU`
@@ -91,7 +90,7 @@ read-only without `--apply`; the ledger, `pc undo` and the guard exits are in
   (software was 3.3 % / 30 MB at 30). First frame `Started` → `eye up at`: **0.31 s**.
   Rollback, no rebuild: `systemctl --user edit dark-eye` → `[Service]` `Environment=DARK_EYE_GPU=0`
   → `systemctl --user restart dark-eye` (`systemctl --user revert dark-eye` undoes it).
-  Full block: `RUNBOOK.md` "GPU backend"; design `~/the-dark-eye/PLAN-GPU.md`.
+  Full block: `RUNBOOK.md` "GPU backend".
 - **The page, phone and desktop (R04 2026-09-06, M11 · M12 2026-09-15)**:
   `https://$HARNESS_TAILNET_FQDN:8644/` — tap to talk into the same ear, replies come back on it
   (`eye speak --to remote`). Tailnet only via `tailscale serve`, loopback bind, login is the
@@ -164,12 +163,26 @@ read-only without `--apply`; the ledger, `pc undo` and the guard exits are in
   control, no pixels ever. Subcommands, the Web API setup and the client's quirks:
   `README-pc-control.md` "Spotify".
 - Volume and sinks: `wpctl get-volume/set-volume/set-mute @DEFAULT_AUDIO_SINK@`, `pactl list short sinks`.
-- The XM5 push-to-talk sidecar (`dark-eye-ptt.service`, `body/linux/ptt-earbuds.py`) **owns the bud
-  profile**: it grabs the AVRCP evdev node exclusively, switches `a2dp-sink` ↔ `headset-head-unit`
-  around the mic and restores the volume. WirePlumber is configured not to fight it
-  (`bluetooth.autoswitch-to-headset-profile = false`). Do not switch the card profile by hand while it runs.
 - One `pactl move-sink-input` pins **all** later `pw-cat` playback to that sink, and sinks must be
   targeted by name, never by index: `quirks.md` "PipeWire / WirePlumber stream memory (E23)".
+
+## 4b. Motion video and media (T439, skill `/motion-video`, guide `motion-video`)
+
+- `mv-render new remotion|mc <dir>`, `mv-render remotion|mc <dir> …`, `mv-render blender <scene.py> <frames-dir>`, `mv-render clean <dir>` — headless renders, prints render fps.
+- `mv-encode <in|frame_%04d.png> <out> --preset h264-master|h264-web|hevc|av1|h264-hw|hevc-hw|vp9-alpha [--fps N] [--audio F] [--loudnorm]`.
+- Remotion 4.0.536 and Motion Canvas 3.17.2 per project (npm, templates in the skill); Blender 5.0.1 (apt, EEVEE on the Iris Xe in `-b`); Manim CE 0.21.0 (pipx).
+- ffmpeg 8.0.1: libx264/libx265/SVT-AV1/libvpx; VA-API H.264/HEVC encode via `intel-media-va-driver-non-free` (`vainfo`); no AV1 hw encode, QSV not set up. sox 14.7; fonts Inter + JetBrains Mono.
+- T453: `mv-render variants|bench`, `mv-encode --lut film|bleach|F.cube --burn F.ass --subs F.srt`, presets `hevc-10`/`av1-10`; `mv-mix` (VO + ducked music + SFX, -16 LUFS), `mv-captions` (Kokoro cues.json -> SRT + word-highlight ASS), `mv-assets fetch|list` (CC0 music/SFX in `~/.local/share/motion-video`), `mv-lut`; Remotion `Camera3D` (three.js + motion blur), concurrency default 6.
+
+## 4c. Game dev and GPU profiling (T440, skill `/gamedev`, guide `gamedev-toolchain`)
+
+- `godot` / `godot-mono` 4.7.2 (`~/opt/gamedev/`, export templates linux/windows/web); `~/.claude/skills/gamedev/scripts/godot-smoke.sh [--display wayland|xwayland|xvfb] [--renderdoc DIR] [PROJECT]` exports and runs offscreen with FPS lines.
+- Offscreen GPU display: `weston --backend=headless --renderer=gl` (Iris Xe, 187 fps on the fixture); Xvfb = llvmpipe (8 fps).
+- `renderdoccmd` / `qrenderdoc` 1.46 (X11 only; capture under `weston --xwayland`), `vulkaninfo`, validation layers (`godot --gpu-validation`), glslc/glslang/spirv-tools.
+- Tracy 0.14.1: client lib `~/opt/gamedev/tracy-0.14.1/build-client/libTracyClient.a` (localhost only), `tracy-capture`, `tracy-csvexport`, GUI `tracy`; `perf`.
+- Pipeline (T454, `~/.claude/skills/gamedev/scripts/`): `asset-pipeline.sh` (Blender -> glb -> gltfpack 1.3 LODs + KTX2 in `~/opt/gamedev/gltfpack-1.3` -> Godot import check), `godot-perfgate.sh` (fps CSV, exit 1 regression / 3 skip on load), `godot-test.sh` (GUT 9.7.1 in `~/opt/gamedev/gut-9.7.1`, JUnit), `shader-check.sh` (glslang + spirv-val + spirv-cross), `cc0-fetch.sh` (Poly Haven / ambientCG / Kenney + LICENSES.csv).
+- Native C++ (T457): `~/.claude/skills/gamedev/scripts/new-cpp-game [--build] DIR` copies `templates/cpp-vulkan/` (CMake presets + vcpkg manifest: SDL3 3.4.18, vk-bootstrap, volk; clang + mold + ccache); `cpp-vk-run.sh [--frames N] BINARY` runs it on the Iris Xe under headless weston with validation (rc 2 on any error). vcpkg in `~/opt/gamedev/vcpkg`, binary cache `~/.cache/vcpkg/archives`.
+- Build: clang/lld 21, mold 2.40, ninja 1.13, ccache 4.12, CMake 4.2, dotnet 10. Assets: Krita 6.0, GIMP 3.2, Inkscape 1.4, gltfpack 0.22, assimp 6.0; OpenAL 1.25. UE5 not installed (Epic account, 60-225 GB).
 
 ## 5. Fleet and comms
 
@@ -178,15 +191,13 @@ read-only without `--apply`; the ledger, `pc undo` and the guard exits are in
   phone setup: `README-pc-control.md` "Owner notifications".
 - Persistent agents: one folder per agent under `~/agents/<name>/`; every runner command
   (`agent-run`, `agent-now`, `agent-enable`, `agents-status`, `agents-stop`/`agents-start`) is in
-  `~/agents/RUNNER.md`. Roster of record: `~/CLAUDE.md`. Owner-facing summary: `~/agents/README.md`.
-- Logs and state: `agents-log [--since 24h] [--session ID] [--grep X] [--stats] [--pc]`,
-  `~/agents/<name>/logs/`, `~/agents/<name>/REPORT.md`, status page
-  http://$HARNESS_TAILNET_FQDN:19998, netdata :19999.
-- `buds-capture [seconds] [--quiet]` — one command to freeze the failing state of the XM5 buds
-  (btmon HCI trace + bluez/pulse/wireplumber/journal snapshot + the sidecar's evdev view) into
-  `~/agents/log/buds-capture/<ts>/`, then print a decoded summary. Run it **before** any recovery.
-- `buds-recover` — `bluetoothctl disconnect`/`connect` on the buds, reports what came back, then
-  prints the case power-cycle instruction if the taps still fail. Destroys the failing state: capture first.
+  `~/agents/RUNNER.md`. Roster of record: `~/agents/KB/orchestrator.md`. Owner-facing summary: `~/agents/README.md`.
+- Logs and state: `agents-log [--since 24h] [--session ID] [--grep X] [--stats] [--pc] [--raw] [--kind K]`,
+  `agents-log --errors --cluster` (failed calls grouped by the failing command + the line naming the error, rate from the first logged outcome),
+  `agents-log --tokens` (context per turn of each Claude session, from the transcripts), `~/agents/<name>/logs/`,
+  `~/agents/<name>/REPORT.md`, status page http://$HARNESS_TAILNET_FQDN:19998, netdata :19999.
+- Agent working papers: `$AGENT_WORK` (default `~/agent-work`: `briefs/`, `research/<date>/<ticket>/`, `evidence/`,
+  `archive/`, `owner/` move only); bash gets it from `bin/env.sh`, Python from `lib/agent_work.py`; guide `agent-work-layout`.
 - `sites publish <ailearning|portfolio>` / `sites status` / `sites check` — local GitHub Pages mirror (`sites.service`, caddy in bwrap, :8072 → https :8472), atomic snapshot swap into `~/sites`; guide `local-sites`.
 - Other helpers in `~/agents/bin`: `boot-check.sh` (post-boot OK/FAIL), `lockcheck.sh` (always-on desktop),
   `baseline.sh` (config tarball before changing user config), `maintenance-run`, `moodle-keep`,
@@ -196,6 +207,7 @@ read-only without `--apply`; the ledger, `pc undo` and the guard exits are in
   `sentinel-runaway` (runaway-process killer, called by `sentinel-check`; `--dry-run` to preview),
   `wait-for` (wait on a job: `--pid P` | `--file F --match RE [--job P]` | `--until CMD [--job P]`; exits when the job ends or dies; `--list` shows live waits) and
   `sentinel-waits` (kills wait loops whose job or owner agent is gone, called by `sentinel-check`; `--dry-run` to preview),
+  `ci-window` (exit 1 in the nightly CI window 00:50–01:50: `ci-window && <heavy run>`; `--quiet` waits until the 1-min load < 4, cap 30 min),
   `playwright-mcp` (headless unless `PW_HEADED=1`, `PW_PROFILE=<name>`).
 - Skills: `/desktop` (pc), `/browser` + `/moodle-web` (Playwright MCP), `/eye`, `/moodle-ci`,
   `/moodle-docs` (offline moodledev.io mirror — never web-fetch it), `/moodle-guidelines`,

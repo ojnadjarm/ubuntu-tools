@@ -13,6 +13,7 @@ class Http(unittest.TestCase):
         open(os.path.join(cls.tmp.name, "blob.bin"), "wb").write(bytes(range(256)) * 4)
         for i in range(40):
             open(os.path.join(cls.tmp.name, "note-%02d.txt" % i), "w").write("x")
+        open(os.path.join(cls.tmp.name, "café—notes.txt"), "w").write("x")
         cls.srv = server.Server(("127.0.0.1", 0), server.Handler)
         threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
 
@@ -71,6 +72,12 @@ class Http(unittest.TestCase):
         self.assertEqual(body, bytes(range(100)))
         r, body = self.get("/files/blob.bin", Range="bytes=-24")
         self.assertEqual((r.status, body), (206, bytes(range(232, 256))))
+
+    def test_download_non_latin1_name(self):
+        r, body = self.get("/files/caf%C3%A9%E2%80%94notes.txt?dl=1")
+        self.assertEqual((r.status, body), (200, b"x"))
+        self.assertEqual(r.getheader("Content-Disposition"),
+                         "attachment; filename=\"caf_notes.txt\"; filename*=UTF-8''caf%C3%A9%E2%80%94notes.txt")
 
     def test_post_is_no_store(self):
         r, _ = self.get("/api/nothing", method="POST")

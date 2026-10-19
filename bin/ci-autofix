@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# ci-autofix — run a CI command; on red, one fixer agent per cause per 24 h, one re-run, a high push only if still red (T402).
+# Load contention (the CI log's `ci-load: contention` line or the fixer's `Cause: … contention` report) re-runs once when quiet (T407).
+# Targets: ailearning-ci-daily.service (T402), fleet-ci-daily.service (T459) in ~/agents/units.
+set -uo pipefail
+usage() { echo "usage: ci-autofix --repo <dir> --log <ci log> <label> -- <ci command>...   (fixer: agent-run \${CI_AUTOFIX_AGENT:-ci-fix})" >&2; exit "${1:-2}"; }
+REPO=""; LOG=""
+while [ $# -gt 0 ]; do case "$1" in
+  -h|--help) usage 0;;
+  --repo|--log) [ $# -ge 2 ] || usage; [ "$1" = --repo ] && REPO="$2" || LOG="$2"; shift 2;;
+  -*) usage;;
+  *) break;;
+esac; done
+LABEL="${1:-}"; [ $# -ge 2 ] && [ "$2" = -- ] || usage; shift 2
+[ -n "$REPO" ] && [ -n "$LOG" ] && [ -n "$LABEL" ] && [ $# -gt 0 ] || usage
+
+B="$HOME/agents/bin"; AGENT="${CI_AUTOFIX_AGENT:-ci-fix}"
+DIR="$HOME/agents/state/ci-fix"; TRIES="$DIR/attempts.tsv"; NOTE="$DIR/$(date +%F).md"
+export CI_AUTOFIX=1   # the CI command leaves the push to this wrapper
+# One budget for the whole run (T408): every load wait and the re-run fit before the unit's 10800 s timeout, 300 s margin.
+export CI_DEADLINE="${CI_DEADLINE:-$(( $(date +%s) + ${CI_BUDGET:-10500} ))}" CI_RUN_NEED="${CI_RUN_NEED:-2700}"
+mkdir -p "$DIR"
+
+# Cluster line of the failed run with exit code $1: auditlib's error_cluster plus the log's last failure line.
+cluster() {
+  tail -n 60 "$LOG" 2>/dev/null | python3 -c '
+import re, sys
+sys.path.insert(0, sys.argv[1])
+from auditlib import error_cluster
+tail = sys.stdin.read()
+c = error_cluster({"tool": "Bash", "summary": sys.argv[3], "error": f"Exit code {sys.argv[2]}\n{tail}"})
+hit = next((l for l in reversed(tail.splitlines()) if re.search(r"(?i)fail|error|✖", l)), None)
+print(c + (" · " + " ".join(hit.split())[:160] if hit else ""))' "$B" "$1" "$(basename "$CMD0")"
+}
+# True when the red run was CPU contention: the CI's own log line, or a fixer report written after $ATT that names it.
+contended() {
+  grep -q '^ci-load: contention' "$LOG" 2>/dev/null && return 0
+  [ -n "$ATT" ] && [ "$(stat -c %Y "$REPORT" 2>/dev/null || echo 0)" -ge "$ATT" ] && grep -qiE '^cause:.*contention' "$REPORT"
+}
+quiet() { echo "contention: re-run once the machine is quiet" >>"$NOTE"; "$B/ci-window" --quiet >>"$NOTE" 2>&1; }
+# One re-run: green resolves the need ("green $1"), red pushes ("$2").
+rerun() {
+  local left=$(( CI_DEADLINE - $(date +%s) ))
+  if [ "$left" -lt "$CI_RUN_NEED" ]; then
+    echo "budget: $left s left before the unit timeout, a re-run needs $CI_RUN_NEED s; skipped" | tee -a "$NOTE"
+    push "(no time left for a re-run before the unit timeout)"; exit "$rc"
+  fi
+  "${CMD[@]}"; rc=$?
+  case "$rc" in 2|75|143) echo "re-run: rc $rc, left to the CI command" >>"$NOTE"; exit "$rc";; esac
+  if [ "$rc" -eq 0 ]; then
+    echo "re-run: green $1" >>"$NOTE"
+    "$B/pc" need resolve "$LABEL ci failed" --fixed "ci-autofix: green $1 (${NOTE/#$HOME/\~})" --apply || true
+    exit 0
+  fi
+  CAUSE="$(cluster "$rc")"; KEY="$(printf '%s' "$CAUSE" | tr -d '0-9')"
+  echo "re-run: still red (rc $rc): $CAUSE" >>"$NOTE"
+  push "$2"
+  exit "$rc"
+}
+push() { "$B/notify-owner" -p high -t "$LABEL" -k "$LABEL ci: $KEY" "$LABEL ci failed $1: ${CAUSE:0:120} · ${NOTE/#$HOME/\~}" || true; }
+
+CMD0="$1"; CMD=("$@"); ATT=""; REPORT="$HOME/agents/$AGENT/REPORT.md"
+"$@"; rc=$?
+case "$rc" in 0|2|75|143) exit "$rc";; esac
+
+CAUSE="$(cluster "$rc")"; KEY="$(printf '%s' "$CAUSE" | tr -d '0-9')"
+now=$(date +%s)
+{ printf '\n## %s red at %s (rc %d)\n\ncluster: %s\nlog: %s\n\n```\n' "$LABEL" "$(date -Is)" "$rc" "$CAUSE" "$LOG"
+  tail -n 40 "$LOG" 2>/dev/null; printf '```\n'; } >>"$NOTE"
+if awk -F'\t' -v k="$KEY" -v c=$((now - 86400)) '$1 >= c && $2 == k {f=1} END {exit !f}' "$TRIES" 2>/dev/null; then
+  echo "attempt: skipped, this cause already had its fix attempt in the last 24 h" >>"$NOTE"
+  contended && { quiet; rerun "after a quiet re-run" "(auto-fix already tried in 24 h)"; }
+  push "(auto-fix already tried in 24 h)"; exit "$rc"
+fi
+printf '%s\t%s\n' "$now" "$KEY" >>"$TRIES"
+
+T="$HOME/agents/$AGENT/BRIEF.template.md"
+b="$(cat "$T")"
+b="${b//@LABEL@/"$LABEL"}"; b="${b//@REPO@/"$REPO"}"; b="${b//@NOTE@/"$NOTE"}"; b="${b//@LOG@/"$LOG"}"; b="${b//@CAUSE@/"$CAUSE"}"; b="${b//"$HOME"/\~}"
+printf '%s\n' "$b" >"$HOME/agents/$AGENT/BRIEF.md"
+ATT=$(date +%s)
+AGENT_RUN_NO_PUSH=1 "$B/agent-run" "$AGENT"; arc=$?
+echo "attempt: agent-run $AGENT exit $arc" >>"$NOTE"
+
+contended && quiet
+rerun "after the fix attempt" "after one auto-fix attempt"

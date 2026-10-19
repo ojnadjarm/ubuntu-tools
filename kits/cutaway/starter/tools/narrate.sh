@@ -4,7 +4,7 @@
 set -euo pipefail
 unit=$1; shift
 id=$(basename "$unit" .unit.json)
-PY=~/agents/research/2026-09-23/T65/tts/envs/kokoro/bin/python
+PY=~/.local/opt/kokoro/bin/python
 mkdir -p content/.render public/bundles/"$id"
 "$PY" ~/.claude/skills/kokoro-narration/render_narration.py "$unit" content/.render/"$id" "$@"
 rm -rf public/bundles/"$id"/audio

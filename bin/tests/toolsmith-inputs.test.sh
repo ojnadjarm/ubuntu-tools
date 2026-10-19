@@ -99,6 +99,10 @@ t "idle.baseline is the last BASELINE-IDLE.tsv row"
   = '["2026-01-11T02:00:00+01:00",4.54,5.59,"rcu_preempt",76.7,"-"]' ] &&
   ok || no "$(printf '%s' "$J" | jq -c .idle.baseline)"
 
+t "idle.baseline carries other_rss_mb and other_top (TSP-039)"
+[ "$(printf '%s' "$J" | jq -c '.idle.baseline|[.other_rss_mb,.other_top]')" = '[489.8,"agent@x.service:chrome-headless:3600:455"]' ] &&
+  ok || no "$(printf '%s' "$J" | jq -c .idle.baseline)"
+
 t "tokens: per-agent per-run in/out where the columns exist"
 [ "$(printf '%s' "$J" | jq -c '[.tokens.columns_present,.tokens.agents.alpha.runs,
   .tokens.agents.alpha.in_per_run,.tokens.agents.alpha.out_per_run,
@@ -110,6 +114,20 @@ t "tokens: cache_r, tool calls and the histogram, legacy short rows still counte
   .tokens.agents.alpha.tool_calls,.tokens.agents.alpha.tool_histogram.Bash,
   .tokens.agents.alpha.tool_histogram.Read]')" = '[2000,8,5,3]' ] &&
   ok || no "$(printf '%s' "$J" | jq -c .tokens.agents.alpha)"
+
+t "tokens: Workflow runs are flagged partial, not averaged in"
+R="$(mktemp -d)"; mkdir -p "$R/swarm/logs"
+{ printf 'start\ttokens_in\ttokens_out\thistogram\n'
+  printf '%s\t10\t1000\tWorkflow=1,Bash=4\n' "$(date +%Y-%m-%dT%H:%M:%S)"
+  printf '%s\t300\t5000\tBash=2\n' "$(date +%Y-%m-%dT%H:%M:%S)"; } > "$R/swarm/logs/index.tsv"
+o="$(TOOLSMITH_ROOT="$R" HARNESS_HOME=/nonexistent "$CLI" --since 4d 2>/dev/null)"
+[ "$(printf '%s' "$o" | jq -c '.tokens.agents.swarm|[.runs,.partial_runs,.tokens_partial,.in_per_run,.out_per_run]')" \
+  = '[2,1,true,300,5000]' ] && ok || no "$(printf '%s' "$o" | jq -c .tokens.agents.swarm)"
+m="$(TOOLSMITH_ROOT="$R" HARNESS_HOME=/nonexistent "$CLI" --since 4d --md 2>/dev/null)"
+t "--md marks the partial Workflow runs"
+printf '%s' "$m" | grep -q 'swarm: 300 in / 5000 out.*1 Workflow run(s) partial' && ok ||
+  no "$(printf '%s' "$m" | grep -A1 '^## tokens')"
+rm -rf "$R"
 
 t "the window actually filters"
 [ "$(run --since 1s 2>/dev/null | jq -c '[.audit.lines,.changes.window,(.tokens.agents|length)]')" \
@@ -127,6 +145,10 @@ t "--md prints the baseline before the biased live sample"
 printf '%s\n' "$M" | grep -A2 '^## idle' | sed -n '2p;3p' | tr '\n' '|' |
   grep -q '^- baseline 2026-01-11T02:00:00+01:00: package 4.54 W.*|- live (biased by this run)' &&
   ok || no "$(printf '%s\n' "$M" | grep -A3 '^## idle')"
+
+t "--md idle baseline names the largest browser tree"
+printf '%s\n' "$M" | grep -A1 '^## idle' | grep -q 'other 489.8 MB (agent@x.service:chrome-headless:3600:455)' &&
+  ok || no "$(printf '%s\n' "$M" | grep -A1 '^## idle')"
 
 t "--md carries no money either"
 printf '%s' "$M" | grep -qiE 'cost|usd|\$' && no "money in --md" || ok
@@ -186,6 +208,45 @@ R="$(mktemp -d)"; mkdir -p "$R/log"
 o="$(TOOLSMITH_ROOT="$R" HARNESS_HOME=/nonexistent "$CLI" --since 4d 2>/dev/null)"
 [ "$(printf '%s' "$o" | jq -c '[.audit.raw_kind,.audit.raw_total,.audit.lines]')" = '["agent",1,4]' ] &&
   ok || no "$(printf '%s' "$o" | jq -c '.audit|[.raw_kind,.raw_total,.lines]')"
+rm -rf "$R"
+
+t "failures: ok:false rows counted by op, newest errors listed"
+R="$(mktemp -d)"; mkdir -p "$R/log"
+now=$(date +%Y-%m-%dT%H:%M:%S)
+{ printf '{"ts":"%s","session":"s","tool":"Bash","op":"pc see","summary":"pc see","ok":true}\n' "$now"
+  printf '{"ts":"%s","session":"s","tool":"Bash","op":"pc see","summary":"pc see","ok":false,"error":"Exit code 1"}\n' "$now"
+  printf '{"ts":"%s","session":"s","tool":"Bash","op":"pc see","summary":"pc see","ok":false,"error":"Exit code 2"}\n' "$now"
+  printf '{"ts":"%s","session":"s","tool":"Read","op":"Read x","summary":"/x","ok":false,"error":"File does not exist"}\n' "$now"
+  printf '{"ts":"%s","session":"s","tool":"Bash","op":"ls","summary":"ls"}\n' "$now"; } > "$R/log/actions.jsonl"
+o="$(TOOLSMITH_ROOT="$R" HARNESS_HOME=/nonexistent "$CLI" --since 4d 2>/dev/null)"
+[ "$(printf '%s' "$o" | jq -c '[.failures.rows,.failures.of,.failures.by_op["pc see"],(.failures.recent|length),.failures.recent[-1].error]')" \
+  = '[3,5,2,3,"File does not exist"]' ] && ok || no "$(printf '%s' "$o" | jq -c .failures)"
+t "failures: top clusters by op + first error line, with the rate"
+[ "$(printf '%s' "$o" | jq -c '[.failures.rate_pct,(.failures.clusters|length),.failures.clusters[0].key,.failures.clusters[0].n]')" \
+  = '[60.0,3,"pc see · exit 1",1]' ] && ok || no "$(printf '%s' "$o" | jq -c '.failures|{rate_pct,clusters}')"
+t "--md prints the failures line"
+TOOLSMITH_ROOT="$R" HARNESS_HOME=/nonexistent "$CLI" --since 4d --md 2>/dev/null | grep -q '^- failures: 3 real of 5 calls (60.0%) · guarded 0 · probe 0 · red-first 0 · bench 0' &&
+  ok || no "$(TOOLSMITH_ROOT="$R" HARNESS_HOME=/nonexistent "$CLI" --since 4d --md 2>/dev/null | grep -i fail)"
+rm -rf "$R"
+
+t "failures: by-design rows classed, rate on real, bench apart"
+R="$(mktemp -d)"; mkdir -p "$R/log"
+a='{"ts":"%s","session":"%s","agent":"%s","tool":"Bash","op":"%s","summary":"%s","ok":false,"error":"%s"}\n'
+{ printf '{"ts":"%s","session":"s","tool":"Bash","op":"ls","summary":"ls","ok":true}\n' "$now"
+  printf "$a" "$now" r toolsmith "grep -rn" "grep -rn x ." 'Exit code 97\nleftover'
+  printf "$a" "$now" r toolsmith "which eye-tap" "ls; which eye-tap" 'Exit code 1'
+  printf "$a" "$now" i "" "bash /h/agents/bin/tests/x.test.sh" "bash /h/agents/bin/tests/x.test.sh" 'Exit code 1\nFAIL — got 3'
+  printf "$a" "$now" i "" "python3 f.py" "python3 f.py" 'Exit code 1\nKeyError: x'
+  printf "$a" "$now" b bench "systemctl --user" "systemctl --user is-active pcbench-idle.service" 'Exit code 3\ninactive'
+  printf '{"ts":"%s","session":"s","tool":"Bash","op":"ls","summary":"ls","ok":true}\n' "$now"; } > "$R/log/actions.jsonl"
+o="$(TOOLSMITH_ROOT="$R" HARNESS_HOME=/nonexistent "$CLI" --since 4d 2>/dev/null)"
+[ "$(printf '%s' "$o" | jq -c '.failures|[.rows,.of,.rate_pct,.by_class,.bench_rows,[.clusters[].key]]')" \
+  = '[4,6,16.67,{"guarded":1,"probe":1,"red-first":1,"real":1},1,["exit 1 · KeyError"]]' ] &&
+  ok || no "$(printf '%s' "$o" | jq -c '.failures|del(.recent)')"
+t "--md prints the four buckets"
+TOOLSMITH_ROOT="$R" HARNESS_HOME=/nonexistent "$CLI" --since 4d --md 2>/dev/null |
+  grep -q '^- failures: 1 real of 6 calls (16.7%) · guarded 1 · probe 1 · red-first 1 · bench 1' &&
+  ok || no "$(TOOLSMITH_ROOT="$R" HARNESS_HOME=/nonexistent "$CLI" --since 4d --md 2>/dev/null | grep -i fail)"
 rm -rf "$R"
 
 t "bench_failures: skipped rows out, new arm first, old C no --apply expected"

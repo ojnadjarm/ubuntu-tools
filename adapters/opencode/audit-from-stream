@@ -19,6 +19,7 @@ NAMES = {'bash': 'Bash', 'read': 'Read', 'write': 'Write', 'edit': 'Edit', 'patc
          'todowrite': 'TodoWrite', 'todoread': 'TodoRead', 'task': 'Task', 'skill': 'Skill'}
 SESSION = os.environ.get('AGENT_SESSION_ID', '')
 CWD = os.environ.get('PWD', '')
+AGENT = os.environ.get('AGENT_NAME', '')
 
 for line in sys.stdin:
     sys.stdout.write(line)
@@ -39,6 +40,6 @@ for line in sys.stdin:
         name = part.get('tool') or '?'
         core.record(NAMES.get(name, name), args,
                     args.get('workdir') or CWD,
-                    ev.get('sessionID') or SESSION)
+                    (ev.get('sessionID') or SESSION).removeprefix('ses_'), AGENT)
     except Exception:
         continue

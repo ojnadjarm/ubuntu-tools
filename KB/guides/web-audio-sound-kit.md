@@ -27,7 +27,7 @@ Ticket: T57 · Last verified: 2026-09-24 by `node --test test/remote-sound.test.
 cd ~/the-dark-eye/body
 node --test test/remote-sound.test.js          # served without cookie, lab behind the key, levels rendered offline
 # lab page with every sound on a button (behind the Eye key):  https://<tailnet>:8644/lab/sound.html
-cd ~/agents/research/2026-09-23/T57/build            # a stub Eye on :18657 (key t57), never the live body
+cd ~/agent-work/research/2026-09-23/T57/build            # a stub Eye on :18657 (key t57), never the live body
 ./nosound node dev-server.js &                        # nosound = bwrap hiding /dev/snd and the pipewire socket
 ./nosound node levels.js    # peak/bed dBFS via window.labLevels() on an OfflineAudioContext
 ./nosound node duck.js      # duck depth under the voice · fps.js: fps before/after the kit
@@ -48,6 +48,13 @@ cd ~/agents/research/2026-09-23/T57/build            # a stub Eye on :18657 (key
 ## Links
 - Code: `~/the-dark-eye/body/src/remote-www/sound.js`, wiring in `remote-www/index.html` ("the sound" block), lab `remote-www/lab/sound.html`
 - Tests: `~/the-dark-eye/body/test/remote-sound.test.js`
-- Scripts: `~/agents/research/2026-09-23/T57/build/` (`common.js` = muted Playwright launch) · backups `~/agents/backups/T57/`
+- Scripts: `~/agent-work/research/2026-09-23/T57/build/` (`common.js` = muted Playwright launch) · backups `~/agents/backups/T57/`
   (the 20 s demo video `~/drop/t57/` is gone from the drop as of 2026-09-24)
-- Brief: `~/agents/briefs/T57-sound-design.md` · Skill: `ui-sound-design`
+- Brief: `~/agent-work/briefs/T57-sound-design.md` · Skill: `ui-sound-design`
+
+## T333 additions (neon-sin page sound, 2026-10-12)
+- Second start point: `~/projects/personal/sinners-day-web/mockups/neon-sin/js/sound.js` (ES module: `createKit(ctx, clips)` shared by page and offline renders, `mountSound()` header toggle, off by default, soft/hard buses with press ducking); render tool `~/agent-work/research/2026-10-12/T333/tools/render.mjs` (WAV + peak per sound), demo page generator `demo.py`.
+- Counting voices in a test: patch `AudioBufferSourceNode.prototype.start` as well as `AudioScheduledSourceNode.prototype.start`; the buffer source has its own `start`, so clips are invisible otherwise.
+- Any periodic sound (a flicker every 5–14 s, eye blinks) keeps the context from napping; gate them on their element being on screen.
+- Noise-based sounds vary ±2 dB per render: calibrate trims on the worst of several renders, keep 1–2 dB under the ceiling.
+- The drop serves any file but `.html`/`.htm` as an attachment (T388); `<audio>` still plays attachment WAVs.

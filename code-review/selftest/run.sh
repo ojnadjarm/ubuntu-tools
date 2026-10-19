@@ -14,7 +14,7 @@ echo "selftest: fixture $FX"
 code-review-sandbox --fixture "$FX" --selftest || exit 1
 
 roots=("$HOME/agents/bin" "$HOME/agents/dashboard" "$HOME/agents/hooks" "$HOME/agents/eye-relay" "$HOME/agents/adapters"
-       "$HOME/agents/units" "$HOME/agents/KB" "$HOME/agents/improve" "$HOME/agents/toolsmith" "$HOME/agents/briefs"
+       "$HOME/agents/units" "$HOME/agents/KB" "$HOME/agents/improve" "$HOME/agents/toolsmith" "${AGENT_WORK:-$HOME/agent-work}/briefs"
        "$HOME/agents/backups/code-review" "$HOME/agents/backups/retired" "$HOME/.claude/skills" "$HOME/.claude/agents"
        "$HOME/.claude/hooks" "$HOME/.claude/projects/${HOME//\//-}/memory" "$HOME/.config/pc-harness"
        "$HOME/.config/systemd/user" "$HOME/.local/bin")

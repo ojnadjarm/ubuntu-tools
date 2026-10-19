@@ -4,8 +4,8 @@ import argparse
 import datetime as dt
 import fcntl
 import glob
-import gzip
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -14,10 +14,21 @@ import subprocess
 import sys
 import time
 
+BIN = os.path.dirname(os.path.realpath(__file__))
+sys.path[:0] = [os.path.join(BIN, '..', 'lib'), BIN]
+from agent_work import agent_work  # noqa: E402
+from auditlib import rotated_rows, row_stamp  # noqa: E402
+
+_core = importlib.util.spec_from_file_location('audit_log', os.path.join(BIN, '..', 'hooks', 'audit-log.py'))
+audit_log = importlib.util.module_from_spec(_core)
+_core.loader.exec_module(audit_log)
+redact = audit_log.redact
+
 REAL_HOME = os.path.expanduser('~')
 HOME = os.path.abspath(os.environ.get('CR_HOME') or REAL_HOME)
 FIXTURE = HOME != REAL_HOME
 AGENTS = os.path.join(HOME, 'agents')
+AW_REL = os.path.relpath(agent_work(), REAL_HOME)
 SKILLS = os.path.join(HOME, '.claude', 'skills')
 ME = os.path.join(AGENTS, 'code-review')
 STATE = os.path.join(ME, 'state')
@@ -32,6 +43,8 @@ DATE = os.environ.get('CR_DATE') or dt.date.today().isoformat()
 NOW = float(os.environ.get('CR_NOW') or time.time())
 UNUSED_DAYS = 28
 TOOLSMITH_CAP = 3
+SWEEP_EVERY = 4  # every 4th run reads whole areas; the others read changed files plus a rotation quarter
+QUARTERS = 4
 RETIRE_WHY = ('broken', 'duplicate', 'superseded', 'obsolete')
 
 AREAS = [  # key, paths under HOME, test commands (run from HOME)
@@ -71,11 +84,11 @@ CONTAINMENT = ['agents/bin/code-review', 'agents/bin/code-review-sandbox', 'agen
                'agents/code-review/state', 'agents/bin/tests/code-review.test.sh', 'agents/bin/tests/fixtures/code-review',
                'agents/log', 'agents/FILE-CLAIMS.md', 'agents/.git']
 WRITTEN_BY_CLI = ('agents/code-review/state', 'agents/log', 'agents/FILE-CLAIMS.md')  # forbidden to lanes, written by the CLI/hooks
-FORBIDDEN = ['agents/backups', 'agents/secrets', 'agents/asr-corpus', 'agents/research', 'agents/AGENTS.md',
-             'agents/FLEET.md', '.claude/CLAUDE.md', '.claude/settings.json', 'CLAUDE.md'] + CONTAINMENT
-REF_DIRS = ['agents/briefs', 'agents/KB', 'agents/units', 'agents/bin', 'agents/hooks', 'agents/adapters',
+FORBIDDEN = ['agents/backups', 'agents/secrets', 'agents/asr-corpus', f'{AW_REL}/research', f'{AW_REL}/owner', 'agents/AGENTS.md',
+             'agents/ORCHESTRATOR.md', 'agents/FLEET.md', '.claude/CLAUDE.md', '.claude/settings.json', 'CLAUDE.md'] + CONTAINMENT
+REF_DIRS = [f'{AW_REL}/briefs', 'agents/KB', 'agents/units', 'agents/bin', 'agents/hooks', 'agents/adapters',
             'agents/eye-relay', 'agents/dashboard', 'agents/README.md', 'agents/RUNNER.md', 'agents/Makefile',
-            'agents/install.sh', 'CLAUDE.md', '.claude/skills', '.claude/settings.json', '.config/systemd/user']
+            'agents/install.sh', 'CLAUDE.md', 'agents/ORCHESTRATOR.md', '.claude/skills', '.claude/settings.json', '.config/systemd/user']
 REF_SKIP = re.compile(r'/(state|logs|__pycache__|node_modules|\.git|plans|mockups)/')
 
 
@@ -103,7 +116,7 @@ def harness_skills():
 def installed_skills():
     """Third-party skills: a same-named SKILL.md exists in a research skills-src checkout."""
     out = set()
-    for f in glob.glob(os.path.join(AGENTS, 'research', '*', '*', 'skills-src', '**', 'SKILL.md'), recursive=True):
+    for f in glob.glob(os.path.join(HOME, AW_REL, 'research', '*', '*', 'skills-src', '**', 'SKILL.md'), recursive=True):
         out.add(os.path.basename(os.path.dirname(f)))
     return out
 
@@ -146,36 +159,17 @@ def policy_rules():
 
 
 # ---- audit log -----------------------------------------------------------------------------------
-def audit_lines():
-    for f in sorted(glob.glob(AUDIT + '*')):
-        opener = gzip.open if f.endswith('.gz') else open
-        try:
-            with opener(f, 'rt', errors='replace') as fh:
-                yield from fh
-        except OSError:
-            continue
-
-
-def ts_of(line):
-    m = re.search(r'"ts":\s*"([^"]+)"', line)
-    if not m:
-        return None
-    try:
-        return dt.datetime.strptime(m.group(1), '%Y-%m-%dT%H:%M:%S%z').timestamp()
-    except ValueError:
-        return None
-
-
 def usage(names, days=UNUSED_DAYS):
     """Uses of each name in the audit log inside the window, last use, and how many days the log covers."""
     cut = NOW - days * 86400
     pats = {n: re.compile(r'(?<![\w.-])' + re.escape(n) + r'(?![\w-])') for n in names}
     res = {n: {'uses': 0, 'last': None} for n in names}
     oldest = None
-    for line in audit_lines():
-        t = ts_of(line)
+    for row in rotated_rows(AUDIT, cut):
+        t = row_stamp(row)
         if t is None:
             continue
+        line = json.dumps(row)
         oldest = t if oldest is None else min(oldest, t)
         for n, rx in pats.items():
             if rx.search(line):
@@ -457,7 +451,8 @@ def test_exists(t):
 def fail_lines(out):
     """Failing-test lines, with numbers masked so timings do not count as new failures."""
     return sorted({re.sub(r'\d+(\.\d+)?', '#', l.strip())[:160] for l in out.splitlines()
-                   if re.search(r'\bFAIL|\bERROR\b|Error:|Traceback', l)})
+                   if re.search(r'\bFAIL|\bERROR\b|Error:|Traceback', l)
+                   and not re.match(r'(ok|OK|PASS|pass)\b', l.strip())})
 
 
 def run_tests(cmds):
@@ -679,7 +674,7 @@ def open_items():
 
 
 def toolsmith_backlog():
-    """Open auto-ok toolsmith proposals for the toolsmith lane: status proposed, lowest rank first, at most TOOLSMITH_CAP."""
+    """Open auto-ok toolsmith proposals for the toolsmith lane: status go then proposed, lowest rank first, at most TOOLSMITH_CAP."""
     rows = []
     try:
         lines = open(os.path.join(AGENTS, 'toolsmith', 'BACKLOG.md')).readlines()
@@ -687,12 +682,70 @@ def toolsmith_backlog():
         return []
     for line in lines:
         c = [x.strip() for x in line.split('|')]
-        if len(c) > 6 and c[1].isdigit() and re.fullmatch(r'TSP-\d+', c[2]) and c[4] == 'auto-ok' and c[5] == 'proposed':
+        if len(c) > 6 and c[1].isdigit() and re.fullmatch(r'TSP-\d+', c[2]) and c[4] == 'auto-ok' and c[5] in ('go', 'proposed'):
             p = os.path.join(AGENTS, 'toolsmith', 'proposals', c[2] + '.md')
             if os.path.isfile(p):
                 accept = re.findall(r'^- measured by:\s*(.+)$', open(p, errors='replace').read(), re.M)
-                rows.append({'id': c[2], 'rank': int(c[1]), 'title': c[3], 'path': p, 'accept': accept[-1] if accept else ''})
-    return sorted(rows, key=lambda r: r['rank'])[:TOOLSMITH_CAP]
+                rows.append({'id': c[2], 'rank': int(c[1]), 'status': c[5], 'title': c[3], 'path': p,
+                             'accept': accept[-1] if accept else ''})
+    return sorted(rows, key=lambda r: (r['status'] != 'go', r['rank']))[:TOOLSMITH_CAP]
+
+
+def area_files(paths):
+    """Every reviewable file under an area's paths with its mtime, sorted by path."""
+    skip = re.compile(SNAP_SKIP.pattern + r'|/\.git(/|$)')
+    out = []
+    for root in paths:
+        for d, ds, fs in os.walk(root):
+            ds[:] = [x for x in ds if not skip.search(os.path.join(d, x) + '/')]
+            for f in fs:
+                p = os.path.join(d, f)
+                if skip.search(p) or os.path.islink(p):
+                    continue
+                try:
+                    out.append((p, os.path.getmtime(p)))
+                except OSError:
+                    continue
+    return sorted(out)
+
+
+def completed_runs():
+    """Earlier runs whose swarm returned, oldest first: (prep time = args.json mtime, was it a full sweep)."""
+    out = []
+    for d in glob.glob(os.path.join(STATE, 'runs', '*')):
+        try:
+            res = json.load(open(os.path.join(d, 'result.json')))
+            args = json.load(open(os.path.join(d, 'args.json')))
+            t = os.path.getmtime(os.path.join(d, 'args.json'))
+        except (OSError, ValueError):
+            continue
+        if isinstance(res, dict) and not res.get('error'):
+            out.append((t, any(x.get('sweep', True) for x in args.get('areas', []))))
+    return sorted(out)
+
+
+def focus_plan(runs):
+    """(sweep, since, quarter): a full sweep after SWEEP_EVERY - 1 focused runs; focused run k reads rotation quarter k."""
+    if not runs:
+        return True, 0.0, 0
+    k = 0
+    for _, sweep in reversed(runs):
+        if sweep:
+            break
+        k += 1
+    return k >= SWEEP_EVERY - 1, runs[-1][0], k % QUARTERS
+
+
+def quarter_of(path):
+    return int(hashlib.sha1(rel(path).encode()).hexdigest(), 16) % QUARTERS
+
+
+def area_focus(paths, sweep, since, quarter):
+    """focus = files changed since the last finished run, then (focused runs only) this run's quarter of the rest."""
+    files = area_files(paths)
+    changed = [p for p, m in files if m > since]
+    rest = [] if sweep else [p for p, m in files if m <= since and quarter_of(p) == quarter]
+    return {'sweep': sweep, 'focus': changed + rest, 'changed': len(changed), 'files': len(files)}
 
 
 def cmd_prep(a):
@@ -705,14 +758,17 @@ def cmd_prep(a):
     open(os.path.join(STATE, 'current-run'), 'w').write(run + '\n')
     rdir = run_dir(run)
     os.makedirs(rdir, exist_ok=True)
+    sweep, since, quarter = focus_plan(completed_runs())
     areas = []
     for key, paths, tests in AREAS:
         ps = [os.path.join(HOME, p) for p in paths if os.path.exists(os.path.join(HOME, p))]
         if ps:
-            areas.append({'key': key, 'paths': ps, 'tests': [t for t in tests if test_exists(t)]})
+            areas.append({'key': key, 'paths': ps, 'tests': [t for t in tests if test_exists(t)],
+                          **area_focus(ps, sweep, since, quarter)})
     seen = load_seen()
     args = {
         'date': DATE, 'run': run, 'mode': 'fixture' if FIXTURE else 'real', 'home': HOME, 'run_dir': rdir,
+        'focus': {'sweep': sweep, 'since': dt.datetime.fromtimestamp(since).isoformat(timespec='seconds'), 'quarter': quarter},
         'rules': RULES, 'swarm': SWARM, 'cli': 'code-review', 'areas': areas,
         'lenses': [{'key': k, 'ask': q} for k, q in LENSES],
         'policy': policy_rules(),
@@ -736,13 +792,7 @@ def cmd_prep(a):
 SKIP_VERDICTS = ('refuted', 'queued', 'staged', 'reported', 'retired', 'kept')
 SEEN_VERDICT = {'fixed': 'fixed', 'retired': 'retired', 'queued': 'queued', 'staged': 'staged', 'kept': 'kept',
                 'left': 'reported'}
-SECRET = re.compile(r'(sk-ant-[\w-]{8,}|gh[pousr]_\w{20,}|xox[abprs]-[\w-]{10,}|AKIA[0-9A-Z]{16}|eyJ[\w-]{20,}\.[\w.-]+'
-                    r'|(?i:(?:token|secret|password|passwd|api[_-]?key|topic)\s*[:=]\s*)["\']?[^\s"\',;]{6,})')
 
-
-def redact(text):
-    return SECRET.sub(lambda m: (m.group(0).split('=')[0].split(':')[0] + '=[redacted]')
-                      if re.match(r'(?i)(token|secret|pass|api|topic)', m.group(0)) else '[redacted]', text)
 
 
 def read_or_none(p):
@@ -815,7 +865,7 @@ def cmd_finish(a):
     with open(os.path.join(STATE, 'seen.jsonl'), 'a') as fh:
         for i in items:
             st = i.get('status')
-            v = 'refuted' if i.get('verdict') != 'confirmed' else \
+            v = 'unverified' if i.get('verdict') == 'unverified' else 'refuted' if i.get('verdict') != 'confirmed' else \
                 'fixed' if st == 'already-fixed' else SEEN_VERDICT.get(st, 'deferred')
             fh.write(json.dumps({'key': i.get('key'), 'date': DATE, 'run': run, 'verdict': v,
                                  'title': i.get('title'), 'file': i.get('file')}) + '\n')
@@ -841,12 +891,16 @@ def cmd_finish(a):
     section('Fixed', fixed)
     section('Retired', retired)
     section('Left for the owner or next week', left)
-    section('Refuted', [i for i in main if i.get('verdict') != 'confirmed'])
+    section('Unverified (refuters gave no answer; back next week)', [i for i in main if i.get('verdict') == 'unverified'])
+    section('Refuted', [i for i in main if i.get('verdict') not in ('confirmed', 'unverified')])
     section('Duplicate reports merged into the findings above', [i for i in items if i.get('merged_into')])
     doc = os.path.join(rdir, 'findings.md')
     open(doc, 'w').write(redact('\n'.join(md) + '\n'))
     lines = [f'found {found}', f'confirmed {len(confirmed)}', f'fixed {len(fixed)}', f'retired {len(retired)}',
              f'left {len(left)}' + (' (' + ', '.join(f'{k} {v}' for k, v in sorted(by.items())) + ')' if by else '')]
+    unver = sum(i.get('verdict') == 'unverified' for i in main)
+    if unver:
+        lines.append(f'unverified {unver} (refuters gave no answer; back next week)')
     with open(os.path.join(ME, 'REPORT.md'), 'w') as fh:
         fh.write('\n'.join(lines) + '\n')
     msg = (f'code-review: found {found}, confirmed {len(confirmed)}, fixed {len(fixed)}, retired {len(retired)}, '

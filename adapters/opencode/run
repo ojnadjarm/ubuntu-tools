@@ -28,8 +28,11 @@ case "${MODEL:-}" in */*) [ -n "$model" ] || model="$MODEL";; esac
 [ -n "${AGENT_TIMEOUT:-}" ] && cmd=(timeout "$AGENT_TIMEOUT" "${cmd[@]}")
 cmd+=(-- "$prompt")
 
-"${cmd[@]}" </dev/null | tee "$RAW_OUT" | "$HERE/audit-from-stream" >/dev/null
-rc=${PIPESTATUS[0]}
+# Background + wait so a SIGTERM from agents-stop reaches opencode instead of waiting for it.
+( "${cmd[@]}" </dev/null | tee "$RAW_OUT" | "$HERE/audit-from-stream" >/dev/null; exit "${PIPESTATUS[0]}" ) &
+child=$!
+trap 'pkill -TERM -P "$child"' TERM INT
+until wait "$child"; rc=$?; ! kill -0 "$child" 2>/dev/null; do :; done
 
 python3 - "$RAW_OUT" "$META_OUT" <<'PY'
 import json, sys

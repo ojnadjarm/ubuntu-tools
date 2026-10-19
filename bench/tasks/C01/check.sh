@@ -14,7 +14,8 @@ id=$(jq -r .id <<<"$rec"); rb=$(jq -r .rollback <<<"$rec")
 
 said=$(af "$answer" rollback)
 case "$said" in *"$id"*|*"$rb"*) ;; *) verdict 0 "rollback field '$said' names neither the ledger id $id nor its rollback";; esac
-[ "$(af "$answer" sink)" = "$SINK" ] || verdict 0 "sink field is '$(af "$answer" sink)'"
+said=$(af "$answer" sink)
+[ "${said%% *}" = "$SINK" ] || verdict 0 "sink field is '$said'"
 
 "$PC" undo "$id" --apply >/dev/null 2>&1
 back=$(pactl get-default-sink)

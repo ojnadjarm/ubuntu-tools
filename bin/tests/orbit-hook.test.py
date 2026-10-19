@@ -23,7 +23,11 @@ srv = http.server.HTTPServer(("127.0.0.1", 0), Bridge)
 threading.Thread(target=srv.serve_forever, daemon=True).start()
 os.makedirs(f"{root}/cfg/dark-eye")
 json.dump({"port": srv.server_port, "secret": "x"}, open(f"{root}/cfg/dark-eye/config.json", "w"))
-ENV = dict(os.environ, HOME=root, XDG_CONFIG_HOME=f"{root}/cfg", XDG_RUNTIME_DIR=f"{root}/run")
+os.makedirs(f"{root}/kb/skills")
+open(f"{root}/kb/INDEX.md", "w").write("- orbit-hook-orbiters — agents as orbiters on the Eye: subagent start hook\n"
+                                       "- night-swarm — research swarm lanes · skill /research-swarm\n")
+ENV = dict(os.environ, HOME=root, XDG_CONFIG_HOME=f"{root}/cfg", XDG_RUNTIME_DIR=f"{root}/run",
+           GUIDES_DIR=f"{root}/kb", SKILLS_DIR=f"{root}/kb/skills", AGENT_WORK=f"{root}/aw")
 CLAIMS = f"{root}/run/dark-eye/orbit-claims.json"
 PROJ = f"{root}/.claude/projects/-p"
 TP = f"{PROJ}/sess.jsonl"
@@ -37,8 +41,9 @@ def check(name, ok):
     bad |= not ok
 
 
-def hook(verb, hook=None):
-    subprocess.run([HOOK, verb], input=json.dumps(hook or {}), text=True, env=ENV, timeout=20)
+def hook(verb, hook=None, env=None):
+    return subprocess.run([HOOK, verb], input=json.dumps(hook or {}), text=True, env=env or ENV, timeout=20,
+                          capture_output=True).stdout
 
 
 def touch(path, age=0):
@@ -50,6 +55,21 @@ def touch(path, age=0):
 
 def claims():
     return json.load(open(CLAIMS))
+
+
+def posted(want, secs=5):
+    end = time.time() + secs
+    while time.time() < end:
+        if want in posts:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def line(path, row, mode="a"):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, mode) as f:
+        f.write(json.dumps(row) + "\n")
 
 
 def age_claim(oid, secs):
@@ -72,7 +92,7 @@ touch(wf + ".jsonl")
 json.dump({"description": "T65 mockup"}, open(wf + ".meta.json", "w"))
 hook("start", {"agent_id": wf_id, "transcript_path": TP, "agent_type": "worker"})
 check("workflow start resolves the nested transcript", claims()["wf0001"]["tx"] == wf + ".jsonl")
-check("workflow start labels from the nested meta", {"id": "wf0001", "state": "working", "label": "T65 mockup"} in posts)
+check("workflow start labels from the nested meta", posted({"id": "wf0001", "state": "working", "label": "T65 mockup"}))
 age_claim("wf0001", 3600)
 hook("sweep")
 check("workflow written now stays lit 60 min after start", "wf0001" in claims())
@@ -105,15 +125,6 @@ hook("sweep")
 check("never-found transcript drops at the Eye's 12 h expiry", "ms0001" not in claims())
 
 
-def posted(want, secs=5):
-    end = time.time() + secs
-    while time.time() < end:
-        if want in posts:
-            return True
-        time.sleep(0.05)
-    return False
-
-
 lt_id, lt = "lt0001aaaaaaaaaa", f"{SUBS}/workflows/wf_z/agent-lt0001aaaaaaaaaa"
 touch(lt + ".jsonl")
 t0 = time.monotonic()
@@ -139,11 +150,17 @@ check(f"workflow session: hook skips the in-hook meta wait ({took:.2f} s)", took
 hook("stop", {"agent_id": nw_id, "transcript_path": TP})
 
 TP2 = f"{PROJ}/sess2.jsonl"
-pw_id, pw = "pw0001aaaaaaaaaa", f"{PROJ}/sess2/subagents/agent-pw0001aaaaaaaaaa"
-touch(pw + ".jsonl")
-threading.Timer(0.2, lambda: json.dump({"description": "T74 plain"}, open(pw + ".meta.json", "w"))).start()
+pw_id = "pw0001aaaaaaaaaa"
+line(TP2, {"type": "assistant", "message": {"content": [
+    {"type": "tool_use", "id": "tp1", "name": "Agent", "input": {"subagent_type": "general-purpose", "description": "T391 plain label from the parent", "prompt": "x"}}]}})
+t0 = time.monotonic()
 hook("start", {"agent_id": pw_id, "transcript_path": TP2, "agent_type": "general-purpose"})
-check("plain session: hook still waits for a meta landing in 0.2 s", {"id": "pw0001", "state": "working", "label": "T74 plain"} in posts)
+took = time.monotonic() - t0
+check(f"plain label: lit at once from the parent's Agent call, no meta, no meta wait ({took:.2f} s)",
+      {"id": "pw0001", "state": "working", "label": "T391 plain label from th"} in posts and took < 0.45)
+check("plain label: no relabel posts the agent_type later",
+      not posted({"id": "pw0001", "state": "working", "label": "general-purpose"}, 0.5))
+hook("stop", {"agent_id": pw_id, "transcript_path": TP2})
 
 ox_id = "ox0001aaaaaaaaaa"
 other = f"{root}/.claude/projects/-q/sess/subagents/agent-{ox_id}.meta.json"
@@ -152,18 +169,13 @@ json.dump({"description": "other session"}, open(other, "w"))
 hook("start", {"agent_id": ox_id, "transcript_path": TP2, "agent_type": "worker"})
 check("label reads only its own session, not a projects-wide glob", not posted({"id": "ox0001", "state": "working", "label": "other session"}, 1))
 hook("stop", {"agent_id": ox_id, "transcript_path": TP2})
+os.makedirs(f"{PROJ}/sess2/subagents", exist_ok=True)
 json.dump({"description": "end relabel"}, open(f"{PROJ}/sess2/subagents/agent-{ox_id}.meta.json", "w"))
 
 
 
 def iso(t):
     return time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(t))
-
-
-def line(path, row, mode="a"):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, mode) as f:
-        f.write(json.dumps(row) + "\n")
 
 
 def agent_tx(path, began, last):
@@ -267,6 +279,72 @@ gone = posted({"id": "fs0001", "state": "done", "label": ""})
 lag = time.monotonic() - t0
 check(f"TaskStop hook puts the orbiter out at once, before the transcript line lands (lag {lag:.2f} s, hook {hook_s:.2f} s)",
       gone and lag < 2 and "fs0001" not in claims())
+
+TP4 = f"{PROJ}/sess4.jsonl"
+
+
+def spawn(*calls):
+    """One parent assistant row with Agent tool_use blocks (id, subagent_type, description)."""
+    line(TP4, {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": i, "name": "Agent", "input": {"subagent_type": k, "description": d, "prompt": "x"}} for i, k, d in calls]}})
+
+
+def ctx_of(out):
+    try:
+        return json.loads(out)["hookSpecificOutput"]
+    except Exception:
+        return {}
+
+
+spawn(("tu1", "worker", "T379 orbiters at subagent start"))
+ctx = ctx_of(hook("start", {"agent_id": "gd0001aaaaaaaaaa", "transcript_path": TP4, "agent_type": "worker"}))
+text = ctx.get("additionalContext", "")
+check("guide: start prints SubagentStart additionalContext from the parent's Agent call, top match first",
+      ctx.get("hookEventName") == "SubagentStart" and text.splitlines()[1:2] and text.splitlines()[1].startswith("guide 3/4 ")
+      and "orbit-hook-orbiters.md" in text)
+check(f"guide: at most 3 hits and ~300 tokens ({len(text) // 4} est.)", text.count("\n      ") <= 3 and len(text) // 4 <= 300)
+check("guide: an Agent call already taken prints nothing for the next start",
+      hook("start", {"agent_id": "gd0002aaaaaaaaaa", "transcript_path": TP4, "agent_type": "worker"}) == "")
+line(TP4, {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "tu1", "content": "done"}]}})
+spawn(("tu2", "worker", "research swarm lanes"), ("tu3", "Explore", "T379 subagent start orbiters"))
+ex = ctx_of(hook("start", {"agent_id": "px0001aaaaaaaaaa", "transcript_path": TP4, "agent_type": "Explore"})).get("additionalContext", "")
+wk = ctx_of(hook("start", {"agent_id": "pw0002aaaaaaaaaa", "transcript_path": TP4, "agent_type": "worker"})).get("additionalContext", "")
+check("guide: parallel spawns each get their own call by subagent_type", "orbit-hook-orbiters" in ex and "night-swarm" in wk
+      and "→ invoke /research-swarm" in wk)
+spawn(("tu4", "worker", "zzz qqq"))
+check("guide: no match prints nothing", hook("start", {"agent_id": "nh0001aaaaaaaaaa", "transcript_path": TP4, "agent_type": "worker"}) == "")
+check("guide: no Agent call (workflow agent) prints nothing",
+      hook("start", {"agent_id": "nm0001aaaaaaaaaa", "transcript_path": TP, "agent_type": "worker"}) == "")
+os.makedirs(f"{root}/dead/dark-eye")
+json.dump({"port": 9, "secret": "x"}, open(f"{root}/dead/dark-eye/config.json", "w"))
+spawn(("tu5", "worker", "T379 subagent start"))
+out = hook("start", {"agent_id": "dn0001aaaaaaaaaa", "transcript_path": TP4, "agent_type": "worker"}, dict(ENV, XDG_CONFIG_HOME=f"{root}/dead"))
+check("guide: a dead Eye still hands the subagent its guides", "orbit-hook-orbiters.md" in out)
+for a in ("gd0001", "gd0002", "px0001", "pw0002", "nh0001", "nm0001", "dn0001"):
+    hook("stop", {"agent_id": a + "aaaaaaaaaa", "transcript_path": TP4})
+
+os.makedirs(f"{root}/aw/decisions")
+os.makedirs(f"{root}/agents/KB")
+open(f"{root}/aw/decisions/ailearning.md", "w").write("# ledger\n" + "".join(
+    f'- 2026-10-{i:02d} · Decision number {i} keeps the sheet as it is, padded to look like a real ledger row · "quote {i}"\n'
+    for i in range(1, 31)))
+open(f"{root}/aw/decisions/vass.md", "w").write('- 2026-10-06 · No git writes in his checkout · (owner)\n')
+open(f"{root}/agents/KB/DECISIONS.md", "w").write('- 2026-09-07 · Never push · "never again"\n')
+spawn(("tu6", "worker", "T396 ailearning sheet fix"))
+dt = ctx_of(hook("start", {"agent_id": "dc0001aaaaaaaaaa", "transcript_path": TP4, "agent_type": "worker"})).get("additionalContext", "")
+dg = dt[dt.find("Owner decisions for ailearning"):]
+check(f"decisions: a description naming a project gets its ledger, quotes cut, <= 300 tokens ({len(dg) // 4} est.)",
+      "- 2026-10-01 · Decision number 1 keeps the sheet" in dg and '"quote' not in dg and 0 < len(dg) <= 1200)
+check("decisions: a long ledger ends with a pointer to the rest", "more in " + f"{root}/aw/decisions/ailearning.md)" in dg)
+spawn(("tu7", "worker", "vass fleet check"))
+dv = ctx_of(hook("start", {"agent_id": "dc0002aaaaaaaaaa", "transcript_path": TP4, "agent_type": "worker"})).get("additionalContext", "")
+check("decisions: every named project is handed over", "No git writes in his checkout" in dv and "Never push" in dv
+      and "ailearning" not in dv)
+spawn(("tu8", "worker", "zzz qqq"))
+check("decisions: no project and no guide prints nothing",
+      hook("start", {"agent_id": "dc0003aaaaaaaaaa", "transcript_path": TP4, "agent_type": "worker"}) == "")
+for a in ("dc0001", "dc0002", "dc0003"):
+    hook("stop", {"agent_id": a + "aaaaaaaaaa", "transcript_path": TP4})
 
 srv.shutdown()
 sys.exit(bad)

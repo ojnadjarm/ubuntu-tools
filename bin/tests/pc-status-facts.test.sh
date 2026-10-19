@@ -90,6 +90,10 @@ grep -q '^- Moodle svc: ' <<<"$blk" && nok "non-Moodle stack skipped" "svc liste
 mkdir -p "$envs/9.8"; cp "$envs/9.9/docker-compose.yml" "$envs/9.8/"
 line=$(MOODLE_ENVS_DIR="$envs" "$PCS" --facts | grep '^- Moodle envs: ')
 [ "$line" = '- Moodle envs: `~/moodle-envs/9.8`, `~/moodle-envs/9.9`' ] && ok "Paths line lists only Moodle envs, ', ' separated" || nok "Paths Moodle envs line" "$line"
+# T398: a stopped env shows the code dir its compose file mounts, not a guessed <env>/www.
+mkdir -p "$envs/9.7"; printf 'services:\n  app:\n    volumes:\n      - /srv/x/moodle:/var/www/html\n' >"$envs/9.7/docker-compose.yml"
+line=$(MOODLE_ENVS_DIR="$envs" "$PCS" --facts | grep '^- Moodle 9\.7: ')
+case "$line" in *'code `/srv/x/moodle`'*) ok "a stopped env shows its mounted code dir";; *) nok "a stopped env shows its mounted code dir" "$line";; esac
 
 # --- 6. the real KB file was not touched -------------------------------------
 [ "$(sha256sum "$REAL" 2>/dev/null)" = "$real_sum" ] && ok "real machine.md untouched" || nok "real machine.md untouched" "checksum changed"

@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""Lint agent briefs: every brief needs a CHECK command, file claims, a time box and a report cap (T381); warn when it names a project but not its decisions ledger (T396) or feeds /dev/zero into script/tmux (T401)."""
+import argparse, os, re, sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
+import decisions  # noqa: E402
+
+RULES = [
+    ('check', re.compile(r'^\s*(?:[-*]\s*)?CHECK:\s*\S', re.M)),
+    ('claims', re.compile(r'FILE-CLAIMS', re.I)),
+    ('timebox', re.compile(r'time[ -]?box', re.I)),
+    ('report-cap', re.compile(r'report:?\s*(?:at most|max\.?|≤)\s*\d+\s*lines?', re.I)),
+]
+INCLUDE = re.compile(r'(_common[\w-]*\.md)')
+DEVZERO = re.compile(r'\b(?:script|tmux)\b[^\n;&|]*<\s*/dev/zero|/dev/zero[^\n;]*\|\s*(?:script|tmux)\b')
+TESTS = os.path.expanduser('~/agents/bin/tests')
+
+
+def text_of(path):
+    """Brief text plus any `_common-*.md` block it names from the same folder."""
+    with open(path, encoding='utf-8', errors='replace') as f:
+        text = f.read()
+    for name in sorted(set(INCLUDE.findall(text))):
+        inc = os.path.join(os.path.dirname(path), name)
+        if os.path.isfile(inc) and os.path.abspath(inc) != os.path.abspath(path):
+            with open(inc, encoding='utf-8', errors='replace') as f:
+                text += '\n' + f.read()
+    return text
+
+
+def missing(path):
+    text = text_of(path)
+    return [name for name, rx in RULES if not rx.search(text)]
+
+
+def devzero_hits(path):
+    """Line numbers where /dev/zero feeds script or tmux (T399: 34 GB OOM)."""
+    with open(path, encoding='utf-8', errors='replace') as f:
+        return [i for i, line in enumerate(f, 1) if DEVZERO.search(line)]
+
+
+def scan_tests(folder):
+    for name in sorted(os.listdir(folder)):
+        p = os.path.join(folder, name)
+        if name.endswith('.sh') and os.path.isfile(p):
+            for n in devzero_hits(p):
+                print(f"WARN {p}:{n}: /dev/zero feeds script/tmux; use </dev/null or `sleep inf |`")
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('briefs', nargs='*')
+    ap.add_argument('--tests', nargs='?', const=TESTS, metavar='DIR', help='warn on /dev/zero fed to script/tmux in DIR/*.sh (default %(const)s)')
+    ap.add_argument('--summary', action='store_true', help='print per-rule pass counts only')
+    a = ap.parse_args()
+    if a.tests:
+        scan_tests(a.tests)
+    if not a.briefs:
+        if a.tests:
+            sys.exit(0)
+        ap.error('give briefs or --tests')
+    passed, rule_ok = 0, {n: 0 for n, _ in RULES}
+    for p in a.briefs:
+        miss = missing(p)
+        for n in rule_ok:
+            rule_ok[n] += n not in miss
+        passed += not miss
+        if not a.summary:
+            print(f"{'ok  ' if not miss else 'FAIL'} {p}" + (f": missing {', '.join(miss)}" if miss else ''))
+            for name in decisions.unreferenced(text_of(p)):
+                print(f"WARN {p}: names {name} but not its decisions ledger {decisions.path(name)}")
+            for n in devzero_hits(p):
+                print(f"WARN {p}:{n}: /dev/zero feeds script/tmux; use </dev/null or `sleep inf |`")
+    n = len(a.briefs)
+    if a.summary:
+        print(f"pass {passed}/{n} · " + ' · '.join(f"{k} {v}/{n}" for k, v in rule_ok.items()))
+    sys.exit(0 if passed == n else 1)
+
+
+if __name__ == '__main__':
+    main()

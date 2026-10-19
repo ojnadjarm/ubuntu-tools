@@ -82,6 +82,19 @@ class Thumbs(unittest.TestCase):
                 t.join()
             self.assertEqual(errors, [], run)
 
+    def test_stale_thumbs_pruned_on_write(self):
+        full = os.path.join(server.DROP, "sub", "big.png")
+        thumbs.thumb(full, 320)
+        os.makedirs(thumbs.CACHE, exist_ok=True)
+        stale = os.path.join(thumbs.CACHE, "stale.webp")
+        open(stale, "wb").write(b"x")
+        old = time.time() - thumbs.MAX_AGE - 60
+        os.utime(stale, (old, old))
+        os.utime(full, ns=(time.time_ns(), time.time_ns()))
+        thumbs.thumb(full, 320)
+        self.assertFalse(os.path.exists(stale))
+        self.assertTrue(any(n.endswith(".webp") for n in os.listdir(thumbs.CACHE)))
+
     def test_refuses_traversal_and_non_images(self):
         for p in ("../outside.png", "sub/../../outside.png", "%2e%2e/outside.png", ".hidden.png", "", "note.txt", "missing.png"):
             self.assertEqual(self.get("/thumb/" + p)[0].status, 404, p)

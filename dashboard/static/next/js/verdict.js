@@ -4,7 +4,7 @@ export function verdict(D) {
   return {
     text: errs.length ? "unknown" : n ? n + (n === 1 ? " needs you" : " need you") : "all clear",
     bad: errs.length > 0 || n > 0,
-    items: needs.map((x) => (x.kind === "ask" ? "ask: " : "") + x.text).concat(errs.map((k) => k + " collector: " + D.errors[k])),
-    keys: needs.map((x) => (x.kind === "ask" ? "ask:" + x.t : "need:" + x.text)),
+    items: needs.map((x) => (x.kind === "ask" ? "ask: " : x.kind === "todo" ? "to do: " : "") + x.text).concat(errs.map((k) => k + " collector: " + D.errors[k])),
+    keys: needs.map((x) => (x.kind === "ask" ? "ask:" + x.t : x.kind === "todo" ? "todo:" + x.todo : "need:" + x.text)),
   };
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # PT12: `pc bt`. Sections 1-4 run against the recorded bluez tree in fixtures/bt (buds connected,
-# Battery1 present, sidecar active) and touch no bus; section 5 is live and read-only apart from
+# Battery1 present) and touch no bus; section 5 is live and read-only apart from
 # one bounded scan. Nothing connects, disconnects or switches a profile on the live adapter — the
 # owner is asleep with the buds in their case, so every mutation here is a `would:` or a guard.
 set -uo pipefail
@@ -27,7 +27,7 @@ s=$(fx status --json)
 is 'status --json reads the adapter' "$(jq -r .adapter.address <<<"$s")" 00:00:5E:00:53:02
 is 'status --json counts the connected device' "$(jq -r .counts.connected <<<"$s")" 1
 is 'status --json carries the battery of a connected device' "$(jq -r '.connected[0].battery' <<<"$s")" 85
-is 'status --json names the sidecar' "$(jq -r '.sidecar.unit + ":" + (.sidecar.active|tostring)' <<<"$s")" dark-eye-ptt:true
+is 'status --json carries no sidecar' "$(jq -r 'has("sidecar")' <<<"$s")" false
 is 'status --json ages the last bluez error' "$(jq -r '.error.age_seconds > 0 and (.error.message|test("profile.c"))' <<<"$s")" true
 is 'devices --json shows the buds connected with a battery' \
   "$(fx devices --json | jq -r '.[]|select(.name=="WF-1000XM5")|.connected==true and .battery==85 and .paired==true')" true
@@ -40,22 +40,18 @@ is 'a MAC selector resolves' "$(fx info 00:00:5E:00:53:01 --json | jq -r .name)"
 is 'a name substring resolves' "$(fx info 1000xm5 --json | jq -r .mac)" 00:00:5E:00:53:01
 is 'profile with no argument prints the active one' "$(fx profile buds)" 'bluez_card.00_00_5E_00_53_01 a2dp-sink'
 
-# 3. the sidecar guard — the reason this command exists.
-fx profile buds hfp --apply >/dev/null 2>&1; is 'profile --apply on the buds exits 3 while the sidecar is active' "$?" 3
-out=$(fx profile buds hfp --apply 2>&1); case "$out" in *dark-eye-ptt*--force*) ok 'the refusal names the sidecar and the way out';; *) nok 'the refusal names the sidecar and the way out' "$out";; esac
-fx connect buds --apply >/dev/null 2>&1; is 'connect --apply on the buds exits 3 while the sidecar is active' "$?" 3
-fx disconnect buds --apply >/dev/null 2>&1; is 'disconnect --apply on the buds exits 3 while the sidecar is active' "$?" 3
-fx disconnect buds --apply --force >/dev/null 2>&1; is '--force without --why exits 2' "$?" 2
-is 'a dry run still prints would: under the guard' \
+# 3. mutations on the buds: dry runs print would:, guards that remain still refuse.
+is 'a dry run prints would:' \
   "$(fx disconnect buds 2>/dev/null)" 'would: 00:00:5E:00:53:01 connected → disconnected'
-is 'the sidecar-inactive path reaches the profile change' \
-  "$(FIX_SIDECAR=inactive fx profile buds hfp 2>&1)" 'would: bluez_card.00_00_5E_00_53_01 a2dp-sink → headset-head-unit'
-is 'an unknown profile exits 2' "$(FIX_SIDECAR=inactive fx profile buds nosuch >/dev/null 2>&1; echo $?)" 2
+is 'a profile dry run reaches the profile change' \
+  "$(fx profile buds hfp 2>&1)" 'would: bluez_card.00_00_5E_00_53_01 a2dp-sink → headset-head-unit'
+fx disconnect buds --force >/dev/null 2>&1; is '--force is no longer an option' "$?" 2
+is 'an unknown profile exits 2' "$(fx profile buds nosuch >/dev/null 2>&1; echo $?)" 2
 is 'power off is refused while a device is connected' "$(fx power off >/dev/null 2>&1; echo $?)" 3
 is 'power on when it is already on is a no-op' "$(fx power on)" 'already: adapter on'
 
 # 4. the ledger: one recorded disconnect, verified, with the inverse as its rollback.
-out=$(FIX_SIDECAR=inactive PC_LEDGER="$WORK/changes.jsonl" fx disconnect buds --apply)
+out=$(PC_LEDGER="$WORK/changes.jsonl" fx disconnect buds --apply)
 id=$(printf '%s\n' "$out" | tail -1 | sed -n 's/^rollback: pc undo //p')
 [ -n "$id" ] && ok '--apply prints the rollback line' || nok '--apply prints the rollback line' "$out"
 e=$(PC_LEDGER="$WORK/changes.jsonl" "$BIN/pc-undo" show "$id" --json)
@@ -64,8 +60,7 @@ is 'the ledger records before → after' "$(jq -r '.before + " → " + .after' <
 is 'the rollback is the inverse verb' "$(jq -r '.rollback|test("pc-bt connect 00:00:5E:00:53:01 --apply")' <<<"$e")" true
 is 'the live ledger was not touched' "$(grep -c . "$WORK/changes.jsonl")" 2
 
-# 5. live, read-only (plus one 1 s scan). Skipped when bluez is not reachable. XDG_RUNTIME_DIR
-#    stays the real one here: `systemctl --user is-active` (the sidecar check) needs it.
+# 5. live, read-only (plus one 1 s scan). Skipped when bluez is not reachable.
 if busctl --system status org.bluez >/dev/null 2>&1; then
   s=$("$PC" status --json)
   is 'live adapter is powered' "$(jq -r .adapter.powered <<<"$s")" true
@@ -77,12 +72,6 @@ if busctl --system status org.bluez >/dev/null 2>&1; then
   # Tonight the buds are in their case: connect must stay a dry run, and it must say so.
   is 'live connect without --apply prints would:' \
     "$("$PC" connect buds 2>/dev/null | head -1 | cut -d' ' -f1)" 'would:'
-  if [ "$(systemctl --user is-active dark-eye-ptt 2>/dev/null)" = active ]; then
-    "$PC" profile buds hfp --apply >/dev/null 2>&1
-    is 'live profile --apply on the buds exits 3 (the sidecar owns them)' "$?" 3
-  else
-    ok 'live sidecar guard skipped (dark-eye-ptt is not active)'
-  fi
   t0=$(date +%s)
   "$PC" scan --seconds 1 >/dev/null 2>&1
   is 'scan exits 0' "$?" 0

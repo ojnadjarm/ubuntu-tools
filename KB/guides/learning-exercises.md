@@ -33,7 +33,7 @@ The explanation, script and callouts: guide `learning-unit-authoring`. The look:
 cd ~/projects/personal/ailearning
 npm test                                                               # play.test.mjs: generators, trap vs solve, assembly, tuner levels, lintPlay
 npm run build && node --import ./tests/lib/register.mjs tests/e2e/lesson.mjs            # whole lesson by script, ~3 min
-node --import ./tests/lib/register.mjs tests/e2e/lesson.mjs https://<tailnet-fqdn>:8470/ailearning/u/01-neuron/
+node --import ./tests/lib/register.mjs tests/e2e/lesson.mjs https://<tailnet-fqdn>:8472/ailearning/u/01-neuron/
 # page hooks: ?mute&fast=10&beat=bench ; window.__d.beats.cur.{task,phase} ; __d.events.log (step/attempt/detect/hint/complete)
 ```
 
@@ -68,4 +68,4 @@ node --import ./tests/lib/register.mjs tests/e2e/lesson.mjs https://<tailnet-fqd
 ## Links
 - Code: `~/projects/personal/ailearning/units/01-neuron/{unit/bench,unit/race.ts,unit/click.ts,sim}`; kit `~/agents/kits/explainer/src/unit/{bench,flow,hints,walk,log,kinds}.ts`
 - Tests: `tests/unit/play.test.mjs`, `tests/lib/solve.mjs`, `tests/e2e/lesson.mjs` (in `npm run e2e`); kit `test/bench.test.ts`
-- Design / results: `~/agents/research/2026-09-24/T84/{lesson-design.md,build-3.md,findings.md}`
+- Design / results: `~/agent-work/research/2026-09-24/T84/{lesson-design.md,build-3.md,findings.md}`

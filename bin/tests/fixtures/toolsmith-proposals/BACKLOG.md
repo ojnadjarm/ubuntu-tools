@@ -4,3 +4,4 @@
 |---|---|---|---|---|---|---|
 | 1 | TSP-999 | broken example | maybe-later | someday | latency fast → faster | two |
 | 2 | TSP-998 | missing proposal file | auto-ok | proposed | n/a | 1 |
+| 3 | TSP-999 | owner veto is a valid status | auto-ok | hold | n/a | 1 |

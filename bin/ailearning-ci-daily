@@ -1,36 +1,86 @@
 #!/usr/bin/env bash
-# ailearning-ci-daily — the once-a-day full ailearning suite (`npm run ci`) on a throwaway copy, headless and muted (T140).
+# ailearning-ci-daily — the once-a-day ailearning suite on a throwaway copy, headless and muted (T140): `npm run ci:core`, then the
+# declutter check (1366) of each reviewed unit changed since its last green declutter run (T340); `--full` declutters every reviewed unit.
+# Nightly also runs the playthrough gate report-only (T406): its fail list goes to ~/agents/log/ailearning-playthrough/fails.txt, never red.
 set -uo pipefail
 . "$HOME/agents/bin/env.sh"
 
 REPO="${AILEARNING_REPO:-$HOME/projects/personal/ailearning}"
-LOG="${AILEARNING_CI_LOG:-$HOME/agents/log/ailearning-ci.log}"
 RESULTS="$HOME/agents/log/ailearning-ci.jsonl"
+MARKS="$HOME/agents/state/ailearning-declutter"
+SHARED="src/kit src/core src/site/sheet tools/declutter.mjs tools/declutter vite.config.ts package-lock.json"
+START_BY=1500
+MODE=nightly
+PERF_JOBS="home-perf sheet-change sheet-cold"
 
-case "${1:-}" in -h|--help)
-  echo "usage: ailearning-ci-daily   (copies $REPO with cp -a, runs npm run ci there; log $LOG, one row per run in $RESULTS)"
-  exit 0;;
+# Hash of a unit's files plus the shared kit and tool files, in checkout $1 for unit slug $2.
+unit_hash() {
+  (cd "$1" && git ls-files -co --exclude-standard -z -- $SHARED "units/$2" "u/$2" "public/bundles/$2" | sort -z \
+    | xargs -0 -r sha256sum 2>/dev/null | sha256sum | cut -c1-64)
+}
+
+case "${1:-}" in
+  -h|--help)
+    echo "usage: ailearning-ci-daily [--full | --mark <slug>...]   (copies $REPO with rsync minus content/.render and out/, runs npm run ci:core"
+    echo "  then npm run declutter at 1366 on each reviewed unit changed since its last green run; --full: declutter only, every reviewed unit;"
+    echo "  --mark: record units as declutter-green at $REPO's current files. Marks in $MARKS, one row per run in $RESULTS)"
+    exit 0;;
+  --full) MODE=full;;
+  --mark)
+    shift; mkdir -p "$MARKS"
+    for slug in "$@"; do
+      [ -d "$REPO/u/$slug" ] || { echo "no unit $slug in $REPO/u" >&2; exit 2; }
+      unit_hash "$REPO" "$slug" >"$MARKS/$slug" && echo "marked $slug"
+    done
+    exit 0;;
+  "") ;;
+  *) echo "usage: ailearning-ci-daily [--full | --mark <slug>...]   (unknown argument $1; see --help)" >&2; exit 2;;
 esac
+mkdir -p "$HOME/agents/state"
+exec 9>"$HOME/agents/state/ailearning-ci.lock"
+flock -n 9 || { echo "ailearning-ci-daily: a run is already going" >&2; exit 75; }
+TIMER=0; grep -qE 'ailearning-ci-(daily|weekly)\.service' "${AILEARNING_CI_CGROUP:-/proc/self/cgroup}" 2>/dev/null && TIMER=1
+if [ "$TIMER" = 0 ]; then LOG="${AILEARNING_CI_LOG:-$HOME/agents/log/ailearning-ci-manual.log}"
+elif [ "$MODE" = full ]; then LOG="${AILEARNING_CI_LOG:-$HOME/agents/log/ailearning-ci-full.log}"
+else LOG="${AILEARNING_CI_LOG:-$HOME/agents/log/ailearning-ci.log}"; fi
 
 WORK="$(mktemp -d /var/tmp/ailearning-ci.XXXXXX)"
 T0=$(date +%s); RC=1; STEP=setup; SENT=0
 finish() {
   local s=$(( $(date +%s) - T0 )) last
-  last="$(grep -E '^(e2e:|── .*FAIL|npm error|ℹ fail|✖)' "$LOG" 2>/dev/null | tail -1 | cut -c1-90)"
-  printf '{"ts":"%s","rc":%d,"step":"%s","seconds":%d,"last":"%s"}\n' "$(date -Is)" "$RC" "$STEP" "$s" "${last//\"/\'}" >> "$RESULTS"
-  if [ "$RC" -ne 0 ] && [ "$SENT" -eq 0 ]; then
+  last="$(grep -E '^(e2e:|── .*FAIL|npm error|ℹ fail|✖)' "$LOG" 2>/dev/null | tail -1 \
+    | sed -E 's/^(e2e: [0-9]+ jobs in [0-9]+ s) \(.*\), ([0-9]+ failed: .*)$/\1, \2/' | cut -c1-90)"
+  printf '{"ts":"%s","mode":"%s","rc":%d,"step":"%s","seconds":%d,"last":"%s"}\n' "$(date -Is)" "$MODE" "$RC" "$STEP" "$s" "${last//\"/\'}" >> "$RESULTS"
+  [ "$RC" -ne 0 ] && echo "✖ ci failed at $STEP (rc $RC): ${last:-see log}"
+  if [ "$RC" -ne 0 ] && [ "$SENT" -eq 0 ] && { [ "$RC" -ne 143 ] || [ "$TIMER" = 1 ]; } && { [ -z "${CI_AUTOFIX:-}" ] || [ "$RC" -eq 143 ]; }; then
     SENT=1
-    "$HOME/agents/bin/notify-owner" -p high -t ailearning "ailearning daily ci failed at $STEP (rc $RC): ${last:-see log} · ~/agents/log/ailearning-ci.log" || true
+    "$HOME/agents/bin/notify-owner" -p high -t ailearning -k "ailearning ci $STEP: ${last:-see log}" "ailearning $MODE ci failed at $STEP (rc $RC): ${last:-see log} · ${LOG/#$HOME/\~}" || true
   fi
   rm -rf "$WORK"
+}
+# The playthrough gate over every unit, report only: tables and fails.txt in ~/agents/log/ailearning-playthrough, one log line, rc untouched.
+playthrough() {
+  local pt="$HOME/agents/log/ailearning-playthrough" t=$(date +%s) rc
+  rm -rf "$pt"; mkdir -p "$pt"
+  npm run playthrough -- --out "$pt" >"$pt/run.log" 2>&1; rc=$?
+  echo "playthrough (report only): rc $rc, $(wc -l <"$pt/fails.txt" 2>/dev/null || echo "?") failing cases, $(( $(date +%s) - t )) s → ${pt/#$HOME/\~}/fails.txt"
+}
+# After a red ci:core: a `ci-load: contention` line when only perf jobs went red and the 1-min load before or after was > 6 (T407).
+contention() {
+  local l2 red j
+  read -r l2 _ <"${CI_LOADAVG:-/proc/loadavg}"
+  red="$(sed -nE 's/^e2e: .*[0-9]+ failed: (.*)$/\1/p' "$LOG" | tail -1)"
+  [ -n "$red" ] || return 0
+  for j in ${red//,/ }; do [[ " $PERF_JOBS " == *" $j "* ]] || return 0; done
+  awk -v a="$LOAD0" -v b="$l2" 'BEGIN {exit !(a > 6 || b > 6)}' && echo "ci-load: contention (1-min load $LOAD0 before, $l2 after; only perf jobs red: $red)"
 }
 trap finish EXIT
 trap 'RC=143; exit 143' TERM INT
 
 exec >"$LOG" 2>&1
-echo "ailearning-ci-daily $(date -Is) copy=$WORK"
+echo "ailearning-ci-daily $MODE $(date -Is) copy=$WORK"
 
-cp -a "$REPO/." "$WORK/" || exit
+rsync -a --exclude=/content/.render --exclude=/out "$REPO/" "$WORK/" || exit
 STEP=mute
 BR="$WORK/tests/lib/browser.mjs"
 grep -q -- '--mute-audio' "$BR" || sed -i "s|const ARGS = \[|const ARGS = ['--mute-audio', |" "$BR"
@@ -42,7 +92,33 @@ export NVM_DIR="$HOME/.nvm"
 unset DISPLAY WAYLAND_DISPLAY
 
 STEP=ci
-cd "$WORK" && npm run ci
-RC=$?
+export E2E_DUMP_DIR="${AILEARNING_CI_DUMPS:-$HOME/agents/log/ailearning-ci-dumps}/$(date +%F-%H%M)"
+cd "$WORK" || exit
+if [ "$MODE" = nightly ]; then
+  "$HOME/agents/bin/ci-window" --quiet; read -r LOAD0 _ <"${CI_LOADAVG:-/proc/loadavg}"; T0Q=$(date +%s)
+  npm run ci:core || { RC=$?; contention; playthrough; exit "$RC"; }
+fi
+
+STEP=declutter
+mkdir -p "$MARKS"
+units="$(node --input-type=module -e "import { CHECKED } from './tools/declutter/rules.mjs'; console.log(CHECKED.join(' '))")"
+[ -n "$units" ] || { echo "✖ could not read CHECKED from tools/declutter/rules.mjs"; exit 1; }
+if [ "$MODE" = nightly ]; then
+  # Oldest green marker first (none = 0), so a unit deferred last night goes first.
+  units="$(for n in $units; do s="$(basename "$(ls -d u/"$n"-*/ 2>/dev/null | head -1)")"
+    echo "$(stat -c %Y "$MARKS/$s" 2>/dev/null || echo 0) $n"; done | sort -s -n -k1,1 | cut -d' ' -f2)"
+fi
+RC=0; ran=0; failed=""
+for n in $units; do
+  slug="$(basename "$(ls -d u/"$n"-*/ 2>/dev/null | head -1)")"
+  [ -f "u/$slug/index.html" ] || continue
+  h="$(unit_hash "$WORK" "$slug")"
+  if [ "$MODE" = nightly ] && [ "$(cat "$MARKS/$slug" 2>/dev/null)" = "$h" ]; then echo "declutter $slug: unchanged since its last green run, skipped"; continue; fi
+  if [ "$MODE" = nightly ] && [ "$ran" -gt 0 ] && [ $(( $(date +%s) - ${T0Q:-$T0} )) -gt "$START_BY" ]; then echo "declutter $slug: deferred to the next run (past $START_BY s)"; continue; fi
+  ran=$((ran + 1))
+  if npm run declutter -- "$slug" --size 1366x768; then echo "$h" >"$MARKS/$slug"; else RC=1; failed="$failed $slug"; fi
+done
+[ -n "$failed" ] && echo "✖ declutter failed:$failed"
+[ "$MODE" = nightly ] && playthrough
 [ "$RC" -eq 0 ] && STEP=done
 exit "$RC"

@@ -3,7 +3,7 @@
 # shows them connected while the owner wears them, so the two calls `pc dbus --system` makes are
 # recorded from the live adapter and the device object is patched to the connected shape
 # (Connected/ServicesResolved true, RSSI, org.bluez.Battery1, MediaControl1 connected) — the
-# same keys `buds-capture` sees on a healthy link (RUNBOOK-earbuds.md). Run by hand when bluez
+# same keys a healthy link shows. Run by hand when bluez
 # or the device object changes.
 set -eu
 . "$HOME/agents/bin/env.sh"
@@ -31,7 +31,7 @@ busctl --system call --json=short org.bluez / org.freedesktop.DBus.ObjectManager
 journalctl -u bluetooth -p err -n 1 -o json --no-pager >"$d/journal.json"
 
 # 4. the bluez5 card. Crafted, not recorded: the card only exists while the buds are connected.
-#    Profile list from RUNBOOK-earbuds.md ("Profiles offered"), active profile a2dp-sink.
+#    Profile list as the XM5 card offers it, active profile a2dp-sink.
 jq -n --arg mac "$MAC" '[{index: 42, name: ("bluez_card." + ($mac | gsub(":"; "_"))), driver: "bluez5",
   active_profile: "a2dp-sink",
   profiles: (["a2dp-sink","a2dp-sink-sbc","a2dp-sink-sbc_xq","headset-head-unit","headset-head-unit-cvsd","off"]

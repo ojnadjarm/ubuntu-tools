@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pc units — systemd units/timers (user+system), per-unit cost, journal tail, guarded restart.
+# pc units — systemd units/timers (user+system), per-unit cost, journal tail, guarded restart and reset-failed.
 # shellcheck disable=SC2034
 set -uo pipefail
 BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -7,7 +7,7 @@ BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 # Entries pc_apply drops after a unit mutation (tailscaled and the docker units feed these).
 export PC_CACHE_KEYS='docker tailscale ts_pair'
 
-pc_usage 'usage: pc units [list|timers|fleet|show|cost|log|deps|start|stop|restart] [args]
+pc_usage 'usage: pc units [list|timers|fleet|show|cost|log|deps|start|stop|restart|reset-failed] [args]
        pc units list [--user|--system|--all] [--failed] [--json]
        pc units timers [--user|--system|--all] [--json]
        pc units fleet [--json]
@@ -16,20 +16,24 @@ pc_usage 'usage: pc units [list|timers|fleet|show|cost|log|deps|start|stop|resta
        pc units log <u> [--user|--system] [-n 30] [--since 1h] [--json]
        pc units deps <u> [--user|--system] [--json]
        pc units start|stop|restart <u> [--user|--system] [--apply]
+       pc units reset-failed <u> [--user|--system] [--apply]
        (no args) = failed + fleet + top 5 by cpu
 
 Manager is auto-detected (checked in --user first, then --system) unless --user/--system forces
 it. `start`/`stop`/`restart` are guarded (never ssh*/ufw/tailscaled, never dark-eye.service
 without PC_ORCHESTRATOR=1, never the orchestrator unit) and ledgered — without --apply they print
-the change they would make and exit 0.
+the change they would make and exit 0. `reset-failed` clears a failed unit (a transient
+`systemd-run` scope unloads); same guard and ledger, its rollback is a no-op (the journal keeps it).
 
-Roster (~/CLAUDE.md): sentinel-check.timer, agent@moodle-keeper, agent@sentinel-digest,
-agent@maintenance, moodle-keep-weekly.timer, dark-eye(.service/-ptt/-failed), agents-dashboard,
-the orchestrator unit, ydotoold (system). `fleet` = just those, with next/last run from timers.' "$@"
+Roster (KB/orchestrator.md): sentinel-check.timer, agent@moodle-keeper, agent@sentinel-digest,
+agent@maintenance, moodle-keep-weekly.timer, dark-eye(.service/-failed), agents-dashboard,
+the orchestrator unit, ydotoold (system). `fleet` = just those plus any enabled user unit named
+like the fleet (dark-eye*, sentinel*, agent@*), with next/last run from timers and a verdict:
+FAIL for a failed unit, a oneshot whose last run failed, or an enabled unit that is not running.' "$@"
 
-# Roster units (~/CLAUDE.md persistent-agent table + always-on services).
+# Roster units (KB/orchestrator.md persistent-agent table + always-on services).
 ROSTER_USER=(sentinel-check.timer agent@moodle-keeper.service agent@sentinel-digest.service
-  agent@maintenance.service moodle-keep-weekly.timer dark-eye.service dark-eye-ptt.service
+  agent@maintenance.service moodle-keep-weekly.timer dark-eye.service
   dark-eye-failed.service agents-dashboard.service "$ORCHESTRATOR_UNIT")
 ROSTER_SYSTEM=(ydotoold.service)
 
@@ -83,7 +87,7 @@ both() {
 
 # guard_unit <unit> — the bare-name check now lives in pclib (pc_guard_unit); kept as the
 # local name the verbs already call.
-guard_unit() { pc_guard_unit "$1"; }
+guard_unit() { pc_guard_unit "$1" "${2:-}"; }
 
 case "${ARGS[0]:-}" in
   list)
@@ -102,38 +106,36 @@ case "${ARGS[0]:-}" in
     ;;
 
   fleet)
+    fleet_user=("${ROSTER_USER[@]}")
+    while read -r u; do
+      [ -n "$u" ] && [[ " ${fleet_user[*]} " != *" $u "* ]] && fleet_user+=("$u")
+    done < <(pc_fleet_enabled)
     roster_rows() {
       local u
-      for u in "${ROSTER_USER[@]}"; do jq -n --arg u "$u" --arg s user '{unit:$u,scope:$s}'; done
+      for u in "${fleet_user[@]}"; do jq -n --arg u "$u" --arg s user '{unit:$u,scope:$s}'; done
       for u in "${ROSTER_SYSTEM[@]}"; do jq -n --arg u "$u" --arg s system '{unit:$u,scope:$s}'; done
     }
     out=$(roster_rows | jq -s '.')
     all_timers=$(both timers_json)
-    # ActiveState/SubState for the whole roster in two calls (one per scope, explicit unit
-    # names — not a glob, which silently drops some inactive units on this systemd when
-    # ActiveState/SubState are requested together; explicit names do not have that bug).
-    states=$(
-      { systemctl --user show "${ROSTER_USER[@]}" -p Id,ActiveState,SubState 2>/dev/null
-        [ ${#ROSTER_SYSTEM[@]} -gt 0 ] && systemctl show "${ROSTER_SYSTEM[@]}" -p Id,ActiveState,SubState 2>/dev/null
-      } | awk '/^Id=/{if(id)print id"\t"a"\t"b; id=substr($0,4); a="";b=""}
-                /^ActiveState=/{a=substr($0,13)} /^SubState=/{b=substr($0,10)}
-                END{if(id)print id"\t"a"\t"b}')
+    # State and verdict for the whole roster in two calls (one per scope, explicit unit names:
+    # a glob silently drops some inactive units on this systemd).
+    states=$(pc_fleet_states "${fleet_user[@]}"
+      [ ${#ROSTER_SYSTEM[@]} -gt 0 ] && pc_fleet_states --system "${ROSTER_SYSTEM[@]}")
     out=$(jq -c '.[]' <<<"$out" | while IFS= read -r row; do
       u=$(jq -r .unit <<<"$row")
-      st=$(awk -F'\t' -v u="$u" '$1==u{print $2"\t"$3; found=1} END{if(!found) print "unknown\tunknown"}' <<<"$states")
-      as=${st%%$'\t'*}; ss=${st#*$'\t'}
+      IFS=$'\t' read -r as ss vd < <(awk -F'\t' -v u="$u" '$1==u{print $2"\t"$3"\t"$4; found=1} END{if(!found) print "unknown\tunknown\tFAIL"}' <<<"$states")
       tm=$(jq -c --arg u "$u" '[.[] | select(.activates==$u)][0] // null' <<<"$all_timers")
-      jq -c --arg as "$as" --arg ss "$ss" --argjson tm "${tm:-null}" \
-        '. + {active:$as, sub:$ss, next:($tm.next // null), last:($tm.last // null)}' <<<"$row"
+      jq -c --arg as "$as" --arg ss "$ss" --arg vd "$vd" --argjson tm "${tm:-null}" \
+        '. + {active:$as, sub:$ss, state:$vd, next:($tm.next // null), last:($tm.last // null)}' <<<"$row"
     done | jq -s '.')
     if [ "$JSON" = 1 ]; then printf '%s\n' "$out"; else
-      jq -r '.[] | [.scope,.unit,.active,.sub] | @tsv' <<<"$out" | column -t
+      jq -r '.[] | [.scope,.unit,.active,.sub,.state] | @tsv' <<<"$out" | column -t
     fi
     ;;
 
   show)
     u=${ARGS[1]:-}; [ -n "$u" ] || { echo "pc units show: need a unit" >&2; exit 2; }
-    s=$(resolve_scope "$u"); flag=$(scope_flag "$s")
+    s=$(resolve_scope "$u") || exit $?; flag=$(scope_flag "$s")
     out=$(systemctl $flag show "$u" -p ActiveState,SubState,NRestarts,MainPID,ExecMainStartTimestamp,Result,ControlGroup,Description 2>/dev/null)
     if [ "$JSON" = 1 ]; then
       jq -Rn --arg s "$s" --arg u "$u" '
@@ -145,7 +147,7 @@ case "${ARGS[0]:-}" in
 
   cost)
     u=${ARGS[1]:-}; [ -n "$u" ] || { echo "pc units cost: need a unit" >&2; exit 2; }
-    s=$(resolve_scope "$u"); flag=$(scope_flag "$s")
+    s=$(resolve_scope "$u") || exit $?; flag=$(scope_flag "$s")
     props=$(systemctl $flag show "$u" -p CPUUsageNSec,MemoryCurrent,MemoryPeak,TasksCurrent,ControlGroup 2>/dev/null)
     cpu_ns=$(sed -n 's/^CPUUsageNSec=//p' <<<"$props")
     mem_cur=$(sed -n 's/^MemoryCurrent=//p' <<<"$props")
@@ -170,7 +172,7 @@ case "${ARGS[0]:-}" in
 
   log)
     u=${ARGS[1]:-}; [ -n "$u" ] || { echo "pc units log: need a unit" >&2; exit 2; }
-    s=$(resolve_scope "$u"); flag=$(scope_flag "$s")
+    s=$(resolve_scope "$u") || exit $?; flag=$(scope_flag "$s")
     since=(); [ -n "$SINCE" ] && since=(--since "$SINCE")
     if [ "$JSON" = 1 ]; then
       journalctl $flag -u "$u" -n "$N" "${since[@]}" -o json 2>/dev/null | jq -c '{MESSAGE,PRIORITY,__REALTIME_TIMESTAMP}' | jq -s '.'
@@ -181,7 +183,7 @@ case "${ARGS[0]:-}" in
 
   deps)
     u=${ARGS[1]:-}; [ -n "$u" ] || { echo "pc units deps: need a unit" >&2; exit 2; }
-    s=$(resolve_scope "$u"); flag=$(scope_flag "$s")
+    s=$(resolve_scope "$u") || exit $?; flag=$(scope_flag "$s")
     out=$(systemctl $flag show "$u" -p Requires,Wants,After,Before,BoundBy,PartOf 2>/dev/null)
     if [ "$JSON" = 1 ]; then
       jq -Rn '[inputs | select(length>0) | split("=") | {(.[0]): (.[1] // "" | split(" ") | map(select(length>0)))}] | add // {}' <<<"$out"
@@ -192,8 +194,8 @@ case "${ARGS[0]:-}" in
 
   start|stop|restart)
     verb=${ARGS[0]}; u=${ARGS[1]:-}; [ -n "$u" ] || { echo "pc units $verb: need a unit" >&2; exit 2; }
-    guard_unit "$u"
-    s=$(resolve_scope "$u"); flag=$(scope_flag "$s")
+    guard_unit "$u" "$verb"
+    s=$(resolve_scope "$u") || exit $?; flag=$(scope_flag "$s")
     before=$(systemctl $flag show "$u" -p ActiveState --value 2>/dev/null); : "${before:=unknown}"
     case "$verb" in start|restart) after=active;; stop) after=inactive;; esac
     case "$verb" in
@@ -204,6 +206,16 @@ case "${ARGS[0]:-}" in
     export PC_READ_CMD="systemctl $flag show $(printf '%q' "$u") -p ActiveState --value 2>/dev/null"
     pc_apply "$u" "$before" "$after" "$rollback" \
       systemctl $flag "$verb" -- "$u"
+    ;;
+
+  reset-failed)
+    u=${ARGS[1]:-}; [ -n "$u" ] || { echo "pc units reset-failed: need a unit" >&2; exit 2; }
+    guard_unit "$u" reset-failed
+    s=$(resolve_scope "$u") || exit $?; flag=$(scope_flag "$s")
+    before=$(systemctl $flag show "$u" -p ActiveState --value 2>/dev/null); : "${before:=unknown}"
+    export PC_READ_CMD="systemctl $flag show $(printf '%q' "$u") -p ActiveState --value 2>/dev/null"
+    pc_apply "$u" "$before" inactive ": none, a failed state cannot be restored (the journal keeps the record)" \
+      systemctl $flag reset-failed -- "$u"
     ;;
 
   ""|default)

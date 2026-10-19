@@ -25,6 +25,7 @@ A="$BENCH/arms/$arm"
 bash "$FIXTURE" ensure || { echo "exec.sh: could not build the dark-eye fixture" >&2; exit 2; }
 repo=$(bash "$FIXTURE" path)
 gitcfg=$(bash "$FIXTURE" gitconfig)
+sink="${PCBENCH_TRIALDIR:-${XDG_RUNTIME_DIR:-/tmp}/pcbench}"
 
 safe=(
   # 1. the throwaway repo, so nothing a trial does can reach the owner's work
@@ -49,6 +50,10 @@ safe=(
   --ro-bind "$SAFE/stubs/tailscale" "$(readlink -f /usr/bin/tailscale)"
   --ro-bind "$SAFE/stubs/sudo"      "$(readlink -f /usr/bin/sudo)"
   --setenv PCBENCH_SAFE "$SAFE"
+  # 4. notify-owner posts to a dead local port and logs into the trial, never the phone
+  --setenv NTFY_ENV_FILE "$SAFE/ntfy.env"
+  --setenv NTFY_LOG_FILE "$sink/notify-sandbox.log"
+  --setenv NTFY_KEYS_FILE "$sink/notify-keys-sandbox.tsv"
 )
 # Only hide what exists: binding over a missing path makes bwrap create it on the real home.
 for f in "$HOME/.gitconfig" "$HOME/.git-credentials"; do

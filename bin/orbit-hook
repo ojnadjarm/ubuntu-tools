@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Subagent hooks → orbiters: SubagentStart lights one, SubagentStop puts it out, sweep puts out the dead.
+"""Subagent hooks → orbiters: SubagentStart lights one and hands the subagent its top `guide` matches and its project's owner decisions, SubagentStop puts it out, sweep puts out the dead.
 
 usage: orbit-hook start|stop   (the hook JSON arrives on stdin)
        orbit-hook sweep        (sentinel-check, every 15 min)
-       orbit-hook relabel      (spawned by start when the meta file is late)
+       orbit-hook relabel      (spawned by start when no Agent call names the agent)
        orbit-hook taskstop     (spawned by the PostToolUse audit hook on TaskStop)
 Never blocks and never fails: a dead Eye is a silent no-op.
 """
@@ -18,15 +18,20 @@ import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
 import agent_ends  # noqa: E402
+import decisions  # noqa: E402
 
 TIMEOUT = 1.5
 LABEL_MAX = 24
-META_WAIT_S = 0.5
+SPAWN_WAIT_S = 0.5
 RELABEL_WAIT_S = 30
+GUIDE_HITS = 3
+GUIDE_TIMEOUT = 2
 STALE_S = int(os.environ.get("ORBIT_STALE_S") or 1800)
 LOST_S = 43200
 CLAIMS = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "dark-eye", "orbit-claims.json")
 SCANS = os.path.join(os.path.dirname(CLAIMS), "orbit-scans.json")
+SPAWNS = os.path.join(os.path.dirname(CLAIMS), "orbit-spawns.json")
+SPAWN_TAIL = 2 << 20
 
 
 def post(state, oid, label=""):
@@ -107,7 +112,7 @@ def subagent_file(hook, agent_id, ext, wide=True):
 
 
 def label_for(hook, agent_id, wait):
-    """The Agent call's own description, from the meta file Claude Code writes just after this hook fires; None if it is still missing after `wait` s."""
+    """The agent's description from its meta file, which Claude Code writes only after this hook returns; None if still missing after `wait` s."""
     end = time.monotonic() + wait
     while True:
         try:
@@ -119,6 +124,70 @@ def label_for(hook, agent_id, wait):
         if time.monotonic() > end:
             return None
         time.sleep(0.05)
+
+
+def spawn_desc(hook, wait):
+    """The description of this agent's Agent call: the oldest pending one in the parent transcript's tail not yet taken (same subagent_type first), polled `wait` s since the row lands just after the hook fires; None if none."""
+    end = time.monotonic() + wait
+    while True:
+        desc = take_spawn(hook)
+        if desc or time.monotonic() > end:
+            return desc
+        time.sleep(0.05)
+
+
+def take_spawn(hook):
+    """One read of spawn_desc()."""
+    try:
+        with open(hook["transcript_path"], "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - SPAWN_TAIL))
+            rows = f.read().decode("utf-8", "replace").splitlines()
+        taken = json.load(open(SPAWNS)) if os.path.exists(SPAWNS) else []
+    except Exception:
+        return None
+    calls, done = [], set()
+    for row in rows:
+        if '"Agent"' not in row and '"tool_result"' not in row:
+            continue
+        try:
+            for c in json.loads(row)["message"]["content"]:
+                if c.get("type") == "tool_use" and c.get("name") == "Agent":
+                    calls.append(c)
+                elif c.get("type") == "tool_result":
+                    done.add(c.get("tool_use_id"))
+        except Exception:
+            continue
+    free = [c for c in calls if c.get("id") not in done and c.get("id") not in taken]
+    kind = str(hook.get("agent_type") or "")
+    pick = next((c for c in free if (c.get("input") or {}).get("subagent_type", "general-purpose") == kind), free[0] if free else None)
+    if not pick:
+        return None
+    save((taken + [pick["id"]])[-200:], SPAWNS)
+    return str((pick.get("input") or {}).get("description") or "") or None
+
+
+def guide_text(desc):
+    """Top GUIDE_HITS `guide` matches for the task description; "" when none."""
+    try:
+        out = subprocess.run([os.path.join(os.path.dirname(os.path.realpath(__file__)), "guide"), desc],
+                             capture_output=True, text=True, timeout=GUIDE_TIMEOUT).stdout.splitlines()[:2 * GUIDE_HITS]
+    except Exception:
+        return ""
+    if not out:
+        return ""
+    return (f"guide (auto, matched on your task description \"{desc}\"; word matches, may be noise):\n" + "\n".join(out) +
+            "\nLoad a fitting `→ invoke /name` skill with the Skill tool; run `guide <words>` for more.")
+
+
+def start_context(desc):
+    """The guide matches plus the owner decisions of every project the description names, as SubagentStart additionalContext JSON; "" when none."""
+    if not desc:
+        return ""
+    parts = [t for t in [guide_text(desc)] + [decisions.digest(n) for n in decisions.named(desc)] if t]
+    if not parts:
+        return ""
+    return json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": "\n\n".join(parts)}})
 
 
 def relabel(hook, agent_id, oid):
@@ -161,8 +230,15 @@ def main():
     if agent_id and verb == "relabel":
         return relabel(hook, agent_id, oid)
     if agent_id and verb == "start":
-        wait = 0 if os.path.isdir(os.path.join(subs_dir(hook), "workflows")) else META_WAIT_S
-        label = label_for(hook, agent_id, wait)
+        wait = 0 if os.path.isdir(os.path.join(subs_dir(hook), "workflows")) else SPAWN_WAIT_S
+        os.makedirs(os.path.dirname(CLAIMS), mode=0o700, exist_ok=True)
+        with open(CLAIMS + ".lock", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            desc = spawn_desc(hook, wait)
+        ctx = start_context(desc)
+        if ctx:
+            print(ctx, flush=True)
+        label = desc and desc[:LABEL_MAX]
         post("working", oid, label or str(hook.get("agent_type") or "agent")[:LABEL_MAX])
     os.makedirs(os.path.dirname(CLAIMS), mode=0o700, exist_ok=True)
     with open(CLAIMS + ".lock", "w") as lock:

@@ -12,4 +12,4 @@ The T71 owner-approved neuron plate, rebuilt on the kit (T77). It is the templat
 
 Flow: `boot()` → `WatchBeat` (state = f(clock)) → CTA "Your turn" → `GuidedPlay` (two spoken steps on the dials) → `EndBeat`.
 Proof (T77): same state as the original at every 10 ms of the 78.8 s watch (0 of 88 cue onsets moved), same perf; see
-`~/agents/KB/guides/explainer-engine.md` (numbers) and `~/agents/research/2026-09-24/T77/out/`.
+`~/agents/KB/guides/explainer-engine.md` (numbers) and `~/agent-work/research/2026-09-24/T77/out/`.

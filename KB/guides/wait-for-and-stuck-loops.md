@@ -1,6 +1,6 @@
 # Wait on a background job, and how the sentinel catches stuck wait loops
 
-Ticket: T67 · Last verified: 2026-09-24 by both fixture suites (12 + 17 checks pass; the 2 workflow-owner fixtures added 2026-09-24 by code-review F04 not yet run under bwrap) and `sentinel-waits --dry-run`
+Ticket: T67, T408, T438, T449 · Last verified: 2026-10-19 (T449: `wait-for.test.sh` 18, `sentinel-waits.test.sh` 29, `wait-nudge.test.py` 29, the 4 pgrep forms below re-measured; T438: 2 handback-schema checks, replay of the T429 transcript; T408: `wait-for.test.sh` 18, `sentinel-waits.test.sh` 4 new owner checks, replay of the T407 transcript); before: 2026-09-24 by both fixture suites (12 + 17 checks pass; the 2 workflow-owner fixtures added 2026-09-24 by code-review F04 not yet run under bwrap) and `sentinel-waits --dry-run`
 
 ## When to use
 - You started something long (a build, a benchmark, a render, a subagent's log) and need to be told when it ends: use `wait-for`.
@@ -18,9 +18,11 @@ Ticket: T67 · Last verified: 2026-09-24 by both fixture suites (12 + 17 checks 
   `until/while … sleep` shells by: every PID they name is dead, or every file they name is unchanged 15 min with no writer,
   or their owner agent ended. Owner ended: TERM (KILL after 3 s), a `stuck-wait killed` line in `sentinel/state/sentinel.log`
   and an audit record. Owner still running: one `stuck-wait seen` line, deduped in `waits-seen.tsv`, no kill.
-- Owner = the Bash-tool shell (argv sources `.claude/shell-snapshots/`) → its `tasks/<id>.output` → the subagent transcript
+- Owner = the outermost Bash-tool shell (argv sources `.claude/shell-snapshots/`; a piped or backgrounded loop forks a
+  subshell with the same argv, judged 'session gone' before 2026-10-17) → its `tasks/<id>.output` → the subagent transcript
   holding that id, searched recursively under `<session>/subagents/` (workflow agents live in `workflows/wf_*/`, 69% on
-  2026-09-24; before that fix their loops counted as never ended). Ended = handed back and idle 2 min, or idle 30 min (orbit-hook's rule).
+  2026-09-24; before that fix their loops counted as never ended). Ended = handed back (`SubagentHandback`, a last-line `end_turn`, or a last-line StructuredOutput
+  tool_result, how 267 of 300 workflow agents ended on 2026-10-17) and idle 2 min, or idle 30 min (orbit-hook's rule).
 - `sentinel-runaway` rule 1 kills only `until/while … sleep` shells under a scratchpad, > 60 min, whose owner session is gone
   (no `claude` ancestor, no `claude` naming the session id); it skips `wait-for`. Before 2026-09-24 it killed any 60-min
   scratchpad shell, and twice hit a live session (sentinel.log 09-15, pids 594947 and 1293483).
@@ -31,12 +33,18 @@ Run these in a background Bash call (`run_in_background`); the call returning is
 wait-for --label build --pid 4242                                     # until the process exits
 wait-for --label dia --file run.log --match '^\{|Traceback' --job 4242  # until the log matches; exit 3 if 4242 dies first
 wait-for --label up --until 'curl -sf localhost:8080/health' --job 4242 --every 5
+p=$(pgrep -o -f '[f]rames-ab.sh') && wait-for --label ab --pid "$p"   # wait on a job by name; skips when it is already gone
+wait-for --label ab --until "! pgrep -f '[f]rames-ab.sh'" --every 30  # same, as a condition: bracket the first letter
 wait-for --list            # live waits: pid, age, label, target (--json for the dashboard)
 sentinel-waits --dry-run   # what the reaper would kill now, kills nothing
-bash ~/agents/bin/tests/wait-for.test.sh        # 12 checks, own child processes only, 5.4 s
-bash ~/agents/bin/tests/sentinel-waits.test.sh  # 2 stubbed checks (owner(), one-line reap log), then 19 inside a bwrap PID namespace
+bash ~/agents/bin/tests/wait-for.test.sh        # 18 checks, own child processes only, 11 s
+python3 ~/agents/bin/tests/wait-nudge.test.py   # 29 checks, temp HARNESS_HOME
+bash ~/agents/bin/tests/sentinel-waits.test.sh  # 29 checks: stubbed owner() and reap-log checks, then the rest inside a bwrap PID namespace
 ```
 Exit codes: 0 condition met · 3 job died, or `--file` without `--job` stalled · 143 killed · 2 usage.
+The last line always says why: `done after N s`, `done at once, the condition already held at start`, `job P died before the
+condition held (exit 3)`, `stalled: … (exit 3)`, `killed by SIGTERM after N s, condition not met (exit 143)`. A wrapper's exit code
+(`wait-for …; tail -1 f` exits as `tail`) hides wait-for's: read that line, or `echo rc=$?` right after wait-for.
 
 ## Pitfalls (measured)
 - Age alone cannot judge a wait: in 87 background loops from this machine's transcripts, the finished ones took p50 2 min,
@@ -46,9 +54,40 @@ Exit codes: 0 condition met · 3 job died, or `--file` without `--job` stalled �
   that `sentinel-runaway` rule 1 watched. `sentinel-waits` would have taken them at the first tick after 20 min.
 - `--file` without `--job` can only detect a dead job by the 15-min stall; always pass `--job <pid>` when you have it.
 - `--until` runs `bash -c` every poll (default 10 s): keep the condition cheap, raise `--every` for heavy checks.
+- `--until '! pgrep -f X'` never ends: pgrep matches wait-for's own argv (and its `bash -c`), which holds X. Use
+  `p=$(pgrep -o -f '[X]rest') && wait-for --pid "$p"` or `--until "! pgrep -f '[X]rest'"`. An unbracketed
+  `pgrep -o -f X` with the job gone returns the caller's own shell (its argv holds X), so `--pid` waits forever
+  (T363, measured); a bracketed pattern still matches a caller whose argv holds the bare name. Do not start X
+  in the same command line (the caller's shell argv matches too). Measured 2026-10-15: bare form hung until `timeout` (rc 124), bracketed rc 0;
+  the audit log shows frames-ab, t146-end and quiet-gpu waits re-armed for this reason. Re-measured 2026-10-19 (T449): bare, job gone →
+  caller's pid, rc 124; bracketed, job gone, bare name elsewhere in the same command → caller's pid, hung 128 s;
+  bracketed, clean command → no pid, rc 1; bracketed, job live → `done after 3 s`. If you started X, use `X & p=$!`.
+- T408 (2026-10-19): two T407 waits "returned early" with no `wait-for:` line: `sentinel-waits` killed them (sentinel.log 02:34:57,
+  02:49:57) because a subagent's last line was `end_turn` 3–6 min idle. A subagent that ends its turn with a background wait running
+  is waiting for that wait's notification, not done. Now a registered wait's owner ends only on `SubagentHandback`/StructuredOutput
+  (+2 min) or 3 h idle (`WAITING_IDLE`, above the 178 min measured max); unregistered loops keep the end_turn rule.
+- T438 (2026-10-19): T429's registered wait was killed at 750 s (sentinel.log 08:22:49) although T408 had shipped: every
+  `api-request-shape` record lists the `SubagentHandback` tool schema, so the substring `"name":"SubagentHandback"` in the
+  64 KB tail read as a handback after 2 min idle. Now only an `assistant` record's `tool_use` counts (`handed_back()`).
+  Not the Bash tool's 600 s cap: a `run_in_background` call has none (the wait ran 750 s).
+- `--until '! systemctl --user is-active -q X.service'` holds at once for a `Type=oneshot` unit: it is `activating`, not `active`,
+  while it runs (T407, measured). Wait on `--pid "$(systemctl --user show -p MainPID --value X.service)"`. `done at once` flags such a condition.
 - `wait-for` vs `pc wait-for`: agents confuse them. Only the first waits on jobs; the second is desktop UI.
 - Adoption, first day (41 transcripts newer than `bin/wait-for`): 64 `wait-for --label` calls, but still 6 hand-written
   `until/while … sleep` loops. The fallback reaper is still needed.
+- Nudge (T376, 2026-10-18): the async PostToolUse audit hook (`adapters/claude/hooks/audit-log.py` → `hooks/wait_nudge.py`)
+  returns a one-line `additionalContext` with the exact `wait-for` equivalent of an `until/while … sleep` loop, an
+  `X && break` polling loop, or a leading/after-`&` `sleep N` (N ≥ 10). Measured: delivered to a main-thread session on
+  the next turn (headless `claude -p` quoted it). A subagent's async output lands in the MAIN thread, not the
+  subagent (4 subagent probes reached the orchestrator as false nudges), so the hook skips calls with `agent_id`;
+  nudging subagents needs a synchronous PostToolUse entry (settings.json, owner-go). Adoption:
+  `python3 ~/agents/hooks/wait_nudge.py --share 14` (baseline 2026-10-18: 105 wait-for vs 265 hand waits, 28.4 %).
+- Block (TSP-040, T436, 2026-10-19): the PreToolUse hook `hooks/sleep-loop-block.py` (same parser, `wait_nudge.loop_wait`)
+  denies an `until/while … sleep` or `X && break` loop before it runs, in subagents too (measured: a haiku subagent got the deny
+  and the line); the reason is the `wait-for` line to run. Loops in quoted data or heredoc bodies pass; `bash -c '…'`/`eval` loops
+  are blocked. A deliberate loop fixture (reaper tests) goes in a script file run with `bash f.sh`. Replay of 7 days of audit
+  summaries: 139 denies of 15 269, 0 on data. Live once the owner reruns `adapters/claude/install`.
+  Test: `python3 ~/agents/hooks/sleep-loop-block.test.py`.
 - Testing the reaper against real processes could kill a live agent (FLEET §5.6). The suite re-execs itself under
   `bwrap --unshare-pid --proc /proc` and a selftest first proves the host's `claude` processes are invisible.
 - Cost at idle: `sentinel-waits --dry-run` with no waits registered takes 0.03 s per 15-min tick.
@@ -56,5 +95,5 @@ Exit codes: 0 condition met · 3 job died, or `--file` without `--job` stalled �
 ## Links
 - Code: `~/agents/bin/wait-for`, `~/agents/bin/sentinel-waits`, called from `~/agents/bin/sentinel-check` (after `sentinel-runaway`)
 - Tests: `~/agents/bin/tests/wait-for.test.sh`, `~/agents/bin/tests/sentinel-waits.test.sh`
-- Design: `~/agents/research/2026-09-23/T67/design.md` · Fleet rule: `~/agents/AGENTS.md` §3 · Toolbox: `KB/toolbox.md` (sentinel section)
+- Design: `~/agent-work/research/2026-09-23/T67/design.md` · Fleet rule: `~/agents/AGENTS.md` §3 · Toolbox: `KB/toolbox.md` (sentinel section)
 - State: `$XDG_RUNTIME_DIR/agent-waits/`, `~/agents/sentinel/state/{sentinel.log,waits-seen.tsv}`

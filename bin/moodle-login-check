@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 # moodle-login-check <ver> — curl-only check that a Moodle env answers and its login page renders.
 set -uo pipefail
+case "${1:-}" in -h|--help) awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; exit 0 ;; esac
 ver="${1:-}"
 [ -z "$ver" ] && { echo "usage: moodle-login-check <ver>"; exit 2; }
-cfg="$HOME/moodle-envs/$ver/www/config.php"
+# shellcheck source=/dev/null
+. "$(dirname "$(readlink -f "$0")")/moodlelib.sh"
+d="$(moodle_envs_root)/$ver"
+src="$(moodle_src "$d")" || src="$d/www"
+cfg="$src/config.php"
 [ -f "$cfg" ] || { echo "no env $ver (missing $cfg)"; exit 1; }
-url="$(sed -n "s/.*\$CFG->wwwroot[[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" "$cfg" | head -1)"
+url="$(moodle_wwwroot "$cfg")"
 code="$(curl -sS -o /dev/null -w '%{http_code}' -m 15 "$url/login/index.php")"
 body="$(curl -sS -m 15 "$url/login/index.php")"
 echo "url:   $url"

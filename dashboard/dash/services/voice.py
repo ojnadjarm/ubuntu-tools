@@ -187,19 +187,23 @@ def _corpus_key():
     return (CORPUS, _mtime(CORPUS), len(side), max(side, default=0), _mtime(PROMPTS_FILE), FLOOR_FILE, _mtime(FLOOR_FILE))
 
 
-def corpus_stats():
-    """/api/voice/stats, recomputed only when _corpus_key() changes or a clip is saved, deleted or cleared."""
+def _stats_hit():
+    """The stats memo entry, recomputed only when _corpus_key() changes or a clip is saved, deleted or cleared."""
     key = _corpus_key()
     hit = _memo.get("stats")
     if not hit or hit["key"] != key:
         hit = _memo["stats"] = {"key": key, "val": _corpus_stats()}
-    return hit["val"]
+    return hit
+
+
+def corpus_stats():
+    """/api/voice/stats, recomputed only when _corpus_key() changes or a clip is saved, deleted or cleared."""
+    return _stats_hit()["val"]
 
 
 def stats_body():
     """corpus_stats() as (JSON bytes, gzip bytes, ETag), serialised once per recompute."""
-    corpus_stats()
-    hit = _memo["stats"]
+    hit = _stats_hit()
     if "body" not in hit:
         body = json.dumps(hit["val"]).encode()
         hit["body"], hit["gz"], hit["etag"] = body, gzip.compress(body, 6), '"%s"' % hashlib.sha1(body).hexdigest()[:16]
@@ -254,8 +258,11 @@ def save_clip(raw, mime, prompt_id, prompt_sha=None):
     ext = {"audio/webm": ".webm", "audio/ogg": ".ogg", "audio/mp4": ".m4a", "audio/wav": ".wav"}.get(mime.split(";")[0].strip(), ".bin")
     src = os.path.join(CORPUS, cid + ".src" + ext)
     open(src, "wb").write(raw)
-    conv = subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", src, "-ac", "1", "-ar", "16000",
-                           "-c:a", "pcm_s16le", "-f", "wav", "-rf64", "never", "-fflags", "+bitexact", wav], capture_output=True, text=True, timeout=60)
+    try:
+        conv = subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", src, "-ac", "1", "-ar", "16000",
+                               "-c:a", "pcm_s16le", "-f", "wav", "-rf64", "never", "-fflags", "+bitexact", wav], capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        return 500, {"error": "ffmpeg timed out after 60 s", "kept": os.path.basename(src)}
     if conv.returncode != 0 or not os.path.exists(wav):
         return 500, {"error": "ffmpeg failed: " + conv.stderr.strip()[-200:], "kept": os.path.basename(src)}
     os.remove(src)
@@ -280,7 +287,7 @@ def save_clip(raw, mime, prompt_id, prompt_sha=None):
 
 def delete_clip(cid):
     """Move one clip and its sidecar by id into spoiled/ — a take he threw away is where the model fails hardest; the id pattern is the whole confinement."""
-    if not CLIP_ID.match(cid or ""):
+    if not isinstance(cid, str) or not CLIP_ID.match(cid):
         return 400, {"error": "bad id"}
     gone = 0
     for ext in (".wav", ".json"):

@@ -28,9 +28,9 @@ Ticket: T52–T56 · Last verified: 2026-09-24 by dashboard pytest 84 passed + `
 cd ~/agents/dashboard
 python3 -m pytest tests -q && node tests/test_next.js && node tests/test_pronunciation_page.js   # 84 + 2 green
 python3 tools/perf.py                                             # endpoint timings, raw/gzip bytes
-SCREEN=eye W=1920 H=1080 node ~/agents/research/2026-09-23/T53/build/next-measure.js          # fps, first KB, idle/hidden CPU
-SCREEN=eye W=400 H=860 DPR=2 THROTTLE=4 node ~/agents/research/2026-09-23/T53/build/next-measure.js   # phone proxy
-node ~/agents/research/2026-09-23/T53/build/next-shot.js         # shots at 400/768/1366/1920/2560 (responsive hard rule)
+SCREEN=eye W=1920 H=1080 node ~/agent-work/research/2026-09-23/T53/build/next-measure.js          # fps, first KB, idle/hidden CPU
+SCREEN=eye W=400 H=860 DPR=2 THROTTLE=4 node ~/agent-work/research/2026-09-23/T53/build/next-measure.js   # phone proxy
+node ~/agent-work/research/2026-09-23/T53/build/next-shot.js         # shots at 400/768/1366/1920/2560 (responsive hard rule)
 systemctl --user restart agents-dashboard && curl -sI http://127.0.0.1:19998/ | head -1
 ```
 
@@ -52,6 +52,6 @@ systemctl --user restart agents-dashboard && curl -sI http://127.0.0.1:19998/ | 
 ## Links
 - Code: `~/agents/dashboard/static/next/` (`js/stage.js`, `js/gl/{engine,eye,life,creatures}.js`, `js/gl/eyes/swarm.js`, `vendor/three.sub.js`)
 - Tests: `~/agents/dashboard/tests/{test_next.py,test_next.js,test_needs.py}`
-- Design / results: `~/agents/research/2026-09-22/T52/spec.md`, `research/2026-09-23/T53/art-direction.md`, scripts in
-  `research/2026-09-2{2,3}/T5{2,3,4,6}/build/`, history lines in `~/agents/dashboard/CLAUDE.md` · briefs `~/agents/briefs/T5{2,3,4,6}-*.md`
+- Design / results: `~/agent-work/research/2026-09-22/T52/spec.md`, `research/2026-09-23/T53/art-direction.md`, scripts in
+  `research/2026-09-2{2,3}/T5{2,3,4,6}/build/`, history lines in `~/agents/dashboard/CLAUDE.md` · briefs `~/agent-work/briefs/T5{2,3,4,6}-*.md`
 - Skill: `frontend-design` (design plan and quality floor before code)

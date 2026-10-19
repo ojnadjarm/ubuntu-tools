@@ -16,7 +16,7 @@ Steps marked **owner** touch sudoers, sshd, ufw or a second access path: agents 
 
 ```bash
 machine-inventory > ~/agents/backups/inventory-$(date +%F).txt            # the list this runbook replays
-sudo tar -czf ~/etc-fleet.tgz -T <(machine-inventory --etc-list | grep -vE '^/etc/(passwd|group|shadow|gshadow)$')
+machine-inventory --etc-list | grep -vE '^/etc/(passwd|group|shadow|gshadow)$' | sudo tar -czf ~/etc-fleet.tgz -T -
 moodle-keep                                                                  # fresh pg_dump into ~/agents/backups/moodle/{4.5,5.2}/<date>.sql.gz, restore-tested
 tailscale serve status > ~/agents/backups/tailscale-serve-$(date +%F).txt
 gsettings list-recursively > ~/agents/backups/gsettings-$(date +%F).txt
@@ -28,7 +28,7 @@ gsettings list-recursively > ~/agents/backups/gsettings-$(date +%F).txt
 ## 1. Base install (owner)
 
 Ubuntu 26.04 LTS desktop, in the installer:
-- the **same user name** as the old box and **uid 1000** (paths and file names below embed it: the udev ptt rule, `/etc/sudoers.d/*` (named after the user), `/etc/security/limits.d/90-agents.conf`, the AppArmor profile, user units);
+- the **same user name** as the old box and **uid 1000** (paths and file names below embed it: `/etc/sudoers.d/*` (named after the user), `/etc/security/limits.d/90-agents.conf`, the AppArmor profile, user units);
 - "log in automatically" on: writes `/etc/gdm3/custom.conf` (`AutomaticLoginEnable=true`, `AutomaticLogin=<user>`) — the fleet needs a live session after every boot (P);
 - keyboard **latam** (`pc type` exists because `ydotool type` mistypes it), timezone Europe/Madrid, English UI;
 - hostname: any name works (the old one is in `KB/machine.md` "Identity"); links use the Tailscale name (step 8).
@@ -95,7 +95,6 @@ sudo ufw reload && sudo systemctl restart systemd-journald NetworkManager docker
 | `/etc/dconf/profile/user`, `/etc/dconf/db/local.d/00-agents`, `/etc/dconf/db/local.d/10-agent-mode`, `/etc/dconf/db/local.d/locks/00-agents`, `/etc/dconf/db/local` | `user-db:user` + `system-db:local`; no lock/blank/idle/dim, power button and sleep `nothing`, `toolkit-accessibility=true`, no animations, 1 workspace, no update notifier; `/etc/dconf/db/local` is compiled by `sudo dconf update` | always-on agent desktop · T02, T10, T28c | P |
 | `/etc/gdm3/custom.conf` | `AutomaticLoginEnable=true`, `AutomaticLogin=<user>` | session after every boot · install choice | P |
 | `/etc/systemd/system/ydotoold.service` | `ExecStart=/usr/bin/ydotoold --socket-path=/tmp/.ydotool_socket --socket-perm=0666`, `Restart=always`, WantedBy multi-user | `pc` input verbs · day-1 setup, before etckeeper | P |
-| `/etc/udev/rules.d/90-dark-eye-ptt.rules` | input `*AVRCP*` devices and `uinput`: `GROUP="input"`, `MODE="0660"`, `setfacl -m u:<user>:rw` | buds push-to-talk, ydotool · E08 | P |
 | `/etc/systemd/system/battery-charge-threshold.service` | oneshot writes `80` to `BAT0` `charge_control_end_threshold` at boot and after resume (waits up to 60 s for the node); WantedBy multi-user + suspend/hibernate/hybrid-sleep/suspend-then-hibernate targets; replaces the old udev rule `99-agents-battery-threshold.rules` | battery always plugged in · T21, T258 | H |
 | `/etc/udev/rules.d/99-agents-power-profile.rules` + `/etc/systemd/system/power-profile-auto.service` + `/usr/local/sbin/power-profile-auto` | `KERNEL=="A[CD]*"` power_supply change → oneshot sets the profile from AC state | performance on AC · T21 | H |
 | `/etc/NetworkManager/conf.d/zz-agents-wifi-powersave-off.conf` | `[connection] wifi.powersave = 2` | MT7921 Wi-Fi drops with power save · T21 | H |
@@ -156,7 +155,6 @@ curl --proto '=https' -sSf https://sh.rustup.rs | sh -s -- -y         # ~/.cargo
   `gsettings set org.gnome.desktop.peripherals.mouse accel-profile flat` (ydotool reaches every window);
   input source `[('xkb', 'latam')]`; `pc mode agent` re-applies the agent-first profile (T28c); display layout from
   `~/.config/monitors.xml` (TV on HDMI-1; H — never change it without the owner).
-- Godot 4.7.2: binary `~/.local/opt/t65/Godot_v4.7.2-stable_linux.x86_64`, templates `~/.local/share/godot/export_templates/4.7.2.stable` (both come with the home copy).
 - **Verify:** `claude --version`; `~/.nvm/versions/node/v24.20.0/bin/playwright-mcp --help | grep -c idle` ≥ 1;
   `npm ls -g --depth=0 | grep playwright/mcp` = `@playwright/mcp@0.0.83`; `gnome-extensions list --enabled | grep window-calls`.
 
@@ -168,11 +166,11 @@ rsync -aHAX --info=progress2 --exclude='.cache/' --exclude='snap/*/common/.cache
   "$USER@<old-tailnet-name>:" "$HOME/"
 ```
 What that brings (D unless marked), and why it matters:
-- `~/agents` (36 GB, 35 GB of it `research/` — the kokoro venv used by `/kokoro-narration` lives in `research/2026-09-23/T65/tts/envs/kokoro`), `~/agents/backups` (DB dumps, config baselines), `~/agents/log`, `~/agents/state`.
+- `~/agents` (6 GB), `~/agents/backups` (DB dumps, config baselines), `~/agents/log`, `~/agents/state`; `~/agent-work` (`$AGENT_WORK`, 37 GB, 33 GB of it `research/`: briefs, research, evidence, archive, owner material).
 - `~/moodle-envs` (code + moodledata; the database is **not** here — step 10), `~/moodle-harness`, `~/the-dark-eye` (3.6 GB), `~/projects` (3 GB), `~/drop` (3.8 GB), `~/sites`, `~/obsidian-vault`, `~/Documents`, `~/finance`, `~/invoices`.
 - `~/.claude` (2.7 GB: skills, settings, hooks, `projects/` memory and transcripts), `~/CLAUDE.md`.
 - `~/.config/systemd/user/` (all user units, step 8), `~/.config/drop/Caddyfile`, `~/.config/sites/Caddyfile` (both bind the tailnet + LAN IPs: H), `~/.config/pc-harness/config.env`, `~/.config/monitors.xml`, `~/.config/dark-eye/`.
-- `~/.local/share/tts` (1.8 GB xtts model), `~/.local/share/godot`, `~/.local/opt`, `~/nltk_data`, `~/.local/share/pipx`, `~/.nvm` (or reinstall in step 6).
+- `~/.local/share/tts` (1.8 GB xtts model), `~/.local/opt` (the `/kokoro-narration` venv `kokoro/`), `~/.local/share/dev-cert` (vite HTTPS cert), `~/nltk_data`, `~/.local/share/pipx`, `~/.nvm` (or reinstall in step 6).
 - **Verify:** `du -sh --exclude=.cache ~` within 1 GB of the old box; `ls ~/agents/backups/moodle/5.2 | tail -1` is the step-0 dump.
 
 ## 8. Fleet install
@@ -182,18 +180,18 @@ What that brings (D unless marked), and why it matters:
 ~/moodle-harness/install.sh             # then /set-moodle-harness in Claude Code
 systemctl --user daemon-reload
 systemctl --user enable --now agents-dashboard.service claude-orchestrator.service drop.service finance-web.socket sites.service
-~/the-dark-eye/bridge/relay/install.sh   # eye-relay.service, eye tap, mcp-<brain>.json; then link ~/agents/eye-relay/mcp-{main,notes}.json to ~/.config/dark-eye/
-systemctl --user enable dark-eye.service dark-eye-ptt.service pc-lid.service           # graphical-session.target
+~/the-dark-eye/bridge/relay/install.sh   # eye-relay.service, eye tap, mcp-<brain>.json; then link ~/agents/eye-relay/mcp-main.json to ~/.config/dark-eye/
+systemctl --user enable dark-eye.service pc-lid.service           # graphical-session.target
 systemctl --user enable --now ailearning-ci-daily.timer moodle-keep-weekly.timer moodle45-cron.timer moodle52-cron.timer orchestrator-pulse.timer pcbench-weekly.timer sentinel-check.timer
 agents-start                            # the agent@<name>.timer roster from KB/orchestrator.md
 sudo tailscale up --ssh                 # owner: log in, then in the admin console remove the old node and give this one the old Tailscale name (`KB/machine.md` "Identity")
 ```
 - User units that live only in `~/.config/systemd/user` (no copy in `~/agents/units`; they arrive with step 7):
-  `ailearning-ci-daily.service`, `ailearning-ci-daily.timer`, `claude-orchestrator.service`, `drop.service`, `finance-web.service`,
+  `claude-orchestrator.service`, `drop.service`, `finance-web.service`,
   `finance-web.socket`, `moodle45-cron.service`, `moodle45-cron.timer`, `moodle52-cron.service`, `moodle52-cron.timer`, `orchestrator-pulse.service`, `orchestrator-pulse.timer`,
-  `pc-lid.service`, `sites.service`, `vass-middleware.service`, `vass-frontend.service`, `vass-frontend-proxy.service` (T264; enable all three, the sentinel watches them, T269). Symlinks into the Eye repo: `dark-eye.service`, `dark-eye-ptt.service`, `dark-eye-failed.service`.
-  From `~/agents/units` via install.sh: `agent@.service`, `agent@.timer`, `agents-dashboard.service`, `notes-brain.service`,
-  `moodle-keep-weekly.service`, `moodle-keep-weekly.timer`, `pcbench-weekly.service`, `pcbench-weekly.timer`, `sentinel-check.service`, `sentinel-check.timer`.
+  `pc-lid.service`, `sites.service`, `vass-middleware.service`, `vass-frontend.service`, `vass-frontend-proxy.service` (T264; enable all three, the sentinel watches them, T269). Symlinks into the Eye repo: `dark-eye.service`, `dark-eye-failed.service`.
+  From `~/agents/units` via install.sh: `agent@.service`, `agent@.timer`, `agents-dashboard.service`,
+  `ailearning-ci-daily.service`, `ailearning-ci-daily.timer`, `moodle-keep-weekly.service`, `moodle-keep-weekly.timer`, `pcbench-weekly.service`, `pcbench-weekly.timer`, `sentinel-check.service`, `sentinel-check.timer`.
   Schedules as drop-ins: `agent@code-review.service.d`, `agent@code-review.timer.d`, `agent@hello.timer.d`, `agent@maintenance.timer.d`,
   `agent@moodle-keeper.timer.d`, `agent@sentinel-digest.timer.d`, `agent@sentinel.timer.d`, `agent@toolsmith.timer.d`.
 - New tailnet IP (H): put it in `/etc/systemd/system/netdata.service.d/10-tailscale.conf`, `~/.config/drop/Caddyfile`, `~/.config/sites/Caddyfile`,

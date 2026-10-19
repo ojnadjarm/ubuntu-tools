@@ -16,8 +16,8 @@ quality drop". Not for general benchmark scores (use public leaderboards) or for
 
 ## Exact commands
 ```bash
-OUT=~/agents/research/$(date +%F)/TNNN
-python3 ~/.claude/skills/context-rot/selftest.py ~/agents/research/2026-09-27/T129/corpus.jsonl   # offline oracle, 0.1 s
+OUT=~/agent-work/research/$(date +%F)/TNNN
+python3 ~/.claude/skills/context-rot/selftest.py ~/agent-work/research/2026-09-27/T129/corpus.jsonl   # offline oracle, 0.1 s
 ~/agents/bin/ctxrot run $OUT --lengths 32000,128000,200000,300000            # plain, seeds 1,2,3 (builds corpus + calibration)
 ~/agents/bin/ctxrot run $OUT --lengths 32000,128000,200000,300000 --hard
 ~/agents/bin/ctxrot run $OUT --lengths 32000,128000,300000,500000,800000,970000 --updates 6
@@ -52,4 +52,4 @@ mkdir -p "$OUT/drop" && cp -rT "$OUT/page" "$OUT/drop/context-rot" && ~/agents/b
 ## Links
 - Code: `~/.claude/skills/context-rot/` (skill `/context-rot`), CLI `~/agents/bin/ctxrot`, page template `page.html`
 - Tests: `python3 ~/.claude/skills/context-rot/selftest.py <corpus.jsonl>`
-- Design / results: `~/agents/research/2026-09-27/T129/results.md`, page `https://$HARNESS_TAILNET_FQDN:8470/t129/context-rot/`
+- Design / results: `~/agent-work/research/2026-09-27/T129/results.md`, page `https://$HARNESS_TAILNET_FQDN:8470/t129/context-rot/` (deleted T271)

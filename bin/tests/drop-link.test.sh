@@ -20,8 +20,8 @@ out=$("$BIN/drop-link" "$T/src/site" t99); rc=$?
 ok "folder: trailing-slash link answers" '[ $rc = 0 ] && [ "$out" = "$DROP_URL/t99/site/" ]'
 out=$("$BIN/drop-link" "$T/drop/t99/site/index.html"); rc=$?
 ok "index.html already in drop: folder link, no copy" '[ $rc = 0 ] && [ "$out" = "$DROP_URL/t99/site/" ]'
-err=$("$BIN/drop-link" "$T/src/page.html" t99 2>&1 >/dev/null)
-ok "other .html: download warning" '[[ "$err" == *"served as a download"* ]]'
+out=$("$BIN/drop-link" "$T/src/page.html" t99 2>/dev/null); rc=$?
+ok "other .html: direct page link" '[ $rc = 0 ] && [ "$out" = "$DROP_URL/t99/page.html" ]'
 "$BIN/drop-link" "$T/src/a b.txt" "../x" >/dev/null 2>&1; rc=$?
 ok "sub with .. is refused (exit 2)" '[ $rc = 2 ] && [ ! -e "$T/x" ]'
 DROP_URL=http://127.0.0.1:9 "$BIN/drop-link" "$T/src/a b.txt" t99 >/dev/null 2>&1; rc=$?

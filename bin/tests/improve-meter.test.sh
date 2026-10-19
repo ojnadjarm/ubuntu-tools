@@ -30,8 +30,8 @@ t0=$(date +%s.%N); R=$(im --idle on); rc=$?; t1=$(date +%s.%N)
 is 'exit 0'                 "$rc" 0
 is 'header'                 "$(head -1 <<<"$R")" "$(printf 'date\torch_ctx_k\theadless_cc_k\tdoctor_s\tpcbench_pass\tcorpus_wer_pct\tidle_psys_w')"
 is 'date from IMPROVE_NOW'  "$(col date "$R")" 2026-09-22
-is 'orch ctx: 2 turns in window, sidechain, old turn and stale file skipped' "$(col orch_ctx_k "$R")" 150.0
-is 'headless cc: 2 runs in window, old and broken skipped' "$(col headless_cc_k "$R")" 25.0
+is 'orch ctx: 3 turns in window (one split over 2 lines, F18), sidechain, old turn and stale file skipped' "$(col orch_ctx_k "$R")" 200.0
+is 'headless cc: 2 runs in window, old, broken and all-zero skipped' "$(col headless_cc_k "$R")" 25.0
 is 'pcbench new-arm pass'   "$(col pcbench_pass "$R")" 0.75
 is 'corpus WER after corrector, pooled 1/8' "$(col corpus_wer_pct "$R")" 12.5
 is 'idle psys W'            "$(col idle_psys_w "$R")" 4.20
@@ -69,6 +69,19 @@ im --idle maybe >/dev/null 2>&1; is 'bad idle mode exit 2' "$?" 2
 before=$(find "$FIX" -type f -newermt '-2 second' | wc -l)
 im --idle on >/dev/null
 is 'fixture untouched' "$(find "$FIX" -type f -newermt '-2 second' | wc -l)" "$before"
+
+# 7. registration (CR-004): daily 06:45 timer, oneshot --append, roster row, kill switch. Files only.
+U="$BIN/../units"
+is 'service is a oneshot'      "$(grep -c '^Type=oneshot$' "$U/improve-meter.service" 2>/dev/null)" 1
+is 'service runs --append'     "$(grep -c '^ExecStart=%h/agents/bin/improve-meter --append$' "$U/improve-meter.service" 2>/dev/null)" 1
+is 'service PATH has agents/bin' "$(grep -c '^Environment=PATH=%h/agents/bin:' "$U/improve-meter.service" 2>/dev/null)" 1
+is 'timer daily 06:45'         "$(grep -c '^OnCalendar=\*-\*-\* 06:45$' "$U/improve-meter.timer" 2>/dev/null)" 1
+is 'timer persistent'          "$(grep -c '^Persistent=true$' "$U/improve-meter.timer" 2>/dev/null)" 1
+systemd-analyze calendar '*-*-* 06:45' >/dev/null 2>&1; is 'calendar spec valid' "$?" 0
+u=$(grep 'improve-meter.timer' "$BIN/../KB/orchestrator.md" | head -1 | awk -F'|' '{print $3}' | grep -o '`[^`]*`' | head -1 | tr -d '`')
+is 'agents-start parses the roster row' "$u" improve-meter.timer
+{ grep -q 'improve-meter.service' "$BIN/agents-stop" && grep -q 'improve-meter.timer' "$BIN/agents-stop"; } &&
+  ok 'agents-stop stops service and timer' || nok 'agents-stop stops service and timer' 'not listed'
 
 [ "$bad" = 0 ] && printf 'PASS improve-meter\n' || printf 'FAIL improve-meter\n'
 exit "$bad"

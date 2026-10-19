@@ -66,6 +66,8 @@ s "stop docker"              systemctl "Access denied"        $SC stop docker-pc
 s "sudo reboot refused"      sudo      "password is required" /usr/bin/sudo -n /usr/sbin/reboot
 s "sudo ufw disable refused" sudo      "password is required" /usr/bin/sudo -n /usr/sbin/ufw disable
 
+( . "${NTFY_ENV_FILE:-/nonexistent}" && case "$NTFY_URL" in http://127.0.0.1:*) exit 0;; esac; exit 1 ) 2>/dev/null
+ck "$(yes_if $?)" "notify-owner sandboxed" "NTFY_ENV_FILE=${NTFY_ENV_FILE:-unset}"
 /usr/bin/systemctl --user show-environment >/dev/null 2>&1
 ck "$(yes_if $?)" "read-only verbs forwarded" "systemctl --user show-environment"
 exit $fail

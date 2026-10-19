@@ -527,6 +527,9 @@ def main():
     p.add_argument("--max-bytes", type=int, default=4000)
     p.add_argument("--modal-check", action="store_true")
     p.add_argument("--all", action="store_true")
+    if sys.argv[1:2] in (["-h"], ["--help"]):
+        print(__doc__ + "\n" + p.format_usage(), end="")
+        return 0
     a = p.parse_args()
     Atspi.set_timeout(*LIVE_TIMEOUT)
 

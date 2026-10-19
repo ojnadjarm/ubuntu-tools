@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
-# pc bt status|devices|info|battery|profile|connect|disconnect|scan|power — bluez adapter, devices, battery and the sidecar-guarded mutations.
+# pc bt status|devices|info|battery|profile|connect|disconnect|scan|power — bluez adapter, devices, battery and ledgered mutations.
 #
 # JSON shapes (stable):
 #   status  {"adapter":{address,name,powered,discoverable,pairable,discovering,class,path},
 #            "counts":{total,paired,connected},"connected":[{mac,name,battery}],
-#            "sidecar":{"unit":U,"active":bool},"error":{message,age_seconds}|null}
+#            "error":{message,age_seconds}|null}
 #   devices [{mac,name,alias,paired,bonded,trusted,blocked,connected,rssi,battery,icon,path,uuids}]
 #   info    one devices[] entry + {"card":C|null,"profile":P|null,"profiles":[…]}
 #   battery [{mac,name,percentage}]
 #   profile {"device":MAC,"card":C,"active":P,"profiles":[…]}
 #   scan    devices[] as seen after the window
 # Mutations (connect|disconnect|profile|power) print `would: <before> → <after>` without --apply
-# and are ledgered with it (`pc undo <id>`). Anything touching the buds while the push-to-talk
-# sidecar is active is refused (exit 3) unless --force --why '<reason>'.
+# and are ledgered with it (`pc undo <id>`).
 set -uo pipefail
 export LC_ALL=C
 BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -29,23 +28,11 @@ pc_usage 'usage: pc bt [status] [--json]
 
 <dev> is a MAC, a name substring, or `buds` (the Sony WF-1000XM5, $BUDS_MAC).
 Reads go through `pc dbus --system` (org.bluez GetManagedObjects, one round trip); the audio
-profile is the PipeWire bluez5 card profile (`pactl set-card-profile`).
-dark-eye-ptt owns the buds: while it is active, connect/disconnect/profile on them exit 3 —
-stop the sidecar or pass --force --why "<reason>". `power off` is refused while a device is
-connected. Scan windows are bounded (1..60 s) and always send StopDiscovery.' "$@"
+profile is the PipeWire bluez5 card profile (`pactl set-card-profile`). `power off` is
+refused while a device is connected. Scan windows are bounded (1..60 s) and always send StopDiscovery.' "$@"
 
 BUDS_MAC="${BUDS_MAC:-$HARNESS_BUDS_MAC}"
-SIDECAR_UNIT=dark-eye-ptt
-FORCE=0; WHY=""; ARGV=()
-while [ $# -gt 0 ]; do
-  case $1 in
-    --force) FORCE=1;;
-    --why) WHY=$2; shift;; --why=*) WHY=${1#*=};;
-    *) ARGV+=("$1");;
-  esac
-  shift
-done
-pc_opt ${ARGV[@]+"${ARGV[@]}"}
+pc_opt "$@"
 die() { printf 'pc bt: %s\n' "$1" >&2; exit "${2:-1}"; }
 refuse() { printf 'pc bt: refused (%s)\n' "$1" >&2; exit 3; }
 
@@ -99,29 +86,12 @@ resolve_dev() {
   printf '%s\n' "$out"
 }
 
-## --- the sidecar guard ------------------------------------------------------
-sidecar_active() { [ "$(pc_cmd systemctl --user is-active "$SIDECAR_UNIT" 2>/dev/null)" = active ]; }
-# The push-to-talk sidecar flips the buds between A2DP and HFP on every tap; a second writer
-# there leaves the card without a source and the mic silently dead (quirks E20/E24).
-guard_sidecar() {
-  local mac=$1 verb=$2
-  [ "${mac,,}" = "${BUDS_MAC,,}" ] || return 0
-  sidecar_active || return 0
-  [ "$FORCE" = 1 ] && [ -n "$WHY" ] && { printf 'forced: %s (%s owns the buds)\n' "$WHY" "$SIDECAR_UNIT"; return 0; }
-  [ "$FORCE" = 1 ] && die '--force needs --why "<reason>"' 2
-  # A dry run changes nothing: it still prints `would:`, with the refusal it would hit on stderr.
-  [ "$APPLY" = 1 ] || { printf 'note: %s owns the buds — this needs --force --why "<reason>" to apply.\n' "$SIDECAR_UNIT" >&2; return 0; }
-  printf 'pc bt: refused (%s is active and owns the buds — it flips A2DP/HFP on every tap).\n' "$SIDECAR_UNIT" >&2
-  printf '       stop it (systemctl --user stop %s) or rerun: pc bt %s ... --force --why "<reason>"\n' "$SIDECAR_UNIT" "$verb" >&2
-  exit 3
-}
-
 ## --- the bluez5 card profile ------------------------------------------------
 card_of() { printf 'bluez_card.%s' "${1//:/_}"; }
 cards() { pc_cmd pactl --format=json list cards 2>/dev/null; }
 card_json() { cards | jq -c --arg c "$1" 'map(select(.name==$c)) | first // empty'; }
 active_profile() { card_json "$1" | jq -r '.active_profile // empty'; }
-# a2dp/hfp are the two the sidecar names; anything else is passed to pactl verbatim.
+# a2dp/hfp are shorthands; anything else is passed to pactl verbatim.
 profile_name() { case $1 in a2dp) printf a2dp-sink;; hfp) printf headset-head-unit;; *) printf '%s' "$1";; esac; }
 
 ## --- journal ----------------------------------------------------------------
@@ -136,17 +106,15 @@ sub="${PC_ARGS[0]:-status}"; arg="${PC_ARGS[1]:-}"
 case "$sub" in
 status)
   a=$(adapter); d=$(devices); e=$(bt_error)
-  s=$(sidecar_active && echo true || echo false)
   out=$(pc_json '{adapter:$a, counts:{total:($d|length), paired:($d|map(select(.paired))|length),
                    connected:($d|map(select(.connected))|length)},
                   connected:($d|map(select(.connected))|map({mac,name,battery})),
-                  sidecar:{unit:$u,active:$s}, error:$e}' -c \
-    --argjson a "$a" --argjson d "$d" --arg u "$SIDECAR_UNIT" --argjson s "$s" --argjson e "${e:-null}")
+                  error:$e}' -c \
+    --argjson a "$a" --argjson d "$d" --argjson e "${e:-null}")
   if [ "$JSON" = 1 ]; then printf '%s\n' "$out"; else
     jq -r '"adapter   \(.adapter.name) [\(.adapter.address)] powered=\(.adapter.powered) discoverable=\(.adapter.discoverable) pairable=\(.adapter.pairable) discovering=\(.adapter.discovering)",
            "devices   \(.counts.total) known, \(.counts.paired) paired, \(.counts.connected) connected",
            (.connected[] | "  \(.name) [\(.mac)]\(if .battery then " battery \(.battery)%" else "" end)"),
-           "sidecar   \(.sidecar.unit) \(if .sidecar.active then "active (owns the buds)" else "inactive" end)",
            (if .error then "last err  \(.error.message) (\(.error.age_seconds)s ago)" else "last err  none" end)' <<<"$out"
   fi;;
 
@@ -182,7 +150,6 @@ battery)
 profile)
   IFS=$'\t' read -r mac path name < <(resolve_dev "$arg") || exit $?
   want="${PC_ARGS[2]:-}"
-  [ -n "$want" ] && guard_sidecar "$mac" profile
   card=$(card_of "$mac"); cj=$(card_json "$card")
   [ -n "$cj" ] || die "no PipeWire card $card (the device is not connected)"
   cur=$(jq -r '.active_profile' <<<"$cj")
@@ -203,7 +170,6 @@ profile)
 
 connect|disconnect)
   IFS=$'\t' read -r mac path name < <(resolve_dev "$arg") || exit $?
-  guard_sidecar "$mac" "$sub"
   now=$(devices | jq -r --arg m "$mac" '.[]|select(.mac==$m)|if .connected then "connected" else "disconnected" end')
   [ "$now" = "${sub}ed" ] && { printf 'already: %s %s\n' "$mac" "$now"; exit 0; }
   inv=connect; [ "$sub" = connect ] && inv=disconnect

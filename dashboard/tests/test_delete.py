@@ -45,9 +45,9 @@ class Delete(unittest.TestCase):
                 os.environ[k] = v
         self.tmp.cleanup()
 
-    def post(self, path, body):
+    def post(self, path, body, **headers):
         c = http.client.HTTPConnection("127.0.0.1", self.srv.server_address[1], timeout=10)
-        c.request("POST", path, body=json.dumps(body))
+        c.request("POST", path, body=json.dumps(body), headers=dict({"Content-Type": "application/json"}, **headers))
         r = c.getresponse()
         out = (r.status, json.loads(r.read()))
         c.close()
@@ -103,6 +103,22 @@ class Delete(unittest.TestCase):
         os.rename(os.path.join(self.plans, "b-doc"), os.path.join(self.tmp.name, "b-moved"))
         self.assertEqual(self.post("/api/docs/delete", {"slug": "b-doc"})[0], 200)
         self.assertEqual([e["slug"] for e in json.load(open(os.path.join(self.plans, "index.json")))], ["a-doc"])
+
+    def test_cross_site_posts_refused_and_file_kept(self):
+        me = "http://127.0.0.1:%d" % self.srv.server_address[1]
+        for h in ({"Sec-Fetch-Site": "cross-site"}, {"Sec-Fetch-Site": "same-site"}, {"Origin": "https://evil.example"},
+                  {"Origin": me + "1"}, {"Origin": "null"}):
+            self.assertEqual(self.post("/api/files/delete", {"path": "linked.txt"}, **h)[0], 403, h)
+        for ctype in ("text/plain", "application/x-www-form-urlencoded", "multipart/form-data; boundary=x"):
+            self.assertEqual(self.post("/api/files/delete", {"path": "linked.txt"}, **{"Content-Type": ctype})[0], 400, ctype)
+        self.assertTrue(os.path.exists(os.path.join(self.drop, "linked.txt")))
+        self.assertFalse(os.path.exists(self.trash))
+
+    def test_same_origin_post_passes(self):
+        me = "http://127.0.0.1:%d" % self.srv.server_address[1]
+        code, out = self.post("/api/files/delete", {"path": "linked.txt"}, Origin=me, **{"Sec-Fetch-Site": "same-origin",
+                              "Content-Type": "application/json; charset=utf-8"})
+        self.assertEqual((code, out["trashed"]), (200, "linked.txt"))
 
 
 if __name__ == "__main__":

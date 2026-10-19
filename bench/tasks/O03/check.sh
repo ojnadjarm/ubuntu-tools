@@ -11,7 +11,7 @@ if [ -z "$live" ]; then
   exit 2
 fi
 
-if [ "$container" != "$live" ]; then
+if [ "${container%% *}" != "$live" ]; then
   echo "{\"pass\":0,\"reason\":\"container '$container' != live owner '$live'\"}"
   exit 1
 fi

@@ -45,7 +45,7 @@ function summary(id) {
   if (id === "sites") return `${sites.length} sites · ${n(sites, (s) => s.state === "down")} down · ${n(sites, (s) => s.state === "stray")} strays`;
   if (id === "docs") return `${(D.plans || []).length} docs, newest first`;
   if (id === "files") return `${((D.drop || {}).files || []).length} files in the drop`;
-  if (id === "notes") return "the notes vault · search, read, link";
+  if (id === "todo") return `${(D.todo || []).length} steps only you can take · tap done when finished`;
   return "the design system · tokens and components";
 }
 function band(s) {
@@ -53,7 +53,7 @@ function band(s) {
 }
 
 function keys() {
-  const D = store.D, k = { eye: [], sites: [], services: [], files: [], docs: [], notes: [] };
+  const D = store.D, k = { eye: [], sites: [], services: [], files: [], docs: [], todo: [] };
   if (D) {
     (D.plans || []).forEach((p) => k.docs.push("plan:" + p.url + "@" + p.updated));
     ((D.drop || {}).files || []).forEach((f) => k.files.push("file:" + f.name + "@" + f.mtime));
@@ -62,8 +62,8 @@ function keys() {
     if (strays.length) k.services.push("strays@" + strays.join(","));
     if (failed.length) k.services.push("failed@" + failed.join(","));
     k.eye.push(...verdict(D).keys);
+    (D.todo || []).forEach((t) => k.todo.push("todo:" + t.id));
   }
-  if (M.notes) M.notes.keys(k);
   return k;
 }
 function readHash() {

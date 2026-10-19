@@ -7,6 +7,7 @@ STOP = re.compile(r'"name": ?"TaskStop", ?"input": ?\{"task_id": ?"(\w+)"')
 LAUNCH = re.compile(r'"taskId": ?"(\w+)", ?"taskType": ?"local_workflow", ?"workflowName": ?"([^"]*)", ?"runId": ?"([^"]+)"')
 NOTE_STATE = {"completed": "done", "failed": "error", "killed": "stale", "stopped": "stale"}
 SLACK_S = 60
+CHUNK = 4 << 20
 
 
 def iso_s(ts):
@@ -32,10 +33,23 @@ def scan(js, m):
         m[:] = memo()
     with open(js, "rb") as f:
         f.seek(m[0])
-        buf = f.read(size - m[0])
-    cut = buf.rfind(b"\n") + 1
-    m[0] += cut
-    for line in buf[:cut].decode("utf8", "replace").splitlines():
+        buf, left = b"", size - m[0]
+        while left > 0:
+            got = f.read(min(CHUNK, left))
+            if not got:
+                break
+            left -= len(got)
+            buf += got
+            cut = buf.rfind(b"\n") + 1
+            m[0] += cut
+            fold(buf[:cut], m)
+            buf = buf[cut:]
+    return m
+
+
+def fold(raw, m):
+    """Fold complete transcript lines (bytes) into the scan state m."""
+    for line in raw.decode("utf8", "replace").splitlines():
         notes, runs, stops = NOTE.findall(line), LAUNCH.findall(line), STOP.findall(line)
         if not notes and not runs and not stops:
             continue
@@ -51,7 +65,6 @@ def scan(js, m):
         for tid, name, rid in runs:
             m[2][rid] = (tid, name)
             m[3][tid] = rid
-    return m
 
 
 def journal(wf):

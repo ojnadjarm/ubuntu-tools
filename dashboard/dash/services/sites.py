@@ -31,6 +31,8 @@ PAGES = {
     8072: (("/ailearning/", "ailearning", "the AI learning site, GitHub Pages build"),
            ("/portfolio/", "Portfolio", "the portfolio site, GitHub Pages build")),
 }
+# the one test site, pinned on Overview: (path under the 8072 front, name)
+TEST_SITE = (("/ailearning/", "index"), ("/ailearning/board/", "lesson board"))
 # secret pages: dashboard path that redirects to the link -> (CLI printing the link, name, what); the link never enters /api/status
 SECRETS = {
     "/finance": (["finance-month", "link"], "Finances", "your monthly money page · private, tailnet only"),
@@ -142,6 +144,11 @@ def declared_ports():
     for yml in glob.glob(os.path.join(HOME, "moodle-envs/*/docker-compose.yml")):
         out.update(int(m) for m in re.findall(r'"(\d+):\d+"', open(yml).read()))
     return out
+
+
+def test_site():
+    """Links to the test site's index and lesson board on its tailnet https front."""
+    return [{"name": n, "url": "https://%s:%d%s" % (PUBLIC_HOST, SITES[8072][3], p)} for p, n in TEST_SITE]
 
 
 def rows_for(port, name, what, url, group):

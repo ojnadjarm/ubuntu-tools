@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# serve — discord-bot.service: store the guild owner in config.env, then run the job runner (outside) and the bot
+# (inside bin/sandbox); when either exits, both stop.
+set -uo pipefail
+ME="$(cd "$(dirname "$0")/.." && pwd)"
+. "$HOME/agents/bin/env.sh"
+"$HOME/agents/bin/discord-bot" setup || exit $?
+set -a; . "$HARNESS_CONFIG"; set +a
+PYTHONPATH="$ME" "$ME/.venv/bin/python" -m discordbot runner & runner=$!
+"$ME/bin/sandbox" -- -m discordbot bot & bot=$!
+trap 'kill -TERM "$runner" "$bot" 2>/dev/null' TERM INT
+wait -n "$runner" "$bot"; rc=$?
+kill -TERM "$runner" "$bot" 2>/dev/null; wait
+exit "$rc"

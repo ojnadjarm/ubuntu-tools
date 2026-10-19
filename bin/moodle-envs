@@ -2,7 +2,9 @@
 # moodle-envs — list the Moodle dev environments under ~/moodle-envs (version, URL, containers, state).
 set -uo pipefail
 export LC_ALL=C
-ROOT="$HOME/moodle-envs"
+# shellcheck source=/dev/null
+. "$(dirname "$(readlink -f "$0")")/moodlelib.sh"
+ROOT="$(moodle_envs_root)"
 JSON=0
 case "${1:-}" in
   --json) JSON=1;;
@@ -27,11 +29,11 @@ for d in "$ROOT"/*/; do
   ver="$(basename "$d")"
   [ -f "$d/docker-compose.yml" ] || continue
   [ "$ver" = shared ] && continue
-  proj="$(sed -n 's/^name:[[:space:]]*//p' "$d/docker-compose.yml" | head -1)"
-  : "${proj:=$(basename "$d")}"
-  url="$(sed -n "s|.*\$CFG->wwwroot[[:space:]]*=[[:space:]]*'\(https\{0,1\}://[^']\{1,\}\)'.*|\1|p" "$d/www/config.php" 2>/dev/null | head -1)"
+  src="$(moodle_src "$d")" || continue
+  proj="$(moodle_project "$d")"
+  url="$(moodle_wwwroot "$src/config.php")"
   webport="$(sed -n 's|^[[:space:]]*-[[:space:]]*"\([0-9]\{1,\}\):80"|\1|p' "$d/docker-compose.yml" | head -1)"
-  vfile="$d/www/public/version.php"; [ -f "$vfile" ] || vfile="$d/www/version.php"
+  vfile="$src/public/version.php"; [ -f "$vfile" ] || vfile="$src/version.php"
   release="$(sed -n "s/^\$release[[:space:]]*=[[:space:]]*'\([^ ']*\).*/\1/p" "$vfile" 2>/dev/null | head -1)"
   tlsurl="$(echo "$serve_map" | awk -v k="127.0.0.1:${webport:-none}" '$1==k {print $2; exit}')"
   cts="$(containers "$proj")"
