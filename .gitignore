@@ -38,6 +38,7 @@ node_modules/
 /bench/PLAN-*.md
 /bench/tickets/
 /bench/spike/
+/bench/tasks/*/.state/
 
 # portfolio raw material: LinkedIn PDF, USB dump, .env files
 portfolio/incoming/
