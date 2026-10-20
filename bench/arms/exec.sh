@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # exec.sh <old|new> -- <command…> — run a command with that arm's bin/KB/docs bound over the
-# real paths, for this process only. Everything else (D-Bus, PipeWire, docker, /run/user/1000)
+# real paths, for this process only. Everything else (D-Bus, PipeWire, docker, $XDG_RUNTIME_DIR)
 # stays live; other processes keep seeing the real dirs.
 #
 # On top of the arm, every run gets the PB11 safety sandbox: ~/the-dark-eye is a throwaway

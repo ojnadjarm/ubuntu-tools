@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Spot hand-written wait loops in a Bash command and suggest the exact `wait-for` equivalent (T376)."""
-import glob, gzip, json, os, re, shlex, sys, time
+import os, re, shlex, sys, time
 
 LOOP = re.compile(r'\b(until|while)\s+([^;]+?);\s*do\s+(.{1,1000}?)\s*;?\s*done\b', re.S)
 POLL = re.compile(r'\b(?:while\s+(?:true|:)|for\s+\w+\s+in\s+[^;]+);\s*do\s+(.{1,1000}?)\s*;?\s*done\b', re.S)
@@ -131,17 +131,14 @@ def share(records):
 
 
 def _records(days, since=''):
+    """Audit rows from the live log and the rotations that reach back to since (ISO) or the last days."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'bin'))
+    import datetime
+    from auditlib import rotated_rows
     cut = since or time.strftime('%Y-%m-%dT%H:%M', time.localtime(time.time() - days * 86400))
     log = os.path.join(os.environ.get('HARNESS_HOME') or os.path.expanduser('~/agents'), 'log', 'actions.jsonl')
-    for p in sorted(glob.glob(log + '*')):
-        with (gzip.open(p, 'rt') if p.endswith('.gz') else open(p)) as f:
-            for line in f:
-                try:
-                    r = json.loads(line)
-                except ValueError:
-                    continue
-                if r.get('ts', '') >= cut:
-                    yield r
+    start = datetime.datetime.fromisoformat(cut).timestamp()
+    return (r for r in rotated_rows(log, start) if r.get('ts', '') >= cut)
 
 
 if __name__ == '__main__':

@@ -1,6 +1,6 @@
 # Give the owner an https link to a file or web build in ~/drop (tailscale serve :8470)
 
-Ticket: T70 (set up by T70-godot-web; T65/T69 found the need) · Last verified: 2026-10-18 (T388) by `bin/tests/drop-link.test.sh` 7/7 and `curl -sI` on :8070 + :8470 and `drop-link` on `~/drop/t70/godot/` (200; deleted T271)
+Ticket: T70 (set up by T70-godot-web; T65/T69 found the need) · Last verified: 2026-10-20 (T846) by `tailscale serve status` (11 fronts), Caddyfile bind/matcher, `drop-link --help`; 2026-10-19 (T487) by `bin/tests/drop-link.test.sh` 7/7 (1.7 s), `tailscale serve status`, and `curl` on 127.0.0.1/::1 :8070 + :8470 (200; `.html` opens, other files `attachment`)
 
 ## When to use
 - Any file, video, zip or web page he should open or test: **invoke the `drop-link` skill** (`drop-link <path> <tNN>`),
@@ -29,7 +29,8 @@ tailscale serve status                                       # want: :8470 → h
 systemctl --user status drop.service                         # caddy up?
 sudo tailscale serve --https=8470 off                        # undo (orchestrator's go only)
 ```
-Other https fronts on the same pattern: 8452 Moodle 5.2, 8498 dashboard (for the mic), 8499 netdata, 8644 Dark Eye page.
+Other https fronts on the same pattern: 8452 Moodle 5.2, 8453 Moodle 5.3, 8472 ailearning test site, 8498 dashboard (for the mic), 8499 netdata, 8644 Dark Eye page;
+`tailscale serve status` lists 11 fronts (also 8445, 8446, 8447, 8474).
 
 ## Pitfalls (measured)
 - He tested the T65 Atelier mockup over http: 5 of 5 runs fell back to WebGL2 ("WebGPU is not available"); over :8470
@@ -46,7 +47,7 @@ Other https fronts on the same pattern: 8452 Moodle 5.2, 8498 dashboard (for the
 - `~/drop` was emptied at 13:15 on 2026-09-23 by an unknown process (T56b saw t41–t55 vanish), and again at 16:21 on 2026-09-25
   (t70, t71, t76, `AILEARNING-PUSH-STEPS.txt`, t91 at 20:48; all in `~/.local/share/Trash/`). Keep originals under
   `research/`; the drop is a hand-off, not storage.
-- Stale doc as of 2026-09-24: the `drop-folder-for-files` memory's `description:` line still gives the http `:8070` URL (its body names :8470).
+- Stale doc as of 2026-10-20: the `drop-folder-for-files` memory's `description:` line still gives the http `:8070` URL (its body names :8470).
 
 ## Links
 - Code: `~/agents/bin/drop-link`, skill `~/.claude/skills/drop-link/SKILL.md`, unit `~/.config/systemd/user/drop.service`,

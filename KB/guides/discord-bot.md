@@ -1,6 +1,6 @@
 # Discord forum bot: requests from family and friends (and their agents) in a Forum channel
 
-Ticket: T348, T361, T448 · Last verified: 2026-10-19 by 28 fixture tests, sandbox selftest, a live gateway connect through the sandbox
+Ticket: T348, T361, T448 · Last verified: 2026-10-20 by T846 read-only audit (`--help`, paths, code); before: 2026-10-19 by 28 fixture tests (29 `test_` functions now), sandbox selftest, a live gateway connect through the sandbox
 
 ## When to use
 Run, check, change or debug the `agents` Discord bot, post into its forum, or build another sandboxed chat bot.

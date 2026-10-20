@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """pc wait-for — block until one UI condition holds, polling cheap text every 250 ms."""
-import argparse, os, subprocess, sys, time
+import os, sys, time
 
 BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, BIN)
-import a11y_tree as A
+A = None
 
 USAGE = ('usage: pc wait-for (--window SUB | --focus SUB | --text NAME [--app SUB] | --gone SUB) '
          '[--timeout S] [--see]')
@@ -33,6 +33,10 @@ def holds(a):
 
 
 def main():
+    if "-h" in sys.argv[1:] or "--help" in sys.argv[1:]:
+        print(USAGE)
+        return 0
+    import argparse
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument("--window"); p.add_argument("--focus"); p.add_argument("--text")
     p.add_argument("--gone"); p.add_argument("--app", default="")
@@ -46,6 +50,8 @@ def main():
     if sum(bool(x) for x in (a.window, a.focus, a.text, a.gone)) != 1:
         print(USAGE, file=sys.stderr)
         return 2
+    global A
+    import a11y_tree as A
     A.Atspi.set_timeout(800, 3000)
     start = time.time()
     while True:

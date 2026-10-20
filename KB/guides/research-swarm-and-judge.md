@@ -1,6 +1,6 @@
 # Research swarm, spikes or mockups in parallel, then a judge and a critic (Workflow scripts)
 
-Ticket: T65, T69, T70, T70b, T71, T391 · Last verified: 2026-09-24 from the 6 workflow scripts and journals, plus a stubbed dry run of the skill template (lanes → judge → critic)
+Ticket: T65, T69, T70, T70b, T71, T391 · Last verified: 2026-10-20 (T846) by paths, `template.js` read and a script-dir count; 2026-10-19 (T487) by a stubbed run of the skill template (4 agents, lanes → judge → critic, guide line 4/4, a null lane logged 1/2) and the `jq` lane-state line on `wf_ca0b15d4-36d` (10 done)
 
 ## When to use
 - A brief asks for several angles at once: research lanes, engine spikes, diagnosis lenses, competing mockups, then a
@@ -14,12 +14,12 @@ Ticket: T65, T69, T70, T70b, T71, T391 · Last verified: 2026-09-24 from the 6 w
 | T69 Atelier perf | 3 diagnosis lenses → fixer on a copy → adversarial verifier → plan | 8 (2 re-runs) · 211 min |
 | T70 engine options | Godot + Bevy spikes and 2 research lanes → judge → critic | 6 · 149 min |
 | T70b extra spikes | 2 spikes, run beside T70 and told not to write in its folders | 2 · 99 min |
-| T71 2D art direction | directions + stack lanes → 3 mockups → judge | running at the time of writing |
+| T71 2D art direction | directions + stack lanes → 3 mockups | no judge file in `T71/`; the owner judged the mockups (Cutaway) |
 - Each script: `meta.phases`, a binding brief **file**, a `head` prefix naming the brief and one output root, lanes
   as `parallel(LANES.map(l => () => agent(…, {label, phase, agentType: 'worker', schema})))` + `.filter(Boolean)`,
   and each phase's JSON passed into the next prompt. Schemas stay small: `{file, headline, test_link}`.
-- Scripts and journals: `~/.claude/projects/-home-<user>--claude-projects--home-<user>-memory/<session>/workflows/scripts/`
-  and `~/.claude/projects/-home-<user>/<session>/subagents/workflows/wf_*/{journal.jsonl,agent-*.jsonl}`.
+- Scripts and journals: `~/.claude/projects/<cwd-slug>/<session>/workflows/scripts/` (the slug of the cwd the Workflow ran from:
+  13 script dirs under 11 slugs on 2026-10-20) and `~/.claude/projects/-home-<user>/<session>/subagents/workflows/wf_*/{journal.jsonl,agent-*.jsonl}`.
 
 ## Exact commands
 ```bash

@@ -1,7 +1,7 @@
 # Cutaway plate art direction: draw a narrated technical-drawing plate (and the taste bar for any art direction)
 
 Tickets: T71, T75, signatures T81, buttons T91, readouts T95/T97, sheet change T96, kit dedupe T100, skill split T101, legibility T109, straddled press T107, review T111 · Last verified:
-2026-09-26 (T100: kit tests 7 pass, the site's full `npm run ci` with the button system and plate readouts on U01; earlier stills at
+2026-10-20 (T846: paths, kit files, 7 kit tests counted, skill router + 5 references, starter tools); 2026-09-26 (T100: kit tests 7 pass, the site's full `npm run ci` with the button system and plate readouts on U01; earlier stills at
 400/768/1366/1920/2560, perf probe, framing check 6 → 0 faults)
 
 ## When to use

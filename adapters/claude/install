@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Claude Code adapter installer — idempotent. Wires three things and nothing else:
-#   1. the portable skills, symlinked into ~/.claude/skills/
+#   1. the portable skills, symlinked into ~/.claude/skills/ (whole dir when absent, else its SKILL.md)
 #   2. this harness's hooks, merged into ~/.claude/settings.json
 #   3. an @AGENTS.md include in ~/CLAUDE.md, so the contract is in every session in $HOME
-# ~/.claude/CLAUDE.md (the global instruction file) is never touched.
+# ~/.claude/CLAUDE.md (the global instruction file) is never touched. --plan prints would: per change and writes nothing.
 set -uo pipefail
 HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 BIN="$(cd "$HERE/../../bin" && pwd)"
@@ -14,7 +14,11 @@ CTX="$HARNESS_CONTEXT_DIR"
 # across machines (Claude expands it) and matches the entries already written.
 HH="$HARNESS_HOME"; case "$HH" in "$HOME"/*) HH="\$HOME/${HH#"$HOME"/}";; esac
 TILDE="$HARNESS_HOME"; case "$TILDE" in "$HOME"/*) TILDE="~/${TILDE#"$HOME"/}";; esac
+PLAN=0; [ "${1:-}" = --plan ] && PLAN=1
+inc="$HOME/CLAUDE.md"
+marker="<!-- pc-harness: the fleet contract, added by adapters/claude/install -->"
 changed=0
+would() { echo "would: $*"; changed=1; }
 
 ## 1. skills
 for d in "$HARNESS_HOME"/skills/*/; do
@@ -22,13 +26,32 @@ for d in "$HARNESS_HOME"/skills/*/; do
   name="$(basename "$d")"
   target="$CTX/skills/$name/SKILL.md"
   [ "$(readlink -f "$target" 2>/dev/null)" = "$(readlink -f "${d%/}/SKILL.md")" ] && continue
-  mkdir -p "$CTX/skills/$name"
-  ln -sfn "${d%/}/SKILL.md" "$target"
-  echo "linked $target"
+  if [ -e "$CTX/skills/$name" ] || [ -L "$CTX/skills/$name" ]; then
+    [ "$PLAN" = 1 ] && { would link "$target"; continue; }
+    ln -sfn "${d%/}/SKILL.md" "$target"; echo "linked $target"
+  elif [ "$PLAN" = 1 ]; then
+    would link "$CTX/skills/$name"; continue
+  else
+    mkdir -p "$CTX/skills"; ln -s "${d%/}" "$CTX/skills/$name"; echo "linked $CTX/skills/$name"
+  fi
   changed=1
 done
 
 ## 2. hooks in settings.json
+if [ "$PLAN" = 1 ]; then
+  tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+  out="$(SETTINGS_OUT="$tmp/s.json" python3 "$HERE/merge-settings.py" install \
+        "$CTX/settings.json" "$HERE/settings.fragment.json" "$HH")" || exit 1
+  if [ "$out" != "no changes" ]; then
+    old=/dev/null; [ -f "$CTX/settings.json" ] && old="$CTX/settings.json"
+    n="$(diff <(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])), indent=2))' "$old" 2>/dev/null) "$tmp/s.json" | grep -c '^[<>]')"
+    would settings "merge into $CTX/settings.json ($n diff lines)"
+  fi
+  [ -L "$CTX/hooks/audit-log.sh" ] && would remove "stale $CTX/hooks/audit-log.sh"
+  [ -f "$inc" ] && ! grep -qF "$marker" "$inc" && would include "@AGENTS.md in $inc"
+  [ "$changed" = 0 ] && echo "claude adapter: no changes"
+  exit 0
+fi
 out="$(python3 "$HERE/merge-settings.py" install \
         "$CTX/settings.json" "$HERE/settings.fragment.json" "$HH")" || exit 1
 case "$out" in "no changes") ;; *) echo "$out"; changed=1;; esac
@@ -36,8 +59,6 @@ case "$out" in "no changes") ;; *) echo "$out"; changed=1;; esac
 [ -L "$CTX/hooks/audit-log.sh" ] && rm -f "$CTX/hooks/audit-log.sh" && { echo "removed stale $CTX/hooks/audit-log.sh"; changed=1; }
 
 ## 3. @AGENTS.md include in ~/CLAUDE.md
-inc="$HOME/CLAUDE.md"
-marker="<!-- pc-harness: the fleet contract, added by adapters/claude/install -->"
 if [ -f "$inc" ] && ! grep -qF "$marker" "$inc"; then
   printf '\n%s\n@%s/AGENTS.md\n' "$marker" "$TILDE" >>"$inc"
   echo "added the @AGENTS.md include to $inc"

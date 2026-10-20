@@ -12,6 +12,7 @@ FORUM = 15
 ACK = ("Got it. I'm **agents**, the owner's helper bot; I'll answer here. Anything that changes his machine or runs "
        "real work waits for the owner's approval (the `approved` tag or his ✅).")
 HELLO = ('agents is online', 'agents is online; post a request here')
+TAG_BACKOFF = (300, 3600, 21600)
 
 
 class ForumBot:
@@ -24,6 +25,7 @@ class ForumBot:
         self.tags = {}
         self.parent = {}
         self._tag_try = 0.0
+        self._tag_fails = 0
 
     async def dispatch(self, t, d):
         handler = getattr(self, f'on_{t.lower()}', None)
@@ -71,8 +73,9 @@ class ForumBot:
             self.store.set_status(hello_tagged=True)
 
     async def on_tick(self, d):
-        """Retry tag creation every 5 minutes while tags are missing (permission granted later)."""
-        if self.forum_id and len(self.tags) < len(STATUS_TAGS) + 1 and self.clock() - self._tag_try >= 300:
+        """Retry tag creation while tags are missing, backing off 5 min, 1 h, then every 6 h."""
+        wait = TAG_BACKOFF[min(max(self._tag_fails - 1, 0), len(TAG_BACKOFF) - 1)]
+        if self.forum_id and len(self.tags) < len(STATUS_TAGS) + 1 and self.clock() - self._tag_try >= wait:
             await self.ensure_tags()
             await self.hello()
 
@@ -80,6 +83,8 @@ class ForumBot:
         if d['id'] == self.forum_id:
             self.tags = {t['name']: t['id'] for t in d.get('available_tags', [])}
             self.store.set_status(tags=sorted(self.tags))
+            if len(self.tags) < len(STATUS_TAGS) + 1:
+                await self.ensure_tags()
             await self.hello()
 
     async def ensure_tags(self):
@@ -96,9 +101,14 @@ class ForumBot:
                 ch = await self.rest.edit_channel(self.forum_id, available_tags=new)
                 have = ch.get('available_tags', [])
                 self.store.set_status(problem=None)
+                if self._tag_fails:
+                    log.info('tags created after %d failed tries', self._tag_fails)
+                self._tag_fails = 0
             except RestError as e:
                 err = f'{e.status} {(e.body or {}).get("code", "")} {(e.body or {}).get("message", "")}'.strip()
-                log.warning('cannot create tags: rest %s', err)
+                if not self._tag_fails:
+                    log.warning('cannot create tags: rest %s; retrying after 5 min, 1 h, then every 6 h', err)
+                self._tag_fails += 1
                 self.store.set_status(problem=f'cannot create tags {missing}: PATCH /channels/<forum> -> {err} '
                                               '(give the bot Manage Channels on the forum, or create the tags by hand)')
         self.tags = {t['name']: t['id'] for t in have}

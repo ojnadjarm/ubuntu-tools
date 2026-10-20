@@ -1,6 +1,6 @@
 # Clear a stale "need you" item on the dashboard (resolve a push)
 
-Ticket: T264 · Last verified: 2026-10-06 by `pc need resolve` on the two ailearning CI pushes (dashboard count 2 → 0) and the tests below
+Ticket: T264 · Last verified: 2026-10-20 (T846: `pc need --help`, `pc units` syntax, `push_key`/`resolved`/`verdict` read, test patching read); 2026-10-06 by `pc need resolve` on the two ailearning CI pushes (dashboard count 2 → 0) and the tests below
 
 ## When to use
 A high-priority or asking push in `~/agents/log/notify.log` still counts on the dashboard "need you" headline after the cause was

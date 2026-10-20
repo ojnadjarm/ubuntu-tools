@@ -1,6 +1,6 @@
 # Set up Moodle AI: provider, placements, role access, hourly limits, usage policy
 
-Ticket: T424 · Last verified: 2026-10-19 by tests/setup.test.sh (21/21) on the moodle53 throwaway env
+Ticket: T424 · Last verified: 2026-10-20 by `ai-setup --help`, code read, moodle53-app-1 up; test 2026-10-19 tests/setup.test.sh (21/21) on the moodle53 throwaway env
 
 ## When to use
 Turning on Moodle's built-in AI (4.5+) for a site: days 3-6 of the Moodle AI offer, or re-checking that a site still

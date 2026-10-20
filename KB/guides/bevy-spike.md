@@ -1,6 +1,6 @@
 # Bevy (Rust) spike: port a scene, warm pipelines behind a dark screen, cross-build a Windows .exe
 
-Ticket: T70 (Bevy spike) · Last verified: 2026-09-24 by `cargo test --profile fast` (9/9 pass, cached build 0.3 s) and the run JSONs in `T70/bevy/runs/`
+Ticket: T70 (Bevy spike) · Last verified: 2026-10-20 (T846) by `test -e` on every code/run path, rustc/rustup targets, apt packages, 9 `#[test]` counted, CLI flags read in `src/main.rs`, `unzip -l` of the trashed zip; not rebuilt (2026-09-24: `cargo test --profile fast` 9/9)
 
 ## When to use
 - Evaluating or starting a Bevy 0.19 port, or any Rust/wgpu app that must ship a Windows .exe built on this Linux laptop.
@@ -46,6 +46,8 @@ DISPLAY=:N WGPU_BACKEND=vulkan WINEPREFIX=$PWD/wp WINEDEBUG=-all wine atelier.ex
   Idle still renders every vsync: add a reactive or fps-capped loop.
 - Bevy's default ambient light washes the dark studio: insert `GlobalAmbientLight::NONE`.
   Intel ANV drew speckle pixels, lavapipe was clean (`runs/shot-w20-*.png`).
+- **`target/` is gone** (2026-10-19, disk cleanup): every command above starts with a cold build, and `target/fast/atelier` does not
+  exist until one finishes. Crates are cached in `~/.cargo/registry` (1.1 GB), so `--offline` works.
 - Disk and time: `target/` is 7.4 GB. Cold Windows cross-build 18.6 min, wasm 10.6 min (while sibling agents compiled).
 - Web: 12 MB wasm (2.7 MB gzip, 1.6 MB brotli). It compiles pipelines synchronously, and WebGL2 has no compute. Not viable here.
 - Subagents may not write `report.md`: the spike's findings live in its StructuredOutput and `architecture.md`.
@@ -53,4 +55,4 @@ DISPLAY=:N WGPU_BACKEND=vulkan WINEPREFIX=$PWD/wp WINEDEBUG=-all wine atelier.ex
 ## Links
 - Code: `~/agent-work/research/2026-09-24/T70/bevy/atelier/` (`src/{beats,perf,timeline,kit,materials,voice}.rs`, `Cargo.toml`, `.cargo/config.toml`)
 - Runs: `T70/bevy/runs/` (`e2e.json`, `f-*.json`, `m-*.json`, `measure.txt`, build logs, shots)
-- Design / results: `T70/bevy/architecture.md`, `T70/options.md` (scores, rejection reason, critic) · build: `~/drop/t70/bevy/atelier-bevy-win64.zip` is gone since 2026-09-25 (a copy is in `~/.local/share/Trash/files/`)
+- Design / results: `T70/bevy/architecture.md`, `T70/options.md` (scores, rejection reason, critic) · build: `~/drop/t70/bevy/atelier-bevy-win64.zip` is gone since 2026-09-25 (a copy is in `~/.local/share/Trash/files/atelier-bevy-win64.zip`, 23.6 MB, still there 2026-10-20)

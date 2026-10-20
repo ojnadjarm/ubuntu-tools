@@ -1,6 +1,6 @@
 # Exercises as play on a learning unit: Workbench cases, misconception detectors, contrast pairs, hints, solo tuning levels, proven by a scripted e2e (ailearning)
 
-Ticket: T84 (U01 "The neuron", build 3 of 3, fix pass) · Last verified: 2026-09-25 by `npm run ci` green in `~/projects/personal/ailearning`
+Ticket: T84 (U01 "The neuron", build 3 of 3, fix pass) · Last verified: 2026-10-20 by T846 audit (paths, npm scripts, `BESIDE`, kit `src/unit/*`); before: 2026-09-25 by `npm run ci` green in `~/projects/personal/ailearning`
 (node play tests over 400 seeds, `tests/e2e/lesson.mjs`: 62 cases opened, 30 detector firings over 21 cases, 9 contrast pairs, 0 faults, also on the drop link).
 
 ## When to use
@@ -31,7 +31,7 @@ The explanation, script and callouts: guide `learning-unit-authoring`. The look:
 ## Exact commands
 ```bash
 cd ~/projects/personal/ailearning
-npm test                                                               # play.test.mjs: generators, trap vs solve, assembly, tuner levels, lintPlay
+npm test                                                               # every tests/unit/*.test.mjs; play.test.mjs: generators, trap vs solve, assembly, tuner levels, lintPlay
 npm run build && node --import ./tests/lib/register.mjs tests/e2e/lesson.mjs            # whole lesson by script, ~3 min
 node --import ./tests/lib/register.mjs tests/e2e/lesson.mjs https://<tailnet-fqdn>:8472/ailearning/u/01-neuron/
 # page hooks: ?mute&fast=10&beat=bench ; window.__d.beats.cur.{task,phase} ; __d.events.log (step/attempt/detect/hint/complete)
@@ -68,4 +68,4 @@ node --import ./tests/lib/register.mjs tests/e2e/lesson.mjs https://<tailnet-fqd
 ## Links
 - Code: `~/projects/personal/ailearning/units/01-neuron/{unit/bench,unit/race.ts,unit/click.ts,sim}`; kit `~/agents/kits/explainer/src/unit/{bench,flow,hints,walk,log,kinds}.ts`
 - Tests: `tests/unit/play.test.mjs`, `tests/lib/solve.mjs`, `tests/e2e/lesson.mjs` (in `npm run e2e`); kit `test/bench.test.ts`
-- Design / results: `~/agent-work/research/2026-09-24/T84/{lesson-design.md,build-3.md,findings.md}`
+- Design / results: `~/agent-work/research/2026-09-24/T84/{lesson-design.md,ARCHITECTURE.md,build-1.md,build-2.md,revisions.md}`

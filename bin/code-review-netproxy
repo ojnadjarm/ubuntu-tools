@@ -77,8 +77,12 @@ async def main(argv):
         os.chmod(argv[1], 0o600)
     elif len(argv) == 3 and argv[0] == 'relay':
         srv = await asyncio.start_server(lambda r, w: handle_relay(argv[1], r, w), '127.0.0.1', int(argv[2]))
+    elif argv[:1] in (['-h'], ['--help']):
+        print('usage: ' + __doc__.strip())
+        return
     else:
-        sys.exit(__doc__.splitlines()[0])
+        print('usage: ' + __doc__.splitlines()[0], file=sys.stderr)
+        sys.exit(2)
     async with srv:
         await srv.serve_forever()
 

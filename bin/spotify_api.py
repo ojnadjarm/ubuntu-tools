@@ -54,6 +54,7 @@ def save(tok):
     old = json.load(open(TOKENS)) if os.path.exists(TOKENS) else {}
     tok.setdefault("refresh_token", old.get("refresh_token", ""))
     fd = os.open(TOKENS, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w") as fh:
         json.dump(tok, fh)
     return tok

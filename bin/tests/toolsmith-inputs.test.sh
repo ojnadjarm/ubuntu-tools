@@ -11,6 +11,9 @@ t() { printf '%-56s' "toolsmith-inputs: $1"; }
 ok() { echo OK; }
 no() { echo "FAIL — $1"; fail=1; }
 run() { TOOLSMITH_ROOT="$FIX" HARNESS_HOME=/nonexistent "$CLI" "$@"; }
+SHIM="$(mktemp -d)"; trap 'rm -rf "$SHIM"' EXIT
+printf '#!/bin/sh\necho "$*" >> "%s/calls"\n' "$SHIM" > "$SHIM/pc"; chmod +x "$SHIM/pc"
+export PATH="$SHIM:$PATH" TOOLSMITH_NO_LIVE=1
 
 J="$(run --since 9999d --qa 2>/dev/null)"
 
@@ -287,6 +290,9 @@ rm -rf "$R"
 
 t "no live probe: the fixture run never calls pc"
 grep -q "mock" "$CLI" && [ ! -x "$FIX/bin/pc" ] && ok || no "probe would fall through to live pc"
+
+t "recording pc shim saw 0 live calls"
+[ ! -s "$SHIM/calls" ] && ok || no "$(wc -l < "$SHIM/calls") pc calls: $(head -3 "$SHIM/calls" | tr '\n' ';')"
 
 t "warm run under 5 s"
 s=$(date +%s%N); run --since 4d >/dev/null 2>&1; e=$(date +%s%N)

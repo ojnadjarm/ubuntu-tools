@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # discord-bot status|setup|post|read|invite|selftest|test — the family/friends Discord forum bot (T348).
+case "${1:-}" in
+  -h|--help) echo 'usage: discord-bot status|setup|post|read|invite|selftest|test'; exit 0 ;;
+  -*) echo "discord-bot: unknown option: $1" >&2; echo 'usage: discord-bot status|setup|post|read|invite|selftest|test' >&2; exit 2 ;;
+esac
 . "$HOME/agents/bin/env.sh"
 D="$HOME/agents/discord-bot"
 PYTHONPATH="$D" exec "$D/.venv/bin/python" -m discordbot.cli "$@"

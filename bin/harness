@@ -5,13 +5,17 @@
 # single source the per-agent SessionStart wrappers in adapters/*/hooks/ call.
 set -uo pipefail
 BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+# Read before env.sh, which sets HARNESS_AGENT from config.env for every caller.
+IN_AGENT=0; [ -n "${CLAUDECODE:-}${HARNESS_AGENT:-}" ] && IN_AGENT=1
 # shellcheck source=/dev/null
 [ -r "$BIN/env.sh" ] && . "$BIN/env.sh"
 
 usage() {
   cat <<'U'
-usage: harness context [--brief] [--json] [--moodle]
+usage: harness context [--brief] [--worker] [--full] [--json] [--moodle]
        --brief   the one-line machine brief only
+       --worker  the machine brief, 5 worker report rules and the claims/wait-for verbs (<= 720 B), for subagents
+       --full    the full text even inside an agent (CLAUDECODE or HARNESS_AGENT set), where the default is --worker
        --json    SessionStart hook JSON (systemMessage + hookSpecificOutput.additionalContext)
        --moodle  include the project guidelines even when detection finds no Moodle root
 Instruction files are read from $HARNESS_CONTEXT_DIR (default ~/.claude).
@@ -20,10 +24,11 @@ U
 
 [ "${1:-}" = context ] || { usage >&2; exit 2; }
 shift
-BRIEF=0; JSON=0; FORCE=0
+BRIEF=0; WORKER=0; JSON=0; FORCE=0
+[ $# = 0 ] && [ "$IN_AGENT" = 1 ] && WORKER=2
 while [ $# -gt 0 ]; do
   case $1 in
-    --brief) BRIEF=1;; --json) JSON=1;; --moodle) FORCE=1;;
+    --brief) BRIEF=1;; --worker) WORKER=1;; --json) JSON=1;; --moodle) FORCE=1;; --full) ;;
     -h|--help) usage; exit 0;;
     *) echo "harness: unknown option $1" >&2; usage >&2; exit 2;;
   esac
@@ -41,6 +46,35 @@ esac
 
 if [ "$BRIEF" = 1 ]; then
   [ -n "$brief" ] && printf '%s\n' "$brief"
+  exit 0
+fi
+
+if [ "$WORKER" != 0 ]; then
+  rules='Worker rules (the full output rules are in `harness context --full`):
+1. Report to your caller in at most 6 lines, numbers over prose.
+2. Lead with the result; no preamble, recap or closer.
+3. Report only what you verified; red is red.
+4. Absolute paths; code only when load-bearing; no emojis.
+5. Lists of at most 5; run `guide <words>` and `pc status` before acting.
+6. Claims: claims add T<n> <paths> before editing; claims done T<n> after. Waits: wait-for --label X --until '"'"'<cmd>'"'"'.'
+  # 720 B cap (T908), 700 B for the in-agent plain form with its tail line (T602, T957).
+  cap=720 tail=''; [ "$WORKER" = 2 ] && cap=700 tail=$'\nfull rules: harness context --full'
+  # T993: over its share the brief drops middle fields for `…`, keeping orch= and FAIL=; cuts stay UTF-8 whole.
+  fit() {
+    local s=$1 max=$2 f out='' keep='' LC_ALL=C; local -a a
+    [ "${#s}" -le "$max" ] && { printf '%s' "$s"; return; }
+    read -ra a <<<"$s"
+    for f in "${a[@]}"; do case $f in orch=*|FAIL=*) keep+=" $f";; esac; done
+    for f in "${a[@]}"; do
+      case $f in orch=*|FAIL=*) continue;; esac
+      [ $(( ${#out} + ${#f} + 1 + 4 + ${#keep} )) -le "$max" ] || break
+      out+="${out:+ }$f"
+    done
+    s="${out:+$out }…$keep"
+    [ "${#s}" -le "$max" ] || s=$(printf '%s' "$s" | head -c "$max" | iconv -f utf-8 -t utf-8 -c 2>/dev/null)
+    printf '%s' "$s"
+  }
+  printf 'Machine now: %s\n%s%s\n' "$(fit "${brief:-unknown}" $((cap - 15 - ${#rules} - ${#tail})))" "$rules" "$tail"
   exit 0
 fi
 

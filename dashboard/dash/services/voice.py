@@ -1,5 +1,5 @@
 """Voice corpus: prompts, the error floor, word diff, drill verdicts, clips in and out, stats."""
-import gzip, hashlib, json, os, re, subprocess, sys, urllib.parse
+import glob, gzip, hashlib, json, os, re, shutil, subprocess, sys, urllib.parse
 from datetime import datetime
 from dash.cache import lock
 from dash.env import HERE, HOME
@@ -9,7 +9,16 @@ CORPUS = os.path.join(HOME, "agents", "asr-corpus")
 PROMPTS_FILE = os.path.join(HERE, "voice_prompts.json")
 CLIP_ID = re.compile(r"^\d{8}-\d{6}-[a-z0-9]{4}$")
 CLIP_MAX = 32 << 20
-NODE = os.path.expanduser("~/.nvm/versions/node/v24.20.0/bin/node")
+
+
+def find_node():
+    """$FLEET_NODE, else node on PATH, else the newest ~/.nvm node; plain "node" when there is none."""
+    nvm = sorted(glob.glob(os.path.join(HOME, ".nvm", "versions", "node", "v*", "bin", "node")),
+                 key=lambda p: [int(x) for x in re.findall(r"\d+", p.split(os.sep)[-3])])
+    return os.environ.get("FLEET_NODE") or shutil.which("node") or (nvm[-1] if nvm else "node")
+
+
+NODE = find_node()
 
 
 _memo = {}
@@ -24,11 +33,15 @@ def _mtime(path):
 
 
 def prompts():
-    """The prompt list, re-read only when voice_prompts.json changes."""
+    """The prompt list, re-read only when voice_prompts.json changes; [] and a stderr hint when it is missing."""
     key = (PROMPTS_FILE, _mtime(PROMPTS_FILE))
     hit = _memo.get("prompts")
     if not hit or hit[0] != key:
-        hit = _memo["prompts"] = (key, json.load(open(PROMPTS_FILE))["prompts"])
+        if key[1] is None:
+            print("voice: %s missing, no prompts (owner data, not in git)" % PROMPTS_FILE, file=sys.stderr, flush=True)
+            hit = _memo["prompts"] = (key, [])
+        else:
+            hit = _memo["prompts"] = (key, json.load(open(PROMPTS_FILE))["prompts"])
     return hit[1]
 
 

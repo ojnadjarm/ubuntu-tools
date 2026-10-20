@@ -5,6 +5,7 @@ WINDOW="${CI_WINDOW:-00:50-01:50}"
 LOADAVG="${CI_LOADAVG:-/proc/loadavg}"
 BELOW="${CI_QUIET_BELOW:-4}"; CAP="${CI_QUIET_CAP:-1800}"; EVERY="${CI_QUIET_EVERY:-15}"
 NEED="${CI_RUN_NEED:-2700}"   # with CI_DEADLINE (epoch, from ci-autofix): every wait leaves NEED s for the run after it
+export CI_UNITS="${CI_UNITS-fleet-ci-daily.service ailearning-ci-daily.service}" CI_CGROUP="${CI_CGROUP:-/proc/self/cgroup}"
 
 usage() {
   cat <<EOF
@@ -13,7 +14,18 @@ usage: ci-window            exit 0 outside the CI window ($WINDOW), 1 inside it:
                             with CI_DEADLINE set, the cap shrinks to the shared budget: CI_DEADLINE - now - $NEED s (CI_RUN_NEED)
 EOF
 }
-load1() { awk '{print $1}' "$LOADAVG"; }
+. "$(dirname "$(readlink -f "$0")")/quiet-gate"
+load1() { qg_load1 "$LOADAVG"; }
+# Print the first active CI unit other than the caller's own (its cgroup); rc 0 when one is active.
+busy_unit() {
+  local u cg; cg=$(cat "$CI_CGROUP" 2>/dev/null)
+  for u in $CI_UNITS; do
+    case "$cg" in */"$u"|*/"$u"/*) continue;; esac
+    case "$(systemctl --user is-active "$u" 2>/dev/null)" in active|activating|reloading|deactivating) echo "$u"; return 0;; esac
+  done
+  return 1
+}
+export -f busy_unit
 
 case "${1:-}" in
   -h|--help) usage; exit 0;;
@@ -24,14 +36,19 @@ case "${1:-}" in
       [ "$room" -gt 0 ] || { echo "ci-window: no wait budget left ($(( CI_DEADLINE - t0 )) s to the deadline, a run needs $NEED s); going on"; exit 1; }
       [ "$room" -lt "$CAP" ] && { CAP=$room; why="cap $CAP s, shared budget: $(( CI_DEADLINE - t0 )) s to the deadline"; }
     fi
-    timeout "$CAP" "$(dirname "$0")/wait-for" --label "ci-window: 1-min load < $BELOW" --every "$EVERY" \
-      --until "awk -v b=$BELOW '{exit !(\$1 < b)}' '$LOADAVG'" >/dev/null; rc=$?
+    u0=$(busy_unit)
+    timeout "$CAP" "$(dirname "$0")/wait-for" --label "ci-window: 1-min load < $BELOW, no CI unit active" --every "$EVERY" \
+      --until "awk -v b=$BELOW '{exit !(\$1 < b)}' '$LOADAVG' && ! busy_unit" >/dev/null; rc=$?
     w=$(( $(date +%s) - t0 ))
-    if [ "$rc" -eq 0 ]; then echo "ci-window: 1-min load $(load1) < $BELOW after $w s"; exit 0; fi
-    echo "ci-window: 1-min load $(load1), still ≥ $BELOW after $w s ($why); going on"; exit 1;;
+    if [ "$rc" -eq 0 ]; then echo "ci-window: 1-min load $(load1) < $BELOW after $w s${u0:+, $u0 done}"; exit 0; fi
+    u=$(busy_unit); l=$(load1)
+    if awk -v l="$l" -v b="$BELOW" 'BEGIN{exit !(l < b)}'; then echo "ci-window: 1-min load $l < $BELOW, but ${u:-${u0:-a CI unit}} still active after $w s ($why); going on"
+    else echo "ci-window: 1-min load $l, still ≥ $BELOW${u:+, $u still active} after $w s ($why); going on"; fi
+    exit 1;;
   "")
     now="${CI_WINDOW_NOW:-$(date +%H:%M)}"; from="${WINDOW%-*}"; to="${WINDOW#*-}"
     if [[ ! "$now" < "$from" && "$now" < "$to" ]]; then echo "ci-window: in the CI window $WINDOW; start heavy runs after $to"; exit 1; fi
+    if u=$(busy_unit); then echo "ci-window: $u active; start heavy runs after it"; exit 1; fi
     echo "ci-window: clear ($now, window $WINDOW)"; exit 0;;
   *) usage >&2; exit 2;;
 esac

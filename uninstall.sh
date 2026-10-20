@@ -6,8 +6,15 @@ HARNESS_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 # shellcheck source=/dev/null
 . "$HARNESS_DIR/bin/env.sh"
 
-[ "${1:-}" = -h ] || [ "${1:-}" = --help ] && {
-  echo "usage: uninstall.sh    (removes PATH links, units and the adapter wiring; keeps your data)"; exit 0; }
+# The orchestrator session unit stays unless asked for by name (AGENTS.md §5.2).
+KEEP=claude-orchestrator.service
+for a in "$@"; do
+  case "$a" in
+    --with-orchestrator) KEEP="";;
+    -h|--help) echo "usage: uninstall.sh [--with-orchestrator]   (removes PATH links, units and the adapter wiring; keeps your data and, without the flag, $KEEP)"; exit 0;;
+    *) echo "uninstall.sh: unknown option $a" >&2; exit 2;;
+  esac
+done
 
 echo "1. adapter"
 agent="${HARNESS_AGENT:-}"
@@ -29,6 +36,7 @@ for d in "$HARNESS_DIR"/*/; do
 done
 for u in "$HARNESS_DIR"/units/*; do
   n="$(basename "$u")"
+  [ "$n" = "$KEEP" ] && { echo "  kept $n (use --with-orchestrator to remove it)"; continue; }
   case "$n" in agent@*) ;; *) systemctl --user disable --now "$n" >/dev/null 2>&1 && echo "  disabled $n";; esac
   [ -f "$UD/$n" ] && rm -f "$UD/$n" && echo "  removed unit $n"
 done

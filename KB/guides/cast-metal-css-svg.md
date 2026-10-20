@@ -1,15 +1,15 @@
 # Cast metal (brass, copper) on web text, frames, keys and bars with one SVG lighting filter
 
-Ticket: T332, T334 · Last verified: 2026-10-12 by headless GPU Chrome shots at 400–2560 px, idle CPU pairs and trace counts
+Ticket: T332, T334 · Last verified: 2026-10-20 by T846 audit (paths, filter ids, 80 ms / 6° / 4° in metal.js, potrace); before: 2026-10-12 by headless GPU Chrome shots at 400–2560 px, idle CPU pairs and trace counts
 
 ## When to use
 Display text, card frames, icons or ornaments must read as real cast metal (bevel, brushed or hammered surface, specular that follows the pointer, patina, wall shadow) while staying crisp, selectable text. Not for a full 3D object you orbit around: use three.js there.
 
 ## The path we took
-- One SVG filter family built in JS (`metal-l/m/s/bar`, scale only): height = `feGaussianBlur(SourceAlpha)` + `feTurbulence` grain → `feDiffuseLighting` (multiply with the base fill, plus an ambient term) + `feSpecularLighting` (add) + a second coloured specular for a fixed bounce light → patina flood in the edge band (`SourceAlpha − blur`) → wall shadow (`feOffset` set from the light) + contact shadow.
+- One SVG filter family built in JS (brass lettering `metal-l/m/s`, copper `cu-m/s/bar`; scale only): height = `feGaussianBlur(SourceAlpha)` + `feTurbulence` grain → `feDiffuseLighting` (multiply with the base fill, plus an ambient term) + `feSpecularLighting` (add) + a second coloured specular for a fixed bounce light → patina flood in the edge band (`SourceAlpha − blur`) → wall shadow (`feOffset` set from the light) + contact shadow.
 - Applied with CSS `filter: url(#metal-m)` to text with `background-clip: text`, to a `::before` ring (border + `border-image: conic-gradient(...)` for reflection bands + corner castings as background images), and to SVG groups.
 - One `feDistantLight` aimed from screen centre toward the pointer; the JS updates azimuth/elevation and the shadow offsets, quantised (6°, 4°) and throttled to one relight per 80 ms. CSS vars `--lx/--ly` on `:root` drive gradients, shadows and a tiny parallax.
-- Example: `mockups/neon-sin/js/metal.js` + the "Cast metal" CSS block in the sinners-day-web repo; WebGL bar in `js/metalgl.js`.
+- Example: `mockups/neon-sin/js/metal.js` + the "Cast metal" CSS block in `mockups/neon-sin/index.html` of the sinners-day-web repo; WebGL bar in `js/metalgl.js`.
 
 ## Going further (T334): copper and a WebGL-lit bar
 - Copper reads as copper only with low diffuse (`lit = SourceGraphic × diffuse × ~1.1 + 0.04`) and strong specular; with T332's 1.15/0.38 it turns flat salmon. Match a reference by measuring mean hue/saturation of bright pixels (target hue 23, sat 0.46 for the owner's pick).
@@ -34,5 +34,5 @@ node tools/bake-bar.mjs index.html img/bar-height.png
 - Register `--lift`/`--soft` with `@property` and transition those, not `box-shadow`, so hover animates but pointer relights do not.
 
 ## Links
-- Code: sinners-day-web `mockups/neon-sin/js/metal.js`, `index.html` (Cast brass block)
+- Code: sinners-day-web `mockups/neon-sin/js/metal.js`, `index.html` (Cast metal block)
 - Design / results: `~/agent-work/research/2026-10-12/T332/`

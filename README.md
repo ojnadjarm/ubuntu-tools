@@ -94,6 +94,25 @@ is the only place that knows an adapter exists; `agent-run` and the units are ag
 
 Each command's first comment line (or `--help`) says what it does.
 
+## Running agents
+
+Runner detail behind `AGENTS.md` §6–§8; full mechanics in `RUNNER.md`.
+
+- Long jobs: a background run of your agent from an interactive session, or `agent-run <name>` headless.
+  `agent-run` calls `agent-exec`, which dispatches to `adapters/$HARNESS_AGENT/run`.
+- `agents-stop` stops every `agent@*` unit and fleet timer (`agent@*`, `sentinel-check`, `moodle-keep-weekly`), kills
+  background agent runs and pushes once. Timers are stopped, not disabled. `agents-start` (= `agents-stop --resume`)
+  re-enables the roster in `KB/orchestrator.md`. The interactive tmux session (`$ORCHESTRATOR_TMUX_SESSION`, `claude`
+  by default) is never touched.
+- A persistent agent runs headless from a systemd user timer via `~/agents/bin/agent-run`, working directory
+  `~/agents/<name>/`, instructions in its `BRIEF.md`, scratch files in `state/`. It ends every run by overwriting
+  `REPORT.md` with at most 5 lines (what it did, what it found, what needs the owner); the runner prepends the run
+  metadata.
+- `AGENTS.md` is the whole contract. `make preamble` generates `AGENT-PREAMBLE.md` (persistent agents' system prompt)
+  and `bench/TRIAL-PREAMBLE.md` from it; edit `AGENTS.md`, never a copy.
+- Known gaps (§7): the agent CLI's own in-browser integration is pending the user's sign-in; T11 (RDP screen sharing)
+  and T22 (restic backups) are skipped by owner decision, so do not assume off-machine backups exist.
+
 ## Updating the repo (the owner runs these)
 
 Agents never run `git add`, `commit` or `push` here. Before a commit:

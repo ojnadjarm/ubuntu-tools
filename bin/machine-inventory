@@ -5,22 +5,25 @@ export LC_ALL=C
 
 usage() {
   cat <<'EOF'
-usage: machine-inventory [--etc|--etc-list|--packages|--snaps|--units] [--check [DOC]]
+usage: machine-inventory [--etc|--etc-list|--packages|--snaps|--units] [--check [-v] [DOC]]
   (no flag)   every section: etc, packages, snaps, units
   --etc       /etc paths we added, changed or removed: "<A|M|D> <path>"
   --etc-list  the same paths, absolute, existing files only (for: machine-inventory --etc-list | sudo tar -czf x.tgz -T -)
   --packages  apt packages installed by hand after the OS install
   --snaps     snaps beyond the Ubuntu desktop defaults
   --units     user units and drop-ins in ~/.config/systemd/user
-  --check     exit 1 and list every item DOC (default KB/runbooks/migration.md) does not mention
+  --check     exit 1 and list every item DOC (default KB/runbooks/migration.md) does not mention; a package also
+              counts when bin/DEPS.tsv names it as apt or install.sh installs it; -v prints "documented by: <source>"
 Read-only: runs `sudo -n git` on /etc/.git and `sudo -n md5sum` on root-only conffiles.
-Env for fixtures: MI_ETC (default /etc), MI_SUDO (default "sudo -n"), MI_INSTALL_END (epoch).
+Env for fixtures: MI_ETC (default /etc), MI_SUDO (default "sudo -n"), MI_INSTALL_END (epoch), MI_HARNESS (default ~/agents),
+  MI_PRISTINE=1 (dpkg pristine check on a fixture MI_ETC; always on for /etc).
 EOF
 }
 
 ETC="${MI_ETC:-/etc}"
 SUDO="${MI_SUDO-sudo -n}"
 DOC_DEFAULT="$HOME/agents/KB/runbooks/migration.md"
+HARNESS="${MI_HARNESS:-$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)}"
 INSTALLER_LOG=/var/log/installer/curtin-install.log
 DEFAULT_SNAPS=" bare core22 core24 desktop-security-center firefox firmware-updater gnome-42-2204 gnome-46-2404 gtk-common-themes mesa-2404 prompting-client snap-store snapd snapd-desktop-integration "
 
@@ -42,16 +45,40 @@ generated() {
   return 1
 }
 
-# 0 when a package owns the path and it is byte-identical to what the package shipped.
-package_pristine() {
-  [ "$ETC" = /etc ] || return 1
-  local f="/etc/$1" pkg want have
-  pkg=$(dpkg -S "$f" 2>/dev/null | head -1 | cut -d: -f1) || return 1
-  [ -n "$pkg" ] || return 1
-  want=$(dpkg-query -W -f='${Conffiles}\n' "$pkg" 2>/dev/null | awk -v f="$f" '$1==f {print $2}')
-  [ -n "$want" ] || return 0
-  have=$($SUDO md5sum "$f" 2>/dev/null | cut -d' ' -f1)
-  [ "$want" = "$have" ]
+# Drops "<st> <path>" lines a package owns and ships unchanged; one dpkg -S, one dpkg-query, one sudo md5sum batch.
+drop_pristine() {
+  local st p pkg want h f line
+  local -a lines paths
+  local -A want_of st_of have_of pkg_of conf_of pkgs
+  if [ "$ETC" != /etc ] && [ -z "${MI_PRISTINE:-}" ]; then cat; return; fi
+  mapfile -t lines
+  for line in "${lines[@]}"; do [ "${line%% *}" = D ] || paths+=("/etc/${line#* }"); done
+  # "pkg[:arch][, pkg2]: path" lines; diversion lines name the diverter, not the owner.
+  while IFS= read -r line; do
+    pkg=${line%%: *}; f=${line#*: }
+    case "$pkg" in "diversion by "*) continue;; esac
+    [ -n "${pkg_of[$f]+x}" ] || { pkg_of[$f]=${pkg%%:*}; pkgs[${pkg%%:*}]=1; }
+  done < <([ "${#paths[@]}" -gt 0 ] && dpkg -S "${paths[@]}" 2>/dev/null)
+  while IFS=$'\t' read -r pkg f h; do
+    [ -n "${conf_of[$pkg $f]+x}" ] || conf_of[$pkg $f]=$h
+  done < <([ "${#pkgs[@]}" -gt 0 ] && dpkg-query -W -f='${Package}\n${Conffiles}\n' "${!pkgs[@]}" 2>/dev/null \
+    | awk '/^$/ {next} /^ / {print pkg "\t" $1 "\t" $2; next} {pkg=$0}')
+  for line in "${lines[@]}"; do
+    st=${line%% *}; p=${line#* }
+    [ "$st" = D ] && { echo "$line"; continue; }
+    pkg=${pkg_of[/etc/$p]:-}
+    [ -n "$pkg" ] || { echo "$line"; continue; }
+    want=${conf_of[$pkg /etc/$p]:-}
+    [ -n "$want" ] || continue
+    want_of[$p]=$want; st_of[$p]=$st
+  done
+  [ "${#want_of[@]}" -gt 0 ] || return 0
+  while IFS= read -r line; do
+    h=${line%% *}; f=${line#*  }; have_of[${f#"$ETC/"}]=$h
+  done < <(for p in "${!want_of[@]}"; do printf '%s\0' "$ETC/$p"; done | xargs -0 -r $SUDO md5sum -- 2>/dev/null)
+  for p in "${!want_of[@]}"; do
+    [ "${want_of[$p]}" = "${have_of[$p]:-}" ] || echo "${st_of[$p]} $p"
+  done
 }
 
 # An added *.wants/*.requires link or an alias into /usr/lib is enablement, listed under units.
@@ -82,12 +109,11 @@ etc_changes() {
     generated "$p" && continue
     if [ "$st" != D ]; then
       enablement_link "$p" && continue
-      package_pristine "$p" && continue
     else
       case "$p" in *snap*) continue;; esac
     fi
     echo "$st $p"
-  done | sort -k2
+  done | drop_pristine | sort -k2
 }
 
 packages() {
@@ -119,8 +145,23 @@ units() {
 # Backticked /etc/... tokens of the doc; each may be a glob (`/etc/netplan/90-NM-*.yaml`).
 doc_etc_patterns() { grep -oE '`/etc/[^` ]+`' "$1" | tr -d '`' | sort -u; }
 
+# Apt package names in the DEPS.tsv apt column, any level.
+deps_packages() {
+  awk -F'\t' '$1 !~ /^#/ && $2 != "" && $2 != "-" {n=split($2,a," "); for(i=1;i<=n;i++) print a[i]}' "$HARNESS/bin/DEPS.tsv" 2>/dev/null
+}
+
+# Packages install.sh installs, parsed not run: literal `apt install` words and the DEPS.tsv `# <key>:` lists it reads.
+install_packages() {
+  local sh="$HARNESS/install.sh" key
+  grep -oE 'apt(-get)? +install( +[^ ;&|>"#)]+)*' "$sh" 2>/dev/null | awk '{for (i = 3; i <= NF; i++) print $i}' | grep -vE '^[-$]'
+  grep -oE "s/\^# [A-Za-z0-9_-]+: //p" "$sh" 2>/dev/null | while read -r _ key _; do
+    sed -n "s/^# ${key%:}: //p" "$HARNESS/bin/DEPS.tsv" 2>/dev/null | tr ' ' '\n'
+  done | grep -vE ':|^$'
+}
+
 check() {
-  local doc="$1" gaps=0 st p pat hit
+  local doc="$1" verbose="${2:-}" gaps=0 st p pat hit src
+  local -A deps inst
   [ -r "$doc" ] || { echo "machine-inventory: cannot read $doc" >&2; return 2; }
   mapfile -t pats < <(doc_etc_patterns "$doc")
   while read -r st p; do
@@ -131,7 +172,16 @@ check() {
     done
     [ "$hit" = 1 ] || { echo "GAP etc $st /etc/$p"; gaps=$((gaps+1)); }
   done < <(etc_changes)
-  while read -r p; do grep -qwF -- "$p" "$doc" || { echo "GAP package $p"; gaps=$((gaps+1)); }; done < <(packages)
+  while read -r p; do deps[$p]=1; done < <(deps_packages)
+  while read -r p; do inst[$p]=1; done < <(install_packages)
+  while read -r p; do
+    if grep -qwF -- "$p" "$doc"; then src=doc
+    elif [ -n "${deps[$p]+x}" ]; then src=DEPS.tsv
+    elif [ -n "${inst[$p]+x}" ]; then src=install.sh
+    else echo "GAP package $p"; gaps=$((gaps+1)); continue
+    fi
+    [ -z "$verbose" ] || echo "ok package $p documented by: $src"
+  done < <(packages)
   while read -r p; do grep -qwF -- "$p" "$doc" || { echo "GAP snap $p"; gaps=$((gaps+1)); }; done < <(snaps)
   while read -r p; do grep -qF -- "$p" "$doc" || { echo "GAP unit $p"; gaps=$((gaps+1)); }; done < <(units)
   echo "gaps: $gaps (doc $doc)"
@@ -145,7 +195,10 @@ case "${1:-}" in
   --packages) packages;;
   --snaps) snaps;;
   --units) units;;
-  --check) check "${2:-$DOC_DEFAULT}";;
+  --check)
+    shift; v=; doc=$DOC_DEFAULT
+    for a in "$@"; do case "$a" in -v) v=1;; *) doc=$a;; esac; done
+    check "$doc" "$v";;
   "")
     echo "## etc"; etc_changes | sed 's/^/  /'
     echo "## packages"; packages | paste -sd' ' | fold -s -w 100 | sed 's/^/  /'

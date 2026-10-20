@@ -137,13 +137,12 @@ def spawn_desc(hook, wait):
 
 
 def take_spawn(hook):
-    """One read of spawn_desc()."""
+    """One read of spawn_desc(); only the take of a row holds the claims lock."""
     try:
         with open(hook["transcript_path"], "rb") as f:
             f.seek(0, 2)
             f.seek(max(0, f.tell() - SPAWN_TAIL))
             rows = f.read().decode("utf-8", "replace").splitlines()
-        taken = json.load(open(SPAWNS)) if os.path.exists(SPAWNS) else []
     except Exception:
         return None
     calls, done = [], set()
@@ -158,12 +157,21 @@ def take_spawn(hook):
                     done.add(c.get("tool_use_id"))
         except Exception:
             continue
-    free = [c for c in calls if c.get("id") not in done and c.get("id") not in taken]
-    kind = str(hook.get("agent_type") or "")
-    pick = next((c for c in free if (c.get("input") or {}).get("subagent_type", "general-purpose") == kind), free[0] if free else None)
-    if not pick:
+    calls = [c for c in calls if c.get("id") not in done]
+    if not calls:
         return None
-    save((taken + [pick["id"]])[-200:], SPAWNS)
+    with open(CLAIMS + ".lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            taken = json.load(open(SPAWNS)) if os.path.exists(SPAWNS) else []
+        except Exception:
+            return None
+        free = [c for c in calls if c.get("id") not in taken]
+        kind = str(hook.get("agent_type") or "")
+        pick = next((c for c in free if (c.get("input") or {}).get("subagent_type", "general-purpose") == kind), free[0] if free else None)
+        if not pick:
+            return None
+        save((taken + [pick["id"]])[-200:], SPAWNS)
     return str((pick.get("input") or {}).get("description") or "") or None
 
 
@@ -232,9 +240,7 @@ def main():
     if agent_id and verb == "start":
         wait = 0 if os.path.isdir(os.path.join(subs_dir(hook), "workflows")) else SPAWN_WAIT_S
         os.makedirs(os.path.dirname(CLAIMS), mode=0o700, exist_ok=True)
-        with open(CLAIMS + ".lock", "w") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            desc = spawn_desc(hook, wait)
+        desc = spawn_desc(hook, wait)
         ctx = start_context(desc)
         if ctx:
             print(ctx, flush=True)

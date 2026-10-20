@@ -1,30 +1,103 @@
 #!/usr/bin/env bash
-# pc search-index status|exclude <dir> [--apply] — GNOME's file indexer (localsearch-3): its cost, busiest dirs, .trackerignore excludes.
+# pc search-index status [--under DIR]|exclude <dir>|--name <basename>|scope --drop DIR [--apply] — GNOME's file indexer (localsearch-3): its cost, crashes, busiest dirs, excludes.
 # shellcheck disable=SC2034,SC2016
 # Design: one verb, two reads (systemd's CPUUsageNSec for cost, a tinysparql query of the index for
 # where it works) and one ledgered write (a .trackerignore file, which localsearch honours through
 # ignored-directories-with-content); `pc undo <id>` removes the file. External tools go through
 # pc_cmd so tests run on recorded fixtures; ~/moodle-envs is refused (owner rule, T450).
+# T732: `exclude --name` appends a basename to gsettings ignored-directories (localsearch's own
+# name filter, so Moodle data dirs drop without writing inside ~/moodle-envs); rollback is the
+# previous list. The 24 h cost and crash count come from the unit's journal (`Consumed`, `status=11`).
+# T940: `status --under` groups the index rows (never a walk) at a depth; `exclude --name` refuses a
+# name that also holds indexed files outside --under; `scope --drop` takes a top-level dir out of
+# index-recursive-directories (live monitors ignore a name added later, a root change does not).
 set -uo pipefail
 BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 . "$BIN/pclib.sh"
 
-pc_usage 'usage: pc search-index status [-n N] [--json]
+pc_usage 'usage: pc search-index status [-n N] [--json] [--under DIR [--depth N]]
        pc search-index exclude <dir> [--apply]
+       pc search-index exclude --name <basename> [--under DIR] [--force] [--apply]
+       pc search-index scope --drop DIR [--apply]
 
-status   the indexer unit (CPU seconds, seconds per hour since start, memory), `localsearch status`
-         totals, the dirs that hold a .trackerignore, and the top N (default 8) dirs under $HOME by
-         indexed files changed in the last 24 h.
+status   the indexer unit (CPU seconds, seconds per hour since start, memory), CPU seconds and
+         SEGV crashes over 24 h from its journal, `localsearch status` totals, the dirs that hold a
+         .trackerignore, the excluded names, and the top N (default 8) dirs under $HOME by indexed
+         files changed in the last 24 h.
+         --under DIR: only the index rows under DIR, grouped at --depth N (default 1) below it:
+         files changed in 24 h and indexed per group. Reads the index, never walks DIR.
 exclude  write <dir>/.trackerignore so localsearch drops and skips the dir; ledgered,
-         `pc undo <id>` deletes the file. Refuses ~/moodle-envs (exit 3).' "$@"
+         `pc undo <id>` deletes the file. Refuses ~/moodle-envs (exit 3).
+         --name <basename>: append to gsettings org.freedesktop.Tracker3.Miner.Files
+         ignored-directories (every dir of that name, anywhere); ledgered, `pc undo <id>` restores
+         the previous list. Refuses empty, "/" or names holding / or a quote (exit 2), and a
+         name whose dirs hold indexed files outside --under DIR (`would also drop N files
+         elsewhere`, exit 3; --force overrides).
+scope    --drop DIR (a top-level dir of $HOME): index-recursive-directories becomes the other
+         top-level dirs (minus those holding an ignored-directories-with-content marker
+         such as .trackerignore or .git, which a root would not honour), and $HOME is
+         indexed as a single dir; ledgered, `pc undo <id>` restores
+         both keys. A top-level dir made later is not indexed until scope runs again.' "$@"
 
-PC_SUB='pc search-index'; PC_EXTRA_FLAGS=(-n:)
+PC_SUB='pc search-index'; PC_EXTRA_FLAGS=(-n: --name: --under: --depth: --drop: --force)
 pc_opt "$@"; ARGS=("${PC_ARGS[@]}")
 N=${PC_OPT[-n]-8}
 UNIT=localsearch-3.service
+SCHEMA=org.freedesktop.Tracker3.Miner.Files; KEY=ignored-directories
+REC=index-recursive-directories; SINGLE=index-single-directories
+GS=gsettings; [ -n "$PC_FIXTURE" ] && [ -x "$PC_FIXTURE/bin/gsettings" ] && GS=$PC_FIXTURE/bin/gsettings
+
+# journal_24h <cpu_s now> <uptime_s>: "<cpu s> <crashes>" over 24 h; a run that began earlier counts pro rata.
+journal_24h() {
+  local now; printf -v now '%(%s)T' -1
+  pc_cmd journalctl --user -u "$UNIT" --since '24 hours ago' --no-pager -o short-unix 2>/dev/null \
+    | awk -v cur="$1" -v up="$2" -v cut="$(( now - 86400 ))" '
+        function dur(t,   k, p, i, v, s) { k = split(t, p, " ")
+          for (i = 1; i <= k; i++) { v = p[i] + 0
+            if (p[i] ~ /ms$/) v /= 1000; else if (p[i] ~ /(us|µs)$/) v /= 1000000
+            else if (p[i] ~ /min$/) v *= 60; else if (p[i] ~ /h$/) v *= 3600; else if (p[i] ~ /d$/) v *= 86400
+            s += v }
+          return s }
+        /status=11\// { n++ }
+        / Consumed .* CPU time/ { c = $0; sub(/.* Consumed /, "", c); w = c; sub(/ CPU time.*/, "", c)
+          wall = sub(/.* CPU time over /, "", w) ? dur(substr(w, 1, index(w " wall", " wall") - 1)) : 0
+          f = (wall > $1 - cut) ? ($1 - cut) / wall : 1; s += dur(c) * f }
+        END { if (up > 86400) cur = cur * 86400 / up; printf "%d %d\n", s + cur, n }'
+}
+
+# index_rows: "<path>\t<last modified>" for every file in the index.
+index_rows() {
+  pc_cmd tinysparql query -b org.freedesktop.LocalSearch3 \
+      'SELECT ?u ?m WHERE { ?u a nfo:FileDataObject ; nfo:fileLastModified ?m }' 2>/dev/null \
+    | sed -n 's|^  file://\(.*\), \([^,]*\)$|\1\t\2|p'
+}
+
+# under <dir>: indexed files below <dir> grouped at --depth, ranked by files changed in 24 h.
+under() {
+  local dir depth=${PC_OPT[--depth]-1} cutoff rows
+  [[ $depth =~ ^[1-9][0-9]*$ ]] || { echo "pc search-index: --depth needs a number >= 1" >&2; exit 2; }
+  dir=$(realpath -m -- "$1")
+  cutoff=$(date -u -d '-24 hours' +%Y-%m-%dT%H:%M:%SZ)
+  rows=$(index_rows | awk -F'\t' -v d="$dir/" -v n="$depth" -v c="$cutoff" -v h="$HOME/" '
+      index($1, d) == 1 { k = split(substr($1, length(d) + 1), a, "/"); if (k > n) k = n
+        g = a[1]; for (i = 2; i <= k; i++) g = g "/" a[i]
+        t[g]++; if ($2 >= c) r[g]++ }
+      END { p = d; if (index(p, h) == 1) p = "~/" substr(p, length(h) + 1)
+        for (g in t) printf "%d\t%d\t%s%s\n", r[g], t[g], p, g }' \
+    | sort -t$'\t' -k1,1nr -k2,2nr | head -n "$N")
+  if [ "$JSON" = 1 ]; then
+    pc_json '{under:$u, depth:$d, groups:($b | split("\n") | map(select(. != "") | split("\t")
+              | {changed_24h:(.[0]|tonumber), indexed:(.[1]|tonumber), path:.[2]}))}' \
+      --arg u "$dir" --argjson d "$depth" --arg b "$rows"
+    return
+  fi
+  printf 'under %s, depth %s (changed 24 h, indexed, path):\n' "${dir/#$HOME/\~}" "$depth"
+  [ -n "$rows" ] && sed 's/^/  /' <<<"$rows"
+  return 0
+}
 
 status() {
-  local props cpu start mem now since rate total ignored busy cutoff
+  local props cpu start mem now since rate total ignored busy cutoff cpu24 crashes names
   props=$(pc_cmd systemctl --user show "$UNIT" -p CPUUsageNSec -p ActiveEnterTimestamp -p MemoryCurrent -p ActiveState --timestamp=unix)
   cpu=$(sed -n 's/^CPUUsageNSec=//p' <<<"$props"); cpu=$(( ${cpu:-0} / 1000000000 ))
   start=$(sed -n 's/^ActiveEnterTimestamp=@//p' <<<"$props")
@@ -32,26 +105,30 @@ status() {
   printf -v now '%(%s)T' -1
   since=$(( now - ${start:-now} )); [ "$since" -gt 0 ] || since=1
   rate=$(( cpu * 3600 / since ))
+  read -r cpu24 crashes <<<"$(journal_24h "$cpu" "$since")"
+  names=$("$GS" get "$SCHEMA" "$KEY" 2>/dev/null)
   total=$(pc_cmd localsearch status 2>/dev/null | sed -n 's/^Currently indexed: //p' | head -1)
   ignored=$(find "$HOME" -maxdepth 3 -name .trackerignore -not -path '*/node_modules/*' -printf '%h\n' 2>/dev/null | sort)
   cutoff=$(date -u -d '-24 hours' +%Y-%m-%dT%H:%M:%SZ)
-  busy=$(pc_cmd tinysparql query -b org.freedesktop.LocalSearch3 \
-      'SELECT ?u ?m WHERE { ?u a nfo:FileDataObject ; nfo:fileLastModified ?m }' 2>/dev/null \
-    | sed -n 's|^  file://||p' \
-    | awk -F', ' -v h="$HOME/" -v c="$cutoff" 'index($1, h) == 1 { p = substr($1, length(h) + 1); sub(/\/.*/, "", p)
+  busy=$(index_rows \
+    | awk -F'\t' -v h="$HOME/" -v c="$cutoff" 'index($1, h) == 1 { p = substr($1, length(h) + 1); sub(/\/.*/, "", p)
         n[p]++; if ($2 >= c) r[p]++ } END { for (p in n) printf "%d\t%d\t~/%s\n", r[p], n[p], p }' \
     | sort -t$'\t' -k1,1nr -k2,2nr | head -n "$N")
   if [ "$JSON" = 1 ]; then
     pc_json '{unit:$u, active:$a, cpu_s:$c, uptime_s:$s, cpu_s_per_h:$r, mem_bytes:$m, indexed:$t,
+              cpu_s_24h:$c24, crashes_24h:$cr, excluded_names:$nm,
               excluded:($i | split("\n") | map(select(. != ""))),
               busiest:($b | split("\n") | map(select(. != "") | split("\t") | {changed_24h:(.[0]|tonumber), indexed:(.[1]|tonumber), dir:.[2]}))}' \
       --arg u "$UNIT" --arg a "$(sed -n 's/^ActiveState=//p' <<<"$props")" --argjson c "$cpu" --argjson s "$since" \
-      --argjson r "$rate" --argjson m "$mem" --arg t "$total" --arg i "${ignored//$HOME/\~}" --arg b "$busy"
+      --argjson r "$rate" --argjson m "$mem" --arg t "$total" --arg i "${ignored//$HOME/\~}" --arg b "$busy" \
+      --argjson c24 "${cpu24:-0}" --argjson cr "${crashes:-0}" --arg nm "$names"
     return
   fi
   printf '%s: %s · cpu %s s over %s s · %s s/h · mem %s MB\n' "$UNIT" "$(sed -n 's/^ActiveState=//p' <<<"$props")" \
     "$cpu" "$since" "$rate" "$(( mem / 1048576 ))"
+  printf 'cpu 24 h %s s (journal), crashes 24 h %s\n' "${cpu24:-0}" "${crashes:-0}"
   printf 'indexed: %s\n' "${total:-unknown}"
+  printf 'excluded names: %s\n' "${names:-unknown}"
   printf 'excluded: %s\n' "$(tr '\n' ' ' <<<"${ignored//$HOME/\~}")" | sed 's/ *$//; s/:$/: none/'
   printf 'busiest (changed 24 h, indexed, dir):\n'
   [ -n "$busy" ] && sed 's/^/  /' <<<"$busy"
@@ -70,8 +147,51 @@ exclude() {
     pc_apply "search-index:$dir" indexed excluded "rm -f -- $q" touch -- "$dir/.trackerignore"
 }
 
+exclude_name() {
+  local name=$1 cur new rb rd
+  case "$name" in ''|*/*|*\'*|*\"*) echo "pc search-index: refused — '$name' is not a plain basename" >&2; exit 2;; esac
+  cur=$("$GS" get "$SCHEMA" "$KEY") || { echo "pc search-index: cannot read $SCHEMA $KEY" >&2; exit 1; }
+  case "$cur" in *"'$name'"*) echo "already: $name excluded by name"; return 0;; esac
+  local in=${PC_OPT[--under]-} n
+  [ -n "$in" ] && in=$(realpath -m -- "$in")/
+  n=$(index_rows | awk -F'\t' -v s="/$name/" -v d="$in" 'index($1, s) && (d == "" || index($1, d) != 1) { n++ } END { print n + 0 }')
+  [ "$n" -gt 0 ] && [ -z "${PC_OPT[--force]+set}" ] && {
+    echo "pc search-index: refused — '$name' would also drop $n files elsewhere${in:+ (outside ${in%/})}; --force overrides" >&2; exit 3; }
+  case "$cur" in '@as []'|'[]') new="['$name']";; *) new="${cur%]}, '$name']";; esac
+  printf -v rb '%q set %q %q %q' "$GS" "$SCHEMA" "$KEY" "$cur"
+  printf -v rd '%q get %q %q' "$GS" "$SCHEMA" "$KEY"
+  PC_READ_CMD=$rd pc_apply "search-index:name:$name" "$cur" "$new" "$rb" "$GS" set "$SCHEMA" "$KEY" "$new"
+}
+
+scope() {
+  local drop=${PC_OPT[--drop]-} cr cs nr ns rb set rd
+  [ -n "$drop" ] || { echo "pc search-index scope: need --drop DIR" >&2; exit 2; }
+  drop=$(realpath -m -- "$drop")
+  [ "${drop%/*}" = "$HOME" ] && [ -d "$drop" ] || { echo "pc search-index: $drop is not a top-level dir of $HOME" >&2; exit 2; }
+  cr=$("$GS" get "$SCHEMA" "$REC") && cs=$("$GS" get "$SCHEMA" "$SINGLE") || { echo "pc search-index: cannot read $SCHEMA" >&2; exit 1; }
+  # A root ignores its own markers (.trackerignore, .git), so a marked or name-ignored dir stays out.
+  local d m skip marks names keep=()
+  marks=$("$GS" get "$SCHEMA" ignored-directories-with-content 2>/dev/null); names=$("$GS" get "$SCHEMA" "$KEY" 2>/dev/null)
+  for d in "$HOME"/*/; do
+    d=${d%/}; [ -L "$d" ] || [ "$d" = "$drop" ] && continue
+    case "$d" in *"'"*) continue;; esac
+    case "$names" in *"'${d##*/}'"*) continue;; esac
+    skip=; for m in $(tr -d "[],'" <<<"$marks"); do [ -e "$d/$m" ] && skip=1; done
+    [ -n "$skip" ] || keep+=("'$d'")
+  done
+  nr="[$(IFS=,; printf '%s' "${keep[*]}" | sed 's/,/, /g')]"
+  case "$cs" in *"'\$HOME'"*) ns=$cs;; '@as []'|'[]') ns="['\$HOME']";; *) ns="${cs%]}, '\$HOME']";; esac
+  if [ "$cr" = "$nr" ] && [ "$cs" = "$ns" ]; then echo "already: ${drop/#$HOME/\~} out of scope"; return 0; fi
+  printf -v rb '%q set %q %q %q && %q set %q %q %q' "$GS" "$SCHEMA" "$REC" "$cr" "$GS" "$SCHEMA" "$SINGLE" "$cs"
+  printf -v set '%q set %q %q %q && %q set %q %q %q' "$GS" "$SCHEMA" "$REC" "$nr" "$GS" "$SCHEMA" "$SINGLE" "$ns"
+  printf -v rd 'printf "recursive=%%s single=%%s" "$(%q get %q %q)" "$(%q get %q %q)"' "$GS" "$SCHEMA" "$REC" "$GS" "$SCHEMA" "$SINGLE"
+  PC_READ_CMD=$rd pc_apply "search-index:scope:${drop/#$HOME/\~}" "recursive=$cr single=$cs" "recursive=$nr single=$ns" "$rb" bash -c "$set"
+  echo "note: a top-level dir made under ~ later is not indexed until scope --drop runs again"
+}
+
 case "${ARGS[0]:-status}" in
-  status) status;;
-  exclude) exclude "${ARGS[1]:-}";;
-  *) echo "pc search-index: unknown verb '${ARGS[0]}' (status|exclude)" >&2; exit 2;;
+  status) if [ -n "${PC_OPT[--under]+set}" ]; then under "${PC_OPT[--under]}"; else status; fi;;
+  scope) scope;;
+  exclude) if [ -n "${PC_OPT[--name]+set}" ]; then exclude_name "${PC_OPT[--name]}"; else exclude "${ARGS[1]:-}"; fi;;
+  *) echo "pc search-index: unknown verb '${ARGS[0]}' (status|exclude|scope)" >&2; exit 2;;
 esac

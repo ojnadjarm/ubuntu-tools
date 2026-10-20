@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lint agent briefs: every brief needs a CHECK command, file claims, a time box and a report cap (T381); warn when it names a project but not its decisions ledger (T396) or feeds /dev/zero into script/tmux (T401)."""
+"""Lint agent briefs: every brief needs a CHECK command, file claims, a time box and a report cap (T381); warn when it names a project but not its decisions ledger (T396) or feeds /dev/zero into script/tmux (T401); `--backlog` checks a planner BACKLOG.md (T913)."""
 import argparse, os, re, sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
@@ -14,6 +14,108 @@ RULES = [
 INCLUDE = re.compile(r'(_common[\w-]*\.md)')
 DEVZERO = re.compile(r'\b(?:script|tmux)\b[^\n;&|]*<\s*/dev/zero|/dev/zero[^\n;]*\|\s*(?:script|tmux)\b')
 TESTS = os.path.expanduser('~/agents/bin/tests')
+TICKET = re.compile(r'^##[ \t]+(?:(\d+)\.[ \t]*)?T(\d+)\b.*$', re.M)
+CHECK_LINE = re.compile(r'^\s*(?:[-*]\s*)?CHECK:\s*(.+?)\s*$', re.M)
+FIELDS = [
+    ('Size', re.compile(r'^- Size [SM]\b', re.M)),
+    ('gate', re.compile(r'^- Size\b.*\b(?:auto-ok|owner-go)\b', re.M)),
+    ('Files', re.compile(r'^- Files:\s*\S', re.M)),
+    ('Success', re.compile(r'^- Success:\s*\S', re.M)),
+]
+HEAVY = {'run.sh', 'blender', 'cpp-ci', 'mv-render', 'godot', 'godot4', 'build.sh', 'ffmpeg', 'make.sh'}
+SEGMENT = re.compile(r'&&|\|\||[;|`]|\$\(|\b(?:do|then|else)\b')
+WRAPPERS = {'!', '(', '{', 'time', 'env', 'bash', 'sh', 'dash', 'exec', 'timeout', 'sudo', 'nohup', 'xvfb-run'}
+
+
+def backlog_tickets(text):
+    """(k, id, body) per `## [k.] T<n>` heading; a body ends at the next `## `."""
+    heads = list(re.finditer(r'^## ', text, re.M))
+    out = []
+    for i, h in enumerate(heads):
+        m = TICKET.match(text, h.start())
+        if m:
+            end = heads[i + 1].start() if i + 1 < len(heads) else len(text)
+            out.append((m.group(1), int(m.group(2)), text[m.end():end]))
+    return out
+
+
+def unniced_heavy(cmd):
+    """Heavy commands a CHECK calls without `nice -n 19` in front, unless gated by `ci-window &&`."""
+    if re.search(r'\bci-window\s*&&', cmd):
+        return []
+    hits = []
+    for seg in SEGMENT.split(cmd):
+        toks, niced = seg.split(), False
+        while toks:
+            if toks[0] == 'nice' and toks[1:2] == ['-n'] and toks[2:3]:
+                niced, toks = niced or toks[2] == '19', toks[3:]
+            elif toks[0] == 'nice' and toks[1:2] and re.match(r'-n?\d', toks[1]):
+                niced, toks = niced or toks[1] in ('-n19', '-19'), toks[2:]
+            elif toks[0] in WRAPPERS | {'nice'} or re.match(r'\w+=|\d+(\.\d+)?[smhd]?$', toks[0]) or (toks[0].startswith('-') and len(toks[0]) > 1):
+                toks = toks[1:]
+            else:
+                break
+        if not toks:
+            continue
+        name = os.path.basename(toks[0])
+        if not niced and (name in HEAVY or '--measure' in toks):
+            hits.append(name if name in HEAVY else f'{name} --measure')
+    return hits
+
+
+def braces(item):
+    """`a/{b,c}/d` → [`a/b/d`, `a/c/d`]."""
+    m = re.search(r'\{([^{}]*)\}', item)
+    return [x for alt in m.group(1).split(',') for x in braces(item[:m.start()] + alt + item[m.end():])] if m else [item]
+
+
+def claim_paths(line):
+    """Files line → normalised paths; `(…)` notes, backticks and prose items dropped, `{a,b}` expanded."""
+    line = line.replace('`', '')
+    while re.search(r'\([^()]*\)', line):
+        line = re.sub(r'\([^()]*\)', '', line)
+    out = []
+    for item in re.split(r'[,;](?![^{]*\})', line):
+        tok = (item.split() or [''])[0]
+        if '/' in tok:
+            out += [os.path.normpath(os.path.expanduser(x)) for x in braces(tok)]
+    return out
+
+
+def covers(a, b):
+    return a == b or b.startswith(a.rstrip('/') + '/')
+
+
+def backlog_problems(tickets, min_checks, top):
+    """One line per broken backlog rule (T913)."""
+    probs, checks, seen, files = [], 0, set(), []
+    for i, (k, tid, body) in enumerate(tickets):
+        name = f'#{k or i + 1} T{tid}'
+        miss = [f for f, rx in FIELDS if not rx.search(body)]
+        if miss:
+            probs.append(f'{name}: missing {", ".join(miss)}')
+        cmds = CHECK_LINE.findall(body)
+        checks += len(cmds)
+        if len(cmds) != 1:
+            probs.append(f'{name}: {len(cmds)} CHECK lines, want 1')
+        for cmd in cmds:
+            for h in unniced_heavy(cmd.strip('`')):
+                probs.append(f'{name}: CHECK calls {h} without `nice -n 19` or `ci-window &&`')
+        if tid in seen:
+            probs.append(f'{name}: duplicate id')
+        elif i and tid != tickets[i - 1][1] + 1:
+            probs.append(f'{name}: id not consecutive after T{tickets[i - 1][1]}')
+        seen.add(tid)
+        m = re.search(r'^- Files:\s*(.+)$', body, re.M)
+        files.append((name, claim_paths(m.group(1)) if m else []))
+    if checks < min_checks:
+        probs.append(f'backlog: {checks} CHECKs < {min_checks}')
+    head = files[:top]
+    for i, (na, pa) in enumerate(head):
+        for nb, pb in head[i + 1:]:
+            for x in sorted({b if covers(a, b) else a for a in pa for b in pb if covers(a, b) or covers(b, a)}):
+                probs.append(f'{na} and {nb}: both claim {x}')
+    return probs
 
 
 def text_of(path):
@@ -52,7 +154,18 @@ def main():
     ap.add_argument('briefs', nargs='*')
     ap.add_argument('--tests', nargs='?', const=TESTS, metavar='DIR', help='warn on /dev/zero fed to script/tmux in DIR/*.sh (default %(const)s)')
     ap.add_argument('--summary', action='store_true', help='print per-rule pass counts only')
+    ap.add_argument('--backlog', metavar='FILE', help='check a planner BACKLOG.md: fields, one CHECK each, ids, --min CHECKs, top --top files disjoint, heavy CHECKs niced')
+    ap.add_argument('--min', type=int, default=20, help='--backlog: minimum CHECK count (default %(default)s)')
+    ap.add_argument('--top', type=int, default=8, help='--backlog: first K tickets need disjoint Files (default %(default)s)')
     a = ap.parse_args()
+    if a.backlog:
+        with open(a.backlog, encoding='utf-8', errors='replace') as f:
+            tickets = backlog_tickets(f.read())
+        probs = backlog_problems(tickets, a.min, a.top)
+        for p in probs:
+            print(p)
+        print(f'backlog: {len(tickets)} tickets, {len(probs)} problems')
+        sys.exit(1 if probs else 0)
     if a.tests:
         scan_tests(a.tests)
     if not a.briefs:

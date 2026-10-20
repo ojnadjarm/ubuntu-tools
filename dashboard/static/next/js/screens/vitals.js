@@ -1,5 +1,5 @@
 /* Vitals: each usage series is a ribbon of glyph columns under a small sun eye whose rings hold the four "now" values; panes roll the numbers, a probe reads any sample. */
-import { esc } from "/static/js/core/fmt.js";
+import { esc, when } from "/static/js/core/fmt.js";
 import { terrain, terrainTop, dust } from "../shapes.js";
 import { fitEye, FACE } from "../gl/cam.js";
 import { odo, trail } from "../ui/num.js";
@@ -40,7 +40,15 @@ export function render(grid, D) {
       return `<section class="pane"><h2><span data-dec>${s.k}</span><s>30 min</s></h2><div class="nbig">${odo("vt." + s.k, fmt(v[n - 1]))} <u>${esc(s.u)} now</u></div>` +
         trail("vt." + s.k, v, `${s.k}, last 30 minutes, now ${fmt(v[n - 1])} ${s.u}`) +
         `<dl class="kv"><dt>min</dt><dd>${fmt(Math.min(...v))}</dd><dt>avg</dt><dd>${fmt(avg)}</dd><dt>max</dt><dd>${fmt(Math.max(...v))}</dd></dl></section>`;
-    }).join("") + `</div></div>`;
+    }).join("") + `</div>${fails(D.failures)}</div>`;
+}
+
+/* `pc failures` of the last 24 h as one compact table; rows not ours, test OOMs and gone units are dimmed. */
+function fails(F) {
+  if (!Array.isArray(F)) return "";
+  const rows = F.map((r) => `<tr${r.dim ? ' class="dim"' : ""}><td>${esc(r.source)}</td><td title="${esc(r.what + (r.note ? " · " + r.note : "") + (r.ours ? "" : " · not ours"))}">${esc(r.what)}${r.note ? ` <s>${esc(r.note)}</s>` : ""}</td><td>${r.n}</td><td title="${r.last ? esc(when(r.last)) : ""}">${r.last ? esc(when(r.last)) : "—"}</td></tr>`).join("");
+  return `<section class="pane fails"><h2><span data-dec>failures</span><s>24 h · ${F.length}</s></h2>` +
+    (F.length ? `<table><thead><tr><th>source</th><th>what</th><th>n</th><th>last</th></tr></thead><tbody>${rows}</tbody></table>` : `<p class="sm">nothing failed</p>`) + `</section>`;
 }
 
 /* Keeps each ribbon's label on its newest column, stacked so none overlap. */

@@ -5,16 +5,18 @@
 # TSP-011: the uutils `timeout` costs a flat ~100 ms; prefer the GNU binary.
 export PC_TIMEOUT_BIN="${PC_TIMEOUT_BIN:-$(command -v gnutimeout || echo timeout)}"
 out=""; scale=""; region=""; diff=""; prev=""; ignore="0,0,1366,32"; conly=""; quiet=""
+u="usage: pc shot [out.png] [--scale F] [--region X,Y,W,H] [--diff [PREV]] [--ignore X,Y,W,H] [--changed-only] [--quiet]"
 while [ $# -gt 0 ]; do
   case "$1" in
-    -h|--help) echo "usage: pc shot [out.png] [--scale F] [--region X,Y,W,H] [--diff [PREV]] [--ignore X,Y,W,H] [--changed-only] [--quiet]"; exit 0;;
-    --scale) scale="$2"; shift 2;;
-    --region) region="$2"; shift 2;;
-    --ignore) ignore="$2"; shift 2;;
+    -h|--help) echo "$u"; exit 0;;
+    --scale) scale="$2"; shift 2 || { echo "$u" >&2; exit 2; };;
+    --region) region="$2"; shift 2 || { echo "$u" >&2; exit 2; };;
+    --ignore) ignore="$2"; shift 2 || { echo "$u" >&2; exit 2; };;
     --changed-only) conly=1; shift;;
     --quiet) quiet=1; shift;;
     --diff) diff=1; shift
             case "${1:-}" in ""|--*) ;; *) prev="$1"; shift;; esac;;
+    -*) echo "$u" >&2; exit 2;;
     *) out="$1"; shift;;
   esac
 done

@@ -90,10 +90,16 @@ do_ifaces() {
 ## --- listeners --------------------------------------------------------------
 # ss without root shows no process column (users:(...) needs CAP_SYS_PTRACE on someone else's
 # socket); fixtures already carry it, a live run falls back to `sudo -n` once.
+# The root read is a 60 s cache shared with the dashboard (sites.py): one sudo per minute (T650).
+LISTENERS_CACHE="${XDG_RUNTIME_DIR:-/tmp}/pc-cache"
+_root_ss() { pc_root ss -Hltnup; }
 listeners_raw() {
   local out
   if [ -n "$PC_FIXTURE" ]; then out=$(pc_cmd ss -Hltnup 2>/dev/null)
-  else out=$(pc_root ss -Hltnup 2>/dev/null); [ -n "$out" ] || out=$(pc_cmd ss -Hltnup 2>/dev/null)
+  else
+    mkdir -p "$LISTENERS_CACHE" 2>/dev/null
+    out=$(CACHE=$LISTENERS_CACHE cached listeners 60 _root_ss)
+    [ -n "$out" ] || { rm -f "$LISTENERS_CACHE/listeners"; out=$(pc_cmd ss -Hltnup 2>/dev/null); }
   fi
   printf '%s\n' "$out"
 }

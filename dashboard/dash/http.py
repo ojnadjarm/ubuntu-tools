@@ -1,5 +1,5 @@
 """HTTP transport: one-write send() with gzip, ETag/304 and TCP_NODELAY; route dispatch; pages and static files."""
-import gzip, hashlib, html, json, os, socket, threading, urllib.parse
+import gzip, hashlib, html, json, os, socket, sys, threading, urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from dash import routes
 from dash.env import BINDS, BRAND, HERE, PORT
@@ -143,6 +143,11 @@ class Handler(BaseHTTPRequestHandler):
 class Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+
+    def handle_error(self, request, client_address):
+        """A client that hung up ends its request quietly; anything else keeps the traceback."""
+        if not isinstance(sys.exc_info()[1], ConnectionError):
+            super().handle_error(request, client_address)
 
 
 class Server6(Server):

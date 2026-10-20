@@ -1,8 +1,10 @@
 """Voice training: prompts, the word diff, clip storage and deletion on a throwaway corpus dir."""
-import json, os, subprocess, sys, tempfile, unittest
+import json, os, subprocess, sys, tempfile, unittest, unittest.mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import server
 
+OWNER_PROMPTS = os.path.exists(server.PROMPTS_FILE)
+owner_data = unittest.skipUnless(OWNER_PROMPTS, "voice_prompts.json is owner data, absent on a fresh install")
 WAV = os.path.expanduser("~/the-dark-eye/body/models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/test_wavs/en.wav")
 
 
@@ -19,6 +21,7 @@ class Voice(unittest.TestCase):
         server.FLOOR_FILE = self.real_floor_file
         self.tmp.cleanup()
 
+    @owner_data
     def test_prompts(self):
         p = server.prompts()
         self.assertGreaterEqual(len(p), 40)
@@ -67,18 +70,21 @@ class Voice(unittest.TestCase):
         json.dump(side, open(os.path.join(server.CORPUS, side["id"] + ".json"), "w"))
         return server.corpus_stats()
 
+    @owner_data
     def test_his_wer_subtracts_the_machine_floor(self):
         st = self._drill_take("He close the tab and skipped the restarts.")
         take = st["takes"]["d02"][0]
         self.assertEqual((take["wer"], take["floor_wer"], take["his_wer"]), (0.125, 0.25, 0.0))
         self.assertTrue(st["floor"]["ok"])
 
+    @owner_data
     def test_a_miss_the_floor_also_misses_is_the_machines(self):
         st = self._drill_take("He close the tab and skipped the restarts.")
         v = {x["word"]: x for x in st["takes"]["d02"][0]["verdict"]}
         self.assertEqual((v["closed"]["status"], v["closed"].get("machine")), ("miss", True))
         self.assertEqual(st["patterns"]["final-consonant"], {"hit": 3, "miss": 0, "machine": 1})
 
+    @owner_data
     def test_a_miss_of_his_own_still_counts(self):
         st = self._drill_take("He closed the tap and skipped the restarts.")
         v = {x["word"]: x for x in st["takes"]["d02"][0]["verdict"]}
@@ -93,6 +99,7 @@ class Voice(unittest.TestCase):
         self.assertEqual(st["floor"]["ok"], False)
         self.assertIn("missing", st["floor"]["note"])
 
+    @owner_data
     def test_progress_persists_cleared_steps(self):
         server.PROGRESS_FILE = os.path.join(self.tmp.name, "pronunciation.json")
         self.assertEqual(server.progress_get(), {"cleared": {}})
@@ -102,6 +109,7 @@ class Voice(unittest.TestCase):
         server.progress_add("d02")
         self.assertEqual(sorted(server.progress_get()["cleared"]), ["d01", "d02"])
 
+    @owner_data
     def test_save_and_delete(self):
         raw = subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-i", WAV, "-t", "2", "-c:a", "libopus", "-f", "webm", "-"],
                              capture_output=True).stdout
@@ -120,6 +128,7 @@ class Voice(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(os.path.join(server.CORPUS, "spoiled"))), files)
         self.assertEqual(server.corpus_stats()["clips"], 0)
 
+    @owner_data
     def test_clear_takes_archives_one_drill_prompt(self):
         server.PROGRESS_FILE = os.path.join(self.tmp.name, "pronunciation.json")
         server.progress_add("d02")
@@ -172,6 +181,7 @@ class Voice(unittest.TestCase):
         finally:
             voice._memo = real
 
+    @owner_data
     def test_stats_change_after_save_and_after_delete(self):
         raw = subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-i", WAV, "-t", "1", "-c:a", "libopus", "-f", "webm", "-"], capture_output=True).stdout
         self.assertEqual(server.corpus_stats()["clips"], 0)
@@ -195,10 +205,40 @@ class Voice(unittest.TestCase):
         finally:
             server.PROMPTS_FILE = real
 
+    def test_missing_prompts_file_is_an_empty_list(self):
+        real, server.PROMPTS_FILE = server.PROMPTS_FILE, os.path.join(self.tmp.name, "absent.json")
+        try:
+            self.assertEqual(server.prompts(), [])
+            self.assertEqual(server.floor()[0], {})
+            self.assertEqual(server.corpus_stats()["clips"], 0)
+        finally:
+            server.PROMPTS_FILE = real
+
+    def test_find_node_order(self):
+        from dash.services import voice
+        real_home, real_env = voice.HOME, os.environ.pop("FLEET_NODE", None)
+        voice.HOME = self.tmp.name
+        try:
+            for v in ("v9.1.0", "v22.23.2", "v24.20.0"):
+                os.makedirs(os.path.join(self.tmp.name, ".nvm/versions/node", v, "bin"))
+                open(os.path.join(self.tmp.name, ".nvm/versions/node", v, "bin", "node"), "w").close()
+            with unittest.mock.patch("shutil.which", return_value=None):
+                self.assertTrue(voice.find_node().endswith("/v24.20.0/bin/node"))
+            with unittest.mock.patch("shutil.which", return_value="/usr/bin/node"):
+                self.assertEqual(voice.find_node(), "/usr/bin/node")
+                os.environ["FLEET_NODE"] = "/opt/node/bin/node"
+                self.assertEqual(voice.find_node(), "/opt/node/bin/node")
+        finally:
+            voice.HOME = real_home
+            os.environ.pop("FLEET_NODE", None)
+            if real_env is not None:
+                os.environ["FLEET_NODE"] = real_env
+
     def test_clear_takes_refuses_anything_but_a_drill_prompt(self):
         for bad in ("nope", "p08", "../d02", "", None, ["d02"]):
             self.assertEqual(server.clear_takes(bad)[0], 400, bad)
 
+    @owner_data
     def test_tokens_are_kept_in_the_sidecar(self):
         server.transcribe = lambda wav: {"text": "run pc status", "model": "fake", "decode_ms": 1,
                                          "tokens": ["run", " pc", " status"], "timestamps": [0.0, 0.4, 0.8], "durations": []}
@@ -211,6 +251,7 @@ class Voice(unittest.TestCase):
         self.assertNotIn("durations", side)
         self.assertEqual(server.corpus_stats()["clips"], 1)
 
+    @owner_data
     def test_long_take(self):
         raw = subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-stream_loop", "-1", "-i", WAV, "-t", "60", "-c:a", "libopus", "-f", "webm", "-"],
                              capture_output=True).stdout
@@ -219,6 +260,7 @@ class Voice(unittest.TestCase):
         self.assertEqual(code, 200, meta)
         self.assertAlmostEqual(meta["seconds"], 60.0, delta=0.2)
 
+    @owner_data
     def test_prompt_hash_guards_against_the_wrong_prompt(self):
         import hashlib
         raw = subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-i", WAV, "-t", "1", "-c:a", "libopus", "-f", "webm", "-"], capture_output=True).stdout
@@ -236,11 +278,13 @@ class Voice(unittest.TestCase):
             self.assertEqual(server.delete_clip(bad)[0], 400, bad)
         self.assertEqual(server.delete_clip("20260922-094742-1afd")[0], 404)
 
+    @owner_data
     def test_bad_audio_keeps_source(self):
         code, out = server.save_clip(b"not audio at all" * 100, "audio/webm", "p01")
         self.assertEqual(code, 500)
         self.assertTrue(os.path.isfile(os.path.join(server.CORPUS, out["kept"])))
 
+    @owner_data
     def test_ffmpeg_timeout_answers_500_and_keeps_source(self):
         from unittest import mock
         from dash.services import voice

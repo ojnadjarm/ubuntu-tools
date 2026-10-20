@@ -8,10 +8,7 @@ FIX="$BIN/tests/fixtures/kernel"
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 REAL_LIMIT=$(cat /proc/sys/fs/inotify/max_user_instances)
 K="$BIN/pc-kernel"
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
-is()  { [ "$2" = "$3" ] && ok "$1" || nok "$1" "expected '$3', got '$2'"; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 # k <args…> — pc-kernel against the fixture tree, with its own cache and ledger.
 k() { PC_FIXTURE="$FIX" XDG_RUNTIME_DIR="$WORK" PC_LEDGER="$WORK/changes.jsonl" "$K" "$@"; }
 
@@ -83,6 +80,18 @@ o=$(k --json)
 is 'overview counts modules'   "$(jq -r '.modules' <<<"$o")" 6
 is 'overview counts the hour'  "$(jq -r '.dmesg_last_hour' <<<"$o")" 183
 is 'overview carries a digest' "$(jq -r '.digest|length' <<<"$o")" 3
+
+# 5b. overview --json with a 400 KB last hour: 4000 memcg OOM lines must not reach jq's argv.
+BIG="$WORK/bigfix"; cp -r "$FIX" "$BIG"
+jq -c '.dmesg += [range(4000) as $i | {pri: 3, time: 1, msg: "Memory cgroup out of memory: Killed process \($i) (stress-ng-vm) total-vm:\($i)kB, anon-rss:\($i)kB, file-rss:0kB, shmem-rss:0kB"}]' \
+  "$FIX/dmesg.json" >"$BIG/dmesg.json"
+is 'the generated hour is over 400 KB' "$(( $(jq -r '[.dmesg[].msg]|join("\n")' "$BIG/dmesg.json" | wc -c) > 400000 ))" 1
+o=$(PC_FIXTURE="$BIG" XDG_RUNTIME_DIR="$WORK" PC_LEDGER="$WORK/changes.jsonl" "$K" --json); rc=$?
+is 'overview --json with a 400 KB last hour exits 0' "$rc" 0
+is 'overview --json with a 400 KB last hour parses' "$(jq -r '.dmesg_last_hour' <<<"$o" 2>/dev/null)" 4183
+mkdir -p "$WORK/nojq"; printf '#!/bin/sh\nexit 1\n' >"$WORK/nojq/jq"; chmod +x "$WORK/nojq/jq"
+PATH="$WORK/nojq:$PATH" k --json >/dev/null 2>&1; rc=$?
+is 'a failed jq makes the overview exit non-zero' "$([ "$rc" != 0 ] && echo yes || echo no)" yes
 
 # 6. usage and option errors.
 "$K" -h >/dev/null 2>&1;      is 'pc kernel -h exits 0' "$?" 0

@@ -197,6 +197,16 @@ body.nx { font-size: 1rem; min-height: 100svh; overflow-x: hidden; padding-botto
 .stats .trail { margin-top: .6rem; }
 @media (max-width: 1000px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 480px) { .scape { height: clamp(18rem, 100vw, 28rem); } .stats { gap: .6rem; } .stats .pane { padding: .8rem; } }
+.fails { margin-top: 1rem; --k: 4; }
+.fails table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: .82rem; font-variant-numeric: tabular-nums; }
+.fails th { font-size: .66rem; letter-spacing: .18em; text-transform: uppercase; color: var(--mute); font-weight: 400; text-align: left; padding: 0 .5rem .35rem 0; }
+.fails td { padding: .3rem .5rem .3rem 0; border-top: 1px solid var(--line); color: var(--txt); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fails th:nth-child(1), .fails td:nth-child(1) { width: 4.2rem; color: var(--mute); }
+.fails th:nth-child(3), .fails td:nth-child(3) { width: 2.6rem; text-align: right; padding-right: 1rem; }
+.fails th:nth-child(4), .fails td:nth-child(4) { width: 7.5rem; padding-right: 0; }
+.fails td s { text-decoration: none; color: var(--mute); }
+.fails tr.dim td { opacity: .45; }
+@media (max-width: 480px) { .fails { margin-top: .6rem; padding: .8rem; } .fails th:nth-child(1), .fails td:nth-child(1) { width: 3.4rem; } .fails th:nth-child(4), .fails td:nth-child(4) { width: 5.6rem; } }
 @media (max-width: 768px) { .scape { height: 37rem; } .sun { top: 0; right: 0; width: 6rem; } }
 
 /* court: the eye with its orbiting creatures between the running and the roster panes */

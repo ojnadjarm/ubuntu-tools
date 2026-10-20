@@ -1,6 +1,6 @@
 # Decide whether an agent is live or finished (dashboard Agents list, one rule per source)
 
-Ticket: T66, T89, T90 · Last verified: 2026-09-25 by `tests/test_agents_live.py` (98 dashboard tests) and live `/api/agents`: 3 working, 10 recent
+Ticket: T66, T89, T90 · Last verified: 2026-10-20 (T846) by reading the code and live `/api/agents` (keys orchestrator, subagents, orbiters, roster, claims); 2026-10-19 (T487) `tests/test_agents_live.py` 15 passed
 
 ## When to use
 - Anything that must answer "which agents are running now?": the dashboard Court, a digest, a reaper, a status line.
@@ -30,8 +30,8 @@ Ticket: T66, T89, T90 · Last verified: 2026-09-25 by `tests/test_agents_live.py
   (3 of 46 in session 828baebc), and the newest-wins rule showed them `stale` (F21, 2026-10-03).
 - `shown()` is the single view policy: every `working` record, then ended ones of the last 24 h, newest first, max 10.
   Court: "running now" = working only; ended ones in a collapsed "recent · 24 h" `<details>`; outer ring = persistent crew.
-- Cost: the 13 MB orchestrator transcript and the 13.5 MB `log/actions.jsonl` feed are read incrementally (offset memo, only appended bytes;
-  the feed keeps every `eye status` event, 302 rows, first read 23 ms); one batched
+- Cost: the orchestrator transcript (106 MB on 2026-10-20) and the `log/actions.jsonl` feed (3.1 MB) are read incrementally (offset memo, only appended bytes;
+  the feed keeps every `eye status` event, 0 rows on 2026-10-19, first read 12 ms); one batched
   `systemctl show` + one `tmux ls`, memoised 5 s; API memo 3 s. Read-only: nothing on disk is touched.
 
 ## Exact commands
@@ -51,6 +51,8 @@ systemctl --user list-units 'agent@*'; eye status                           # cr
   the agent fell back to `stale` (F21, 2026-09-26). Never window the feed by bytes.
 - `cache.cached()` runs `collect()` outside its lock on a threaded server: two polls advanced the feed offset twice and skipped
   `eye status` lines (F24, 2026-10-03). `feed()` reads and advances under `_feed_lock`; keep any new incremental reader locked too.
+- `actions.jsonl` is rotated (`log/logrotate.conf`, daily, 30 kept, run by `moodle-keep`); a smaller file resets the feed offset, so
+  `eye status` events before the last rotation are gone. Harmless now: agents no longer hand-send `eye status` (orbiters are automatic).
 - Workflow agents sit one folder deeper than one-offs; the same miss broke `orbit-hook` (T68). Glob every depth under `subagents/`.
 - `subagents()` reads only the newest session that spawned any; agents of an older session drop out when a new one spawns.
   The orchestrator session and state come from the newest transcript instead: a new session spawns its first sub-agent hours
@@ -58,7 +60,7 @@ systemctl --user list-units 'agent@*'; eye status                           # cr
 - Tests use fixture transcripts only (paths are module constants the tests repoint); never the real `~/.claude/projects`.
 
 ## Links
-- Code: `~/agents/lib/agent_ends.py` (end signals, shared with `orbit-hook`), `~/agents/dashboard/dash/services/agents.py` (`ends`, `state_of`, `one_offs`, `workflow_agents`, `newest_session`, `persistent`, `shown`),
+- Code: `~/agents/lib/agent_ends.py` (end signals, shared with `orbit-hook`), `~/agents/dashboard/dash/services/agents.py` (`state_of`, `hold`, `record`, `one_offs`, `workflow_agents`, `newest_session`, `persistent`, `shown`),
   `static/next/js/screens/court.js`, `static/next/next.css`
 - Tests: `~/agents/dashboard/tests/test_agents_live.py`
 - Design: `~/agent-work/research/2026-09-23/T66/design.md`, shots `T66/shots/` · brief `~/agent-work/briefs/T66-agents-list-cleanup.md`

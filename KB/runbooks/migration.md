@@ -62,10 +62,19 @@ sudo apt-get install -y cargo rustc libcairo2-dev libpango1.0-dev libxcb1-dev li
 sudo apt-get install -y cmake espeak-ng potrace fonts-roboto binaryen melt libevent-2.1-7t64 libmanette-0.2-0
 sudo apt-get install -y mingw-w64 libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev vulkan-tools pkg-config mesa-utils intel-gpu-tools weston wine64
 sudo apt-get install -y ubuntu-dbgsym-keyring && sudo apt-get install -y --no-install-recommends gnome-shell-dbgsym libmutter-18-0-dbgsym   # versions must match the installed gnome-shell/mutter
+sudo apt-get install -y --no-install-recommends glslc lld libvulkan-dev vulkan-utility-libraries-dev libopenal-dev libglfw3-dev libtbb-dev clang-tidy-21 libclang-rt-21-dev dotnet-sdk-10.0   # gamedev extras beyond install.sh --gamedev
+sudo apt-get install -y --no-install-recommends libssl-dev libdbus-1-dev libcapstone-dev wayland-protocols libegl-dev   # Tracy 0.14.1 GUI build (gamedev-toolchain guide)
+sudo apt-get install -y --no-install-recommends krita gimp inkscape gltfpack assimp-utils                              # art and asset tools
+sudo apt-get install -y --no-install-recommends sox libsox-fmt-all vainfo intel-media-va-driver-non-free fonts-inter fonts-jetbrains-mono   # /motion-video audio, VA-API encode, fonts
+sudo apt-get install -y stress-ng libxml2-utils                                                                       # load fixtures for tests (T616), xmllint for install.xml (T877)
 # .deb downloads: google-chrome-stable (google.com/chrome), microsoft-edge-stable (adds its own repo), obsidian (obsidian.md, 1.13.7 here)
 sudo snap install spotify hwctl
 ```
-- Package list source: `machine-inventory --packages` (hand-installed after the OS install, still manual). The Electron/Chrome runtime libs in the old `--no-install-recommends` line (`libnss3`, `libgbm1`, …) are already pulled in by the desktop.
+- Package list source: `machine-inventory --packages` (hand-installed after the OS install, still manual). Packages named in the
+  `bin/DEPS.tsv` apt column (step 8's `install.sh` prints the missing ones as one `sudo apt install` line) or in its `# gamedev-cpp:`
+  list (`~/agents/install.sh --gamedev` installs them, with vcpkg and the FLIP venv) are not repeated here; `--check -v` names the source.
+- H: `intel-media-va-driver-non-free` (Intel VA-API), `clang-tidy-21`/`libclang-rt-21-dev` track the distro's clang major.
+- `gltfpack` from apt lacks `-tc`; the gamedev skill uses the upstream 1.3 build in `~/opt/gamedev` (`DEPS.tsv` hint), arriving with step 7. The Electron/Chrome runtime libs in the old `--no-install-recommends` line (`libnss3`, `libgbm1`, …) are already pulled in by the desktop.
 - `intel-gpu-tools` is H (Intel iGPU only). `hwctl` is the certification snap the hardware probes used; optional.
 - **Verify:** `machine-inventory --packages | wc -l` on the new box is ≥ 105 (the old box's count on 2026-10-05) and `machine-inventory --snaps` lists `hwctl`, `spotify`.
 
@@ -115,6 +124,9 @@ sudo ufw reload && sudo systemctl restart systemd-journald NetworkManager docker
 | `/etc/opt/chrome/policies/managed/default-search.json` | default search Google | headless Chrome without the search chooser · phase1 | P |
 | `/etc/sudoers.d/*` | `<user> ALL=(ALL) NOPASSWD:ALL` (step 2) | agents run sudo non-interactively | P (owner) |
 | `/etc/ssh/sshd_config.d/50-agents.conf` | step 2 | · T25 | P (owner) |
+| `/etc/systemd/system/paths.target.wants/apport-autoreport.path` | removed: `sudo systemctl disable apport-autoreport.path` | whoopsie uploads fail (SSL), the unit failed on every crash; crashes triaged locally with `pc crashes` · T490 | P |
+| `/etc/ufw/after.rules.T362.bak` | rollback copy of `after.rules` written by the owner's `~/drop/T362/owner-commands.sh` (2026-10-19) | **do not restore**: the live rules are `/etc/ufw/after.rules`; leave it out of the bundle · T362 | — |
+| `/etc/xml/catalog`, `/etc/xml/libdbus-1-dev.xml` | XML catalog entries that `libdbus-1-dev` (step 3) registers at install | **do not restore**: the package writes them again | — |
 | `/etc/passwd`, `/etc/group`, `/etc/shadow`, `/etc/gshadow` | **not copied**: groups `docker`, `input` added to the user (step 2), the rest is package system users | | — |
 
 Kernel command line: `quiet splash` + `crashkernel=2G-4G:320M,…` from `/etc/default/grub.d/kdump-tools.cfg`
@@ -187,11 +199,21 @@ agents-start                            # the agent@<name>.timer roster from KB/
 sudo tailscale up --ssh                 # owner: log in, then in the admin console remove the old node and give this one the old Tailscale name (`KB/machine.md` "Identity")
 ```
 - User units that live only in `~/.config/systemd/user` (no copy in `~/agents/units`; they arrive with step 7):
-  `claude-orchestrator.service`, `drop.service`, `finance-web.service`,
-  `finance-web.socket`, `moodle45-cron.service`, `moodle45-cron.timer`, `moodle52-cron.service`, `moodle52-cron.timer`, `orchestrator-pulse.service`, `orchestrator-pulse.timer`,
+  `drop.service`, `finance-web.service`,
+  `finance-web.socket`, `moodle45-cron.service`, `moodle45-cron.timer`, `moodle52-cron.timer` (every minute, runs `moodle-cron@moodle52-app-1.service`),
   `pc-lid.service`, `sites.service`, `vass-middleware.service`, `vass-frontend.service`, `vass-frontend-proxy.service` (T264; enable all three, the sentinel watches them, T269). Symlinks into the Eye repo: `dark-eye.service`, `dark-eye-failed.service`.
-  From `~/agents/units` via install.sh: `agent@.service`, `agent@.timer`, `agents-dashboard.service`,
+  By hand: `tmux-spawn-.scope.d` (prefix drop-in `oom.conf`, `OOMPolicy=continue`: one OOM kill no longer stops the whole tmux scope; `KB/guides/runaway-guard.md`).
+  From `~/agents/units` via install.sh: `agent@.service`, `agent@.timer`, `agents-dashboard.service`, `claude-orchestrator.service`, `orchestrator-pulse.service`, `orchestrator-pulse.timer` (copies identical to `~/.config/systemd/user`, checked 2026-10-20 T947),
   `ailearning-ci-daily.service`, `ailearning-ci-daily.timer`, `moodle-keep-weekly.service`, `moodle-keep-weekly.timer`, `pcbench-weekly.service`, `pcbench-weekly.timer`, `sentinel-check.service`, `sentinel-check.timer`.
+  Also from `~/agents/units`, each timer enabled by install.sh step 4 (all OnCalendar, local time):
+  - `fleet-ci-daily.service`, `fleet-ci-daily.timer`: nightly fleet suite through `ci-autofix` · 02:10 · T459
+  - `pc-tmp.service`, `pc-tmp.timer`: `pc tmp --apply` sweeps idle test dirs and done scratch in /tmp · 03:30
+  - `gamedev-perf.service`, `gamedev-perf.timer`: Godot slice perf row, fails on an fps regression · 05:15 · T520
+  - `ailearning-ci-weekly.service`, `ailearning-ci-weekly.timer`: `ailearning-ci-daily --full` declutter on a throwaway copy · Sun 05:30
+  - `improve-meter.service`, `improve-meter.timer`: daily self-improvement metrics row · 06:45
+  - `pulse-5h-reset.service`, `pulse-5h-reset.timer`: orchestrator pulse after each 5-hour plan reset · every 10 min (`*:02/10`)
+  - `discord-bot.service`: Discord forum bot + job runner (`~/agents/discord-bot/bin/serve`), enabled (WantedBy default.target) · T348
+  - `moodle-cron@.service`: template, one `moodle-cron <container>` run; started by `moodle52-cron.timer`, never enabled itself
   Schedules as drop-ins: `agent@code-review.service.d`, `agent@code-review.timer.d`, `agent@hello.timer.d`, `agent@maintenance.timer.d`,
   `agent@moodle-keeper.timer.d`, `agent@sentinel-digest.timer.d`, `agent@sentinel.timer.d`, `agent@toolsmith.timer.d`.
 - New tailnet IP (H): put it in `/etc/systemd/system/netdata.service.d/10-tailscale.conf`, `~/.config/drop/Caddyfile`, `~/.config/sites/Caddyfile`,

@@ -4,9 +4,7 @@
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 P5="$(dirname "$here")/pulse-5h-reset"
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/stubs"

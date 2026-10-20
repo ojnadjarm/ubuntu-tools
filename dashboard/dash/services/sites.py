@@ -13,6 +13,7 @@ SITES = {
     8072: ("Local sites", "GitHub Pages mirror (sites.service)", "http", 8472, "mine"),
     8644: ("The Eye", "talk to the eye from the phone", "https", 8644, "mine"),
     8052: ("Moodle 5.2", "the dev site, 17 fixture charts", "http", 8452, "moodle"),
+    8053: ("Moodle 5.3", "the 5.3 dev site", "http", 8453, "moodle"),
     8045: ("Moodle 4.5 vass", "the vass customer project site", "http", 8445, "moodle"),
     8025: ("MailHog", "every mail the Moodle sites send, caught here", "http", None, "moodle"),
     19999: ("Netdata", "live machine metrics, per second", "http", 8499, "metrics"),
@@ -22,6 +23,7 @@ SITES = {
     7900: ("Selenium noVNC", "watch a behat run", "http", None, None),
     1025: ("MailHog SMTP", "mail sink", None, None, None),
     5452: ("Moodle 5.2 DB", "postgres", None, None, None),
+    5453: ("Moodle 5.3 DB", "postgres", None, None, None),
     5445: ("Moodle 4.5 DB", "postgres", None, None, None),
     5900: ("Selenium VNC", "raw VNC", None, None, None),
     80: ("Moodle proxy", "shared nginx front", None, None, None),
@@ -39,18 +41,44 @@ SECRETS = {
 }
 TAILNET = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48"))
 # infrastructure that is never a "site": ssh, dns, cups, statsd, the tailscale serve https fronts
-SKIP_PORTS = {22, 53, 631, 8125, 8445, 8452, 8470, 8472, 8498, 8499}
+SKIP_PORTS = {22, 53, 631, 8125, 8445, 8452, 8453, 8470, 8472, 8498, 8499}
+
+
+SS = ["ss", "-Hltnup"]
+LISTENERS_CACHE = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "pc-cache", "listeners")
+LISTENERS_TTL = 60
+
+
+def ss_lines():
+    """Root `ss -Hltnup` through the 60 s file cache shared with pc-net; unprivileged ss when sudo is refused."""
+    try:
+        ts, _, body = open(LISTENERS_CACHE).read().partition("\n")
+        if 0 <= time.time() - int(ts) < LISTENERS_TTL:
+            return body
+    except (OSError, ValueError):
+        pass
+    body = run(["sudo", "-n"] + SS, 10)
+    if not body:
+        return run(SS, 10)
+    try:
+        os.makedirs(os.path.dirname(LISTENERS_CACHE), exist_ok=True)
+        tmp = "%s.%d" % (LISTENERS_CACHE, os.getpid())
+        with open(tmp, "w") as fh:
+            fh.write("%d\n%s" % (time.time(), body))
+        os.replace(tmp, LISTENERS_CACHE)
+    except OSError:
+        pass
+    return body
 
 
 def listeners():
     """port -> {pid, proc} for every IPv4/IPv6 TCP listener in this user's view."""
     out = {}
-    lines = run(["sudo", "-n", "ss", "-ltnpH"], 10) or run(["ss", "-ltnpH"], 10)
-    for line in lines.splitlines():
+    for line in ss_lines().splitlines():
         f = line.split()
-        if len(f) < 4:
+        if len(f) < 5 or f[0] != "tcp":
             continue
-        m = re.search(r":(\d+)$", f[3])
+        m = re.search(r":(\d+)$", f[4])
         if not m:
             continue
         port = int(m.group(1))

@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """wait_nudge hints on fixture commands, and the Claude audit hook emitting one under a temp HARNESS_HOME.
 Run: python3 wait-nudge.test.py"""
-import importlib.util, json, os, subprocess, tempfile
+import importlib.util, json, os, subprocess, sys, tempfile
 
 HOME = os.path.expanduser('~/agents')
 _s = importlib.util.spec_from_file_location('wait_nudge', f'{HOME}/hooks/wait_nudge.py')
 w = importlib.util.module_from_spec(_s)
 _s.loader.exec_module(w)
+sys.path.insert(0, f'{HOME}/bin/tests/lib')
+from budget import budget
 bad = 0
 
 
@@ -45,7 +47,8 @@ for quiet in ['kill 7301; sleep 1; cat x', 'sleep 3; ls', 'docker stats > d1; sl
 import time
 t0 = time.time()
 w.hint('sleep 1; ' + 'while x; do echo a; ' * 400)
-check('an 8 KB command with open while loops scans in < 0.5 s', time.time() - t0 < 0.5 or print('     took', time.time() - t0))
+took = time.time() - t0
+check(f'an 8 KB command with open while loops scans in {took:.3f} s (budget {budget(0.5):.2f} s)', took < budget(0.5))
 check('share counts wait-for vs hand loops',
       w.share([{'tool': 'Bash', 'summary': 'wait-for --label a --pid 1'},
                {'tool': 'Bash', 'summary': 'until grep -q x f; do sleep 1; done'},

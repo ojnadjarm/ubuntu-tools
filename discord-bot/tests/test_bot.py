@@ -107,6 +107,33 @@ class TestForumBot(Base):
         self.assertEqual(self.fake.channels[hello]['applied_tags'], ['777'])
         self.assertEqual(sum(1 for c in self.fake.calls if c[1] == '/channels/300/threads'), 2)
 
+    async def test_403_50013_backs_off_logs_once_and_retries_on_channel_update(self):
+        now = [1000.0]
+        self.bot.clock = lambda: now[0]
+        self.fake.channels['300']['available_tags'] = []
+        self.fake.deny_tag_edit = True
+
+        def patches():
+            return sum(1 for c in self.fake.calls if c[0] == 'PATCH' and c[1] == '/channels/300'
+                       and 'available_tags' in (c[2] or {}))
+        with self.assertLogs('discordbot', 'INFO') as logs:
+            await self.bot.dispatch('GUILD_CREATE', ev('GUILD_CREATE'))
+            base = patches()
+            for step, expect in ((299, 0), (1, 1), (3599, 1), (1, 2), (21599, 2), (1, 3), (21600, 4)):
+                now[0] += step
+                await self.bot.dispatch('TICK', {})
+                self.assertEqual(patches() - base, expect, (step, expect))
+            self.fake.deny_tag_edit = False
+            await self.bot.dispatch('CHANNEL_UPDATE', self.fake.channels['300'])
+        self.assertEqual(patches() - base, 5)
+        self.assertEqual(sum('cannot create tags' in m and '50013' in m for m in logs.output), 1)
+        self.assertEqual(sum('tags created' in m for m in logs.output), 1)
+        self.assertEqual(len(self.bot.tags), 5)
+        self.assertIsNone(self.bot.store.status['problem'])
+        now[0] += 100000
+        await self.bot.dispatch('TICK', {})
+        self.assertEqual(patches() - base, 5)
+
     async def test_other_guild_is_left(self):
         await self.bot.dispatch('GUILD_CREATE', ev('GUILD_CREATE_OTHER'))
         self.assertEqual(self.fake.left, ['999'])

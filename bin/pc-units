@@ -198,12 +198,28 @@ case "${ARGS[0]:-}" in
     s=$(resolve_scope "$u") || exit $?; flag=$(scope_flag "$s")
     before=$(systemctl $flag show "$u" -p ActiveState --value 2>/dev/null); : "${before:=unknown}"
     case "$verb" in start|restart) after=active;; stop) after=inactive;; esac
+    read_cmd="systemctl $flag show $(printf '%q' "$u") -p ActiveState --value 2>/dev/null"
+    # A oneshot without RemainAfterExit ends inactive with Result=success, never active.
+    if [ "$after" = active ] && [ "$(systemctl $flag show "$u" -p Type --value 2>/dev/null)" = oneshot ] &&
+       [ "$(systemctl $flag show "$u" -p RemainAfterExit --value 2>/dev/null)" != yes ]; then
+      after='inactive success'
+      read_cmd="echo \$($read_cmd) \$(systemctl $flag show $(printf '%q' "$u") -p Result --value 2>/dev/null)"
+      # Re-read hook: wait out a oneshot still activating (≤ 10 s); a longer run is verified late by pc doctor.
+      pc_read() {
+        local i
+        for i in $(seq 50); do
+          [ "$(systemctl $flag show "$u" -p ActiveState --value 2>/dev/null)" = activating ] || break
+          sleep 0.2
+        done
+        eval "$PC_READ_CMD"
+      }
+    fi
     case "$verb" in
       start) rollback="pc units stop $(printf '%q' "$u")${flag:+ $flag} --apply";;
       stop) rollback="pc units start $(printf '%q' "$u")${flag:+ $flag} --apply";;
       restart) rollback="pc units restart $(printf '%q' "$u")${flag:+ $flag} --apply  # noted as such: restart's rollback is restart";;
     esac
-    export PC_READ_CMD="systemctl $flag show $(printf '%q' "$u") -p ActiveState --value 2>/dev/null"
+    export PC_READ_CMD="$read_cmd"
     pc_apply "$u" "$before" "$after" "$rollback" \
       systemctl $flag "$verb" -- "$u"
     ;;

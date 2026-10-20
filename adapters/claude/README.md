@@ -34,6 +34,7 @@ session and subagent):
 | `SessionStart` | `adapters/claude/hooks/session-start.sh` | `~/.claude/hooks/moodle-session-start.sh` **and** `machine-status.sh` — `harness context --json` emits exactly their merged output (proved by `bin/tests/harness-context.test.sh`) |
 | `PostToolUse` | `adapters/claude/hooks/audit-log.py` | `~/.claude/hooks/audit-log.sh` (a symlink to the same file since GH09; `install` deletes it) |
 | `SubagentStart` / `SubagentStop` | `bin/orbit-hook start` / `stop` | — (the Eye's orbiters; Claude-only, see `~/the-dark-eye`) |
+| `PostCompact` | `hooks/image-reread.py` | — (resets the compacted context's image-read counts, T513) |
 
 The rest of `permissions` (`defaultMode`, `allow`, the owner's own `deny` rules), `model`, `effortLevel`,
 `outputStyle`, the `Stop` hook owned by the Moodle harness and every other key are preserved

@@ -1,5 +1,5 @@
 """Sites registry: one listener can hold several sites, each its own row, probed on its own path; no live ports or services are touched."""
-import json, unittest
+import json, os, tempfile, unittest
 from unittest import mock
 
 from dash.services import sites as S
@@ -42,6 +42,40 @@ class SitesRows(unittest.TestCase):
         self.assertNotIn(8071, S.SITES)
         self.assertEqual([r["port"] for r in rows if r["port"] in (8470, 8472)], [])
         self.assertEqual([r["state"] for r in rows if r["port"] == 8071], ["stray"])
+
+
+SS_OUT = ('tcp LISTEN 0 4096 127.0.0.1:8070 0.0.0.0:* users:(("python3",pid=42,fd=3))\n'
+          'udp UNCONN 0 0 127.0.0.1:323 0.0.0.0:*\n')
+
+
+class ListenerCache(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        cache = mock.patch.object(S, "LISTENERS_CACHE", os.path.join(self.dir.name, "pc-cache", "listeners"))
+        cache.start()
+        self.addCleanup(cache.stop)
+
+    def test_two_refreshes_within_ttl_ask_sudo_once(self):
+        with mock.patch.object(S, "run", return_value=SS_OUT) as ss:
+            a, b = S.listeners(), S.listeners()
+        self.assertEqual([c.args[0][:2] for c in ss.call_args_list], [["sudo", "-n"]])
+        self.assertEqual(a, b)
+        self.assertEqual(a, {8070: {"port": 8070, "pid": 42, "proc": "python3"}})
+
+    def test_stale_cache_reads_again(self):
+        with mock.patch.object(S, "run", return_value=SS_OUT) as ss:
+            S.listeners()
+            with mock.patch.object(S.time, "time", return_value=S.time.time() + S.LISTENERS_TTL + 1):
+                S.listeners()
+        self.assertEqual(ss.call_count, 2)
+
+    def test_refused_sudo_falls_back_unprivileged_and_caches_nothing(self):
+        with mock.patch.object(S, "run", side_effect=lambda cmd, t: "" if cmd[0] == "sudo" else SS_OUT) as ss:
+            S.listeners()
+            S.listeners()
+        self.assertEqual([c.args[0][0] for c in ss.call_args_list], ["sudo", "ss", "sudo", "ss"])
+        self.assertFalse(os.path.exists(S.LISTENERS_CACHE))
 
 
 LINK = "https://%s:8474/FAKESECRETTOKEN/" % HOST

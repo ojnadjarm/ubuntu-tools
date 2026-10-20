@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
+# host-only: this box's ~/.config/sites Caddyfile
 # sites: publish into a temp root and run the Pages check against a loopback caddy using the real Caddyfile (fixture only).
 set -euo pipefail
+for p in ~/.config/sites/Caddyfile ~/projects/personal/portfolio/scripts/stamp.mjs; do
+  [ -e "$p" ] || { echo "SKIP owner data absent: $p"; exit 0; }
+done
+command -v caddy >/dev/null || { echo "SKIP tool absent: caddy"; exit 0; }
+CPID=
 T=$(mktemp -d); trap 'kill $CPID 2>/dev/null; rm -rf "$T"' EXIT
 PORT=18072
 mkdir -p "$T/repo/dist/assets" "$T/repo/dist/sub" "$T/root"

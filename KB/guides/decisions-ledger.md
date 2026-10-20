@@ -1,6 +1,6 @@
 # Decisions ledger: standing owner decisions per project, linted into briefs, handed to subagents
 
-Ticket: T396 · Last verified: 2026-10-18 by `bin/tests/orbit-hook.test.py` (41/41) and `bin/tests/brief-check.test.sh` (9/9)
+Ticket: T396 · Last verified: 2026-10-20 (T846) by paths, `brief-lint --help`, `lib/decisions.py` read and one `digest('ailearning')` (8 of 20 lines, 1133 chars); tests last run 2026-10-18 (orbit-hook 41/41, brief-check 9/9)
 
 ## When to use
 - The owner states a standing decision ("desktop only", "delete those buttons", "Chapter 1 stays"): add one line to the ledger.
@@ -29,7 +29,7 @@ python3 -c "import sys; sys.path.insert(0,'$HOME/agents/lib'); import decisions;
 - The digest only fires when the Agent `description` names the project (e.g. "T400 ailearning sheet 6 fix"); "T334 pencil tick" gets nothing.
 - 20 of the T38x/T39x briefs warned on the first lint (most for fleet): the warning is advice, not a gate.
 - `lesson`/`sheet N`/`U0N` count as ailearning, so a make-lesson fleet brief warns too; naming the ledger silences it.
-- Ordered newest re-breaks first: the 300-token digest keeps the top ~10 lines of a 20-line ledger.
+- Ordered newest re-breaks first: the 300-token digest keeps the top 8 lines of the 20-line ailearning ledger (2026-10-20).
 
 ## Links
 - Code: `~/agents/lib/decisions.py`, `~/agents/bin/brief-lint`, `~/agents/bin/orbit-hook`

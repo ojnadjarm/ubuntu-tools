@@ -1,7 +1,9 @@
 ---
 name: desktop
-description: Drive this machine's physical GNOME desktop with the `pc` CLI - screenshots, pointer, keyboard, clipboard, launching apps. Use when a task needs the real screen (a native app, the owner's browser profile, a dialog, "look at my screen", "click that") rather than a headless browser. Not for web scraping or web app testing - use the Playwright MCP for those.
+description: Drive this machine's GNOME desktop with the `pc` CLI. Use when a task needs the real screen ("look at my screen", "click that", a native app, a dialog) - screenshots, pointer, keyboard, clipboard, launching apps. Not for web scraping or testing (Playwright MCP).
 ---
+
+Triggers: physical desktop, owner's browser profile, headless browser, web app testing.
 
 # Desktop control (`pc`)
 

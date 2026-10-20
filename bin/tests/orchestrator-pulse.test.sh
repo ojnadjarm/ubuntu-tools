@@ -6,12 +6,12 @@
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PULSE="$(dirname "$here")/orchestrator-pulse"
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 
 WORK=$(mktemp -d)
-mkdir -p "$WORK/tmux" "$WORK/stubs"
+# tmux socket paths cap at 108 bytes: a short dir, not one under a nested run.sh TMPDIR.
+TMX=$(mktemp -d /tmp/tmx.XXXXXX)
+mkdir -p "$WORK/stubs"
 FXS="pulse-fx-$$"
 # Read-only stubs: argv goes to stubs.argv; needs.json, failed.txt and plan.rc set the queue.
 for s in pc plan-usage systemctl; do
@@ -20,6 +20,8 @@ done
 echo 'cat "$WORK/needs.json" 2>/dev/null || echo "[]"' >>"$WORK/stubs/pc"
 echo 'exit $(cat "$WORK/plan.rc" 2>/dev/null || echo 0)' >>"$WORK/stubs/plan-usage"
 echo 'cat "$WORK/failed.txt" 2>/dev/null; exit 0' >>"$WORK/stubs/systemctl"
+# Time compression: the pulse's 1 s echo poll runs at 0.1 s; every other sleep is real.
+printf '#!/bin/sh\n[ "$*" = 1 ] && exec /usr/bin/sleep 0.1\nexec /usr/bin/sleep "$@"\n' >"$WORK/stubs/sleep"
 chmod +x "$WORK/stubs/"*
 # Fake claude: registers itself like Claude Code (sessions/<pid>.json with its tmux pane and $WORK/status), draws $1 as the prompt.
 mkdir -p "$WORK/bin" "$WORK/.claude/sessions"
@@ -31,10 +33,10 @@ W=$1; shift; [ "$1" = --append-system-prompt-file ] && shift 2
 printf "────\n❯\302\240$1\n────\n\033[2A\033[3G"; sleep 30
 FAKE
 chmod +x "$WORK/bin/claude"
-fx() { env -u TMUX -u PULSE_TMUX_SOCKET -u PULSE_FLOOR_H TMUX_TMPDIR="$WORK/tmux" HOME="$WORK" PULSE_SESSION="$FXS" \
+fx() { env -u TMUX -u PULSE_TMUX_SOCKET -u PULSE_FLOOR_H TMUX_TMPDIR="$TMX" HOME="$WORK" PULSE_SESSION="$FXS" \
        PULSE_LOG="$WORK/pulse.log" PULSE_SETTLE=0 AGENT_WORK="$WORK/agent-work" WORK="$WORK" \
        PATH="$WORK/stubs:$PATH" "$@"; }
-cleanup() { fx tmux kill-server 2>/dev/null; rm -rf "$WORK"; }
+cleanup() { fx tmux kill-server 2>/dev/null; rm -rf "$WORK" "$TMX"; }
 trap cleanup EXIT
 
 # selftest: the fixture server cannot see the real orchestrator session
@@ -53,7 +55,7 @@ run_case() {
   name=${NAME:-$FXS}; echo "$name" >"$WORK/sess"
   flag="--append-system-prompt-file $WORK/agents/ORCHESTRATOR.md"; [ "${ORCH:-1}" = 1 ] || flag=
   fx tmux new-session -d -s "$name" -x 200 -y 10 "bash -c '$WORK/bin/claude $WORK $flag \"$2\"; true'"
-  sleep 0.7
+  timeout 5 wait-for --every 0.05 --until "env -u TMUX TMUX_TMPDIR='$TMX' tmux capture-pane -pt '=$name:' | grep -q '❯'" >/dev/null
   fx bash "$PULSE" >/dev/null 2>&1
   tail -n1 "$WORK/pulse.log"
 }
@@ -102,6 +104,10 @@ out=$(SEED=$recent run_case failed-second '\033[7m \033[27m')
 case "$out" in *" fired session="*"queue: needs 0, failed 2"*"new: failed run-fx2.scope"*) ok "second failed unit fires";; *) nok "second failed unit fires" "$out";; esac
 out=$(SEED=$old run_case failed-floor '\033[7m \033[27m')
 case "$out" in *" fired session="*"new: none"*) ok "floor exceeded with an unchanged queue fires";; *) nok "floor exceeded with an unchanged queue fires" "$out";; esac
+# T721: a failed unit that is not ours (PC_NOT_OURS) never enters the queue.
+echo 'fx-foreign-cron.service loaded failed failed fx' >>"$WORK/failed.txt"
+out=$(PC_NOT_OURS='^fx-foreign' SEED=$recent run_case failed-foreign '\033[7m \033[27m')
+case "$out" in *"skip"*"queue unchanged (needs 0, failed 2"*) ok "foreign failed unit stays out of the queue";; *) nok "foreign failed unit stays out of the queue" "$out";; esac
 rm -f "$WORK/failed.txt"
 
 out=$(ORCH=0 run_case not-orchestrator '\033[7m \033[27m')

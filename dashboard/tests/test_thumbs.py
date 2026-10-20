@@ -1,9 +1,11 @@
 """Thumbnails: WebP output, disk cache, ETag/304 and path confinement, on a throwaway drop and cache."""
 import http.client, os, sys, tempfile, threading, time, unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.expanduser("~/agents/bin/tests/lib"))
 import server
 from dash.services import thumbs
 from PIL import Image
+from budget import budget
 
 
 class Thumbs(unittest.TestCase):
@@ -56,8 +58,8 @@ class Thumbs(unittest.TestCase):
         again = thumbs.thumb(full, 640)
         warm = time.perf_counter() - t
         self.assertEqual(first, again)
-        self.assertLess(cold, 0.15)
-        self.assertLess(warm, 0.002)
+        self.assertLess(cold, budget(0.15))
+        self.assertLess(warm, budget(0.002))
         r, _ = self.get("/thumb/sub/big.png?w=640")
         etag = r.getheader("ETag")
         r, body = self.get("/thumb/sub/big.png?w=640", **{"If-None-Match": etag})

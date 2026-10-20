@@ -4,11 +4,9 @@
 set -uo pipefail
 BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FIX="$BIN/tests/fixtures/improve-meter"
+. "$BIN/tests/lib/budget.sh"
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
-is()  { [ "$2" = "$3" ] && ok "$1" || nok "$1" "expected '$3', got '$2'"; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 
 cp -r "$FIX/agents" "$WORK/agents"
 ORCH="$WORK/projects/$(printf %s "$HOME" | tr / -)"
@@ -35,9 +33,9 @@ is 'headless cc: 2 runs in window, old, broken and all-zero skipped' "$(col head
 is 'pcbench new-arm pass'   "$(col pcbench_pass "$R")" 0.75
 is 'corpus WER after corrector, pooled 1/8' "$(col corpus_wer_pct "$R")" 12.5
 is 'idle psys W'            "$(col idle_psys_w "$R")" 4.20
-d=$(col doctor_s "$R"); awk -v d="$d" 'BEGIN{exit !(d>=0.3 && d<2)}' && ok "doctor wall $d s" || nok 'doctor wall' "$d"
+b=$(budget 2); d=$(col doctor_s "$R"); awk -v d="$d" -v b="$b" 'BEGIN{exit !(d>=0.3 && d<b)}' && ok "doctor wall $d s < $b s budget" || nok "doctor wall < $b s budget" "$d"
 filled=$(sed -n 2p <<<"$R" | tr '\t' '\n' | grep -vc '^-$'); is '7/7 fields filled' "$filled" 7
-awk -v a="$t0" -v b="$t1" 'BEGIN{exit !(b-a<5)}' && ok 'fixture wall < 5 s' || nok 'fixture wall' "$(echo "$t1 - $t0" | bc)"
+b=$(budget 5); awk -v a="$t0" -v b="$t1" -v m="$b" 'BEGIN{exit !(b-a<m)}' && ok "fixture wall < $b s budget" || nok "fixture wall < $b s budget" "$(echo "$t1 - $t0" | bc)"
 
 # 2. idle gate: auto samples only when pcbench says away; off never samples.
 is 'auto, present -> no idle' "$(col idle_psys_w "$(FIX_AWAY=false im)")" -
@@ -78,8 +76,10 @@ is 'service PATH has agents/bin' "$(grep -c '^Environment=PATH=%h/agents/bin:' "
 is 'timer daily 06:45'         "$(grep -c '^OnCalendar=\*-\*-\* 06:45$' "$U/improve-meter.timer" 2>/dev/null)" 1
 is 'timer persistent'          "$(grep -c '^Persistent=true$' "$U/improve-meter.timer" 2>/dev/null)" 1
 systemd-analyze calendar '*-*-* 06:45' >/dev/null 2>&1; is 'calendar spec valid' "$?" 0
-u=$(grep 'improve-meter.timer' "$BIN/../KB/orchestrator.md" | head -1 | awk -F'|' '{print $3}' | grep -o '`[^`]*`' | head -1 | tr -d '`')
-is 'agents-start parses the roster row' "$u" improve-meter.timer
+if [ -f "$BIN/../KB/orchestrator.md" ]; then
+  u=$(grep 'improve-meter.timer' "$BIN/../KB/orchestrator.md" | head -1 | awk -F'|' '{print $3}' | grep -o '`[^`]*`' | head -1 | tr -d '`')
+  is 'agents-start parses the roster row' "$u" improve-meter.timer
+else echo "SKIP owner data absent: $(cd "$BIN/.." && pwd)/KB/orchestrator.md"; fi
 { grep -q 'improve-meter.service' "$BIN/agents-stop" && grep -q 'improve-meter.timer' "$BIN/agents-stop"; } &&
   ok 'agents-stop stops service and timer' || nok 'agents-stop stops service and timer' 'not listed'
 

@@ -1,6 +1,6 @@
 # Invoicing: draft, issue and track the owner's freelance invoices (series YYYY-C-NN)
 
-Ticket: T134 · Last verified: 2026-09-28 by selftest.sh (sandbox issue, totals, back-date refusal, paid, check) and a
+Ticket: T134 · Last verified: 2026-10-20 (T846) by `invoice --help`, module/path checks and the selftest cases read; 2026-09-28 by selftest.sh and a
 field-token diff of the regenerated 2026-C-10 against his original PDF (75 of 75 tokens, only the total gained ".00")
 
 ## When to use

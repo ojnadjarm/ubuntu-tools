@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Phone-first status page for this machine: the unit's entry point; the code lives in dash/."""
-import sys, types
+import ctypes, sys, types
 from dash import cache, env, http, routes
 from dash.services import agents, files, sites, state, system, thumbs, todo, voice
 
@@ -27,4 +27,5 @@ class Facade(types.ModuleType):
 sys.modules[__name__].__class__ = Facade
 
 if __name__ == "__main__":
+    ctypes.CDLL(None).mallopt(-8, 2)  # M_ARENA_MAX=2: a glibc arena per handler thread kept RSS growing
     http.main()

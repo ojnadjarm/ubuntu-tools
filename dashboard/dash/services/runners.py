@@ -23,9 +23,11 @@ def env_keys(path):
 
 
 def spec(name, env):
-    """{kind, unit, tmux}; no RUNNER_KIND means the agent@<name>.timer default."""
+    """{kind, unit, tmux}; no RUNNER_KIND means the agent@<name>.timer default, on-demand without its timer drop-in."""
     kind = env.get("RUNNER_KIND", "timer-agent")
     if kind not in KINDS or kind == "timer-agent" or not env.get("RUNNER_UNIT"):
+        if not os.path.isdir(os.path.join(UNIT_DIR, "agent@%s.timer.d" % name)):
+            return {"kind": "on-demand", "unit": "agent@%s.service" % name, "tmux": ""}
         return {"kind": "timer-agent", "unit": "agent@%s.timer" % name, "tmux": ""}
     return {"kind": kind, "unit": env["RUNNER_UNIT"], "tmux": env.get("RUNNER_TMUX", "")}
 
@@ -116,5 +118,5 @@ def view(s, F, row, human=lambda c: c):
         return dict(row, kind=s["kind"], **VIEWS[s["kind"]](s, F, row, human))
     ex = (row.get("last") or {}).get("exit")
     on = row.get("enabled") == "enabled"
-    return dict(row, kind="timer-agent", on=on, health="bad" if ex not in (None, "", "0") else "ok" if on else "off",
-                runner={"kind": "timer-agent", "unit": s["unit"]})
+    return dict(row, kind=s["kind"], on=on, health="bad" if ex not in (None, "", "0") else "ok" if on else "off",
+                runner={"kind": s["kind"], "unit": s["unit"]})

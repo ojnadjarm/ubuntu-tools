@@ -1,9 +1,9 @@
 # Keep machine values (hosts, IPs, paths, passwords) out of pushable repo files
 
-Ticket: T278 · Last verified: 2026-10-07 by `bin/tests/no-machine-values.test.sh` green in ubuntu-tools and moodle-harness
+Ticket: T278 · Last verified: 2026-10-20 (T846) by paths, `cmp` of both guard copies, `sync.sh` exit line, `.gitignore` (no test run); 2026-10-07 by `bin/tests/no-machine-values.test.sh` green in ubuntu-tools and moodle-harness
 
 ## When to use
-Before adding a host, tailnet name, IP, MAC, home path, user, email or dev password to any file in `~/agents` or `~/moodle-harness`. Not for files git ignores (`KB/machine.md`, `secrets/`, `research/`).
+Before adding a host, tailnet name, IP, MAC, home path, user, email or dev password to any file in `~/agents` or `~/moodle-harness`. Not for files git ignores (`KB/machine.md`, `secrets/`) or `~/agent-work` (outside every repo since T320).
 
 ## The path we took
 Values live in `~/.config/pc-harness/config.env` (keys documented in `config.example.env`) and `~/.config/pc-harness/private-values` (literals, one per line). Code reads the variable (`bin/env.sh` exports every key); docs use `<tailnet-fqdn>`, `<lan-ip>`, `<github-user>`, `-home-<user>`, `~`. The guard reads the real values at run time and greps git's addable + tracked set.

@@ -3,7 +3,7 @@
 Tickets: T77 (extracted from T65 atelier-perf and T71 cutaway-plate), player T84, layout and number-only callouts T87, endless practice and
 give up T88, lesson then Practice, saved completion, one voice, buttons T91, Practice from anywhere, landing states, closing chapter, no
 Parts list T92, section head framing T93, pencils and cue layers T95, sheet change T96, cleanup T100, skill split T101, clamp and presses T106–T110, review T111 · Last verified:
-2026-09-26 by the kit's `npm test` (60 pass); U01 on the site ran the player through T100's full `npm run ci`.
+2026-10-20 by T846 audit (paths, skill files, 60 tests counted in `test/*.test.ts`, not run); before: 2026-09-26 by the kit's `npm test` (60 pass); U01 on the site ran the player through T100's full `npm run ci`.
 
 ## When to use
 - Any learning-game unit, lesson or narrated explainer where visuals land on spoken words and the learner then plays: skill `/explainer-engine`
@@ -17,7 +17,7 @@ Parts list T92, section head framing T93, pencils and cue layers T95, sheet chan
   `boot()`. A style plugs in through `View`; Cutaway is `explainer-kit/cutaway`. Survey: Theatre.js, Motion Canvas, Remotion are
   video/keyframe tools with no interactive beat machine on an audio clock; XState would replace 40 lines. Kept the fleet's engine with GSAP.
 - **T77 dogfood** (a fresh agent with only the three skills built A02 "Bias") listed 9 gaps, all closed: the starter, round semantics,
-  `dialHand()`, `Easing.eps`, overshoot counting, `tools/narrate.sh` (raw WAVs out of `public/`), `tools/drop.sh`, gates on an engine unit,
+  `dialHand()`, `Easing.eps`, overshoot counting, `starter/tools/narrate.sh` (raw WAVs out of `public/`), `starter/tools/drop.sh`, gates on an engine unit,
   e2e `#n` marks.
 - **T84** added the player (seek on sentence spans, chapter bar, re-watch keeps the dials, tap vs grab 6/10 px slop, drawn callout that holds
   the voice, caption term links, side column, keys sheet, instruction with hints on request, end card, resume, volumes, `lintUnit`) and the
@@ -111,6 +111,6 @@ Gates and e2e actions: skill `reference/testing.md`.
 
 ## Links
 - Code: `~/agents/kits/explainer/{src,adapters/cutaway,tools}`; starter `~/agents/kits/explainer/starter/`; proof `example/`
-- Skill: `~/.claude/skills/explainer-engine/SKILL.md` + `reference/{new-unit,components,exercises,lesson-flow,layout,narration-sync,testing,pitfalls}.md`
+- Skill: `~/.claude/skills/explainer-engine/SKILL.md` + `reference/{new-unit,components,exercises,lesson-flow,layout,narration-sync,testing,pitfalls,u01-chapter}.md`
 - Tests: `~/agents/kits/explainer/test/{engine,player,bench,lesson,place,landing,voice}.test.ts`, starter `test/{framing,content}.test.ts`
 - Design / results: `~/agents/kits/explainer/ARCHITECTURE.md`, `~/agent-work/research/2026-09-24/T77/`, `~/agent-work/research/2026-09-25/{T92,T100}/ARCHITECTURE.md`

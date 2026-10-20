@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# host-only: live GNOME compositor checks
 # PT09: `pc mutter`. Sections 1-3 run against the recorded compositor in fixtures/mutter (no bus,
 # no window); section 4 is live and read-only. Nothing here opens, moves or focuses a window,
 # takes a screenshot, makes a sound or touches the monitor configuration.
@@ -6,11 +7,9 @@ set -uo pipefail
 BIN="$HOME/agents/bin"
 PC="$BIN/pc-mutter"
 FIX="$BIN/tests/fixtures/mutter"
+. "$BIN/tests/lib/budget.sh"
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
-is()  { [ "$2" = "$3" ] && ok "$1" || nok "$1" "expected '$3', got '$2'"; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 fx()  { PC_FIXTURE="$FIX" XDG_RUNTIME_DIR="$WORK" "$PC" "$@"; }
 
 # 1. shape: the description line pc help prints, -h, and the exit codes.
@@ -83,8 +82,9 @@ if busctl --user list --no-pager >/dev/null 2>&1; then
   m=$("$PC" --json | jq -r .screen.match)
   [ "$m" = true ] && ok 'live xrandr and DisplayConfig agree on the screen size' \
     || nok 'live xrandr and DisplayConfig agree on the screen size' "$("$PC" | sed -n 2p)"
-  is 'live summary is inside its 0.4 s budget' \
-    "$(awk -v t="$( { /usr/bin/time -f %e "$PC" >/dev/null; } 2>&1 )" 'BEGIN{print (t <= 0.4) ? "yes" : t}')" yes
+  b=$(budget 0.4)
+  is "live summary is inside its $b s budget" \
+    "$(awk -v t="$( { /usr/bin/time -f %e "$PC" >/dev/null; } 2>&1 )" -v b="$b" 'BEGIN{print (t <= b) ? "yes" : t}')" yes
 else
   ok 'live checks skipped (no session bus in this shell)'
 fi

@@ -1,7 +1,7 @@
 # Audit log — `~/agents/log/actions.jsonl`
 
 One JSON object per line, one line per tool call, appended by whichever agent is running.
-Read it with `agents-log [--since 2h] [--session ID] [--grep X] [--kind agent|bench|interactive] [--errors] [--agent ID] [--stats] [--pc] [--raw]`; never parse it
+Read it with `agents-log [--since 2h] [--session ID] [--grep X] [--kind agent|bench|interactive] [--errors [--all]] [--agent ID] [--stats] [--pc] [--raw]`; never parse it
 by hand. The file is machine-local and is never committed.
 
 ## Fields
@@ -63,3 +63,8 @@ day. A turn is one `message.id`: a reply split over several lines counts once, u
 history, so the row matches the session, not the window. Unknown line types are ignored, so a CLI
 format change degrades instead of failing. `ccusage` reports 0 sessions on this box's transcript
 format; `/usage` is interactive and per-session — hence this reader.
+
+`--by ticket` (T552) prints one row per T-id found in each subagent's `agent-*.meta.json`
+`description` (worker and workflow lanes; no T-id → `untagged`; main sessions left out): turns,
+cache-read M, cache-write M, output k, wall min (first to last turn) and agents, sorted by cache-read,
+then a TOTAL. `--errors --cluster` has an `agents` column (distinct session + `agent_id`).

@@ -80,9 +80,8 @@ do_procs() {
   python3 "$BIN/pc_top.py" --seconds "$SECONDS_W" --sort io -n "$N" $([ "$JSON" = 1 ] && echo --json)
 }
 
-_smart() { [ -n "$PC_FIXTURE" ] && pc_cmd smartctl -j -H -A /dev/nvme0 || pc_root smartctl -j -H -A /dev/nvme0; }
 do_smart() {
-  local raw; raw=$(cached io_smart 3600 _smart)
+  local raw; raw=$(pc_smart_json)
   if [ "$JSON" = 1 ]; then
     jq -c '{passed: .smart_status.passed, health: .nvme_smart_health_information_log}' <<<"${raw:-{\}}" 2>/dev/null \
       || echo '{}'

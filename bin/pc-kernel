@@ -316,12 +316,13 @@ do_taint() {
 ## --- overview ---------------------------------------------------------------
 do_overview() {
   local t model mods
-  t=$(taint_json)
-  model=$(N=0 DIGEST=1 dmesg_model "$((NOW - 3600))" "$((NOW - 3600))" 2>/dev/null) || model='{"digest":[]}'
+  t=$(taint_json) || exit 1
+  # The model reaches jq on stdin: an hour of OOM traces passes the 128 KB argv string limit.
+  model=$(N=1 DIGEST=1 dmesg_model "$((NOW - 3600))" "$((NOW - 3600))" 2>/dev/null) || model='{"digest":[]}'
   mods=$(wc -l <"$PC_PROC/modules")
   if [ "$JSON" = 1 ]; then
-    pc_json '$t + {modules:($m|tonumber), dmesg_last_hour:($d.digest|map(.count)|add // 0), digest:($d.digest[0:3])}' -c \
-      --argjson t "$t" --argjson d "$model" --arg m "$mods"
+    printf '%s' "$model" | jq -c --argjson t "$t" --arg m "$mods" \
+      '$t + {modules:($m|tonumber), dmesg_last_hour:(.digest|map(.count)|add // 0), digest:(.digest[0:3])}' || exit 1
     return 0
   fi
   JSON=0 do_taint

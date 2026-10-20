@@ -1,6 +1,6 @@
 # Agent work layout: where briefs, research, evidence and archives live (AGENT_WORK)
 
-Ticket: T320 · Last verified: 2026-10-11 by the T320 batch B/C moves, `env.sh` and `agent_work.py` read-backs, `no-machine-values.test.sh`
+Ticket: T320 · Last verified: 2026-10-20 (T846) by `env.sh` and `agent_work.py` read-backs, `test -e` on every path, mode 700 / 2026-10-11 by the T320 batch B/C moves, `no-machine-values.test.sh`
 
 ## When to use
 Writing a brief, research notes, spike or mockup output, ticket evidence, or archiving finished working papers.
@@ -16,7 +16,7 @@ One config key, `AGENT_WORK` (default `~/agent-work`, mode 700), outside every r
 | `evidence/<name>/` | finished ticket evidence: pre/post shots, videos, repro files (moved out of `~/drop`) |
 | `archive/<origin path>/` | finished working papers under their original relative path (`archive/agents/portfolio/…`) |
 | `owner/` | owner-provided material: **move only, never delete** (fleet rule 5.4) |
-| `T320/` | the move plan, `MANIFEST.md`, `backup*/`, `trash/`, `rollback.sh` |
+| `T320/` | the move plan, `MANIFEST.md`, `backup*/`, `rollback.sh` (`trash/` purged 2026-10-13) |
 
 Resolvers, same order everywhere (env → `config.env` line → `~/agent-work`):
 - bash: `bin/env.sh` exports `AGENT_WORK`; scripts that may run without it use `"${AGENT_WORK:-$HOME/agent-work}"`.
@@ -34,7 +34,7 @@ mkdir -p "$AGENT_WORK/research/$(date +%F)/TNNN"                           # a n
 ## Pitfalls (measured)
 - Moves are `mv` on one filesystem: 35 GB moved instantly. Relative symlinks inside a moved tree break: 4 did in T320 (3 `node_modules` kit links, 1 `serve/orig`); find them with `find "$AGENT_WORK" -xtype l` after a move.
 - A path relative to `$HOME` breaks in fixture mode when `HOME` is a sandbox: `bin/code-review` builds it from `REAL_HOME`.
-- Every move or delete gets a manifest row before it runs; deletes are staged in `T320/trash/` and purged only on the owner's OK.
+- Every move or delete gets a manifest row before it runs; deletes are staged in a `trash/` dir and purged only on the owner's OK (T320's 3.0 GB went 2026-10-13; `rollback.sh` cannot restore purged rows).
 
 ## Links
 - Code: `~/agents/bin/env.sh`, `~/agents/lib/agent_work.py`, key in `~/agents/config.example.env`

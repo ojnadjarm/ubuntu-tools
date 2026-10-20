@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Usage: sentinel-runaway [--dry-run]   --dry-run prints "would ..." lines, kills nothing, writes no state.
 # Runaway-process check: kills stateless helpers pegged at >=90% of a core over two sentinel
 # runs, restarts fat/hot desktop portal helpers, closes hot Chrome trees no Playwright call drives,
 # and cleans up agent residue (orphan shell loops, unread capture pipes, hand-run Dark Eye bodies,
@@ -212,8 +213,12 @@ for d in "$PROC"/[0-9]*; do
   comm="${rest%\)*}"
   after="${rest##*\) }"
   # state ppid pgrp session tty tpgid flags minflt cminflt majflt cmajflt utime stime cutime cstime priority nice nthreads itrealvalue starttime vsize rss...
-  read -r _ ppid _ _ _ _ _ _ _ _ _ utime stime _ _ _ _ _ _ starttime _ rss_pages _ <<<"$after" || continue
+  # shellcheck disable=SC2206  # numeric fields, no glob characters; an array split costs a third of a here-string read (T988)
+  sf=($after)
+  ppid=${sf[1]:-} utime=${sf[11]:-} stime=${sf[12]:-} starttime=${sf[19]:-} rss_pages=${sf[21]:-}
   [ -n "${starttime:-}" ] || continue
+  # Kernel threads (kthreadd, pid 2, and its children) match no rule: ~40 % of /proc (T988).
+  [ "$ppid" = 2 ] || [ "$pid" = 2 ] && continue
   cpu=$(( (utime + stime) / HZ ))
   start=$(( boot_epoch + starttime / HZ ))
   age=$(( now - start ))
@@ -240,7 +245,7 @@ for d in "$PROC"/[0-9]*; do
   key="$pid:$start"
   strikes=0
   if [ -n "${PREV[$key]:-}" ]; then
-    IFS=: read -r pcpu pts pstrikes <<<"${PREV[$key]}"
+    pv=${PREV[$key]}; pcpu=${pv%%:*}; pv=${pv#*:}; pts=${pv%%:*}; pstrikes=${pv#*:}   # no here-string per process (T988)
     dt=$((now - pts))
     if [ "$dt" -gt 0 ]; then pct=$(( 100 * (cpu - pcpu) / dt )); else pct=0; fi
     [ "$pct" -ge "$PCT_MIN" ] && strikes=$((pstrikes + 1))
@@ -384,10 +389,6 @@ done
 # shellcheck disable=SC2068
 for scratch in ${SCRATCH_GLOBS[@]+${SCRATCH_GLOBS[@]}}; do
   [ -d "$scratch" ] || continue
-  mtime=$(find "$scratch" -printf '%T@\n' 2>/dev/null | sort -n | tail -1)
-  [ -n "$mtime" ] || continue
-  age=$(( now - ${mtime%.*} ))
-  [ "$age" -ge "$SCRATCH_AGE" ] || continue
   uuid_dir="${scratch%/*}"          # the session directory, whatever the glob's last segment is called
   uuid="${uuid_dir##*/}"
   live=0
@@ -398,6 +399,12 @@ for scratch in ${SCRATCH_GLOBS[@]+${SCRATCH_GLOBS[@]}}; do
   for c in "${CMD_ALL[@]:-}"; do
     [[ "$c" == *"$uuid"* ]] && { live=1; break; }
   done
+  # A live session is never wiped: skip walking its tree (T988: 16k files, ~0.3 CPU s a tick).
+  [ "$live" = 1 ] && continue
+  mtime=$(find "$scratch" -printf '%T@\n' 2>/dev/null | sort -n | tail -1)
+  [ -n "$mtime" ] || continue
+  age=$(( now - ${mtime%.*} ))
+  [ "$age" -ge "$SCRATCH_AGE" ] || continue
   if [ "$live" = 0 ]; then
     for cp in "${CLAUDE_PIDS[@]:-}"; do
       if find "$PROC/$cp/fd" -maxdepth 1 -lname "*$uuid*" 2>/dev/null | grep -q .; then live=1; break; fi

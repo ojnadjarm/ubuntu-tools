@@ -1,6 +1,6 @@
 # Keep the vass services and the Moodle 4.5 env alive (restart policy, boot units, sentinel self-heal)
 
-Ticket: T269 · Last verified: 2026-10-07 by `pc status`, `systemctl is-enabled`, `docker inspect`, tests below
+Ticket: T269 · Last verified: 2026-10-20 by T846 read-only audit (`--help`, paths, code); before: 2026-10-07 by `pc status`, `systemctl is-enabled`, `docker inspect`, tests below
 
 ## When to use
 A vass container, vass user unit, the 4.5 cron timer or the 4.5 site is down, or a new service must be kept alive the same way.

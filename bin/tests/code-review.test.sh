@@ -7,15 +7,232 @@ BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROOT="$(cd "$BIN/.." && pwd)"
 CR="$ROOT/code-review"
 fail=0; n=0
-t() { n=$((n+1)); printf '%-66s' "code-review: $1"; }
+t() { n=$((n+1)); printf '%-66s ' "code-review: $1"; }
 ok() { echo OK; }
 no() { echo "FAIL — $1"; fail=1; }
 
 WORK=$(mktemp -d); SBX=""
 trap 'rm -rf "$WORK"; [ -n "$SBX" ] && rm -rf "$SBX"' EXIT
+
+# Sandbox: a fixture under state/selftest/, the home read-only, the fixture writable, sockets and network blocked.
+# These blocks share no fixture with the main sequence, so they run in the background from the start.
+sandbox_checks() {
+unset CR_HOME CR_DATE
+python3 "$CR/selftest/build.py" "$SBX/home" >/dev/null
+
+if [ -n "${CR_SANDBOX:-}" ]; then
+  echo "code-review: sandbox checks skipped (already inside the code-review sandbox; bwrap cannot nest)"
+else
+nonet=; [ "$(curl -s -m 10 -o /dev/null -w '%{http_code}' https://api.anthropic.com/)" = 000 ] && nonet=1
+if [ -n "$nonet" ]; then
+  echo "code-review: SKIP needs network: fixture-mode sandbox selftest proves the Claude API is reachable (no route here)"
+else
+t "sandbox (fixture): selftest proves read-only, hidden, blocked, shimmed"
+out="$(bash "$BIN/code-review-sandbox" --fixture "$SBX/home" --selftest 2>&1)" && ok || no "$out"
+fi
+
+t "sandbox (fixture): real bin unwritable, fixture writable, shims refuse by full path"
+out="$(bash "$BIN/code-review-sandbox" --fixture "$SBX/home" -- bash -c \
+  '[ -w "$1" ] && echo realw; touch "$2/agents/bin/probe" && echo fxw; notify-owner hi >/dev/null 2>&1; echo "n=$?"; /usr/bin/systemctl --user status >/dev/null 2>&1; echo "s=$?"' _ "$BIN" "$SBX/home")"
+[ "$out" = "$(printf 'fxw\nn=97\ns=97')" ] && ok || no "$out"
+
+t "sandbox: a setsid child does not outlive a timeout (pid namespace)"
+timeout 30 bash "$BIN/code-review-sandbox" --fixture "$SBX/home" -- bash -c 'setsid sleep 4747 & : >"$1/setsid-up"; sleep 30' _ "$SBX/home" >/dev/null 2>&1 & p0=$!
+timeout 10 wait-for --every 0.05 --until "[ -e '$SBX/home/setsid-up' ]" >/dev/null; kill -TERM "$p0"; wait "$p0"; rm -f "$SBX/home/setsid-up"
+timeout 2 wait-for --every 0.05 --until "! pgrep -f '^sleep 4747\$'" >/dev/null && ok || no "sleep 4747 still alive"
+
+t "sandbox: a second run leaves the first run's proxy socket alive"
+first=': >"$1/first-up"; until [ -e "$1/second-done" ]; do sleep 0.1; done
+exec 3<>/dev/tcp/127.0.0.1/18474 && printf "CONNECT x.invalid:1 HTTP/1.1\r\n\r\n" >&3 && head -c 12 <&3'
+timeout 60 bash "$BIN/code-review-sandbox" --fixture "$SBX/home" -- bash -c "$first" _ "$SBX/home" >"$WORK/first.out" 2>&1 & p1=$!
+timeout 10 wait-for --every 0.05 --until "[ -e '$SBX/home/first-up' ]" >/dev/null
+bash "$BIN/code-review-sandbox" --fixture "$SBX/home" -- true >/dev/null 2>&1; : >"$SBX/home/second-done"
+wait "$p1"; rm -f "$SBX/home/second-done" "$SBX/home/first-up"
+[ "$(cat "$WORK/first.out")" = "HTTP/1.1 403" ] && ok || no "first run got: $(head -c 200 "$WORK/first.out")"
+
+t "sandbox (real): selftest skips while the code-review lock is held (fake HOME)"
+LH="$WORK/lockhome"; mkdir -p "$LH/agents/code-review"; exec 9>"$LH/agents/code-review/.lock"; flock -n 9
+out="$(HOME="$LH" timeout 20 bash "$BIN/code-review-sandbox" --selftest 2>&1)"; rc=$?
+exec 9>&-
+[ "$rc" = 0 ] && grep -q 'selftest skipped' <<<"$out" && [ ! -e "$LH/.claude" ] && ok || no "rc=$rc $(head -c 300 <<<"$out")"
+
+if [ -e "$CR/.lock" ] && ! flock -n "$CR/.lock" true; then
+  echo "code-review: real-mode sandbox selftest skipped (a code-review run holds $CR/.lock)"
+elif [ -n "$nonet" ]; then
+  echo "code-review: SKIP needs network: real-mode sandbox selftest proves the Claude API is reachable (no route here)"
+else
+t "sandbox (real): selftest proves owner data, containment and sockets"
+out="$(bash "$BIN/code-review-sandbox" --selftest 2>&1)" && ok || no "$out"
+fi
+fi
+}
+focus_checks() {
+export CR_DATE=2026-09-26
+# T447: focus = files changed since the last finished run + a rotation quarter; every 4th finished run is a full sweep.
+FH="$WORK/focushome"; python3 "$CR/selftest/build.py" "$FH" >/dev/null
+for i in $(seq -w 1 40); do echo "# fx $i" >"$FH/agents/bin/fx-$i"; done
+fcr() { CR_HOME="$FH" cr "$@"; }
+T0=$(( $(date +%s) - 86400 ))
+done_run() { printf '{"found":0,"items":[]}\n' >"$(dirname "$1")/result.json"; touch -d "@$T0" "$1"; }
+fa="$(fcr prep)"; s0="$(jq -c '[.areas[].sweep] | unique' "$fa")"; done_run "$fa"
+find "$FH/agents" "$FH/.claude" -type f -exec touch -d "@$((T0 - 100))" {} +
+touch -d "@$((T0 + 100))" "$FH/agents/bin/log-size"
+all="$(cd "$FH" && jq -r '.areas[].paths[]' "$fa" | sed "s|^$FH/||" | xargs find | while read -r p; do [ -f "$p" ] && [ ! -L "$p" ] && echo "$FH/$p"; done | sort)"
+reads=""; sw=""; rot=""
+for k in 0 1 2 3; do
+  fa="$(fcr prep)"; sw="$sw$(jq -c '[.areas[].sweep] | unique | .[0]' "$fa") "
+  if [ "$(jq '.areas[0].sweep' "$fa")" = true ]; then reads="$reads$all"$'\n'
+  else reads="$reads$(jq -r '.areas[].focus[]' "$fa")"$'\n'
+    rot="$rot$(jq -r '.areas[].focus[]' "$fa" | grep -vx "$FH/agents/bin/log-size")"$'\n'
+    [ "$(jq -r '.areas[0].focus[0]' "$fa")" = "$FH/agents/bin/log-size" ] || sw="$sw(log-size not first) "
+  fi
+  [ $k = 0 ] && fa0="$fa"; done_run "$fa"
+done
+
+t "focus: no history → sweep; then 3 focused runs, the 4th a full sweep"
+[ "$s0" = '[true]' ] && [ "$sw" = "false false false true " ] && [ "$(jq -r '.focus.since' "$fa0")" != "" ] && ok || no "s0=$s0 sweeps=$sw"
+
+t "focus: the changed file leads every focused list; quarters disjoint; 4 runs cover every file"
+nall=$(grep -c . <<<"$all")
+{ [ "$(grep . <<<"$rot" | sort | uniq -d | wc -l)" = 0 ] && [ "$(grep -c . <<<"$rot")" -gt 0 ] &&
+  [ "$(grep . <<<"$reads" | sort -u | grep -c .)" = "$nall" ] && [ "$(jq '[.areas[].focus[]] | length' "$fa0")" -lt "$nall" ] &&
+  [ "$(jq '.areas[0].files' "$fa0")" -gt 40 ]; } && ok || no "rot dups=$(grep . <<<"$rot" | sort | uniq -d | wc -l) reads=$(grep . <<<"$reads" | sort -u | grep -c .)/$nall"
+
+t "swarm: a focused area lists FOCUS in its lanes; an empty focused area gets no lanes"
+jq '.areas[1].focus = [] | .areas[1].sweep = false | .areas[0].sweep = false' "$fa0" >"$WORK/focus-args.json"
+fmock="$(node "$BIN/tests/fixtures/code-review/swarm-mock.mjs" "$CR/swarm.js" "$WORK/focus-args.json" 2>>"$WORK/mock.err")"
+nl=$(jq '.areas | length' "$fa0")
+{ [ "$(jq '.res.lanes' <<<"$fmock")" = $(( (nl - 1) * 5 )) ] &&
+  ! jq -e --arg k "$(jq -r '.areas[1].key' "$fa0")" 'any(.calls[]; startswith("review:" + $k + ":"))' <<<"$fmock" >/dev/null &&
+  grep -q 'FOCUS: read only these' "$CR/swarm.js"; } && ok || no "lanes=$(jq '.res.lanes' <<<"$fmock") nl=$nl"
+}
+netproxy_checks() {
+t "netproxy serve: a live socket is never replaced, a dead one is"
+ND="$(mktemp -d)"; NP="$BIN/code-review-netproxy"
+python3 "$NP" serve "$ND/p.sock" 2>/dev/null & s1=$!
+timeout 5 wait-for --every 0.05 --until "[ -S '$ND/p.sock' ]" >/dev/null
+timeout 5 python3 "$NP" serve "$ND/p.sock" 2>/dev/null; r2=$?
+alive="$(python3 -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); s.sendall(b"CONNECT x.invalid:1 HTTP/1.1\r\n\r\n"); print(s.recv(12).decode())' "$ND/p.sock" 2>&1)"
+kill "$s1" 2>/dev/null; wait "$s1" 2>/dev/null
+timeout 1 python3 "$NP" serve "$ND/p.sock" 2>/dev/null; r3=$?
+rm -rf "$ND"
+[ "$r2" = 1 ] && [ "$alive" = "HTTP/1.1 403" ] && [ "$r3" = 124 ] && ok || no "second serve rc=$r2 first=$alive dead-replace rc=$r3"
+}
+roster_checks() {
+unset CR_HOME CR_DATE
+# Roster and kill switch on shims (the pattern of agents-stop.test.sh): nothing real is stopped or started.
+F="$WORK/fleet"; FB="$F/agents/bin"; mkdir -p "$FB" "$F/agents/KB" "$F/agents/code-review"
+ln -s "$BIN/env.sh" "$FB/env.sh"; ln -s "$BIN/fleetlib.sh" "$FB/fleetlib.sh"; cp -r "$BIN/guards" "$FB/guards"
+cp "$CR/BRIEF.md" "$F/agents/code-review/BRIEF.md"; : >"$F/config.env"
+if [ -r "$ROOT/KB/orchestrator.md" ]; then sed -n '/^| Agent | Unit/,/^$/p' "$ROOT/KB/orchestrator.md"
+else printf '| Agent | Unit |\n|---|---|\n| code-review | `agent@code-review` |\n'; fi >"$F/agents/KB/orchestrator.md"
+CALLS="$F/calls.log"; : >"$CALLS"
+cat >"$FB/systemctl" <<'EOF'
+#!/bin/sh
+echo "systemctl $*" >>"$CALLS"
+case "$*" in
+  *list-units*agent@*.service*) echo "agent@code-review.service loaded active running agent code-review" ;;
+  *list-units*agent@*.timer*) echo "agent@code-review.timer loaded active waiting" ;;
+  *is-active*agent@code-review*) echo active ;;
+  *is-active*) echo inactive ;;
+esac
+exit 0
+EOF
+for c in notify-owner claude; do printf '#!/bin/sh\necho "%s $*" >>"$CALLS"\n' "$c" >"$FB/$c"; done
+chmod +x "$FB/systemctl" "$FB/notify-owner" "$FB/claude"
+frun() { HOME="$F" HARNESS_HOME="$F/agents" HARNESS_CONFIG="$F/config.env" HARNESS_AGENT="" CALLS="$CALLS" \
+         PATH="$FB:/usr/bin:/bin" bash "$BIN/$1"; }
+resolved="$(HOME="$F" HARNESS_HOME="$F/agents" HARNESS_CONFIG="$F/config.env" PATH=/usr/bin:/bin \
+  bash -c '. "$HOME/agents/bin/fleetlib.sh"; fleet_path; command -v systemctl; command -v notify-owner')"
+
+t "kill switch selftest: the shims, not the real tools, are on PATH"
+[ "$resolved" = "$(printf '%s\n%s' "$FB/guards/systemctl" "$FB/notify-owner")" ] && [ -x "$FB/systemctl" ] && ok || { no "$resolved"; echo aborting; exit 1; }
+
+t "agents-stop stops agent@code-review service and timer"
+frun agents-stop >/dev/null 2>&1
+grep -q 'stop agent@code-review.service' "$CALLS" && grep -q 'stop agent@code-review.timer' "$CALLS" && ok || no "$(cat "$CALLS")"
+
+t "agents-start re-enables agent@code-review.timer from KB/orchestrator.md"
+: >"$CALLS"; frun agents-start >/dev/null 2>&1
+grep -q '^systemctl --user enable --now agent@code-review.timer$' "$CALLS" && ok || no "$(grep enable "$CALLS")"
+
+t "agent.env: Sat 03:00 schedule valid, Workflow tool, sandbox wrap with --post, unit timeout > TIMEOUT"
+( . "$CR/agent.env"; systemd-analyze calendar "$SCHEDULE" >/dev/null 2>&1 && [ "$SCHEDULE" = "Sat *-*-* 03:00" ] &&
+  case ",$AGENT_TOOLS," in *,Workflow,*) true ;; *) false ;; esac && [ "$AGENT_WRAP" = "code-review-sandbox --post --" ] &&
+  [ "$UNIT_TIMEOUT" -gt "$TIMEOUT" ] ) && ok || no "agent.env"
+
+t "agent.env: headless claude waits for the swarm (bg ceiling > 1 h, < TIMEOUT)"
+( . "$CR/agent.env"; v=$(bash -c 'echo "${CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:-}"')
+  [ -n "$v" ] && [ "$v" -gt 3600000 ] && [ "$v" -lt $((TIMEOUT * 1000)) ] ) && ok || no "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS not exported in range"
+}
+# Each block runs in a background subshell with its own counters; join waits, prints its output in place, adds its counts.
+bg() { ( n=0; fail=0; "$1"; echo "$n $fail" >"$WORK/$1.counts" ) >"$WORK/$1.out" 2>&1 & eval "pid_$1=$!"; }
+join() {
+  eval "wait \"\$pid_$1\""; cat "$WORK/$1.out"
+  read -r sn sf <"$WORK/$1.counts" 2>/dev/null || { sn=0; sf=1; echo "code-review: $1 block died"; }
+  n=$((n + sn)); [ "$sf" = 0 ] || fail=1
+}
+# `cr` without an interpreter start per case: one warm Python (imports done, the CLI compiled once) forks a child per
+# call; the child takes the caller's environ, cwd, stdout and stderr (/proc/<caller>), runs the CLI and hands back its rc.
+read -r -d '' CRD_PY <<'PY'
+import argparse, ast, importlib, os, signal, sys, traceback
+CR = sys.argv[1]
+BIN = os.path.dirname(os.path.realpath(CR))
+sys.path[:0] = [os.path.join(BIN, '..', 'lib'), BIN]
+SRC = open(CR).read()
+CODE = compile(SRC, CR, 'exec')
+LIB = os.path.join(BIN, '..', 'lib', 'code_review')
+for f in [CR] + [os.path.join(LIB, x) for x in sorted(os.listdir(LIB)) if x.endswith('.py')]:
+    for n in ast.parse(open(f).read()).body:  # code_review reads CR_HOME/CR_DATE at import: each child imports it fresh
+        for m in [a.name for a in n.names] if isinstance(n, ast.Import) else [n.module] if isinstance(n, ast.ImportFrom) and not n.level else []:
+            m.startswith('code_review') or importlib.import_module(m)
+argparse.ArgumentParser().parse_args([])
+signal.signal(signal.SIGCHLD, signal.SIG_IGN)
+for line in sys.stdin:
+    q, pid = line.split()
+    if os.fork():
+        continue
+    signal.signal(signal.SIGCHLD, signal.SIG_DFL)
+    try:
+        os.chdir(f'/proc/{pid}/cwd')
+        os.environb.clear()
+        os.environb.update(kv.split(b'=', 1) for kv in open(q + '.env', 'rb').read().split(b'\0') if b'=' in kv)
+        sys.argv = [CR] + [os.fsdecode(a) for a in open(q + '.argv', 'rb').read().split(b'\0')[:-1]]
+        os.dup2(os.open(os.devnull, os.O_RDONLY), 0)
+        for fd in (1, 2):
+            os.dup2(os.open(f'/proc/{pid}/fd/{fd}', os.O_WRONLY | os.O_APPEND), fd)
+        exec(CODE, {'__name__': '__main__', '__file__': CR})
+        rc = 0
+    except SystemExit as e:
+        rc = e.code if isinstance(e.code, int) else 0 if e.code is None else print(e.code, file=sys.stderr) or 1
+    except BaseException:
+        traceback.print_exc()
+        rc = 1
+    sys.stdout.flush()
+    sys.stderr.flush()
+    with open(q + '.rc', 'w') as f:
+        f.write(f'{rc}\n')
+    os._exit(0)
+PY
+exec 6> >(python3 -c "$CRD_PY" "$BIN/code-review")  # the driver reads until this shell, its last writer, is gone
+CRD=$!
+trap 'kill "$CRD" 2>/dev/null; rm -rf "$WORK"; [ -n "$SBX" ] && rm -rf "$SBX"' EXIT
+crn=0
+cr() {
+  local q="$WORK/crq.$BASHPID.$((crn += 1))" rc fd
+  env -0 >"$q.env"; : >"$q.argv"; (($#)) && printf '%s\0' "$@" >"$q.argv"; mkfifo "$q.rc"
+  exec {fd}<>"$q.rc"  # read-write: the open never blocks, so a dead driver or child ends in the read timeout
+  if ! kill -0 "$CRD" 2>/dev/null; then rc=97; echo "cr $1: the cr driver is gone" >&2
+  elif ! { echo "$q $BASHPID" >&6; read -r -t 120 rc <&"$fd"; }; then rc=98; echo "cr $1: no exit code in 120 s (driver or child died)" >&2; fi
+  exec {fd}<&-; rm -f "$q.env" "$q.argv" "$q.rc"
+  return "$rc"
+}
+
+SBX="$CR/state/selftest/test-$$"; mkdir -p "$SBX"
+for b in sandbox_checks focus_checks netproxy_checks roster_checks; do bg "$b"; done
+
 python3 "$CR/selftest/build.py" "$WORK/home" >/dev/null
 H="$WORK/home"; export CR_HOME="$H" CR_DATE=2026-09-26
-cr() { python3 "$BIN/code-review" "$@"; }
 
 t "policy: bin edit, backups/research/containment forbidden, harness review-only"
 got="$(cr policy "$H/agents/bin/x" "$H/agents/backups/x" "$H/agent-work/research/x" "$H/moodle-harness/x" "$H/CLAUDE.md" \
@@ -56,7 +273,7 @@ t "claim: own claim added and dropped; 10 parallel pairs on one file → 1 winne
 cr claim F02 "$H/agents/bin/orbit-lite" >/dev/null; rc2=$?
 has=$(grep -c '^- code-review-F02 ·' "$H/agents/FILE-CLAIMS.md"); cr unclaim F02 >/dev/null
 race=""; for i in $(seq 10); do
-  cr claim "A$i" "$H/agents/bin/log-size" >/dev/null 2>&1 & cr claim "B$i" "$H/agents/bin/log-size" >/dev/null 2>&1 & wait
+  cr claim "A$i" "$H/agents/bin/log-size" >/dev/null 2>&1 & pa=$!; cr claim "B$i" "$H/agents/bin/log-size" >/dev/null 2>&1 & wait "$pa" $!
   race="$race$(grep -cE "^- code-review-(A|B)$i ·" "$H/agents/FILE-CLAIMS.md")"
   cr unclaim "A$i" >/dev/null; cr unclaim "B$i" >/dev/null
 done
@@ -203,7 +420,7 @@ out="$(cr cleanup)"
   grep -q '2 unverified backup(s) restored' <<<"$out" && grep -q 'timeout or crash' "$H/agents/code-review/state/runs/$RUN2/findings.md"; } && ok || no "rv=$rv $vt / $out"
 
 t "redact: tokens and secret-looking values are masked in findings.md"
-printf '%s\n' '{"found":1,"items":[{"id":"F01","key":"k","file":"x","kind":"bug","title":"leak","verdict":"confirmed","status":"left","note":"token=abcdef123456 and sk-ant-api03-XXXXYYYYZZZZ"}]}' >"$H/agents/code-review/state/runs/$RUN2/result.json"
+printf '%s\n' '{"found":1,"items":[{"id":"F01","key":"k","file":"x","kind":"bug","title":"leak","verdict":"confirmed","status":"left","note":"token=abcdef123456 and sk-ant-api03-XXXXYYYYZZZZ"}]}' >"$H/agents/code-review/state/runs/$RUN2/result.json"  # push-ready: test vector
 cr finish >/dev/null
 f="$H/agents/code-review/state/runs/$RUN2/findings.md"
 ! grep -q 'abcdef123456\|sk-ant-api03' "$f" && grep -q 'redacted' "$f" && ok || no "$(grep leak -A2 "$f")"
@@ -313,46 +530,10 @@ wk="$(jq -r '.items[] | select(.title == "walk is slow") | .key' <<<"$res")"
   grep -q '^## Unverified' "$H/agents/code-review/state/runs/$RUN4/findings.md"; } && ok ||
   no "$(grep -F "$wk" "$H/agents/code-review/state/seen.jsonl" | tail -1)"
 
-# T447: focus = files changed since the last finished run + a rotation quarter; every 4th finished run is a full sweep.
-FH="$WORK/focushome"; python3 "$CR/selftest/build.py" "$FH" >/dev/null
-for i in $(seq -w 1 40); do echo "# fx $i" >"$FH/agents/bin/fx-$i"; done
-fcr() { CR_HOME="$FH" python3 "$BIN/code-review" "$@"; }
-T0=$(( $(date +%s) - 86400 ))
-done_run() { printf '{"found":0,"items":[]}\n' >"$(dirname "$1")/result.json"; touch -d "@$T0" "$1"; }
-fa="$(fcr prep)"; s0="$(jq -c '[.areas[].sweep] | unique' "$fa")"; done_run "$fa"
-find "$FH/agents" "$FH/.claude" -type f -exec touch -d "@$((T0 - 100))" {} +
-touch -d "@$((T0 + 100))" "$FH/agents/bin/log-size"
-all="$(cd "$FH" && jq -r '.areas[].paths[]' "$fa" | sed "s|^$FH/||" | xargs find | while read -r p; do [ -f "$p" ] && [ ! -L "$p" ] && echo "$FH/$p"; done | sort)"
-reads=""; sw=""; rot=""
-for k in 0 1 2 3; do
-  fa="$(fcr prep)"; sw="$sw$(jq -c '[.areas[].sweep] | unique | .[0]' "$fa") "
-  if [ "$(jq '.areas[0].sweep' "$fa")" = true ]; then reads="$reads$all"$'\n'
-  else reads="$reads$(jq -r '.areas[].focus[]' "$fa")"$'\n'
-    rot="$rot$(jq -r '.areas[].focus[]' "$fa" | grep -vx "$FH/agents/bin/log-size")"$'\n'
-    [ "$(jq -r '.areas[0].focus[0]' "$fa")" = "$FH/agents/bin/log-size" ] || sw="$sw(log-size not first) "
-  fi
-  [ $k = 0 ] && fa0="$fa"; done_run "$fa"
-done
-
-t "focus: no history → sweep; then 3 focused runs, the 4th a full sweep"
-[ "$s0" = '[true]' ] && [ "$sw" = "false false false true " ] && [ "$(jq -r '.focus.since' "$fa0")" != "" ] && ok || no "s0=$s0 sweeps=$sw"
-
-t "focus: the changed file leads every focused list; quarters disjoint; 4 runs cover every file"
-nall=$(grep -c . <<<"$all")
-{ [ "$(grep . <<<"$rot" | sort | uniq -d | wc -l)" = 0 ] && [ "$(grep -c . <<<"$rot")" -gt 0 ] &&
-  [ "$(grep . <<<"$reads" | sort -u | grep -c .)" = "$nall" ] && [ "$(jq '[.areas[].focus[]] | length' "$fa0")" -lt "$nall" ] &&
-  [ "$(jq '.areas[0].files' "$fa0")" -gt 40 ]; } && ok || no "rot dups=$(grep . <<<"$rot" | sort | uniq -d | wc -l) reads=$(grep . <<<"$reads" | sort -u | grep -c .)/$nall"
-
-t "swarm: a focused area lists FOCUS in its lanes; an empty focused area gets no lanes"
-jq '.areas[1].focus = [] | .areas[1].sweep = false | .areas[0].sweep = false' "$fa0" >"$WORK/focus-args.json"
-fmock="$(node "$BIN/tests/fixtures/code-review/swarm-mock.mjs" "$CR/swarm.js" "$WORK/focus-args.json" 2>>"$WORK/mock.err")"
-nl=$(jq '.areas | length' "$fa0")
-{ [ "$(jq '.res.lanes' <<<"$fmock")" = $(( (nl - 1) * 5 )) ] &&
-  ! jq -e --arg k "$(jq -r '.areas[1].key' "$fa0")" 'any(.calls[]; startswith("review:" + $k + ":"))' <<<"$fmock" >/dev/null &&
-  grep -q 'FOCUS: read only these' "$CR/swarm.js"; } && ok || no "lanes=$(jq '.res.lanes' <<<"$fmock") nl=$nl"
+join focus_checks
 
 t "fail_lines: passing lines that name FAIL are not failures"
-got="$(python3 - "$BIN/code-review" <<'EOF'
+got="$(python3 - "$ROOT/lib/code_review/fixes.py" <<'EOF'
 import ast, re, sys
 fn = [n for n in ast.parse(open(sys.argv[1]).read()).body if isinstance(n, ast.FunctionDef) and n.name == 'fail_lines']
 ns = {'re': re}; exec(compile(ast.Module(fn, []), 'code-review', 'exec'), ns)
@@ -362,102 +543,12 @@ EOF
 )"
 [ "$got" = 3 ] && ok || no "$got failing lines, want 3"
 
-t "netproxy serve: a live socket is never replaced, a dead one is"
-ND="$(mktemp -d)"; NP="$BIN/code-review-netproxy"
-python3 "$NP" serve "$ND/p.sock" 2>/dev/null & s1=$!
-for _ in $(seq 100); do [ -S "$ND/p.sock" ] && break; sleep 0.05; done
-timeout 5 python3 "$NP" serve "$ND/p.sock" 2>/dev/null; r2=$?
-alive="$(python3 -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); s.sendall(b"CONNECT x.invalid:1 HTTP/1.1\r\n\r\n"); print(s.recv(12).decode())' "$ND/p.sock" 2>&1)"
-kill "$s1" 2>/dev/null; wait "$s1" 2>/dev/null
-timeout 1 python3 "$NP" serve "$ND/p.sock" 2>/dev/null; r3=$?
-rm -rf "$ND"
-[ "$r2" = 1 ] && [ "$alive" = "HTTP/1.1 403" ] && [ "$r3" = 124 ] && ok || no "second serve rc=$r2 first=$alive dead-replace rc=$r3"
+join netproxy_checks
 
-# Sandbox: a fixture under state/selftest/, the home read-only, the fixture writable, sockets and network blocked.
 unset CR_HOME CR_DATE
-SBX="$CR/state/selftest/test-$$"; mkdir -p "$SBX"
-python3 "$CR/selftest/build.py" "$SBX/home" >/dev/null
+join sandbox_checks
 
-if [ -n "${CR_SANDBOX:-}" ]; then
-  echo "code-review: sandbox checks skipped (already inside the code-review sandbox; bwrap cannot nest)"
-else
-t "sandbox (fixture): selftest proves read-only, hidden, blocked, shimmed"
-out="$(bash "$BIN/code-review-sandbox" --fixture "$SBX/home" --selftest 2>&1)" && ok || no "$out"
-
-t "sandbox (fixture): real bin unwritable, fixture writable, shims refuse by full path"
-out="$(bash "$BIN/code-review-sandbox" --fixture "$SBX/home" -- bash -c \
-  '[ -w "$1" ] && echo realw; touch "$2/agents/bin/probe" && echo fxw; notify-owner hi >/dev/null 2>&1; echo "n=$?"; /usr/bin/systemctl --user status >/dev/null 2>&1; echo "s=$?"' _ "$BIN" "$SBX/home")"
-[ "$out" = "$(printf 'fxw\nn=97\ns=97')" ] && ok || no "$out"
-
-t "sandbox: a setsid child does not outlive a timeout (pid namespace)"
-timeout 3 bash "$BIN/code-review-sandbox" --fixture "$SBX/home" -- bash -c 'setsid sleep 4747 & sleep 30' >/dev/null 2>&1
-sleep 0.5; pgrep -f '^sleep 4747$' >/dev/null && no "sleep 4747 still alive" || ok
-
-t "sandbox: a second run leaves the first run's proxy socket alive"
-first='until [ -e "$1/second-done" ]; do sleep 0.1; done
-exec 3<>/dev/tcp/127.0.0.1/18474 && printf "CONNECT x.invalid:1 HTTP/1.1\r\n\r\n" >&3 && head -c 12 <&3'
-timeout 60 bash "$BIN/code-review-sandbox" --fixture "$SBX/home" -- bash -c "$first" _ "$SBX/home" >"$WORK/first.out" 2>&1 & p1=$!
-sleep 1; bash "$BIN/code-review-sandbox" --fixture "$SBX/home" -- true >/dev/null 2>&1; : >"$SBX/home/second-done"
-wait "$p1"; rm -f "$SBX/home/second-done"
-[ "$(cat "$WORK/first.out")" = "HTTP/1.1 403" ] && ok || no "first run got: $(head -c 200 "$WORK/first.out")"
-
-t "sandbox (real): selftest skips while the code-review lock is held (fake HOME)"
-LH="$WORK/lockhome"; mkdir -p "$LH/agents/code-review"; exec 9>"$LH/agents/code-review/.lock"; flock -n 9
-out="$(HOME="$LH" timeout 20 bash "$BIN/code-review-sandbox" --selftest 2>&1)"; rc=$?
-exec 9>&-
-[ "$rc" = 0 ] && grep -q 'selftest skipped' <<<"$out" && [ ! -e "$LH/.claude" ] && ok || no "rc=$rc $(head -c 300 <<<"$out")"
-
-if [ -e "$CR/.lock" ] && ! flock -n "$CR/.lock" true; then
-  echo "code-review: real-mode sandbox selftest skipped (a code-review run holds $CR/.lock)"
-else
-t "sandbox (real): selftest proves owner data, containment and sockets"
-out="$(bash "$BIN/code-review-sandbox" --selftest 2>&1)" && ok || no "$out"
-fi
-fi
-
-# Roster and kill switch on shims (the pattern of agents-stop.test.sh): nothing real is stopped or started.
-F="$WORK/fleet"; FB="$F/agents/bin"; mkdir -p "$FB" "$F/agents/KB" "$F/agents/code-review"
-ln -s "$BIN/env.sh" "$FB/env.sh"; ln -s "$BIN/fleetlib.sh" "$FB/fleetlib.sh"; cp -r "$BIN/guards" "$FB/guards"
-cp "$CR/BRIEF.md" "$F/agents/code-review/BRIEF.md"; : >"$F/config.env"
-{ sed -n '/^| Agent | Unit/,/^$/p' "$ROOT/KB/orchestrator.md"; } >"$F/agents/KB/orchestrator.md"
-CALLS="$F/calls.log"; : >"$CALLS"
-cat >"$FB/systemctl" <<'EOF'
-#!/bin/sh
-echo "systemctl $*" >>"$CALLS"
-case "$*" in
-  *list-units*agent@*.service*) echo "agent@code-review.service loaded active running agent code-review" ;;
-  *list-units*agent@*.timer*) echo "agent@code-review.timer loaded active waiting" ;;
-  *is-active*agent@code-review*) echo active ;;
-  *is-active*) echo inactive ;;
-esac
-exit 0
-EOF
-for c in notify-owner claude; do printf '#!/bin/sh\necho "%s $*" >>"$CALLS"\n' "$c" >"$FB/$c"; done
-chmod +x "$FB/systemctl" "$FB/notify-owner" "$FB/claude"
-frun() { HOME="$F" HARNESS_HOME="$F/agents" HARNESS_CONFIG="$F/config.env" HARNESS_AGENT="" CALLS="$CALLS" \
-         PATH="$FB:/usr/bin:/bin" bash "$BIN/$1"; }
-resolved="$(HOME="$F" HARNESS_HOME="$F/agents" HARNESS_CONFIG="$F/config.env" PATH=/usr/bin:/bin \
-  bash -c '. "$HOME/agents/bin/fleetlib.sh"; fleet_path; command -v systemctl; command -v notify-owner')"
-
-t "kill switch selftest: the shims, not the real tools, are on PATH"
-[ "$resolved" = "$(printf '%s\n%s' "$FB/guards/systemctl" "$FB/notify-owner")" ] && [ -x "$FB/systemctl" ] && ok || { no "$resolved"; echo aborting; exit 1; }
-
-t "agents-stop stops agent@code-review service and timer"
-frun agents-stop >/dev/null 2>&1
-grep -q 'stop agent@code-review.service' "$CALLS" && grep -q 'stop agent@code-review.timer' "$CALLS" && ok || no "$(cat "$CALLS")"
-
-t "agents-start re-enables agent@code-review.timer from KB/orchestrator.md"
-: >"$CALLS"; frun agents-start >/dev/null 2>&1
-grep -q '^systemctl --user enable --now agent@code-review.timer$' "$CALLS" && ok || no "$(grep enable "$CALLS")"
-
-t "agent.env: Sat 03:00 schedule valid, Workflow tool, sandbox wrap with --post, unit timeout > TIMEOUT"
-( . "$CR/agent.env"; systemd-analyze calendar "$SCHEDULE" >/dev/null 2>&1 && [ "$SCHEDULE" = "Sat *-*-* 03:00" ] &&
-  case ",$AGENT_TOOLS," in *,Workflow,*) true ;; *) false ;; esac && [ "$AGENT_WRAP" = "code-review-sandbox --post --" ] &&
-  [ "$UNIT_TIMEOUT" -gt "$TIMEOUT" ] ) && ok || no "agent.env"
-
-t "agent.env: headless claude waits for the swarm (bg ceiling > 1 h, < TIMEOUT)"
-( . "$CR/agent.env"; v=$(bash -c 'echo "${CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:-}"')
-  [ -n "$v" ] && [ "$v" -gt 3600000 ] && [ "$v" -lt $((TIMEOUT * 1000)) ] ) && ok || no "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS not exported in range"
+join roster_checks
 
 [ $fail = 0 ] && echo "code-review.test.sh: $n/$n green" || echo "code-review.test.sh: FAILURES"
 exit $fail

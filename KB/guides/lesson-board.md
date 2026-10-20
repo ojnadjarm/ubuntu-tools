@@ -1,6 +1,6 @@
 # Track every ailearning lesson's stage (not started, in development, in review, approved) on the lesson board
 
-Ticket: T272, T281 (local-only) · Last verified: 2026-10-07 by T281 temp-clone CI 4/4 rc 0, lesson-board.test.sh PASS; earlier T272: node tests 441/441 (board 5/5), CLI fixture test PASS, headless board check (43 = 29+0+13+1, 15/15 links 200, 5 widths 0 overflow)
+Ticket: T272, T281 (local-only) · Last verified: 2026-10-20 by `lesson-board --help`/`show` and file checks; 2026-10-07 by T281 temp-clone CI 4/4 rc 0, lesson-board.test.sh PASS; earlier T272: node tests 441/441 (board 5/5), CLI fixture test PASS, headless board check (43 = 29+0+13+1, 15/15 links 200, 5 widths 0 overflow)
 
 ## When to use
 - "Which lessons are done / approved / in review?", "U05 approved", a lesson ticket starts or publishes: `lesson-board`.
@@ -15,7 +15,7 @@ Ticket: T272, T281 (local-only) · Last verified: 2026-10-07 by T281 temp-clone 
 
 ## Exact commands
 ```bash
-lesson-board show                      # "1 of 43 approved · Not started 29 · ..." (+ --json)
+lesson-board show                      # "3 of 43 approved · Not started 29 · ..." (+ --json)
 lesson-board set U05 dev               # first ticket of a lesson starts
 lesson-board set U05 review            # a build is published (sites publish ailearning)
 lesson-board set U05 approved --owner  # only after the owner's word; without --owner exits 3; also makes U05's files pushable

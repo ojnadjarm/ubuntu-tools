@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# host-only: copies tools from the owner's ailearning repo
 # T347-09: a typo never runs the real job. Each CLI of the set runs in a fake HOME under `env -i`, stubs first on PATH:
 # --bogus exits 2 with no stub call, --help exits 0, --dry-run writes no log, lock, streak or summary.
 # Run: bash cli-args.test.sh   (CLI_ARGS_BIN / CLI_ARGS_SKILL / CLI_ARGS_TOOLS point it at other copies, e.g. backups)
@@ -29,7 +30,7 @@ cp "$STUBS/stub" "$FH/agents/bin/notify-owner"
 
 # declutter runs from a copy whose playwright-core and vite are stubs that record the call and exit.
 mkdir -p "$AL/u" "$AL/tools" "$AL/node_modules/playwright-core" "$AL/node_modules/vite"
-cp -r "$SRC_TOOLS/declutter.mjs" "$SRC_TOOLS/declutter" "$AL/tools/"
+[ -f "$SRC_TOOLS/declutter.mjs" ] && cp -r "$SRC_TOOLS/declutter.mjs" "$SRC_TOOLS/declutter" "$AL/tools/"
 for m in playwright-core vite; do
   printf '{"name":"%s","type":"module","main":"index.js"}\n' "$m" >"$AL/node_modules/$m/package.json"
   printf "import { appendFileSync } from 'node:fs';\nconst hit = () => { appendFileSync(process.env.CLI_CALLS, '%s\\\\n'); process.exit(0); };\nexport const chromium = { launch: hit };\nexport const createServer = hit;\n" "$m" >"$AL/node_modules/$m/index.js"
@@ -82,20 +83,24 @@ for c in moodle-keep ailearning-ci-daily; do
   call bash "$FH/agents/bin/$c" --bogus
   grep -q usage "$WORK/err" && pass "$c" "$c --bogus: usage on stderr" || fail "$c" "$c --bogus: usage on stderr"
 done
-for c in lesson-board new-lesson; do
-  bogus "$c" --bogus "$NODE" "$SRC_SKILL/$c.mjs"
-  help "$c" --help "$NODE" "$SRC_SKILL/$c.mjs"
-  help "$c" -h "$NODE" "$SRC_SKILL/$c.mjs"
-done
-call "$NODE" "$SRC_SKILL/new-lesson.mjs" --help
-for f in --lint --narrate --site --spec-only; do
-  grep -q -- "$f" "$WORK/out" || fail new-lesson "new-lesson --help describes $f"
-done
-bogus declutter --bogus "$NODE" "$AL/tools/declutter.mjs"
-help declutter --help "$NODE" "$AL/tools/declutter.mjs"
-help declutter -h "$NODE" "$AL/tools/declutter.mjs"
-call "$NODE" "$AL/tools/declutter.mjs" --bogus
-grep -q -i usage "$WORK/err" && pass declutter "declutter --bogus: usage on stderr" || fail declutter "declutter --bogus: usage on stderr"
+if [ -d "$SRC_SKILL" ]; then
+  for c in lesson-board new-lesson; do
+    bogus "$c" --bogus "$NODE" "$SRC_SKILL/$c.mjs"
+    help "$c" --help "$NODE" "$SRC_SKILL/$c.mjs"
+    help "$c" -h "$NODE" "$SRC_SKILL/$c.mjs"
+  done
+  call "$NODE" "$SRC_SKILL/new-lesson.mjs" --help
+  for f in --lint --narrate --site --spec-only; do
+    grep -q -- "$f" "$WORK/out" || fail new-lesson "new-lesson --help describes $f"
+  done
+else echo "SKIP owner data absent: $SRC_SKILL"; fi
+if [ -f "$SRC_TOOLS/declutter.mjs" ]; then
+  bogus declutter --bogus "$NODE" "$AL/tools/declutter.mjs"
+  help declutter --help "$NODE" "$AL/tools/declutter.mjs"
+  help declutter -h "$NODE" "$AL/tools/declutter.mjs"
+  call "$NODE" "$AL/tools/declutter.mjs" --bogus
+  grep -q -i usage "$WORK/err" && pass declutter "declutter --bogus: usage on stderr" || fail declutter "declutter --bogus: usage on stderr"
+else echo "SKIP owner data absent: $SRC_TOOLS/declutter.mjs"; fi
 
 # --- dry runs write nothing ----------------------------------------------------
 mkdir -p "$FH/moodle-envs/v1/www"

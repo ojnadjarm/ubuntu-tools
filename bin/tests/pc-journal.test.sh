@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
+# host-only: live kernel journal of this box
 # PT13: `pc journal` — live (journalctl -o json is 0.01 s per PLAN-PCTOOLS §0, no fixture needed).
 set -uo pipefail
 BIN="$HOME/agents/bin"
 J="$BIN/pc-journal"
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
-is()  { [ "$2" = "$3" ] && ok "$1" || nok "$1" "expected '$3', got '$2'"; }
+. "$BIN/tests/lib/budget.sh"
+. "$HOME/agents/bin/tests/lib/assert.sh"
 
 "$J" errors --since 1h --json | jq -e 'type=="array"' >/dev/null
 is 'errors --since 1h --json is valid JSON' "$?" 0
@@ -25,9 +24,10 @@ t0=$(date +%s.%N)
 n=$("$J" unit "$u" -n 5 | wc -l)
 t1=$(date +%s.%N)
 is "unit $u -n 5 prints 5 lines" "$n" 5
-awk -v a="$t0" -v b="$t1" 'BEGIN{exit !(b-a<=0.3)}' \
-  && ok "unit $u -n 5 runs in <= 0.3 s" \
-  || nok "unit $u -n 5 runs in <= 0.3 s" "$(awk -v a="$t0" -v b="$t1" 'BEGIN{printf "%.3f", b-a}')"
+bud=$(budget 0.3)
+awk -v a="$t0" -v b="$t1" -v m="$bud" 'BEGIN{exit !(b-a<=m)}' \
+  && ok "unit $u -n 5 runs in <= $bud s budget" \
+  || nok "unit $u -n 5 runs in <= $bud s budget" "$(awk -v a="$t0" -v b="$t1" 'BEGIN{printf "%.3f", b-a}')"
 
 "$J" boots --json | jq -e 'type=="array" and length>=1' >/dev/null
 is 'boots --json lists at least one boot' "$?" 0

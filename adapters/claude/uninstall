@@ -16,6 +16,9 @@ python3 "$HERE/merge-settings.py" uninstall \
 
 for d in "$HARNESS_HOME"/skills/*/; do
   name="$(basename "$d")"
+  if [ -L "$CTX/skills/$name" ] && [ "$(readlink -f "$CTX/skills/$name")" = "$(readlink -f "$d")" ]; then
+    rm -f "$CTX/skills/$name"; echo "unlinked $CTX/skills/$name"; continue
+  fi
   t="$CTX/skills/$name/SKILL.md"
   [ -L "$t" ] && [ "$(readlink -f "$t")" = "$(readlink -f "${d%/}/SKILL.md")" ] || continue
   rm -f "$t"; rmdir "$CTX/skills/$name" 2>/dev/null

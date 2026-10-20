@@ -5,10 +5,7 @@ set -uo pipefail
 LIB="$HOME/agents/bin/pclib.sh"
 FIX="$HOME/agents/bin/tests/fixtures/pclib"
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
-is()  { [ "$2" = "$3" ] && ok "$1" || nok "$1" "expected '$3', got '$2'"; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 # run <script-body> — sources pclib in a clean subshell with $WORK as the runtime dir.
 run() { XDG_RUNTIME_DIR="$WORK" PC_LEDGER="$WORK/changes.jsonl" bash -c ". '$LIB'; $1" _ "$@"; }
 
@@ -43,6 +40,10 @@ is 'cached runs the command once'  "$(run "$mk; cached t 60 c; echo 2 >$WORK/n; 
 is 'cached re-runs past the TTL'   "$(run "$mk; cached u 60 c; echo 2 >$WORK/n; cached u 0 c")"  $'run-1\nrun-2'
 is 'FRESH=1 bypasses the cache'    "$(run "$mk; cached v 60 c; echo 2 >$WORK/n; FRESH=1; cached v 60 c")" $'run-1\nrun-2'
 is 'cached writes into XDG_RUNTIME_DIR' "$(run 'echo $CACHE')" "$WORK/pc-status"
+# T634: a failed root read (empty output) is not cached; the next call retries.
+mkdir -p "$WORK/sfx/bin"; printf '#!/bin/sh\n[ -f %s/s ] && echo "ok $(cat %s/s)"\n' "$WORK" "$WORK" >"$WORK/sfx/bin/smartctl"; chmod +x "$WORK/sfx/bin/smartctl"
+is 'pc_smart_json caches no empty result' \
+  "$(PC_FIXTURE=$WORK/sfx run "pc_smart_json; echo 1 >$WORK/s; pc_smart_json; echo 2 >$WORK/s; pc_smart_json")" $'\nok 1\nok 1'
 
 # 6. the ledger path is overridable and defaults under ~/agents/log.
 is 'PC_LEDGER is overridable' "$(run 'echo $PC_LEDGER')" "$WORK/changes.jsonl"

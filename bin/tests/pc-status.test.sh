@@ -6,9 +6,7 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PCS="$HERE/../pc-status"
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 has() { case "$2" in *"$3"*) ok "$1";; *) nok "$1" "'$3' not in: $2";; esac; }
 
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
@@ -36,7 +34,7 @@ printf '#!/bin/sh\nexit 1\n' >"$WORK/bin/ping"
 chmod +x "$WORK/bin"/*
 
 seed() { printf '%s\n%s\n' "$(date +%s)" "$2" >"$WORK/pc-status/$1"; }
-seed smart "$(printf 'FAILED\t95\t5\t7')"
+seed io_smart '{"smart_status":{"passed":false},"nvme_smart_health_information_log":{"percentage_used":95,"available_spare":5,"media_errors":7}}'
 seed ts_pair "$(printf 'Stopped\t100.0.0.1')"
 seed tailscale '{}'
 seed docker ''
@@ -47,6 +45,10 @@ seed wifi none
 seed lock unlocked
 seed mode agent
 seed keepalive "$(printf 'vass-frontend.service failed\nhttp-moodle45 502')"
+# Info probes no case asserts (pc idle, agents-log, claude, upower, …): one fixture read every run reuses.
+seed_info() { local k; for k in look_ratio: idle:5 players:none seat_logins:0 claude_sessions:0 time_to_empty: power_profile:balanced dns:; do
+  printf '%s\n%s\n' "$(date +%s)" "${k#*:}" >"$1/${k%%:*}"; done; }
+seed_info "$WORK/pc-status"
 
 run_fixture() { env PATH="$WORK/bin:$PATH" XDG_RUNTIME_DIR="$WORK" "$PCS" "$@"; }
 
@@ -124,9 +126,10 @@ cat >"$WORK/fbin/systemctl" <<'S'
 case "$*" in
   *Transient*run-fixture.scope*) echo "$*" >>"$SYSTEMCTL_LOG"; echo yes;;
   *Transient*) echo "$*" >>"$SYSTEMCTL_LOG"; echo no;;
-  *--failed*--user*|*--user*--failed*) echo "fx-user.service loaded failed failed fixture"; [ -z "$FX_TRANSIENT" ] || echo "run-fixture.scope loaded failed failed fixture";;
-  *--failed*) echo "apport-autoreport.path loaded failed failed fixture"; echo "fx-sys.service loaded failed failed fixture"; [ -z "$FX_APPORT" ] || echo "apport-autoreport.service loaded failed failed fixture";;
-  *list-timers*json*) echo '[{"activates":"fx-cron.service"}]';;
+  *--failed*--user*|*--user*--failed*) [ -z "$FX_FOREIGN" ] || echo "fx-foreign-cron.service loaded failed failed fixture"; [ "$FX_FOREIGN" = only ] && exit 0
+    echo "fx-user.service loaded failed failed fixture"; [ -z "$FX_TRANSIENT" ] || echo "run-fixture.scope loaded failed failed fixture";;
+  *--failed*) [ "$FX_FOREIGN" = only ] && exit 0; echo "apport-autoreport.path loaded failed failed fixture"; echo "fx-sys.service loaded failed failed fixture"; [ -z "$FX_APPORT" ] || echo "apport-autoreport.service loaded failed failed fixture";;
+  *list-timers*json*) echo '[{"activates":"fx-cron.service"},{"activates":"fx-foreign-cron.service"}]';;
   *list-timers*) exit 0;;
   *list-unit-files*) echo "dark-eye-old.service enabled enabled";;
   *show*) printf 'Id=dark-eye-old.service\nActiveState=inactive\nSubState=dead\nType=simple\nResult=success\nUnitFileState=enabled\n';;
@@ -137,7 +140,8 @@ S
 cat >"$WORK/fbin/journalctl" <<'S'
 #!/bin/sh
 case "$*" in
-  *MESSAGE_ID*) i=0; while [ $i -lt 12 ]; do echo '{"USER_UNIT":"fx-cron.service"}'; i=$((i+1)); done;;
+  *MESSAGE_ID*) [ "$FX_FOREIGN_LOOP" = only ] || { i=0; while [ $i -lt 12 ]; do echo '{"USER_UNIT":"fx-cron.service"}'; i=$((i+1)); done; }
+    [ -z "$FX_FOREIGN_LOOP" ] || { i=0; while [ $i -lt 48 ]; do echo '{"USER_UNIT":"fx-foreign-cron.service"}'; i=$((i+1)); done; };;
   *) echo "upgrade pending";;
 esac
 S
@@ -155,13 +159,14 @@ touch -d '11 days ago' "$WORK/reboot-required"
 touch -d '2 hours ago' "$WORK/home/agents/sentinel/state/last-run"
 run_faults() {
   local d; d=$(mktemp -d "$WORK/v.XXXX"); mkdir -p "$d/pc-status"
-  for f in smart ts_pair tailscale docker docker_expected wifi mode; do cp "$WORK/pc-status/$f" "$d/pc-status/"; done
+  for f in io_smart ts_pair tailscale docker docker_expected wifi mode; do cp "$WORK/pc-status/$f" "$d/pc-status/"; done
   seed_v() { printf '%s\n%s\n' "$(date +%s)" "$2" >"$d/pc-status/$1"; }
-  seed_v internet reachable; seed_v screenshot 102400; seed_v lock unlocked; seed_v keepalive ''
+  seed_v internet reachable; seed_v screenshot 102400; seed_v lock unlocked; seed_v keepalive ''; seed_info "$d/pc-status"
   env PATH="$WORK/fbin:$WORK/bin:$PATH" XDG_RUNTIME_DIR="$d" HOME="$WORK/home" PC_PROC="$WORK/proc" \
-    PC_REBOOT_FILE="$WORK/reboot-required" ALARMS="${ALARMS:-$WORK/alarms-crit.json}" \
+    PC_REBOOT_FILE="${REBOOT_FILE:-$WORK/reboot-required}" ALARMS="${ALARMS:-$WORK/alarms-crit.json}" \
     FAILED_UNITS_IGNORE="apport-autoreport.path" KEEPALIVE_UNITS="" KEEPALIVE_HTTP="" \
     SYSTEMCTL_LOG="$WORK/systemctl.log" FX_TRANSIENT="${FX_TRANSIENT:-}" FX_APPORT="${FX_APPORT:-}" \
+    FX_FOREIGN="${FX_FOREIGN:-}" FX_FOREIGN_LOOP="${FX_FOREIGN_LOOP:-}" PC_NOT_OURS='^fx-foreign' \
     PC_CRASH_DIR="${CRASH_DIR:-$WORK/crash-empty}" "$PCS" "$@"
 }
 st() { jq -r --arg s "$2" --arg k "$3" '.sections[$s][$k].state + " " + .sections[$s][$k].value' <<<"$1"; }
@@ -169,20 +174,31 @@ j=$(run_faults --json)
 has "failed units FAIL with names"        "$(st "$j" host failed_units)" "FAIL 2: fx-sys.service, user:fx-user.service"
 case "$(st "$j" host failed_units)" in *apport*) nok "ignore list drops a documented unit" "$(st "$j" host failed_units)";; *) ok "ignore list drops a documented unit";; esac
 has "no transient unit is OK 0"         "$(st "$j" host failed_transient)" "OK 0"
-# TSP-044: a failed transient run-* scope is listed apart and does not gate FAIL.
-jt=$(FX_TRANSIENT=1 run_faults --json)
-has "transient scope listed apart"        "$(st "$jt" host failed_transient)" "WARN 1: user:run-fixture.scope"
-has "transient scope not in failed_units" "$(st "$jt" host failed_units)" "FAIL 2: fx-sys.service, user:fx-user.service"
-case "$(FX_TRANSIENT=1 run_faults --brief)" in *failed_transient*) nok "transient does not reach brief FAIL" "listed";; *) ok "transient does not reach brief FAIL";; esac
-# T442: a failed apport upload is a WARN naming the /var/crash report; other failed units stay FAIL.
+has "no foreign unit is OK 0"           "$(st "$j" host failed_foreign)" "OK 0"
+# T721: a failed unit matching PC_NOT_OURS is a WARN row of its own, never a host FAIL.
+jf=$(FX_FOREIGN=1 run_faults --json)
+has "foreign unit listed apart"         "$(st "$jf" host failed_foreign)" "WARN 1: user:fx-foreign-cron.service (not ours)"
+has "foreign unit not in failed_units"  "$(st "$jf" host failed_units)" "FAIL 2: fx-sys.service, user:fx-user.service"
+jo=$(FX_FOREIGN=only run_faults --json)
+has "only foreign failed: failed_units OK 0" "$(st "$jo" host failed_units)" "OK 0"
+c=$(FX_FOREIGN=only run_faults --check)
+case "$c" in *failed_units*|*failed_foreign*) nok "foreign not a --check FAIL" "$c";; *) ok "foreign not a --check FAIL";; esac
+# One run per fixture state: transient scope + apport report + no reboot flag share a run, as do
+# the brief, the check and the WARN band; each assert reads only its own rows.
 mkdir -p "$WORK/crash-empty" "$WORK/crash"
 printf 'ProblemType: Crash\nDate: Mon Oct 19 08:31:46 2026\nExecutablePath: /usr/bin/fx-crasher\nCoreDump: base64\n' >"$WORK/crash/_usr_bin_fx-crasher.1000.crash"
+# TSP-044: a failed transient run-* scope is listed apart and does not gate FAIL.
+jt=$(FX_TRANSIENT=1 FX_APPORT=1 CRASH_DIR="$WORK/crash" REBOOT_FILE="$WORK/no-reboot-required" run_faults --json)
+has "transient scope listed apart"        "$(st "$jt" host failed_transient)" "WARN 1: user:run-fixture.scope"
+has "transient scope not in failed_units" "$(st "$jt" host failed_units)" "FAIL 2: fx-sys.service, user:fx-user.service"
+bb=$(FX_TRANSIENT=1 run_faults --brief); b=${bb##*FAIL=}
+case "$bb" in *failed_transient*) nok "transient does not reach brief FAIL" "listed";; *) ok "transient does not reach brief FAIL";; esac
+# T442: a failed apport upload is a WARN naming the /var/crash report; other failed units stay FAIL.
 has "no apport failure is crash_report OK" "$(st "$j" host crash_report)" "OK none"
-ja=$(FX_APPORT=1 CRASH_DIR="$WORK/crash" run_faults --json)
-has "apport failed is a crash_report WARN" "$(st "$ja" host crash_report)" "WARN /usr/bin/fx-crasher Mon Oct 19 08:31:46 2026"
-has "apport is not in failed_units"        "$(st "$ja" host failed_units)" "FAIL 2: fx-sys.service, user:fx-user.service"
-has "apport without a report still WARNs"  "$(st "$(FX_APPORT=1 run_faults --json)" host crash_report)" "WARN apport-autoreport.service failed, no report in $WORK/crash-empty"
-case "$(FX_APPORT=1 CRASH_DIR="$WORK/crash" run_faults --check)" in *"FAIL host.failed_units:"*apport*) nok "apport not a --check FAIL" "listed";; *) ok "apport not a --check FAIL";; esac
+has "apport failed is a crash_report WARN" "$(st "$jt" host crash_report)" "WARN /usr/bin/fx-crasher Mon Oct 19 08:31:46 2026"
+has "apport is not in failed_units"        "$(st "$jt" host failed_units)" "FAIL 2: fx-sys.service, user:fx-user.service"
+c=$(FX_APPORT=1 CRASH_DIR="$WORK/crash" run_faults --check); crc=$?
+case "$c" in *"FAIL host.failed_units:"*apport*) nok "apport not a --check FAIL" "listed";; *) ok "apport not a --check FAIL";; esac
 bad_argv=$(grep -v -- '^--user show -p Transient --value \|^show -p Transient --value ' "$WORK/systemctl.log" 2>/dev/null | head -1)
 [ -z "$bad_argv" ] && [ -s "$WORK/systemctl.log" ] && ok "selftest: stub saw only show -p Transient" || nok "selftest: stub argv" "${bad_argv:-no calls logged}"
 has "swap 99% is FAIL"                    "$(st "$j" resources swap)" "FAIL 99%"
@@ -191,36 +207,95 @@ has "netdata CRITICAL is FAIL"            "$(st "$j" host netdata_alerts)" "FAIL
 has "sentinel 2 h old is FAIL"            "$(st "$j" agents sentinel_age)" "FAIL 120 min"
 has "enabled-but-dead fleet unit is FAIL" "$(st "$j" agents fleet)" "FAIL dark-eye-old.service inactive"
 has "timer unit loop is FAIL"             "$(st "$j" agents unit_loops)" "FAIL fx-cron.service 12 fails/h"
-b=$(run_faults --brief); b=${b##*FAIL=}
+has "no foreign unit loop is OK none"     "$(st "$j" agents unit_loops_foreign)" "OK none"
+# T734: a timer loop of a unit matching PC_NOT_OURS is a WARN row of its own, never unit_loops.
+jl=$(FX_FOREIGN_LOOP=1 run_faults --json)
+has "foreign loop listed apart"           "$(st "$jl" agents unit_loops_foreign)" "WARN fx-foreign-cron.service 48 fails/h (not ours)"
+case "$(st "$jl" agents unit_loops)" in "FAIL fx-cron.service 12 fails/h: upgrade pending") ok "foreign loop not in unit_loops";; *) nok "foreign loop not in unit_loops" "$(st "$jl" agents unit_loops)";; esac
+jl=$(FX_FOREIGN_LOOP=only run_faults --json)
+has "only foreign loop: unit_loops OK"    "$(st "$jl" agents unit_loops)" "OK no timer-driven unit failing >= 10/h"
+has "no moodle-cron mark is OK"           "$(st "$j" agents moodle_upgrade)" "OK none pending"
 for t in failed_units fleet netdata reboot sentinel swap unit_loops; do has "brief lists $t" "$b" "$t"; done
-c=$(run_faults --check); crc=$?
 { [ "$crc" = 1 ] && grep -q '^FAIL host.reboot_required: 11 d' <<<"$c"; } \
   && ok "--check exits 1 and names the pending reboot" || nok "--check on live faults" "rc=$crc $c"
-# The WARN band: 85% swap, 2-day reboot, WARNING-only alarms, a fresh sentinel tick.
+# The WARN band: 85% swap, 2-day reboot, WARNING-only alarms, a fresh sentinel tick, a moodle-cron mark,
+# an apport failure without a report.
 printf 'MemTotal: 32000000 kB\nMemAvailable: 30000000 kB\nSwapTotal: 1000000 kB\nSwapFree: %s kB\n' 150000 >"$WORK/proc/meminfo"
 touch -d '2 days ago' "$WORK/reboot-required"; touch "$WORK/home/agents/sentinel/state/last-run"
-j=$(ALARMS="$WORK/alarms-warn.json" run_faults --json)
+mkdir -p "$WORK/home/agents/state"; touch -d '2026-01-01 03:04' "$WORK/home/agents/state/moodle-cron-fx-app-1.pending"
+j=$(FX_APPORT=1 ALARMS="$WORK/alarms-warn.json" run_faults --json)
+rm -f "$WORK/home/agents/state/moodle-cron-fx-app-1.pending"
+has "moodle-cron mark is one WARN"        "$(st "$j" agents moodle_upgrade)" "WARN pending: fx-app-1 since 03:04"
+has "apport without a report still WARNs"  "$(st "$j" host crash_report)" "WARN apport-autoreport.service failed, no report in $WORK/crash-empty"
 has "swap 85% is WARN"                    "$(st "$j" resources swap)" "WARN 85%"
 has "reboot pending 2 d is WARN"          "$(st "$j" host reboot_required)" "WARN 2 d"
 has "netdata WARNING only is WARN"        "$(st "$j" host netdata_alerts)" "WARN 1 WARNING"
 has "fresh sentinel tick is OK"           "$(st "$j" agents sentinel_age)" "OK 0 min"
 nf=$(jq '[.sections[][]|select(.state=="FAIL")]|length' <<<"$j")
 [ "$(jq .fails <<<"$j")" = "$nf" ] && ok "WARN rows are not counted as failures" || nok "WARN not counted" "fails=$(jq .fails <<<"$j") FAIL rows=$nf"
-rm -f "$WORK/reboot-required"
-j=$(run_faults --json)
-has "no reboot-required file is OK"       "$(st "$j" host reboot_required)" "OK no"
-# T398: a reboot flag without its .pkgs list is read quietly.
-printf '*** System restart required ***\n' >"$WORK/reboot-required"; mv "$WORK/reboot-required.pkgs" "$WORK/pkgs.bak"
-j=$(run_faults --json 2>"$WORK/rb.err")
-has "a reboot flag without .pkgs is 0 d"  "$(st "$j" host reboot_required)" "OK 0 d"
-has "a missing .pkgs prints no error"     "$(grep -c 'reboot-required.pkgs' "$WORK/rb.err")" 0
-rm -f "$WORK/reboot-required"; mv "$WORK/pkgs.bak" "$WORK/reboot-required.pkgs"
+has "no reboot-required file is OK"       "$(st "$jt" host reboot_required)" "OK no"
+# T398: a reboot flag without its .pkgs list is read quietly. T466: a fresh box (no USER, no
+# KEEPALIVE_*) runs quietly and lists no keepalive row.
+mkdir -p "$WORK/rb"; printf '*** System restart required ***\n' >"$WORK/rb/reboot-required"
+jf=$( (unset USER; REBOOT_FILE="$WORK/rb/reboot-required" run_faults --json) 2>"$WORK/nouser.err"); frc=$?
+has "a reboot flag without .pkgs is 0 d"  "$(st "$jf" host reboot_required)" "OK 0 d"
+has "a missing .pkgs prints no error"     "$(grep -c 'reboot-required.pkgs' "$WORK/nouser.err")" 0
+{ [ "$frc" = 0 ] && [ ! -s "$WORK/nouser.err" ]; } && ok "unset USER runs quietly" || nok "unset USER" "rc=$frc $(head -1 "$WORK/nouser.err")"
+ka=$(jq -c '.sections.keepalive // {}' <<<"$jf")
+[ "$ka" = '{}' ] && ok "no KEEPALIVE_* lists no keepalive row" || nok "no KEEPALIVE_* rows" "$ka"
 
 # --- 8. T350: SSH is up while ssh.service OR ssh.socket is active --------------
 ssh_row() { seed services "$(printf '%s\n' active active "$1" active active active active "$2")"; st "$(run_fixture --json)" services ssh; }
 has "ssh service inactive + socket active is OK" "$(ssh_row inactive active)" "OK active (socket)"
 has "ssh service + socket inactive is FAIL"      "$(ssh_row inactive inactive)" "FAIL inactive"
 rm -f "$WORK/pc-status/services"
+
+# --- 9. T517: an exited service behind an inactive profile is not a missing service
+# Expected services as compose-services prints them; fxtool is profile-only, so it is not listed.
+dk_row() { seed docker "$1"; seed docker_expected 'fx|app db '; st "$(run_fixture --json)" docker fx; }
+has "inactive profile container exited is 2/2 OK" \
+  "$(dk_row "$(printf 'fx|running|fx-app-1||app\nfx|running|fx-db-1||db\nfx|exited|fx-tool-1||tool')")" "OK 2/2 up"
+has "an expected service down is still FAIL" \
+  "$(dk_row "$(printf 'fx|running|fx-app-1||app\nfx|exited|fx-db-1||db\nfx|exited|fx-tool-1||tool')")" "FAIL 1/2 up"
+seed docker ''; seed docker_expected ''
+
+# --- 10. T634: SMART comes from pclib's pc_smart_json (io_smart JSON), no raw sudo
+j=$(run_fixture --json)
+has "smart health from io_smart"      "$(st "$j" disk smart)" "FAIL FAILED"
+has "smart percent_used from io_smart" "$(st "$j" disk percent_used)" "FAIL 95%"
+has "smart spare from io_smart"       "$(st "$j" disk available_spare)" "FAIL 5%"
+has "smart media_errors from io_smart" "$(st "$j" disk media_errors)" " 7"
+[ "$(grep -c 'sudo -n smartctl' "$PCS")" = 0 ] && ok "no raw sudo smartctl" || nok "no raw sudo smartctl" "still present"
+
+# --- 11. T943: --fresh re-probes what the sentinel repairs, slow keys keep their TTL
+mkdir -p "$WORK/frbin" "$WORK/fr/pc-status"
+printf '#!/bin/sh\necho "fx|exited|fx-app-1||app"\n' >"$WORK/frbin/docker"
+printf '#!/bin/sh\necho %s\n' "'{\"BackendState\":\"Running\",\"TailscaleIPs\":[\"100.0.0.9\"]}'" >"$WORK/frbin/tailscale"
+chmod +x "$WORK/frbin"/*
+cp "$WORK/pc-status"/* "$WORK/fr/pc-status/"
+fr() { printf '%s\n%s\n' "$(( $(date +%s) - 120 ))" "$2" >"$WORK/fr/pc-status/$1"; }
+fr services "$(printf 'active\n%.0s' 1 2 3 4 5 6 7 8)"; fr docker 'fx|running|fx-app-1||app'
+fr look_ratio 'TOTAL 1 2 0.77'; seed_at() { printf '%s\n%s\n' "$(( $(date +%s) - 30 ))" "$2" >"$WORK/fr/pc-status/$1"; }
+seed_at unit_loops 'fx-marker.service 99 fails/h'
+j=$(env PATH="$WORK/frbin:$WORK/bin:$PATH" XDG_RUNTIME_DIR="$WORK/fr" "$PCS" --json --fresh)
+has "--fresh re-probes services"        "$(st "$j" services docker)" "FAIL inactive"
+has "--fresh re-probes docker"          "$(st "$j" docker fx)" "FAIL 0/1 up"
+has "--fresh re-probes tailscale"       "$(st "$j" network tailscale)" "OK Running"
+has "--fresh serves look_ratio by TTL"  "$(jq -r .pc_look_ratio_24h <<<"$j")" "0.77"
+has "--fresh serves unit_loops by TTL"  "$(st "$j" agents unit_loops)" "FAIL fx-marker.service 99 fails/h"
+# docker_expected keeps its 24 h entry until a compose file is newer than it.
+mkdir -p "$WORK/cebin" "$WORK/envs/fx"; printf 'name: fx\n' >"$WORK/envs/fx/docker-compose.yml"
+cat >"$WORK/cebin/docker" <<S
+#!/bin/sh
+case "\$*" in *config_files*) echo "$WORK/envs/fx/docker-compose.yml";; *compose*) printf 'app\nweb\n';;
+  *) echo "fx|exited|fx-app-1||app";; esac
+S
+chmod +x "$WORK/cebin/docker"
+ce() { env PATH="$WORK/cebin:$WORK/bin:$PATH" XDG_RUNTIME_DIR="$WORK/fr" MOODLE_ENVS_DIR="$WORK/envs" "$PCS" --json --fresh; }
+touch -d '1 hour ago' "$WORK/envs/fx/docker-compose.yml"; fr docker_expected 'fx|app '
+has "--fresh serves docker_expected by TTL"     "$(st "$(ce)" docker fx)" "FAIL 0/1 up"
+fr docker_expected 'fx|app '; touch "$WORK/envs/fx/docker-compose.yml"
+has "an edited compose file re-reads docker_expected" "$(st "$(ce)" docker fx)" "FAIL 0/2 up"
 
 # --- 6. the fixture wrote only into its own cache dir ------------------------
 # The real timer may refresh the real entry mid-run; a leak would be the fixture's exact entry.

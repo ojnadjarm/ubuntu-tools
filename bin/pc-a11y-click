@@ -5,8 +5,8 @@ name=""; role=(); app=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help) echo 'usage: pc a11y-click "name" [--role R] [--app SUB]'; exit 0;;
-    --role) role=(--role "$2"); shift 2;;
-    --app) app="$2"; shift 2;;
+    --role) role=(--role "$2"); shift 2 || exit 2;;
+    --app) app="$2"; shift 2 || exit 2;;
     *) name="$1"; shift;;
   esac
 done

@@ -51,7 +51,8 @@ class OneCopy(unittest.TestCase):
         with tempfile.TemporaryDirectory() as h:
             os.makedirs(os.path.join(h, "agents/x"))
             open(os.path.join(h, "agents/x/BRIEF.md"), "w").close()
-            with mock.patch.object(system, "HOME", h), \
+            os.makedirs(os.path.join(h, "units/agent@x.timer.d"))
+            with mock.patch.object(system, "HOME", h), mock.patch.object(system.runners, "UNIT_DIR", os.path.join(h, "units")), \
                  mock.patch.object(system, "unit_props", return_value={}), \
                  mock.patch.object(system.runners, "calendar", return_value="Mon,Thu *-*-* 03:00"), \
                  mock.patch.object(system.runners, "view", side_effect=lambda s, F, r, hc: r):

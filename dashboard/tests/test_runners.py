@@ -22,19 +22,28 @@ class Env(unittest.TestCase):
         finally:
             os.unlink(f.name)
         self.assertEqual(env["SCHEDULE"], "2099-01-01 00:00:00")
-        self.assertEqual(runners.spec("s", env), {"kind": "bash-timer", "unit": "chk.timer", "tmux": ""})
-        self.assertEqual(runners.spec("s", {})["unit"], "agent@s.timer")
-        self.assertEqual(runners.spec("s", {"RUNNER_KIND": "bogus", "RUNNER_UNIT": "a"})["kind"], "timer-agent")
+        with tempfile.TemporaryDirectory() as units, mock.patch.object(runners, "UNIT_DIR", units):
+            os.mkdir(os.path.join(units, "agent@s.timer.d"))
+            self.assertEqual(runners.spec("s", env), {"kind": "bash-timer", "unit": "chk.timer", "tmux": ""})
+            self.assertEqual(runners.spec("s", {})["unit"], "agent@s.timer")
+            self.assertEqual(runners.spec("s", {"RUNNER_KIND": "bogus", "RUNNER_UNIT": "a"})["kind"], "timer-agent")
+            self.assertEqual(runners.spec("od", {"ENABLED": "no"}), {"kind": "on-demand", "unit": "agent@od.service", "tmux": ""})
 
 
 class Kinds(unittest.TestCase):
     def test_timer_agent_keeps_row(self):
-        s = runners.spec("x", {})
+        s = {"kind": "timer-agent", "unit": "agent@x.timer", "tmux": ""}
         ok = runners.view(s, facts({}), dict(ROW, enabled="enabled"))
         self.assertEqual((ok["kind"], ok["on"], ok["health"], ok["schedule"]), ("timer-agent", True, "ok", ROW["schedule"]))
         bad = runners.view(s, facts({}), dict(ROW, enabled="enabled", last={"end": "x", "exit": "1"}))
         self.assertEqual(bad["health"], "bad")
         self.assertEqual(runners.view(s, facts({}), ROW)["health"], "off")
+
+    def test_on_demand(self):
+        s = {"kind": "on-demand", "unit": "agent@od.service", "tmux": ""}
+        r = runners.view(s, facts({}), dict(ROW, enabled="no", schedule="on demand"))
+        self.assertEqual((r["kind"], r["on"], r["health"], r["schedule"]), ("on-demand", False, "off", "on demand"))
+        self.assertEqual(runners.facts([s], lambda p, u: self.fail("probed %s" % u) if u else {}), {"units": {}, "next": {}, "cal": {}, "tmux": {}})
 
     def bash(self, timer_state="active", result="success", status="0"):
         s = {"kind": "bash-timer", "unit": "chk.timer", "tmux": ""}

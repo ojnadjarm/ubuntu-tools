@@ -7,10 +7,7 @@ BIN="$HOME/agents/bin"
 PC="$BIN/pc-dbus"
 FIX="$BIN/tests/fixtures/dbus"
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
-is()  { [ "$2" = "$3" ] && ok "$1" || nok "$1" "expected '$3', got '$2'"; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 fx()  { PC_FIXTURE="$FIX" XDG_RUNTIME_DIR="$WORK" "$PC" "$@"; }
 
 # 1. shape: the description line pc help prints, -h, and the exit codes.

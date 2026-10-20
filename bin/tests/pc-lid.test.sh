@@ -3,10 +3,7 @@
 set -uo pipefail
 BIN="$HOME/agents/bin"
 L="$BIN/pc-lid"
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
-is()  { [ "$2" = "$3" ] && ok "$1" || nok "$1" "expected '$3', got '$2'"; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 
 ## --- watcher logic: fixture events through a fake bus ----------------------

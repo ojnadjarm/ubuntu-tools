@@ -1,6 +1,6 @@
 # three.js WebGPU/TSL performance: shader codegen stalls, warm-up, shared materials, on-demand render, MSAA
 
-Ticket: T69 (Atelier perf), T70 web-precompiled · Last verified: 2026-09-24 by T69's adversarial re-measure (`perf/verify.md`) and T70's pixel-identical 8-beat diff
+Ticket: T69 (Atelier perf), T70 web-precompiled · Last verified: 2026-10-20 (T846) by `test -e` on every path, import counts 33/11, MCP playwright-core path / 2026-10-19 by `test -e` on every path and `idle.mjs webgl2 1920 1080 1` (patched import, below) against the served `dist` / 2026-09-24 by T69's re-measure (`perf/verify.md`) and T70's 8-beat diff
 
 ## When to use
 - A three.js r18x `WebGPURenderer`/TSL page loads slowly, freezes on first frames or mid-play, or keeps the GPU busy
@@ -34,6 +34,10 @@ node why-compile.mjs webgl2                   # which state change triggers reco
 Test on `http://localhost` / `[::1]` (secure) or the https drop (`/drop-link`), never `http://<tailnet>:8070`.
 
 ## Pitfalls (measured)
+- **The bench scripts do not start as-is** (2026-10-19): 33 `T65/perf` scripts import playwright-core from
+  `~/agents/research/…/atelier/node_modules` (moved, and node_modules deleted), the 11 in `T70/web-precompiled/bench` from
+  `../app/node_modules` (deleted). Run a copy with the import swapped to the MCP one, outputs then land beside the copy:
+  `T=$(mktemp -d); sed "s#'[^']*playwright-core/index.mjs'#'$HOME/.nvm/versions/node/v24.20.0/lib/node_modules/@playwright/mcp/node_modules/playwright-core/index.mjs'#" idle.mjs > $T/idle.mjs; cd $T`
 - **Unique node graphs = unique pipelines.** Fresh `uniform()`/`color()` per part made ~80 materials → 100–150 programs.
   Families: 153 → 76 programs, GL links 104 → 44; T70: 213 → 52 builds.
 - **Warm the exact frame.** Hiding the wall (whose SpotLight was its child) dropped to 4 lights: first frame stalled

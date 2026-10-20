@@ -5,11 +5,9 @@ set -uo pipefail
 BIN="$HOME/agents/bin"
 FIX="$BIN/tests/fixtures/io"
 TOPFIX="$BIN/tests/fixtures/top"
+. "$BIN/tests/lib/budget.sh"
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
-is()  { [ "$2" = "$3" ] && ok "$1" || nok "$1" "expected '$3', got '$2'"; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 
 # 1. disks: Δ over a 1 s window (100 sectors*512=51200B read/write delta -> 10.24 MB/s each).
 run_disks() { PC_PROC="$FIX/proc" PC_FIXTURE="$FIX" XDG_RUNTIME_DIR="$WORK" "$BIN/pc-io" disks --seconds 1 "$@"; }
@@ -41,8 +39,9 @@ t0=$(date +%s.%N)
 "$BIN/pc-io" --seconds 0.3 --json >/dev/null
 t1=$(date +%s.%N)
 wall=$(python3 -c "print($t1-$t0)")
-python3 -c "import sys; sys.exit(0 if $wall <= 0.8 else 1)" && ok "live default run stays <= 0.8 s wall ($wall s)" \
-  || nok 'live default run stays <= 0.8 s wall' "$wall s"
+b=$(budget 0.8)
+python3 -c "import sys; sys.exit(0 if $wall <= $b else 1)" && ok "live default run stays <= $b s wall budget ($wall s)" \
+  || nok "live default run stays <= $b s wall budget" "$wall s"
 
 [ $bad = 0 ] && echo 'PASS pc-io' || echo 'FAIL pc-io'
 exit $bad

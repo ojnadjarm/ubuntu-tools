@@ -4,10 +4,7 @@
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$(dirname "$here")/sentinel-check"
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
-is()  { [ "$2" = "$3" ] && ok "$1" || nok "$1" "got '$2', want '$3'"; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 BIN="$WORK/agents/bin"; ST="$WORK/agents/sentinel/state"; CALLS="$WORK/calls.log"

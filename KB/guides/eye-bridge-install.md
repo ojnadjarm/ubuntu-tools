@@ -1,6 +1,6 @@
 # Install, move or upgrade the Eye ↔ Claude Code bridge (eye-relay, eye-channel, eye tap)
 
-Ticket: T280 · Last verified: 2026-10-07 by `~/the-dark-eye/bridge/relay/tests/run.sh` (7/7 files, installer sandbox 21/21) and a live switch
+Ticket: T280 · Last verified: 2026-10-20 (T846) by paths, links, `install.sh` usage and source constants (poll 50 s, bus MAX 200, 0.5 s spool poll), no test run; 2026-10-07 by `~/the-dark-eye/bridge/relay/tests/run.sh` (7/7 files, installer sandbox 21/21) and a live switch
 
 ## When to use
 Installing the voice channel on a box, adding a brain, or moving its files. Not for the body itself (`bridge/install.sh`).

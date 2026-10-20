@@ -6,6 +6,14 @@ BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FIX="$BIN/tests/fixtures/pcbench"
 PB="$BIN/pcbench"
 fail=0
+for d in "$HOME/agents/bench/arms/new" "$HOME/agents/bench/arms/old"; do
+  [ -d "$d" ] || { echo "pcbench.test.sh: SKIP owner data absent: $d (bench/arms/build-*.sh)"; exit 0; }
+done
+# Two suites at once (parallel agents) would race on bench/.lock and the shared fixture root.
+LOCK="${XDG_RUNTIME_DIR:-/tmp}/pcbench-test.lock"
+exec 8<>"$LOCK"
+flock -w 120 8 || { echo "pcbench.test.sh: SKIP lock held by pid $(<"$LOCK") for 120 s"; exit 0; }
+echo $$ >"$LOCK"
 t() { printf '%-52s' "pcbench: $1"; }
 ok() { echo OK; }
 no() { echo "FAIL — $1"; fail=1; }
@@ -142,7 +150,7 @@ rm -rf "$GF"
 
 t "fixture.sh clean removes the fixture root"
 FIXLIB="$HOME/agents/bench/tasks/_lib/fixture.sh"
-"$HOME/agents/bench/arms/exec.sh" --selftest new >/dev/null 2>&1  # builds the fixture
+bash "$FIXLIB" ensure >/dev/null 2>&1  # builds the fixture, as arms/exec.sh does before every trial
 FXROOT=$(bash "$FIXLIB" root)
 bash "$FIXLIB" clean
 [ ! -e "$FXROOT" ] && ok || no "$FXROOT still present after clean"
@@ -281,6 +289,18 @@ t "fp failed units: pcbench-* fixture ignored";   eq pcb "$(fpu pcbench-fail.ser
 t "fp failed units: a new real failure differs";  eq new "$(fpu bar.service foo.service daily.service)" 'bar.service,daily.service,foo.service'
 rm -rf "$FPX"
 
+# --- 3f. PCBENCH_FP_<FIELD> fixtures replace live reads; a fixture change shows in the diff ---
+FPF=$(mktemp -d); echo "web:running" > "$FPF/docker"; echo 0 > "$FPF/null_modules"; echo fixture > "$FPF/still"
+# The slow live reads (gdctl, pc win list, pc mode, tailscale, sudo ufw) read a constant file: only docker/null_modules are asserted.
+fpf() { PCBENCH_FP_DOCKER="$FPF/docker" PCBENCH_FP_NULL_MODULES="$FPF/null_modules" PCBENCH_FP_MONITORS="$FPF/still" \
+  PCBENCH_FP_WIN_LIST="$FPF/still" PCBENCH_FP_PC_MODE="$FPF/still" PCBENCH_FP_TAILSCALE="$FPF/still" PCBENCH_FP_UFW="$FPF/still" \
+  bash "$BIN/pcbench.d/fingerprint.sh"; }
+b=$(fpf); echo 1 > "$FPF/null_modules"; echo "web:running,db:running" > "$FPF/docker"; a=$(fpf)
+t "fp fixture: field reads the file";             eq fx "$(echo "$b" | awk -F'\t' '$1=="docker"{print $2}')" 'web:running'
+t "fp fixture: mutation between reads diffs"
+eq dd "$(diff <(echo "$b") <(echo "$a") | grep -cE '^[<>] (docker|null_modules)')" '4'
+rm -rf "$FPF"
+
 # --- 4. end to end with a fake claude --------------------------------------
 if command -v systemd-run >/dev/null && systemctl --user is-system-running >/dev/null 2>&1; then
   TMPBIN=$(mktemp -d)   # not under ~/agents/bin: the arm bind-mount would hide it
@@ -288,9 +308,11 @@ if command -v systemd-run >/dev/null && systemctl --user is-system-running >/dev
   # the arm bind-mounts over ~/agents/bin, so the fixture must live outside it during the trial
   cp "$FIX/streams/d01-new.jsonl" "$TMPBIN/stream.jsonl"
   export PCBENCH_FAKE_STREAM="$TMPBIN/stream.jsonl"
-  # other agents (and the sentinel) start and stop containers while the suite runs; the docker
-  # hash is not this trial's doing, so it is ignored here — never in a real A/B run.
-  export PCBENCH_IGNORE_FP=docker
+  # Fields other agents move while the suite runs read fixtures here, never in a real A/B run.
+  FPE=$(mktemp -d)
+  for fld in default_sink null_modules failed_user_units docker monitors pc_mode win_list ledger_lines; do
+    echo "fixture-$fld" > "$FPE/$fld"; export "PCBENCH_FP_${fld^^}=$FPE/$fld"; done
+  echo 0 > "$FPE/ledger_lines"
   export PCBENCH_PATH="$TMPBIN:$HOME/.local/bin:$HOME/agents/bin:/usr/local/bin:/usr/bin:/bin"
   before=$(bash "$BIN/pcbench.d/fingerprint.sh")
   # --allow-stale-arm: this trial only needs the arm to exist, not to match the live tree.
@@ -307,17 +329,14 @@ if command -v systemd-run >/dev/null && systemctl --user is-system-running >/dev
     t "e2e report renders"; "$PB" report "$run" > /dev/null 2>&1 && ok || no "report failed"
   fi
   t "fingerprint unchanged"
-  # docker/win_list/ledger move under the owner's own hands; compare the fields a trial owns.
-  keep='default_sink|null_modules|power_profile|failed_user_units|tailscale|ufw|tmux_claude|pc_mode|uptime_since|pcbench_units'
-  if [ "$(echo "$before" | grep -E "^($keep)")" = "$(echo "$after" | grep -E "^($keep)")" ]; then ok; else
-    no "$(diff <(echo "$before") <(echo "$after") | tr '\n' ' ')"; fi
+  [ "$before" = "$after" ] && ok || no "$(diff <(echo "$before") <(echo "$after") | tr '\n' ' ')"
   t "no pcbench units left"; eq units "$(systemctl --user list-units 'pcbench-*' --all --no-legend | grep -v pcbench-weekly | wc -l)" '0'
   # PB09: the run above was a plain diagnose trial, but arms/exec.sh built the sandbox fixture
   # for it all the same — nothing may be left under $XDG_RUNTIME_DIR/pcbench/ afterwards.
   t "no fixture left after a run"
   FXLEFT=$(bash "$FIXLIB" root)
   [ ! -e "$FXLEFT" ] && ok || no "$FXLEFT still present after the run"
-  rm -rf "$TMPBIN"
+  rm -rf "$TMPBIN" "$FPE"
   rm -rf "$run"
 else
   echo "pcbench: end-to-end SKIP (no user systemd)"

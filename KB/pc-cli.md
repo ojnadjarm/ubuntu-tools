@@ -58,9 +58,11 @@ Regenerate: `pc help --md > ~/agents/KB/pc-cli.md`. Never hand-edit.
 
 | command | description | usage | bench (warm) |
 |---|---|---|---|
+| `pc crashes` | apport crash reports in /var/crash; archive one set so apport-autoreport stops failing. | `pc crashes [list] [--json]` | — |
 | `pc docker` | compose stacks, health, stats, logs, events, disk use; ledgered restarts. | `pc docker [stacks] [--json]                    compose project -> services (state/health/ports/uptime)` | 0.05 s |
 | `pc journal` | structured journalctl queries: errors, per-unit digest, unit tail, grep, boots, size. | `pc journal [errors\|digest\|unit\|grep\|boots\|size] [args]` | 0.06 s |
 | `pc search-index` | GNOME's file indexer (localsearch-3): its cost, busiest dirs, .trackerignore excludes. | `pc search-index status [-n N] [--json]` | — |
+| `pc tmp` | /tmp (tmpfs, RAM) leftovers: leaked test dirs, finished tickets' scratch, old build caches; dry run lists them. | `pc tmp [--apply]` | — |
 | `pc units` | systemd units/timers (user+system), per-unit cost, journal tail, guarded restart and reset-failed. | `pc units [list\|timers\|fleet\|show\|cost\|log\|deps\|start\|stop\|restart\|reset-failed] [args]` | 0.04 s |
 
 ## Safety net — the change ledger, docs, benchmarks, health
@@ -70,7 +72,7 @@ Regenerate: `pc help --md > ~/agents/KB/pc-cli.md`. Never hand-edit.
 | `pc bench` | wall, CPU and exec count for every read-only pc subcommand, warm and cold. | `pc bench [--cold] [--runs 3] [--save] [--compare] [--only <sub>…] [--json]` | — |
 | `pc doctor` | PASS/FAIL for the whole pc family without opening a window, making a sound or touching the TV. | `pc doctor [--quick] [--json] [--brief]` | 1.20 s |
 | `pc explain` | ranked KB lookup: heading > bold lead > exact quoted token > partial quote/backtick > word > substring. | `pc explain <thing…> [-n 3] [--json] [--files]` | — |
-| `pc failures` | every failure of the window on one screen: units, agent runs, CI, crashes, audit. | `pc failures [--since 24h] [--json]` | — |
+| `pc failures` | every failure of the window on one screen: units, agent runs, CI, creative CI, crashes, audit, needs, checks. | `pc failures [--since 24h] [--json]` | — |
 | `pc need` | the dashboard "need you" pushes; resolve one as a ledgered, undoable ack. | `pc need [list] [--json]` | — |
 | `pc undo` | the change ledger and its rollbacks. | `pc undo list [-n N] [--json]` | 0.02 s |
 

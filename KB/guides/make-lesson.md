@@ -1,17 +1,17 @@
 # Make a new lesson (sheet / unit) for the ailearning site in U01's shape
 
-Ticket: T102, checkpoint postmortem T111 · Last verified: 2026-09-27 (continuity rule, T124); 2026-09-26 by a sandbox scaffold of 02-layers (tsc, unit test 4/4, vite build + all postbuild checks, browser smoke of every beat) and a fresh-agent dry run
+Ticket: T102, checkpoint postmortem T111 · Last verified: 2026-10-20 (T846) by `new-lesson --help`, its source and `test -e` on every path; 2026-09-27 (continuity rule, T124); 2026-09-26 by a sandbox scaffold of 02-layers (tsc, unit test 4/4, vite build + all postbuild checks, browser smoke of every beat) and a fresh-agent dry run
 
 ## When to use
 Starting a new lesson (Sheet II onward): spec, script, look gate, scaffold, ticket plan. Skill `/make-lesson`. For one fix inside an
 existing lesson use `/explainer-engine` directly; for the look `/cutaway-style`; for audio `/kokoro-narration`.
 
 ## The path we took
-- Survey: the explainer kit's starter (`src/units/a02`, bias neuron, fixed in T92) plays but has no lesson route; U01 has the route
+- Survey: the explainer kit's starter (`~/agents/kits/explainer/starter/src/units/a02`, bias neuron, fixed in T92) plays but has no lesson route; U01 has the route
   but its plate is specific. Chosen: copy the starter's plate/sim/state/watch and overlay U01's route files kept in the skill
   (`scaffold/`), so a new unit plays the whole route on day one with a placeholder machine.
 - `new-lesson` (skill `scripts/new-lesson.mjs`, on PATH): `--spec-only` notes, `--lint` script shape, the unit scaffold (writes the
-  unit, page, test, bundle seed; patches vite input and the test-changed MAP).
+  unit, page, test, bundle seed; patches the test-changed MAP, and vite input only if `vite.config.ts` lacks the `...units` auto-discovery).
 - Architecture: `~/agent-work/research/2026-09-26/T102/ARCHITECTURE.md` (Template Method route, composition root in `main.ts`).
 
 ## Exact commands

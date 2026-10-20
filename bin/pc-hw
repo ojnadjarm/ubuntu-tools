@@ -22,7 +22,6 @@ for a in "$@"; do case $a in --firmware) FIRMWARE=1;; *) ARGV+=("$a");; esac; do
 pc_opt ${ARGV[@]+"${ARGV[@]}"}
 ARGS=("${PC_ARGS[@]}")
 
-rd() { [ -r "$1" ] && printf '%s' "$(<"$1")" || printf '%s' "${2-}"; }
 
 ## --- pci ----------------------------------------------------------------
 _lspci() { pc_cmd lspci -vmm -k; }
@@ -116,28 +115,21 @@ firmware_json() {
     || echo '[]'
 }
 
-## --- summary bits reused from the other verbs (kept small, no cross-call) --
-_smart() {
-  if [ -n "$PC_FIXTURE" ]; then pc_cmd smartctl -j -H -A /dev/nvme0
-  else pc_root smartctl -j -H -A /dev/nvme0; fi
-}
-smart_json() { cached io_smart 3600 _smart; }
-
 ## --- summary (text, ~15 lines) ----------------------------------------------
 summary_text() {
   local p c m s smart wear nvme_dev nvme_size wifi bt usb_n bios_date gpu blk
-  p=$(pci_json); c=$(cpu_json); m=$(mem_json); s=$(smart_json); usb_n=$(usb_json); blk=$(block_json)
+  p=$(pci_json); c=$(cpu_json); m=$(mem_json); s=$(pc_smart_json); usb_n=$(usb_json); blk=$(block_json)
   nvme_dev=$(jq -r '.[] | select(.class|test("Non-Volatile|SATA controller"; "i")) | .device' <<<"$p" | head -1)
   nvme_size=$(jq -r '.[] | select(.name|test("^nvme[0-9]+n[0-9]+$")) | .size' <<<"$blk" | head -1)
   wifi=$(jq -r '.[] | select(.class=="Network controller") | .device' <<<"$p" | head -1)
-  bt=$(rd "$PC_SYS/class/bluetooth/hci0/manufacturer" 'n/a')
+  bt=$(pc_rd "$PC_SYS/class/bluetooth/hci0/manufacturer" 'n/a')
   smart=$(jq -r '.smart_status.passed | if . == true then "PASSED" elif . == false then "FAILED" else "n/a" end' <<<"${s:-{\}}" 2>/dev/null); : "${smart:=n/a}"
   wear=$(jq -r '.nvme_smart_health_information_log.percentage_used // "n/a"' <<<"${s:-{\}}" 2>/dev/null); : "${wear:=n/a}"
-  bios_date=$(rd "$PC_SYS/class/dmi/id/bios_date" n/a)
+  bios_date=$(pc_rd "$PC_SYS/class/dmi/id/bios_date" n/a)
   gpu=$(jq -r '.[] | select(.class|test("VGA|3D")) | "\(.device) (\(.slot), driver \(.driver))"' <<<"$p" | head -1)
 
   printf 'host      %s (BIOS %s, %s)\n' \
-    "$(rd "$PC_SYS/class/dmi/id/product_name" n/a)" "$(rd "$PC_SYS/class/dmi/id/bios_version" n/a)" "$bios_date"
+    "$(pc_rd "$PC_SYS/class/dmi/id/product_name" n/a)" "$(pc_rd "$PC_SYS/class/dmi/id/bios_version" n/a)" "$bios_date"
   printf 'cpu       %s\n' "$(jq -r '.model' <<<"$c")"
   printf 'topology  %s socket, %s cores/socket, %s threads/core, %s threads, %s..%s MHz\n' \
     "$(jq -r '.sockets' <<<"$c")" "$(jq -r '.cores_per_socket' <<<"$c")" \
@@ -151,7 +143,7 @@ summary_text() {
   printf 'wifi      %s\n' "${wifi:-n/a}"
   printf 'bt        %s\n' "$bt"
   printf 'battery   %s%% health (design vs now), limit %s%%\n' \
-    "$(pc_bat_health)" "$(rd "$PC_BAT/charge_control_end_threshold" n/a)"
+    "$(pc_bat_health)" "$(pc_rd "$PC_BAT/charge_control_end_threshold" n/a)"
   printf 'usb       %s device(s)\n' "$(jq 'length' <<<"$usb_n")"
   jq -r '.[] | select(.name != "" and (.name|test("root hub")|not)) | "  usb     \(.id)  \(.name)"' <<<"$usb_n"
 }

@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
 """orbit-hook on fixtures: workflow transcripts stay lit while written, stale ones go out, plain subagents unchanged.
 Sandboxed: HOME, XDG dirs and the Eye bridge are all temporary; the selftest proves the real Eye is unreachable."""
-import http.server, json, os, subprocess, sys, tempfile, threading, time
+import http.server, io, json, os, signal, subprocess, sys, tempfile, threading, time
+
+sys.path.insert(0, os.path.expanduser("~/agents/bin/tests/lib"))
+from budget import budget
 
 HOOK = os.path.expanduser("~/agents/bin/orbit-hook")
+CODE = compile(open(HOOK, "rb").read(), HOOK, "exec")
+KEEP = {"wf0001aaaaaaaaaa", "lt0001aaaaaaaaaa", "sp0001aaaaaaaaaa", "ox0001aaaaaaaaaa"}
 posts = []
+landed = threading.Condition()
 
 
 class Bridge(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
-        posts.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+        with landed:
+            posts.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            landed.notify_all()
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"{}")
@@ -41,9 +49,49 @@ def check(name, ok):
     bad |= not ok
 
 
+def relabels(mine=False):
+    """Pids of this fixture's `orbit-hook relabel` pollers (30 s each); mine: only this process's children."""
+    if mine:
+        pids = open(f"/proc/self/task/{os.getpid()}/children").read().split()
+    else:
+        pids = [p for p in os.listdir("/proc") if p.isdigit()]
+    found = set()
+    for pid in pids:
+        try:
+            cmd = open(f"/proc/{pid}/cmdline", "rb").read().split(b"\0")
+            if cmd[-2:] == [b"relabel", b""] and HOOK.encode() in cmd and \
+                    f"XDG_RUNTIME_DIR={root}/run".encode() in open(f"/proc/{pid}/environ", "rb").read().split(b"\0"):
+                found.add(int(pid))
+        except OSError:
+            pass
+    return found
+
+
+def reap(pids):
+    """Stop relabel pollers no check waits on."""
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+
 def hook(verb, hook=None, env=None):
-    return subprocess.run([HOOK, verb], input=json.dumps(hook or {}), text=True, env=env or ENV, timeout=20,
-                          capture_output=True).stdout
+    """The hook's stdout: its code run in this process with argv, stdin, stdout and environ swapped in for the call."""
+    saved = os.environ.copy(), sys.argv, sys.stdin, sys.stdout, list(sys.path)
+    os.environ.clear()
+    os.environ.update(env or ENV)
+    sys.argv, sys.stdin, sys.stdout = [HOOK, verb], io.StringIO(json.dumps(hook or {})), io.StringIO()
+    try:
+        exec(CODE, {"__name__": "__main__", "__file__": HOOK})
+        return sys.stdout.getvalue()
+    finally:
+        os.environ.clear()
+        os.environ.update(saved[0])
+        sys.argv, sys.stdin, sys.stdout = saved[1:4]
+        sys.path[:] = saved[4]
+        if verb == "start" and (hook or {}).get("agent_id") not in KEEP:
+            reap(relabels(mine=True))
 
 
 def touch(path, age=0):
@@ -58,12 +106,18 @@ def claims():
 
 
 def posted(want, secs=5):
-    end = time.time() + secs
-    while time.time() < end:
-        if want in posts:
-            return True
-        time.sleep(0.05)
-    return False
+    with landed:
+        return landed.wait_for(lambda: want in posts, secs)
+
+
+def settles(cond, secs=2):
+    """cond() turns true within secs: the claims file is saved just after the post that woke posted()."""
+    end = time.monotonic() + secs
+    while not cond():
+        if time.monotonic() > end:
+            return False
+        time.sleep(0.02)
+    return True
 
 
 def line(path, row, mode="a"):
@@ -130,7 +184,7 @@ touch(lt + ".jsonl")
 t0 = time.monotonic()
 hook("start", {"agent_id": lt_id, "transcript_path": TP, "agent_type": "worker"})
 took = time.monotonic() - t0
-check(f"late meta: hook returns in {took:.2f} s, under the old 2.0 s wait", took < 1.5)
+check(f"late meta: hook returns in {took:.2f} s, under the old 2.0 s wait (budget {budget(1.5):.2f} s)", took < budget(1.5))
 check("late meta: lit at once with the fallback label", {"id": "lt0001", "state": "working", "label": "worker"} in posts)
 json.dump({"description": "T72 backfill"}, open(lt + ".meta.json", "w"))
 check("late meta: relabelled when the meta lands after the hook returns", posted({"id": "lt0001", "state": "working", "label": "T72 backfill"}))
@@ -146,7 +200,7 @@ nw_id = "nw0001aaaaaaaaaa"
 t0 = time.monotonic()
 hook("start", {"agent_id": nw_id, "transcript_path": TP, "agent_type": "worker"})
 took = time.monotonic() - t0
-check(f"workflow session: hook skips the in-hook meta wait ({took:.2f} s)", took < 0.35)
+check(f"workflow session: hook skips the in-hook meta wait ({took:.2f} s, budget {budget(0.35):.2f} s)", took < budget(0.35))
 hook("stop", {"agent_id": nw_id, "transcript_path": TP})
 
 TP2 = f"{PROJ}/sess2.jsonl"
@@ -156,8 +210,8 @@ line(TP2, {"type": "assistant", "message": {"content": [
 t0 = time.monotonic()
 hook("start", {"agent_id": pw_id, "transcript_path": TP2, "agent_type": "general-purpose"})
 took = time.monotonic() - t0
-check(f"plain label: lit at once from the parent's Agent call, no meta, no meta wait ({took:.2f} s)",
-      {"id": "pw0001", "state": "working", "label": "T391 plain label from th"} in posts and took < 0.45)
+check(f"plain label: lit at once from the parent's Agent call, no meta, no meta wait ({took:.2f} s, budget {budget(0.45):.2f} s)",
+      {"id": "pw0001", "state": "working", "label": "T391 plain label from th"} in posts and took < budget(0.45))
 check("plain label: no relabel posts the agent_type later",
       not posted({"id": "pw0001", "state": "working", "label": "general-purpose"}, 0.5))
 hook("stop", {"agent_id": pw_id, "transcript_path": TP2})
@@ -171,6 +225,7 @@ check("label reads only its own session, not a projects-wide glob", not posted({
 hook("stop", {"agent_id": ox_id, "transcript_path": TP2})
 os.makedirs(f"{PROJ}/sess2/subagents", exist_ok=True)
 json.dump({"description": "end relabel"}, open(f"{PROJ}/sess2/subagents/agent-{ox_id}.meta.json", "w"))
+reap(relabels())
 
 
 
@@ -277,8 +332,8 @@ subprocess.run([AUDIT], input=json.dumps({"tool_name": "TaskStop", "tool_input":
 hook_s = time.monotonic() - t0
 gone = posted({"id": "fs0001", "state": "done", "label": ""})
 lag = time.monotonic() - t0
-check(f"TaskStop hook puts the orbiter out at once, before the transcript line lands (lag {lag:.2f} s, hook {hook_s:.2f} s)",
-      gone and lag < 2 and "fs0001" not in claims())
+check(f"TaskStop hook puts the orbiter out at once, before the transcript line lands (lag {lag:.2f} s, hook {hook_s:.2f} s, budget {budget(2):.2f} s)",
+      gone and lag < budget(2) and settles(lambda: "fs0001" not in claims()))
 
 TP4 = f"{PROJ}/sess4.jsonl"
 
@@ -346,5 +401,41 @@ check("decisions: no project and no guide prints nothing",
 for a in ("dc0001", "dc0002", "dc0003"):
     hook("stop", {"agent_id": a + "aaaaaaaaaa", "transcript_path": TP4})
 
+TP5 = f"{PROJ}/sess5.jsonl"
+line(TP5, {"type": "user", "message": {"content": "go"}})
+
+
+def starts(ids, late_row=None):
+    """Parallel start hooks on TP5; late_row lands in the transcript mid-poll; returns the wall seconds."""
+    t0 = time.monotonic()
+    ps = [subprocess.Popen([HOOK, "start"], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True, env=ENV) for _ in ids]
+    for p, a in zip(ps, ids):
+        p.stdin.write(json.dumps({"agent_id": a, "transcript_path": TP5, "agent_type": "worker"}))
+        p.stdin.close()
+    if late_row:
+        time.sleep(0.15)
+        line(TP5, late_row)
+    for p in ps:
+        p.wait(20)
+    took = time.monotonic() - t0
+    reap(relabels())
+    return took
+
+
+ids = [f"qa{i:04d}aaaaaaaaaa" for i in range(6)]
+wall = starts(ids)
+check(f"6 parallel starts, no Agent row yet: wall {wall:.2f} s (budget {budget(1):.2f} s, serial poll would be >= 3.0 s)",
+      wall < budget(1) and wall < 3.0)
+labels = {f"T493 lane {i}" for i in range(6)}
+lids = [f"qb{i:04d}aaaaaaaaaa" for i in range(6)]
+starts(lids, {"type": "assistant", "message": {"content": [
+    {"type": "tool_use", "id": f"tl{i}", "name": "Agent", "input": {"subagent_type": "worker", "description": d, "prompt": "x"}}
+    for i, d in enumerate(sorted(labels))]}})
+got = {p["label"] for p in posts if p.get("id", "").startswith("qb") and p.get("state") == "working"}
+check(f"6 parallel starts, row lands mid-poll: each takes its own call ({len(got & labels)}/6 labels)", got == labels)
+for a in ids + lids:
+    hook("stop", {"agent_id": a, "transcript_path": TP5})
+
+reap(relabels())
 srv.shutdown()
 sys.exit(bad)

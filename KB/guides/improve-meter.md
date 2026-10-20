@@ -1,6 +1,6 @@
 # Daily metrics of the self-improvement loop: improve-meter
 
-Ticket: T48-L1 · Last verified: 2026-10-15 (timer installed, metrics.tsv rows 10-13..10-15); test 2026-09-26 `bin/tests/improve-meter.test.sh` (25/25 ok)
+Ticket: T48-L1 · Last verified: 2026-10-20 (timer enabled, next 06:45; metrics.tsv rows 2026-09-22 and 10-13..10-20); test 2026-09-26 `bin/tests/improve-meter.test.sh` (25/25 ok)
 
 ## When to use
 You need the loop's daily numbers (orchestrator context per turn, headless cache_creation per run, `pc doctor` wall,

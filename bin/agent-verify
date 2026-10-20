@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """Run a brief's `CHECK: <command>` and record the verdict in $AGENT_WORK/evidence/<ticket>/check.json (T381)."""
-import argparse, datetime, json, os, re, signal, subprocess, sys, time
+import argparse, datetime, glob, json, os, re, shutil, signal, subprocess, sys, tempfile, time
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+from auditlib import parse_age  # noqa: E402
 
 CHECK = re.compile(r'^\s*(?:[-*]\s*)?CHECK:\s*(.+?)\s*$', re.M)
 TAIL = 40
+SUITE = re.compile(r'tests/run\.sh(?![^;&|]*--only)')
+GREP = re.compile(r"""\bgrep(?:\s+-\w+)*\s+(['"])(\^.*?)\1\s+("[^"]+"|'[^']+'|[^\s|;&)<>]+)""")
+QUIET_WAIT = 300
 
 
 def check_cmd(text):
@@ -12,6 +18,15 @@ def check_cmd(text):
         return None
     cmd = m.group(1)
     return cmd[1:-1] if len(cmd) > 1 and cmd[0] == cmd[-1] == '`' else cmd
+
+
+def section_of(text, ticket):
+    """The `## [k.] <ticket> …` heading and its body up to the next `## `, or (None, None)."""
+    m = re.search(rf'^##[ \t]+(?:\d+\.[ \t]*)?{re.escape(ticket)}(?!\d).*$', text, re.M | re.I)
+    if not m:
+        return None, None
+    end = re.search(r'^## ', text[m.end():], re.M)
+    return m.group(0).strip(), text[m.end():m.end() + end.start() if end else len(text)]
 
 
 def ticket_of(path):
@@ -24,43 +39,174 @@ def tail(s):
     return '\n'.join(s.splitlines()[-TAIL:])
 
 
+def scope_prefix():
+    """systemd-run argv that caps the CHECK's memory in its own scope, or [] when no user bus."""
+    pre = ['systemd-run', '--user', '--scope', '-q', '--expand-environment=no',
+           '-p', f"MemoryMax={os.environ.get('TEST_MEM_MAX', '6G')}", '-p', 'MemorySwapMax=0', '-p', 'OOMPolicy=continue']
+    try:
+        ok = subprocess.run(pre[:5] + ['true'], capture_output=True).returncode == 0
+    except OSError:
+        ok = False
+    return pre if ok else []
+
+
+def run(cmd, timeout, cwd=None):
+    """Run a CHECK command in a memory-capped scope with a private TMPDIR; the verdict record without ticket/brief."""
+    started = datetime.datetime.now().astimezone()
+    t0 = time.monotonic()
+    tmp = tempfile.mkdtemp(prefix='agent-verify.')
+    try:
+        p = subprocess.Popen(scope_prefix() + ['env', f'TMPDIR={tmp}', 'bash', '-c', cmd], stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True, start_new_session=True, cwd=cwd)
+        try:
+            out, err = p.communicate(timeout=timeout)
+            rc = p.returncode
+        except subprocess.TimeoutExpired:
+            os.killpg(p.pid, signal.SIGKILL)
+            out, _ = p.communicate()
+            rc, err = 124, f'timeout after {timeout}s'
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    left = sum(len(d) + len(f) for _, d, f in os.walk(tmp))
+    return {'check': cmd, 'cwd': cwd or os.getcwd(), 'rc': rc, 'ok': rc == 0, 'started': started.isoformat(timespec='seconds'),
+            'seconds': round(time.monotonic() - t0, 2), 'tmp_left': left, 'stdout_tail': tail(out), 'stderr_tail': tail(err)}
+
+
+def evidence_dir():
+    return os.path.join(os.environ.get('AGENT_WORK', os.path.expanduser('~/agent-work')), 'evidence')
+
+
+def write(path, rec, quiet=False):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + '.tmp', 'w') as f:
+        json.dump(rec, f, indent=1)
+    os.replace(path + '.tmp', path)
+    if not quiet:
+        print(f"{'green' if rec['ok'] else 'red'} rc={rec['rc']} {rec['seconds']}s → {path}")
+
+
+def quiet(wait):
+    """True when quiet-gate sees a quiet machine within WAIT seconds."""
+    gate = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'quiet-gate')
+    return subprocess.run([gate, '--wait', str(wait)], capture_output=True).returncode == 0
+
+
+def target(tok, check, cwd):
+    """The newest file a grep argument names, following `v=$(ls … GLOB …)` or `v=PATH` for a $v argument."""
+    tok = tok.replace('"', '').replace("'", '')
+    m = re.fullmatch(r'\$\{?(\w+)\}?', tok)
+    if m:
+        a = re.search(rf'\b{m.group(1)}=(\$\(ls\b[^)]*\)|\S+)', check)
+        if not a:
+            return None
+        tok = a.group(1)
+        if tok.startswith('$(ls'):
+            tok = next((w for w in tok[4:-1].split() if not w.startswith('-')), '')
+        tok = tok.replace('"', '').replace("'", '')
+    paths = glob.glob(os.path.join(cwd, os.path.expanduser(os.path.expandvars(tok))))
+    return max(paths, key=os.path.getmtime) if paths else None
+
+
+def drift(check, cwd):
+    """First grep `^REGEX FILE` in CHECK whose FILE's line 1 no longer matches: {file, regex, line}, else None."""
+    for m in GREP.finditer(check):
+        f = target(m.group(3), check, cwd)
+        try:
+            line = open(f, errors='replace').readline().rstrip('\n') if f else None
+            if line is not None and not re.search(m.group(2), line):
+                return {'file': f, 'regex': m.group(2), 'line': line}
+        except (OSError, re.error):
+            continue
+    return None
+
+
+def summary(r):
+    return {k: r.get(k) for k in ('started', 'rc', 'ok', 'seconds')}
+
+
+def recheck(span, timeout):
+    """Re-run every red check.json whose first run is inside the window; earlier runs move to runs[]; suite-runner reds are superseded by fleet-ci.
+
+    A red under load is re-run once quiet-gate passes (one QUIET_WAIT budget for the whole pass); a red still standing gets verdict drift or real.
+    """
+    try:
+        cutoff = time.time() - parse_age(span)
+    except ValueError as e:
+        sys.exit(f'agent-verify: {e}')
+    red, deadline = 0, time.monotonic() + QUIET_WAIT
+    for path in sorted(glob.glob(os.path.join(evidence_dir(), '*', 'check.json'))):
+        try:
+            old = json.load(open(path))
+        except (OSError, ValueError):
+            continue
+        runs = old.pop('runs', [])
+        first = (runs[0] if runs else old).get('started', '')
+        try:
+            young = datetime.datetime.fromisoformat(first).timestamp() >= cutoff
+        except ValueError:
+            young = False
+        if old.get('ok') or not young or not old.get('check') or old.get('superseded'):
+            continue
+        if SUITE.search(old['check']):
+            write(path, {**old, **({'runs': runs} if runs else {}), 'superseded': 'fleet-ci'}, quiet=True)
+            print(f"{old.get('ticket')}: superseded: fleet-ci (suite runner, not re-run) {path}")
+            continue
+        cwd = old.get('cwd') if os.path.isdir(old.get('cwd') or '') else os.path.expanduser('~')
+        calm = quiet(0)
+        rec, hist = run(old['check'], timeout, cwd), runs + [summary(old)]
+        if not rec['ok'] and not calm and quiet(max(0, int(deadline - time.monotonic()))):
+            hist.append(summary(rec))
+            rec, calm = run(old['check'], timeout, cwd), True
+            if rec['ok']:
+                hist[-1]['verdict'] = 'load'
+        if not rec['ok']:
+            d = drift(old['check'], cwd)
+            if d:
+                rec.update(verdict='drift', drift=d)
+            elif calm:
+                rec['verdict'] = 'real'
+        rec = {'ticket': old.get('ticket'), 'brief': old.get('brief'), **rec, 'runs': hist}
+        print(f"{rec['ticket']}: ", end='')
+        write(path, rec)
+        v = rec.get('verdict') or hist[-1].get('verdict') or ('busy' if not rec['ok'] else '')
+        if v:
+            print(f"  verdict {v}" + (f": {d['regex']!r} vs line 1 of {d['file']}: {d['line']}" if v == 'drift' else ''))
+        red += not rec['ok']
+    return 1 if red else 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('brief')
-    ap.add_argument('--ticket', help='evidence folder name (default: T<nn> from the brief file name)')
+    ap.add_argument('brief', nargs='?')
+    ap.add_argument('--ticket', help='evidence folder name (default: T<nn> from the brief file name); in a file with several CHECKs, the CHECK under the `## [k.] <ticket>` heading')
     ap.add_argument('--timeout', type=int, default=600, help='seconds (default 600)')
+    ap.add_argument('--recheck', action='store_true', help='re-run every red evidence/*/check.json from the window, history in runs[]')
+    ap.add_argument('--since', default='7d', help='--recheck window from the first run (default 7d; 30m, 24h, 7d)')
     a = ap.parse_args()
+    if a.recheck:
+        sys.exit(recheck(a.since, a.timeout))
+    if not a.brief:
+        ap.error('a brief is required (or --recheck)')
     with open(a.brief, encoding='utf-8', errors='replace') as f:
-        cmd = check_cmd(f.read())
+        text = f.read()
+    cmd, section, n = check_cmd(text), None, len(CHECK.findall(text))
+    if not a.ticket and n > 1 and not re.match(r'(?i)t\d+', os.path.basename(a.brief)):
+        heads = ' '.join(re.findall(r'^##[ \t]+(?:\d+\.[ \t]*)?(T\d+)', text, re.M | re.I))
+        print(f'agent-verify: {a.brief} has {n} CHECKs; pass --ticket T<n> (headings: {heads})', file=sys.stderr)
+        sys.exit(2)
+    if a.ticket and n > 1:
+        section, body = section_of(text, a.ticket)
+        if section is None:
+            print(f'agent-verify: {a.brief} has {n} CHECKs and no section for {a.ticket}', file=sys.stderr)
+            sys.exit(2)
+        cmd = check_cmd(body)
     if not cmd:
         print(f'agent-verify: no CHECK: line in {a.brief}', file=sys.stderr)
         sys.exit(2)
     ticket = a.ticket or ticket_of(a.brief)
-    out_dir = os.path.join(os.environ.get('AGENT_WORK', os.path.expanduser('~/agent-work')), 'evidence', ticket)
-    started = datetime.datetime.now().astimezone()
-    t0 = time.monotonic()
-    p = subprocess.Popen(['bash', '-c', cmd], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                         start_new_session=True)
-    try:
-        out, err = p.communicate(timeout=a.timeout)
-        rc = p.returncode
-    except subprocess.TimeoutExpired:
-        os.killpg(p.pid, signal.SIGKILL)
-        out, _ = p.communicate()
-        rc, err = 124, f'timeout after {a.timeout}s'
-    rec = {
-        'ticket': ticket, 'brief': os.path.abspath(a.brief), 'check': cmd, 'cwd': os.getcwd(),
-        'rc': rc, 'ok': rc == 0, 'started': started.isoformat(timespec='seconds'),
-        'seconds': round(time.monotonic() - t0, 2), 'stdout_tail': tail(out), 'stderr_tail': tail(err),
-    }
-    os.makedirs(out_dir, exist_ok=True)
-    path = os.path.join(out_dir, 'check.json')
-    with open(path + '.tmp', 'w') as f:
-        json.dump(rec, f, indent=1)
-    os.replace(path + '.tmp', path)
-    print(f"{'green' if rc == 0 else 'red'} rc={rc} {rec['seconds']}s → {path}")
-    sys.exit(0 if rc == 0 else 1)
-
+    rec = {'ticket': ticket, 'brief': os.path.abspath(a.brief), **({'section': section} if section else {}), **run(cmd, a.timeout)}
+    write(os.path.join(evidence_dir(), ticket, 'check.json'), rec)
+    sys.exit(0 if rec['ok'] else 1)
 
 if __name__ == '__main__':
     main()

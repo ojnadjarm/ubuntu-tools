@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # TSP-005: agent-run records tokens and a tool histogram per run in logs/index.tsv.
-# Sandbox only (AGENTS.md §5.6): HOME is a temp dir, `claude` and `notify-owner` are stubs on
+# Sandbox only (AGENTS.md §5.6): HOME is a temp dir, `claude`, `notify-owner`, `pc` and `sudo` are stubs on
 # the fleet PATH, so no model call, no push and no live agent folder is touched. A selftest
 # proves the stubs are the ones that run before any agent-run is invoked.
 set -uo pipefail
@@ -47,10 +47,21 @@ esac
 EOS
 chmod +x "$SB/agents/bin/notify-owner" "$SB/agents/bin/claude"
 
+# T511: recording pc/sudo shim, first on every sandbox PATH; the real ones are never reachable.
+cat >"$SB/agents/bin/live-shim" <<'EOS'
+#!/usr/bin/env bash
+# Recording shim: logs the call, runs nothing live, prints nothing.
+printf '%s %s\n' "${0##*/}" "$*" >>"$SHIM_LOG"
+EOS
+chmod +x "$SB/agents/bin/live-shim"
+ln -s live-shim "$SB/agents/bin/pc"; ln -s live-shim "$SB/agents/bin/sudo"
+export SHIM_LOG="$SB/shim.log"
+SB_PATH="$SB/agents/bin:/usr/bin:/bin"
+
 run_agent() {  # run_agent [HARNESS_AGENT value]
-  env -i HOME="$SB" PATH=/usr/bin:/bin TERM=dumb \
+  env -i HOME="$SB" PATH=/usr/bin:/bin TERM=dumb SHIM_LOG="$SHIM_LOG" \
       HARNESS_CONFIG=/nonexistent HARNESS_HOME="$SB/agents" HARNESS_AGENT="${1:-claude}" ${NO_PUSH:+AGENT_RUN_NO_PUSH=1} \
-      bash "$SB/agents/bin/agent-run" demo >/dev/null 2>&1
+      bash "$SB/agents/bin/agent-run" demo >/dev/null 2>"$SB/stderr.log"
 }
 idx="$SB/agents/demo/logs/index.tsv"
 
@@ -59,6 +70,16 @@ sb_claude="$(env -i HOME="$SB" PATH=/usr/bin:/bin bash -c \
   '. "$HOME/agents/bin/fleetlib.sh"; fleet_path; command -v claude')"
 { [ "$sb_claude" = "$SB/agents/bin/claude" ] && grep -q 'Canned stream stub' "$sb_claude"; } \
   && ok || { no "PATH would reach $sb_claude"; echo "aborting"; exit 1; }
+
+t "T511 selftest: pc and sudo resolve to the recording shim"
+fleet_hits="$(env -i HOME="$SB" PATH=/usr/bin:/bin SHIM_LOG="$SHIM_LOG" bash -c \
+  '. "$HOME/agents/bin/fleetlib.sh"; fleet_path; pc selftest; sudo -n true; command -v pc')"
+sb_hits="$(env -i PATH="$SB_PATH" SHIM_LOG="$SHIM_LOG" bash -c 'pc selftest; sudo -n true; command -v pc sudo')"
+{ [ "$fleet_hits" = "$SB/agents/bin/pc" ] &&
+  [ "$sb_hits" = "$(printf '%s\n' "$SB/agents/bin/pc" "$SB/agents/bin/sudo")" ] &&
+  [ "$(cat "$SHIM_LOG")" = "$(printf '%s\n' 'pc selftest' 'sudo -n true' 'pc selftest' 'sudo -n true')" ]; } \
+  && ok || { no "fleet=$fleet_hits sb=$sb_hits log=$(cat "$SHIM_LOG" 2>&1)"; echo "aborting"; exit 1; }
+: >"$SHIM_LOG"
 
 run_agent claude
 
@@ -103,6 +124,11 @@ run_agent claude
 [ "$(wc -l <"$idx")" = 3 ] && [ "$(grep -c tokens_in "$idx")" = 1 ] \
   && ok || no "$(cat "$idx")"
 
+t "T480: header already current: no stderr, no .tmp"
+run_agent claude
+{ [ ! -s "$SB/stderr.log" ] && [ ! -e "$idx.tmp" ] && [ "$(grep -c tokens_in "$idx")" = 1 ]; } \
+  && ok || no "$(cat "$SB/stderr.log"; ls "$SB/agents/demo/logs")"
+
 t "the direct (no adapter) path fills the token columns too"
 rm -rf "$SB/agents/demo/logs"; run_agent ""
 [ "$(awk -F'\t' 'NR==2{print $7,$8,$9}' "$idx")" = "1234 567 89012" ] \
@@ -118,11 +144,18 @@ run_agent claude
   [ "$(awk -F'\t' 'NR==3{print $7}' "$idx")" = 1234 ] && [ "$(wc -l <"$idx")" = 3 ]; } \
   && ok || no "$(cat "$idx")"
 
+t "T480: old header migrated once, rows untouched, no stderr"
+run_agent claude
+{ [ "$(sed -n 2p "$idx")" = "$old" ] && [ "$(grep -c tokens_in "$idx")" = 1 ] &&
+  [ "$(wc -l <"$idx")" = 4 ] && [ ! -s "$SB/stderr.log" ] && [ ! -e "$idx.tmp" ]; } \
+  && ok || no "$(cat "$SB/stderr.log" "$idx")"
+sed -i '$d' "$idx"
+
 t "toolsmith-inputs reports the columns from the produced index"
-[ "$(TOOLSMITH_ROOT="$SB/agents" HARNESS_HOME=/nonexistent "$BIN/toolsmith-inputs" --since 9999d \
+[ "$(PATH="$SB_PATH" TOOLSMITH_ROOT="$SB/agents" HARNESS_HOME=/nonexistent "$BIN/toolsmith-inputs" --since 9999d \
      2>/dev/null | jq -c '[.tokens.columns_present,.tokens.agents.demo.in_per_run,
      .tokens.agents.demo.tool_histogram.Bash]')" = '[true,1234,2]' ] \
-  && ok || no "$(TOOLSMITH_ROOT="$SB/agents" HARNESS_HOME=/nonexistent "$BIN/toolsmith-inputs" \
+  && ok || no "$(PATH="$SB_PATH" TOOLSMITH_ROOT="$SB/agents" HARNESS_HOME=/nonexistent "$BIN/toolsmith-inputs" \
      --since 9999d 2>/dev/null | jq -c .tokens)"
 
 t "F07: the lock fd never reaches the agent (adapter and direct)"
@@ -139,10 +172,15 @@ t "T402: AGENT_RUN_NO_PUSH=1 (ci-autofix) skips that push"
 
 t "F37: SIGTERM to the claude adapter stops the agent CLI"
 touch "$SB/sleep-mode"; printf 'x\n' >"$SB/p.md"
-env -i HOME="$SB" PATH="$SB/agents/bin:/usr/bin:/bin" PROMPT_FILE="$SB/p.md" MODEL=m \
+env -i HOME="$SB" PATH="$SB_PATH" SHIM_LOG="$SHIM_LOG" PROMPT_FILE="$SB/p.md" MODEL=m \
   RAW_OUT="$SB/raw.json" META_OUT="$SB/meta.json" bash "$SB/agents/adapters/claude/run" >/dev/null 2>&1 &
 ap=$!; sleep 1; kill -TERM "$ap"; wait "$ap" 2>/dev/null; sleep 0.3; rm -f "$SB/sleep-mode"
 left="$(pgrep -f '[s]leep 47471')"; [ -z "$left" ] && ok || { no "sleep 47471 still running ($left)"; kill $left; }
+
+t "T511: 0 live pc/sudo calls; the shim caught the toolsmith probes"
+shim_n="$(wc -l <"$SHIM_LOG")"
+{ grep -q '^pc doctor ' "$SHIM_LOG" && grep -q '^pc power ' "$SHIM_LOG" && grep -q '^pc top ' "$SHIM_LOG"; } \
+  && { ok; echo "agent-run: 0 live pc/sudo calls ($shim_n recorded by the shim)"; } || no "$(cat "$SHIM_LOG")"
 
 [ $fail = 0 ] && echo "agent-run.test.sh: all green" || echo "agent-run.test.sh: FAILURES"
 exit $fail

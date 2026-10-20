@@ -1,7 +1,7 @@
-"""Machine blocks for /api/status: pc status, envs, agents, units, timers, events, sparks, the verdict."""
+"""Machine blocks for /api/status: pc status, envs, agents, units, timers, events, sparks, failures, the verdict."""
 import hashlib, json, os, re, urllib.request
 from datetime import datetime, timedelta, timezone
-from dash.cache import cache_meta, swr
+from dash.cache import cache_meta, cached, swr
 from dash.env import BIN, BRAND, HOME, HOST, PUBLIC_HOST, run
 from dash.routes import route
 from dash.services import files, projects, runners, sites, todo
@@ -33,14 +33,16 @@ def agents():
     out = []
     root = os.path.join(HOME, "agents")
     names = [n for n in sorted(os.listdir(root)) if os.path.isfile(os.path.join(root, n, "BRIEF.md"))]
-    props = unit_props(["UnitFileState", "NextElapseUSecRealtime"], ["agent@%s.timer" % n for n in names])
+    specs = [runners.spec(n, runners.env_keys(os.path.join(root, n, "agent.env"))) for n in names]
+    timed = [n for n, s in zip(names, specs) if s["kind"] != "on-demand"]
+    props = unit_props(["UnitFileState", "NextElapseUSecRealtime"], ["agent@%s.timer" % n for n in timed])
     for name in names:
         d = os.path.join(root, name)
         unit = "agent@%s" % name
         p = props.get(unit + ".timer", {})
         enabled = p.get("UnitFileState") or "no"
         nxt = runners.iso(p.get("NextElapseUSecRealtime", ""))
-        sched = human_cal(runners.calendar(unit + ".timer"))
+        sched = human_cal(runners.calendar(unit + ".timer")) if name in timed else "on demand"
         last = {}
         idx = os.path.join(d, "logs", "index.tsv")
         if os.path.exists(idx):
@@ -49,7 +51,6 @@ def agents():
                 f = rows[-1].split("\t")
                 last = {"end": f[1], "exit": f[2], "seconds": f[3], "cost": f[4] if len(f) > 4 else ""}
         out.append({"name": name, "enabled": enabled, "schedule": sched, "next": nxt, "last": last})
-    specs = [runners.spec(r["name"], runners.env_keys(os.path.join(root, r["name"], "agent.env"))) for r in out]
     F = runners.facts(specs, unit_props)
     return [runners.view(s, F, r, human_cal) for s, r in zip(specs, out)]
 
@@ -167,6 +168,53 @@ def human_cal(cal):
     return cal
 
 
+def pc_failures():
+    """`pc failures --since 24h --json`, run at most once a minute however many tabs poll."""
+    return cached("pc-failures", 60, lambda: json.loads(run([os.path.join(BIN, "pc-failures"), "--since", "24h", "--json"], 30)))
+
+
+def epoch(s):
+    try:
+        return int(datetime.fromisoformat(s).timestamp())
+    except (TypeError, ValueError):
+        return None
+
+
+def failure_rows(d):
+    """One row per failure (source, what, n, last epoch, note, ours, dim) in `pc failures` table order; gone units fold into one row, audit only when calls failed."""
+    units = d.get("units", [])
+    rows = [{"source": "unit", "what": u["unit"], "n": u["count"], "last": u["last"],
+             "note": ("test oom" if u.get("test_oom") else u["result"]) + (" · failed now" if u.get("failed_now") else ""),
+             "ours": u.get("ours", True), "dim": not u.get("ours", True) or bool(u.get("test_oom"))}
+            for u in units if not u.get("gone") or u.get("test_oom")]
+    gone = [u for u in units if u.get("gone") and not u.get("test_oom")]
+    if gone:
+        rows.append({"source": "unit", "what": "gone: %d one-off units" % len(gone), "n": sum(u["count"] for u in gone),
+                     "last": max(u["last"] for u in gone), "note": "", "ours": True, "dim": True})
+    rows += [{"source": "agent", "what": a["agent"], "n": 1, "last": a["start"], "note": "exit %s" % a["exit"]} for a in d.get("agents", [])]
+    rows += [{"source": "ci", "what": c["what"], "n": 1, "last": c["at"], "note": "rc %s" % c["rc"]} for c in d.get("ci", [])]
+    rows += [{"source": "crash", "what": c["exe"], "n": 1, "last": c["at"], "note": ""} for c in d.get("crashes", [])]
+    rows += [{"source": "need", "what": n.get("text", "").split("\n")[0][:80], "n": 1, "last": epoch(n.get("t")), "note": n.get("kind", "")}
+             for n in d.get("needs", [])]
+    rows += [{"source": "check", "what": c["ticket"], "n": c["runs"], "last": c["at"], "note": "rc %s" % c["rc"]} for c in d.get("checks", [])]
+    a = d.get("audit") or {}
+    if a.get("failed"):
+        rows.append({"source": "audit", "what": "tool calls failed", "n": a["failed"], "last": None,
+                     "note": "%.1f%% of %d" % (a.get("rate", 0) * 100, a.get("calls", 0))})
+    rows += [{"source": "error", "what": k, "n": 0, "last": None, "note": v} for k, v in d.get("errors", {}).items()]
+    for r in rows:
+        r.setdefault("ours", True)
+        r.setdefault("dim", False)
+    return rows
+
+
+def failures():
+    d = pc_failures()
+    if "since" not in d:
+        raise RuntimeError("pc failures gave no JSON")
+    return failure_rows(d)
+
+
 def sentinel_last_ok():
     p = os.path.join(HOME, "agents/sentinel/state/last-ok")
     return open(p).read().strip() if os.path.exists(p) else ""
@@ -281,10 +329,10 @@ def owner_counts():
     return {"running": len(d["running"]), "done": len(d["done"]), "waiting": len(d["waiting"]), "queued": len(d["queued"])}
 
 
-BLOCKS = {"status": (pc_status, {}), "owner": (owner_counts, {}), "envs": (envs, []), "agents": (agents, []), "events": (since_24h, []),
-          "sites": (sites.sites, []), "drop": (files.drop, {}), "units": (user_units, []), "timers": (user_timers, []),
+BLOCKS = {"status": (pc_status, {}), "owner": (owner_counts, {}), "envs": (envs, [], 60), "agents": (agents, []), "events": (since_24h, []),
+          "sites": (sites.sites, [], 60), "drop": (files.drop, {}), "units": (user_units, []), "timers": (user_timers, []),
           "docker": (sites.docker_ps, []), "plans": (files.plans, []), "sentinel_last_ok": (sentinel_last_ok, ""),
-          "sparks": (sparks, {}), "projects": (projects.projects, [])}
+          "sparks": (sparks, {}), "projects": (projects.projects, [], 120), "failures": (failures, [], 300)}
 
 
 def payload():

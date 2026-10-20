@@ -9,6 +9,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$(dirname "$here")/sentinel-check"
 EVENTS="$here/fixtures/sentinel-check/events.tsv"
 EXPECT="$here/fixtures/sentinel-check/expected.txt"
+[ -e "$(dirname "$here")/compose-services" ] || { echo "SKIP owner data absent: $(dirname "$here")/compose-services"; exit 0; }
 RECORD=""; [ "${1:-}" = --record ] && RECORD="${2:?--record needs a file}"
 
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
@@ -33,6 +34,8 @@ echo "Error: changing settings via 'tailscale up' requires mentioning all non-de
 exit 1
 EOF
 chmod +x "$BIN/sudo" "$BIN/tailscale"
+# The real compose-services (T540): its docker calls reach the docker shim above.
+ln -s "$(dirname "$here")/compose-services" "$BIN/compose-services"
 cat >"$BIN/pw-metadata" <<'EOF'
 #!/bin/sh
 echo "pw-metadata $*" >>"$CALLS"
@@ -56,19 +59,13 @@ chmod +x "$BIN/status-stub"
 # status_json "<sec.key=value,...>" — a pc status --json document with those entries FAIL ("!" = no output).
 status_json() {
   [ "$1" = '!' ] && return 0
-  python3 - "$1" <<'EOF'
-import json, sys
-sections = {"power": {"battery": {"state": "OK", "value": "100%"}}}
-for item in filter(None, sys.argv[1].split(",")):
-    key, _, value = item.partition("=")
-    sec, _, name = key.partition(".")
-    sections.setdefault(sec, {})[name] = {"state": "FAIL", "value": value}
-print(json.dumps({"sections": sections}, sort_keys=True))
-EOF
+  jq -nSc --arg s "$1" '{sections: (reduce ($s | split(",")[] | select(. != "") | split("=")) as $kv
+    ({power: {battery: {state: "OK", value: "100%"}}};
+     ($kv[0] | split(".")) as $k | .[$k[0]][$k[1:] | join(".")] = {state: "FAIL", value: ($kv[1:] | join("="))}))}'
 }
 
 TICKDIR="$WORK/tick"; mkdir -p "$TICKDIR"
-export CALLS TICK="$TICKDIR"
+export CALLS TICK="$TICKDIR" SENTINEL_BRIEF_CMD=false   # no brief line: every tick reads the status stub
 out="$WORK/transcript.txt"
 : >"$out"
 
@@ -93,9 +90,7 @@ while IFS='|' read -r label before after pw settled; do
 done <"$EVENTS"
 
 # --- T347-10: owner-only faults, the 2 h unit-loop push, the busy lock, the last-run stamp ----
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 tick() {  # tick <fails_before> [fails_after]: one sentinel run, calls in $CALLS, rc in $rc
   status_json "$1" >"$TICKDIR/before.json"; status_json "${2-$1}" >"$TICKDIR/after.json"; cp "$TICKDIR/after.json" "$TICKDIR/settled.json"
   rm -f "$TICKDIR/n" "$TICKDIR/slept" "$ST/last-escalation" "$ST/suppressing"; : >"$CALLS"
@@ -163,6 +158,69 @@ bad_argv=$(grep '^systemctl' "$CALLS" | grep -v -e '^systemctl --user list-units
 [ -z "$bad_argv" ] && grep -q '^systemctl --user show run-old' "$CALLS" \
   && ok "selftest: the systemctl stub saw only read-only argv" || nok "systemctl argv" "${bad_argv:-no show call}"
 mv "$BIN/systemctl.replay" "$BIN/systemctl"
+# T510: a service behind a compose `profiles:` entry is expected only while COMPOSE_PROFILES names it.
+# The docker stub answers the read-only queries; `compose config` answers the fixture's services
+# (db17 only under COMPOSE_PROFILES=target), so no docker CLI or daemon is needed.
+FX="$WORK/moodle-envs/fx-rehearse"; mkdir -p "$FX"
+cat >"$FX/docker-compose.yml" <<'EOF'
+name: fx-rehearse
+services:
+  db13:
+    image: postgres:13
+  db17:
+    image: postgres:17
+    profiles: [target]
+  app:
+    image: moodlehq/moodle-php-apache:8.3
+EOF
+mv "$BIN/docker" "$BIN/docker.replay"
+cat >"$BIN/docker" <<EOF
+#!/bin/sh
+echo "docker \$*" >>"\$CALLS"
+case "\$*" in
+  "ps -a --filter label=com.docker.compose.project=fx-rehearse "*) echo "$FX/docker-compose.yml";;
+  "compose -p fx-rehearse -f "*" config --services") case ",\${COMPOSE_PROFILES:-}," in *,target,*) echo db17;; esac; printf 'app\ndb13\n';;
+  "ps --filter label=com.docker.compose.project=fx-rehearse "*) printf '%s\n' \$FX_RUNNING;;
+esac
+exit 0
+EOF
+chmod +x "$BIN/docker"
+STACK='docker.fx-rehearse=2/3 up'
+rm -rf "$ST/tries"; : >"$ST/sentinel.log"; rm -f "$ST/last-ok"
+FX_RUNNING='db13 app' tick "$STACK"; cat "$CALLS" >>"$WORK/fx-calls"
+{ [ "$rc" = 0 ] && [ -s "$ST/last-ok" ] && ! grep -q 'up -d\|agent-run\|notify-owner' "$CALLS"; } \
+  && grep -q 'docker.fx-rehearse 2/3 up: only services behind an inactive profile' "$ST/sentinel.log" \
+  && ok "profiles: a stopped profile service is not a fault" || nok "profile service stopped" "$(cat "$CALLS" "$ST/sentinel.log")"
+rm -rf "$ST/tries"; FX_RUNNING='db17 app' tick "$STACK"; cat "$CALLS" >>"$WORK/fx-calls"
+grep -q "^docker compose -f $FX/docker-compose.yml up -d" "$CALLS" && grep -q '^agent-run sentinel' "$CALLS" \
+  && ok "profiles: a stopped normal service is still the docker.* fault" || nok "normal service stopped" "$(cat "$CALLS")"
+rm -rf "$ST/tries"; COMPOSE_PROFILES=target FX_RUNNING='db13 app' tick "$STACK"; cat "$CALLS" >>"$WORK/fx-calls"
+grep -q '^agent-run sentinel' "$CALLS" \
+  && ok "profiles: an active COMPOSE_PROFILES makes the profile service expected" || nok "active profile" "$(cat "$CALLS")"
+bad_argv=$(grep '^docker' "$WORK/fx-calls" | grep -v -e '^docker ps ' -e ' config --services$' -e ' up -d$')
+[ -z "$bad_argv" ] && ok "selftest: the docker stub saw only queries and the recorded up -d" || nok "docker argv" "$bad_argv"
+mv "$BIN/docker.replay" "$BIN/docker"
+# T988: a FAIL=none brief line ends the tick without the full JSON.
+: >"$ST/sentinel.log"; rm -f "$ST/last-ok"
+SENTINEL_BRIEF_CMD="echo AC 80% orch=ok FAIL=none" tick 'services.docker=inactive'
+{ [ "$rc" = 0 ] && [ ! -e "$TICKDIR/n" ] && [ -s "$ST/last-ok" ] && ! grep -q '^sudo\|agent-run' "$CALLS"; } \
+  && ok "brief FAIL=none: clean tick, no JSON read, no fix" || nok "brief gate" "rc=$rc n=$(cat "$TICKDIR/n" 2>/dev/null) $(cat "$CALLS")"
+# T988: --profile runs the read path only: no fix, push, escalation or state write, CPU ms per step.
+rm -rf "$ST/tries"; status_json 'services.docker=inactive,agents.unit_loops=x 30 fails/h' >"$TICKDIR/before.json"
+cp "$TICKDIR/before.json" "$TICKDIR/after.json"; rm -f "$TICKDIR/n"; : >"$CALLS"
+state_before=$(find "$ST" -printf '%p %s %T@\n' | sort)
+prof=$(PW_LEVEL=5 HOME="$WORK" HARNESS_ENV_LOADED=1 SENTINEL_STATUS_CMD="$BIN/status-stub" "$SCRIPT" --profile); rc=$?
+{ [ "$rc" = 0 ] && [ "$(find "$ST" -printf '%p %s %T@\n' | sort)" = "$state_before" ]; } \
+  && ok "--profile writes no state" || nok "--profile state" "rc=$rc"
+bad_calls=$(grep -v -e '^sentinel-runaway --dry-run$' -e '^sentinel-waits --dry-run$' -e '^pw-metadata -n settings 0 log.level$' \
+  -e '^systemctl --user list-units ' "$CALLS")
+[ -z "$bad_calls" ] && grep -q '^sentinel-runaway --dry-run$' "$CALLS" \
+  && ok "--profile calls no fix (dry-run helpers only)" || nok "--profile calls" "$bad_calls"
+for s in runaway waits transient pipewire status total; do
+  grep -qE "^$s +[0-9]+ ms" <<<"$prof" || { nok "--profile step $s" "$prof"; continue 2; }
+done
+ok "--profile prints CPU ms per step"
+"$SCRIPT" --bogus >/dev/null 2>&1; [ $? = 2 ] && ok "an unknown flag is rc 2" || nok "unknown flag" "not rc 2"
 [ "$bad" = 0 ] || { echo "sentinel-check: FAIL — T347-10 cases" >&2; exit 1; }
 
 if [ -n "$RECORD" ]; then cp "$out" "$RECORD"; echo "recorded $RECORD"; exit 0; fi

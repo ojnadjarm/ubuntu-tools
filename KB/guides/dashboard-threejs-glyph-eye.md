@@ -1,6 +1,6 @@
 # Build a three.js WebGL page that is alive but idles at ~1 % CPU (dashboard glyph eye)
 
-Ticket: T52–T56 · Last verified: 2026-09-24 by dashboard pytest 84 passed + `test_next.js` + `test_pronunciation_page.js`
+Ticket: T52–T56 · Last verified: 2026-10-20 by T846 audit (`test -e` on every path, `GRACE_S`/`EASE_S`/`ASK`/23rem in source, 174 tests collected, :19998 200); 2026-10-19 by dashboard pytest 170 passed + `test_next.js` + `test_pronunciation_page.js` ok, `tools/perf.py`, `next-measure.js` at 1920, `test -e` on every path
 
 ## When to use
 - A new animated web page, 3D hero or data "eye" on this machine: start from the dashboard's `/` front end (Swarm eye) or its lab.
@@ -15,7 +15,8 @@ Ticket: T52–T56 · Last verified: 2026-09-24 by dashboard pytest 84 passed + `
 - WebGL2, not WebGPU: same 24-layer noise shader on the Iris Xe, 1080p 22.3 ms (WebGL2) vs 24.0 ms (WebGPU) GPU time,
   and the WebGPU/TSL bundle is 248.8 KB gz vs 133.8 KB (`research/2026-09-23/T53/art-direction.md`).
 - Eye variants behind one import: `static/next/js/gl/eye.js` picks `js/gl/eyes/{oracle,swarm}.js`; each exports
-  `create(ctx, U)` → `{draw, probe}`. Lab to try them side by side: `/static/next/lab/eye.html?v=a|b|c`, UI system at `lab/ui.html`.
+  `create(ctx, U)` → `{draw, probe}`. The lab (`static/next/lab/eye.html?v=a|b|c`, `lab/ui.html`) was deleted in
+  `~/agents` commit f36c714 (2026-10-19); read it back with `git -C ~/agents show f36c714^:dashboard/static/next/lab/eye.html`.
 - Render on demand (`static/next/js/stage.js` + `gl/engine.js`): `director.step` returns the wanted fps — 60 for input,
   travel and morphs, 30 while data settles, 12 idle life (blinks, saccades), 6 for the Court orbit (180 s a turn), else 0
   until `life.nextAt`. `wake(ms)` keeps rAF alive; hidden tab 0 frames; `prefers-reduced-motion` draws one still.
@@ -26,7 +27,7 @@ Ticket: T52–T56 · Last verified: 2026-09-24 by dashboard pytest 84 passed + `
 ## Exact commands
 ```bash
 cd ~/agents/dashboard
-python3 -m pytest tests -q && node tests/test_next.js && node tests/test_pronunciation_page.js   # 84 + 2 green
+python3 -m pytest tests -q && node tests/test_next.js && node tests/test_pronunciation_page.js   # 170 + 2 green (2026-10-19); 174 collected 2026-10-20
 python3 tools/perf.py                                             # endpoint timings, raw/gzip bytes
 SCREEN=eye W=1920 H=1080 node ~/agent-work/research/2026-09-23/T53/build/next-measure.js          # fps, first KB, idle/hidden CPU
 SCREEN=eye W=400 H=860 DPR=2 THROTTLE=4 node ~/agent-work/research/2026-09-23/T53/build/next-measure.js   # phone proxy
@@ -39,6 +40,8 @@ systemctl --user restart agents-dashboard && curl -sI http://127.0.0.1:19998/ | 
 - Idle budget met: visible idle 1.0–1.4 % of a core, grace 19.6 % (1920) / 18.2 % (400), hidden 0 frames (T53b, T54, T56a).
 - On this Iris Xe the cost scales with the frame rate only: resolution, bloom passes and GL calls (180 → 118) barely move
   it (T56b: 20.1 → 19.6 %). Cut frames, not pixels.
+- `next-measure.js` starts its 30 s idle window 5 s after the pointer input, inside the 30 s alive grace (T56a), so `idleCpu`
+  reads grace, not idle (2026-10-19: idleFps 59.8, 38 % of a core at load ~9). For true idle set `IDLE=70` and use the tail.
 - Headless Chrome cannot really hide a tab: the measure script overrides `document.hidden` and fires `visibilitychange`.
 - Screenshots without GPU flags use software WebGL (T52a had no fps numbers). Launch with
   `--enable-gpu --ignore-gpu-blocklist --use-angle=vulkan --enable-features=Vulkan`.

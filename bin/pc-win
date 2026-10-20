@@ -1,13 +1,7 @@
 #!/usr/bin/env python3
 """pc win — list/focus/move/resize/close/minimize/maximize windows via the Window Calls extension."""
-import json
 import os
-import re
-import subprocess
 import sys
-import time
-
-from gi.repository import Gio, GLib
 
 DEST = "org.gnome.Shell"
 PATH = "/org/gnome/Shell/Extensions/Windows"
@@ -27,10 +21,21 @@ USAGE = """usage: pc win <command> [args]
   verify                     exit 1 unless the window last focused by `pc win focus` still has focus
 <sel> is a window id, or a case-insensitive substring of the title or wm_class."""
 
+if sys.argv[1:2] in (["-h"], ["--help"], ["help"]):
+    print(USAGE)
+    sys.exit(0)
 
-def call(method, args=None):
+import json
+import re
+import subprocess
+import time
+
+
+def call(method, sig=None, values=()):
     """Call one method on the Window Calls D-Bus interface."""
+    from gi.repository import Gio, GLib
     bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    args = GLib.Variant(sig, values) if sig else None
     try:
         r = bus.call_sync(DEST, PATH, IFACE, method, args, None,
                           Gio.DBusCallFlags.NONE, 5000, None)
@@ -43,7 +48,7 @@ def windows():
     """Every window with its geometry merged in."""
     out = []
     for w in json.loads(call("List")):
-        d = json.loads(call("Details", GLib.Variant("(u)", (w["id"],))))
+        d = json.loads(call("Details", "(u)", (w["id"],)))
         w.update({k: d.get(k) for k in ("x", "y", "width", "height", "minimized")})
         out.append(w)
     return out
@@ -65,7 +70,7 @@ def resolve(sel):
 
 def act(method, sel, extra=(), sig="(u)"):
     """Run a window method on the resolved selector."""
-    call(method, GLib.Variant(sig, (resolve(sel),) + extra))
+    call(method, sig, (resolve(sel),) + extra)
 
 
 def cmd_list(args):
@@ -113,7 +118,7 @@ def focus_click(wid):
     """Click just inside the window's bottom edge: Activate raises a window and sets the
     shell's focus flag, but a window that does not take keyboard focus on map stays
     input-dead until it is clicked, and then every keystroke is silently dropped."""
-    d = json.loads(call("Details", GLib.Variant("(u)", (wid,))))
+    d = json.loads(call("Details", "(u)", (wid,)))
     x, y = d["x"] + d["width"] // 2, d["y"] + d["height"] - 8
     s = screen()
     if s:
@@ -126,7 +131,7 @@ def focus_click(wid):
 def cmd_focus(sel, click=True):
     """Activate a window and make sure it really holds keyboard focus."""
     wid = resolve(sel)
-    call("Activate", GLib.Variant("(u)", (wid,)))
+    call("Activate", "(u)", (wid,))
     time.sleep(0.4)
     if click:
         focus_click(wid)
@@ -168,7 +173,7 @@ def cmd_wait(args):
         for w in windows():
             if sub in (w["title"] or "").lower():
                 if not w["focus"]:
-                    call("Activate", GLib.Variant("(u)", (w["id"],)))
+                    call("Activate", "(u)", (w["id"],))
                     time.sleep(0.4)
                     continue
                 if click:
@@ -182,9 +187,6 @@ def cmd_wait(args):
 
 def main():
     args = sys.argv[1:]
-    if args[0:1] and args[0] in ("-h", "--help", "help"):
-        print(USAGE)
-        return
     if not args:
         print(USAGE, file=sys.stderr)
         sys.exit(2)

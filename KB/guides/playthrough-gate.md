@@ -11,7 +11,7 @@ Reuses the declutter walker (`tools/declutter/walk.mjs`: onPage, beatOrder, case
 
 | Module (`~/projects/personal/ailearning/`) | Does |
 |---|---|
-| `tools/playthrough.mjs` | CLI: Vite dev server, headless Chromium, 8 pages at once, `out/playthrough/<slug>.md` + `.json`, exit 1 on any fault |
+| `tools/playthrough.mjs` | CLI: Vite dev server, headless Chromium, 12 pages at once (`PAGES`), `out/playthrough/<slug>.md` + `.json`, exit 1 on any fault |
 | `tools/playthrough/play.mjs` | Per case (4 to a page): read the shown instruction (`[data-k=ask]`) and the visible control names (plate buttons; each enabled hand's kind word, its state key, labels within 40 px of its grab area, a balloon → its part's name and term; every plate label for tap cases); then play: (1) the worked answer (`answer ?? show`) as the learner's own moves with the case open, (2) else the hand setting its verdict or press-in passes (grid search), (3) else tap each labelled spot, skipping misses; completed = bench event `step` phase `done` within 8 s for the worked answer and its seat, 2 s for search/turns/taps (a judged miss ends a wait at once), the tap path capped at 30 s a case; goal easing runs 4x (`EASE`); each record carries `ms` |
 | `tools/playthrough/rules.mjs` | Pure: `named(prompt, names)` (each name word is a prompt word or, from 3 letters, its prefix; numbers and stop words never name), faults `unnamed` / `no-prompt` / `never-completes` |
 

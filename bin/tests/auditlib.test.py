@@ -48,6 +48,16 @@ check('no cut reads the live file only', got == [2, 1], got)
 got = hs(auditlib.rotated_rows(path, now - 10000 * 3600))
 check('a cut older than every file reads them all', got == [500, 100, 90, 30, 20, 2, 1], got)
 check('a missing log yields nothing', list(auditlib.rotated_rows(path + '.none', now)) == [])
+check('read_jsonl: a missing file is empty', auditlib.read_jsonl(path + '.none') == [])
+got = [auditlib.parse_age(a) for a in ('90s', '30m', '2h', '7d')]
+check('parse_age: s, m, h and d', got == [90, 1800, 7200, 604800], got)
+for bad in ('5x', '4days', '', None):
+    try:
+        auditlib.parse_age(bad)
+        got = 'accepted'
+    except ValueError as e:
+        got = str(e)
+    check(f'parse_age refuses {bad!r} with one message', got == f'bad --since {bad!r} (use 90s, 30m, 2h, 7d)', got)
 
 ec = auditlib.error_cluster
 bash = lambda cmd, err: ec({'tool': 'Bash', 'op': ' '.join(cmd.split()[:2]), 'summary': cmd, 'error': err})
@@ -117,6 +127,11 @@ for tool, old in (('agents-log', 'def log_files'), ('toolsmith-inputs', 'def rea
     src = open(os.path.join(BIN, tool)).read()
     check(f'{tool} uses auditlib, no own rotation reader',
           'rotated_rows' in src and old not in src, tool)
+
+for tool in ('toolsmith-inputs', 'agent-verify', 'pc-failures', '../hooks/wait_nudge.py'):
+    src = open(os.path.join(BIN, tool)).read()
+    check(f'{tool} uses auditlib, no own age map or jsonl reader',
+          "'m': 60" not in src and 'gzip.open' not in src and 'from auditlib import' in src, tool)
 
 print('auditlib.test.py: ' + ('all green' if not fail else 'FAILURES'))
 sys.exit(fail)

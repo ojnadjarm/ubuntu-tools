@@ -4,10 +4,7 @@ set -uo pipefail
 BIN="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 REAL_HOME=$HOME
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
-is()  { [ "$2" = "$3" ] && ok "$1" || nok "$1" "expected '$3', got '$2'"; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 
 real_sum() { cat "$REAL_HOME/agents/log/notify.log" "$REAL_HOME/agents/log/notify-resolved.jsonl" "$REAL_HOME/agents/log/changes.jsonl" 2>/dev/null | md5sum; }
 before=$(real_sum)

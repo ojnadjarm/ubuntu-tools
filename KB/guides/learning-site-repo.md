@@ -1,6 +1,6 @@
 # ailearning repo: set up, build, check and preview the public learning site (Vite multi-page on GitHub Pages)
 
-Ticket: T79 (plan T76 ticket 2), homepage T82, U01 full lesson T84 · Last verified: 2026-09-25 by `npm run ci` green (66 node tests, 11 site pages incl. the narrow sheet, 18 home views + 9 behaviours, home budget, sheet-cold, U01 sweep + callout + live + drive → end, the whole lesson played by script (`lesson.mjs`), also from the drop link)
+Ticket: T79 (plan T76 ticket 2), homepage T82, U01 full lesson T84 · Last verified: 2026-10-20 (T846) by package.json scripts, `vite.config.ts`, deploy.yml, paths and timers (no ci run); 2026-09-25 by `npm run ci` green (66 node tests, 11 site pages incl. the narrow sheet, 18 home views + 9 behaviours, home budget, sheet-cold, U01 sweep + callout + live + drive → end, the whole lesson played by script (`lesson.mjs`), also from the drop link)
 
 ## When to use
 Any work inside `~/projects/personal/ailearning` (public repo `<github-user>/ailearning`, site `https://<github-user>.github.io/ailearning/`):
@@ -32,7 +32,7 @@ adding a page or unit, re-syncing the kits, fixing a Pages URL, the hygiene chec
 ## Exact commands
 ```bash
 cd ~/projects/personal/ailearning
-npm run ci                                            # once a day (timer), not per change: typecheck, kit:verify, node tests, build (+hygiene, base-check), e2e (tests/run-e2e.mjs, parallel lanes)
+npm run ci                                            # nightly timer ailearning-ci-daily (throwaway copy), not per change: ci:core (typecheck, kit:verify, node tests, build +hygiene/base-check, e2e) + declutter at 1366x768
 npm run test:changed [-- --dry] [path ...]           # only the checks covering the changed files (default: git status); map in tools/test-changed.mjs
 HYGIENE_DENY=~/agent-work/research/2026-09-24/T79/hygiene-deny.txt npm run hygiene     # plus private names (keep the file outside the repo)
 CUTAWAY_KIT=~/agents/kits/cutaway EXPLAINER_KIT=~/agents/kits/explainer npm run kit:sync   # after a kit change; then npm run test:changed
@@ -42,7 +42,7 @@ node ~/agents/kits/explainer/tools/e2e.mjs <u01 url> out/run.json               
 npm run cue-check -- --clip c4b --mark graph --key graph --part graph                # one cue: key changes on the word, part drawn
 KOKORO_PY=… KOKORO_RENDER=… tools/narrate.sh 01-neuron c4c                         # render + merge only the named clips (/kokoro-narration)
 ```
-New page: `u/<NN-slug>/index.html` (relative `../../units/...` paths) + one line in `build.rollupOptions.input` in `vite.config.ts`.
+New page: `u/<NN-slug>/index.html` (relative `../../units/...` paths); `vite.config.ts` picks up every `u/*/index.html` itself (`...units`).
 
 ## Pitfalls (measured)
 - `npm run build` fails in a copy without `.git` (a sandbox rsync): outside a git repo `hygiene` scans every file, so the ignored
@@ -63,7 +63,7 @@ New page: `u/<NN-slug>/index.html` (relative `../../units/...` paths) + one line
   `site.mjs` fails on any element outside the sheet's box.
 - `drop-link` serves `.txt` as a download; web previews must be a folder with `index.html`.
 - A hygiene leak pattern `/home/` fails any path containing `/home/`: name folders `homepage`, never `home`.
-- The repo is ~3.3 MB untracked (audio 2.6 MB); no LFS.
+- Committable files are 41 MB, 37 MB of it .opus/.m4a audio (2026-10-20); no LFS (git-lfs not installed).
 - Browsers ask `/favicon.ico` at the host root (a console 404 on every page). The pages link `%BASE_URL%favicon.svg` (Vite's env
   replacement in HTML); a plain `/favicon.svg` fails base-check as root-absolute.
 - The landing check in `site.mjs` was a camera-width ratio; once the landing framed Fig. 1 for the pre-Begin inset it measured the wrong

@@ -20,6 +20,30 @@ got = m.owner({1: {"comm": "claude"}, 2: {"ppid": 1}}, 3)
 print(("PASS" if got == (True, "agent wfdone") else "FAIL") + f" workflow agent transcript is the owner (got {got})")
 sys.exit(got != (True, "agent wfdone"))
 PY
+  # owner() (T988): a remembered task is not grepped again, and a transcript older than the shell is never grepped.
+  python3 - "$SW" <<'PY' || exit 1
+import importlib.machinery, os, sys, tempfile
+d = tempfile.mkdtemp(); os.environ["CLAUDE_PROJECTS_DIR"] = d
+m = importlib.machinery.SourceFileLoader("sw7", sys.argv[1]).load_module()
+sub = os.path.join(d, "-proj", "S1", "subagents"); os.makedirs(sub)
+old, new = os.path.join(sub, "agent-old000000000.jsonl"), os.path.join(sub, "agent-new000000000.jsonl")
+for f in (old, new):
+    open(f, "w").write('{"id":"tmem"}\n')
+os.utime(old, (0, 0))
+m.tool_shell = lambda procs, pid: 2
+m.environ = lambda pid, key: "S1"
+os.readlink = lambda p: "/tmp/claude/-proj/S1/tasks/tmem.output"
+procs = {1: {"comm": "claude"}, 2: {"ppid": 1, "start": "0", "age": 5}}
+argv, real = [], m.subprocess.run
+m.subprocess.run = lambda a, **k: argv.extend(a) or real(a, **k)
+first = m.owner(procs, 3)
+m.subprocess.run = lambda *a, **k: (_ for _ in ()).throw(AssertionError("grep ran"))
+m.OWNERS = dict(m.OWNERS_NOW)
+second = m.owner(procs, 3)
+good = first == second == (False, "agent new000") and m.OWNERS_NOW == {"tmem": new} and old not in argv and new in argv
+print(("PASS" if good else "FAIL") + f" memo: old transcript skipped, second call not grepped (got {first} {second})")
+sys.exit(not good)
+PY
   # owner() with /proc stubbed: a loop forked inside a live tool shell (same snapshot cmdline) belongs to that session.
   python3 - "$SW" <<'PY' || exit 1
 import importlib.machinery, sys
@@ -115,19 +139,18 @@ PY
     env IN_SANDBOX=1 OUTSIDE_CLAUDE="$(pgrep -x claude | tr '\n' ' ')" bash "$0"
 fi
 
-bad=0
-ok() { if [ "$2" = "$3" ]; then echo "PASS $1"; else echo "FAIL $1 (want $2, got $3)"; bad=$((bad+1)); fi; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 isalive() { [ -n "$1" ] && [ -e "/proc/$1" ] && [ "$(awk '{print $3}' "/proc/$1/stat")" != Z ] && echo alive || echo dead; }
 
 # Selftest: no process from outside the sandbox is visible, so none can be signalled.
 seen=0
 for p in $OUTSIDE_CLAUDE; do [ -e "/proc/$p" ] && grep -q '^claude$' "/proc/$p/comm" 2>/dev/null && seen=1; done
-ok "selftest: host claude processes invisible" 0 "$seen"
-ok "selftest: no claude in the sandbox yet" 0 "$(grep -lx claude /proc/[0-9]*/comm 2>/dev/null | wc -l)"
+eq "selftest: host claude processes invisible" 0 "$seen"
+eq "selftest: no claude in the sandbox yet" 0 "$(grep -lx claude /proc/[0-9]*/comm 2>/dev/null | wc -l)"
 
 WORK=$(mktemp -d)
 export WAIT_FOR_DIR="$WORK/waits" CLAUDE_PROJECTS_DIR="$WORK/projects" SENTINEL_STATE_DIR="$WORK/state" \
-  HARNESS_HOME="$WORK/h" WAITS_MIN_AGE=2 WAITS_STALL=60
+  HARNESS_HOME="$WORK/h" WAITS_MIN_AGE=2 WAITS_STALL=60 WAITS_TX_SLACK=3600  # transcripts are backdated before the shells start
 S=11111111-2222-3333-4444-555555555555
 TASKS="$WORK/tmp/-proj/$S/tasks"; SUB="$CLAUDE_PROJECTS_DIR/-proj/$S/subagents"
 mkdir -p "$TASKS" "$SUB" "$WORK/bin" "$WORK/.claude/shell-snapshots"
@@ -178,30 +201,30 @@ sleep 3
 reg1=$(jq -r 'select(.label=="reg1").pid' "$WAIT_FOR_DIR"/*.json); reg2=$(jq -r 'select(.label=="reg2").pid' "$WAIT_FOR_DIR"/*.json)
 
 "$SW" --dry-run >"$WORK/dry.txt"
-ok "dry run: kills nothing" alive "$(isalive "$(cat "$WORK/pid.dead")")"
-ok "dry run: lists 4 would-kills" 4 "$(grep -c 'would kill' "$WORK/dry.txt")"
+eq "dry run: kills nothing" alive "$(isalive "$(cat "$WORK/pid.dead")")"
+eq "dry run: lists 4 would-kills" 4 "$(grep -c 'would kill' "$WORK/dry.txt")"
 
 "$SW"
 LOG="$SENTINEL_STATE_DIR/sentinel.log"
-ok "dead job + finished agent: loop killed"        dead  "$(isalive "$(cat "$WORK/pid.dead")")"
-ok "  logged with its reason" 1 "$(grep -c "killed pid $(cat "$WORK/pid.dead") (polls r-dia.log unchanged 60 min, no writer; owner ended; owner agent adone0" "$LOG")"
-ok "orphaned session, dead pid: loop killed"       dead  "$(isalive "$(cat "$WORK/pid.orph")")"
-ok "  logged with its reason" 1 "$(grep -c "killed pid $(cat "$WORK/pid.orph") (waits on dead pid $deadjob; owner ended; owner session gone" "$LOG")"
-ok "workflow agent finished: loop killed"         dead  "$(isalive "$(cat "$WORK/pid.wf")")"
-ok "  logged with its owner" 1 "$(grep -c "killed pid $(cat "$WORK/pid.wf") .*owner agent wfdone" "$LOG")"
-ok "live job holding its file: loop kept"          alive "$(isalive "$(cat "$WORK/pid.live")")"
-ok "stuck loop of a running agent: kept"           alive "$(isalive "$(cat "$WORK/pid.seen")")"
-ok "  logged once as seen" 1 "$(grep -c "seen pid $(cat "$WORK/pid.seen") .*owner agent alive0 still running" "$LOG")"
-ok "busy long job, owner gone: kept"               alive "$(isalive "$(cat "$WORK/pid.busy")")"
-ok "registered wait, finished agent: killed"       dead  "$(isalive "$reg1")"
-ok "  registry entry removed" 0 "$(grep -l '"reg1"' "$WAIT_FOR_DIR"/*.json 2>/dev/null | wc -l)"
-ok "registered wait, running agent: kept"          alive "$(isalive "$reg2")"
-ok "each kill in the audit log" 4 "$(grep -c '"op": "sentinel kill ' "$HARNESS_HOME/log/actions.jsonl")"
+eq "dead job + finished agent: loop killed"        dead  "$(isalive "$(cat "$WORK/pid.dead")")"
+eq "  logged with its reason" 1 "$(grep -c "killed pid $(cat "$WORK/pid.dead") (polls r-dia.log unchanged 60 min, no writer; owner ended; owner agent adone0" "$LOG")"
+eq "orphaned session, dead pid: loop killed"       dead  "$(isalive "$(cat "$WORK/pid.orph")")"
+eq "  logged with its reason" 1 "$(grep -c "killed pid $(cat "$WORK/pid.orph") (waits on dead pid $deadjob; owner ended; owner session gone" "$LOG")"
+eq "workflow agent finished: loop killed"         dead  "$(isalive "$(cat "$WORK/pid.wf")")"
+eq "  logged with its owner" 1 "$(grep -c "killed pid $(cat "$WORK/pid.wf") .*owner agent wfdone" "$LOG")"
+eq "live job holding its file: loop kept"          alive "$(isalive "$(cat "$WORK/pid.live")")"
+eq "stuck loop of a running agent: kept"           alive "$(isalive "$(cat "$WORK/pid.seen")")"
+eq "  logged once as seen" 1 "$(grep -c "seen pid $(cat "$WORK/pid.seen") .*owner agent alive0 still running" "$LOG")"
+eq "busy long job, owner gone: kept"               alive "$(isalive "$(cat "$WORK/pid.busy")")"
+eq "registered wait, finished agent: killed"       dead  "$(isalive "$reg1")"
+eq "  registry entry removed" 0 "$(grep -l '"reg1"' "$WAIT_FOR_DIR"/*.json 2>/dev/null | wc -l)"
+eq "registered wait, running agent: kept"          alive "$(isalive "$reg2")"
+eq "each kill in the audit log" 4 "$(grep -c '"op": "sentinel kill ' "$HARNESS_HOME/log/actions.jsonl")"
 
 "$SW"
-ok "second tick: no new lines" 5 "$(grep -c stuck-wait "$LOG")"
+eq "second tick: no new lines" 5 "$(grep -c stuck-wait "$LOG")"
 
 kill "$(cat "$WORK/pid.busy")" "$(cat "$WORK/pid.live")" "$(cat "$WORK/pid.seen")" "$reg2" "$sess1" "$writer" "$livejob" 2>/dev/null
 rm -rf "$WORK"
 [ "$bad" = 0 ] && echo "all sentinel-waits fixtures pass"
-exit "$bad"
+exit $bad

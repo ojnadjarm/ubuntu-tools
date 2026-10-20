@@ -1,16 +1,51 @@
 #!/usr/bin/env bash
 # 15-min health check: bash fixes for known faults, Claude (agent-run sentinel) only if they fail.
-case "${1:-}" in -h|--help) awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; exit 0 ;; esac
+# usage: sentinel-check [--profile]
+#   --profile  the tick's read path only (no fix, push, escalation or state write): CPU ms per step.
+PROFILE=""
+case "${1:-}" in
+  -h|--help) awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; exit 0 ;;
+  --profile) PROFILE=1 ;;
+  "") ;;
+  *) echo "usage: sentinel-check [--profile]" >&2; exit 2 ;;
+esac
 set -uo pipefail
 export PATH="$HOME/.local/bin:$HOME/agents/bin:$PATH"
 # shellcheck source=/dev/null
 [ -n "${HARNESS_ENV_LOADED:-}" ] || . "$HOME/agents/bin/env.sh"
 st="$HOME/agents/sentinel/state"
-mkdir -p "$st"
-log() { printf '%s %s\n' "$(date -Is)" "$*" >>"$st/sentinel.log"; }
-exec 9>"$st/.lock"; flock -n 9 || { log "lock busy: the previous tick is still running, skipped"; exit 0; }
-# pc status reads this stamp as agents.sentinel_age: a stale one means the sentinel stopped ticking.
-date -Is >"$st/last-run"
+if [ -n "$PROFILE" ]; then
+  log() { :; }
+else
+  mkdir -p "$st"
+  log() { printf '%s %s\n' "$(date -Is)" "$*" >>"$st/sentinel.log"; }
+  exec 9>"$st/.lock"; flock -n 9 || { log "lock busy: the previous tick is still running, skipped"; exit 0; }
+  # pc status reads this stamp as agents.sentinel_age: a stale one means the sentinel stopped ticking.
+  date -Is >"$st/last-run"
+fi
+# CPU ms of this shell plus its reaped children (/proc stat) and of the unit cgroup (background children
+# too; only as a unit's main process). step <name> <cmd…> runs cmd and, with --profile, prints both deltas.
+cg_stat=""
+[ -n "$PROFILE" ] && HZ=$(getconf CLK_TCK)
+# The cgroup is ours only when systemd started this shell (a unit's main process), not inherited.
+if [ -n "$PROFILE" ] && read -r cg_stat </proc/$PPID/comm && [ "$cg_stat" = systemd ]; then
+  read -r cg_stat </proc/$$/cgroup; cg_stat="/sys/fs/cgroup${cg_stat#0::}/cpu.stat"
+else cg_stat=""; fi
+cpu_now() {
+  local l a; read -r l </proc/$$/stat; read -ra a <<<"${l##*) }"
+  CPU=$(( (a[11] + a[12] + a[13] + a[14]) * 1000 / HZ )); CG=-1
+  [ -r "$cg_stat" ] && { read -r _ l <"$cg_stat"; CG=$((l / 1000)); }
+}
+step() {
+  local n=$1 c0 g0 rc; shift
+  [ -n "$PROFILE" ] || { "$@"; return; }
+  cpu_now; c0=$CPU; g0=$CG
+  "$@" >/dev/null 2>&1; rc=$?
+  cpu_now
+  printf '%-10s %6d ms  cgroup %s  rc %d\n' "$n" $((CPU - c0)) "$([ "$CG" -ge 0 ] && echo "$((CG - g0)) ms" || echo n/a)" "$rc"
+  return "$rc"
+}
+DRY=${PROFILE:+--dry-run}
 # snapshot [--fresh] — pc status JSON; --fresh bypasses the 60 s probe cache (used
 # after a repair, where a cached docker/tailscale value would hide the fix).
 # Output without a .sections key (probe crashed or printed nothing) becomes a status.probe FAIL.
@@ -66,6 +101,24 @@ owner_only() {
     printf '%s\t%s\n' "$key" "$val"
   done
 }
+# profile_only — the failure lines on stdin minus docker.<project> rows whose expected services
+# (compose-services: profile-aware) all run. Unknown projects keep the row.
+profile_only() {
+  local key val p exp run
+  while IFS=$'\t' read -r key val; do
+    [ -n "$key" ] || continue
+    if [[ $key == docker.* ]]; then
+      p=${key#docker.}
+      exp=$(compose-services "$p" 2>/dev/null)
+      run=$(docker ps --filter "label=com.docker.compose.project=$p" \
+        --format '{{.Label "com.docker.compose.service"}}' 2>/dev/null | sort -u)
+      if [ -n "$exp" ] && [ -z "$(comm -23 <(printf '%s\n' "$exp") <(printf '%s\n' "$run"))" ]; then
+        log "$key $val: only services behind an inactive profile are down, not a fault"; continue
+      fi
+    fi
+    printf '%s\t%s\n' "$key" "$val"
+  done
+}
 
 # `tailscale up` refuses unless every non-default pref is restated (hostname, operator, ssh).
 fix_tailscale() { sudo tailscale up --timeout=30s --hostname="$HARNESS_HOST" --operator="$USER" --ssh; }
@@ -113,8 +166,11 @@ fix_orch() {
   sleep "${SENTINEL_ORCH_WAIT:-5}"
 }
 
-sentinel-runaway || true
-sentinel-waits || true
+[ -n "$PROFILE" ] && { cpu_now; p0=$CPU; g0=$CG; }
+# shellcheck disable=SC2086  # $DRY is empty or one word
+step runaway sentinel-runaway $DRY || log "sentinel-check: sentinel-runaway failed rc $?"
+# shellcheck disable=SC2086
+step waits sentinel-waits $DRY || log "sentinel-check: sentinel-waits failed rc $?"
 
 # A hand-typed `systemd-run` without --collect leaves a failed run-* scope that nothing else clears
 # (pc status lists it apart, no FAIL); one older than SENTINEL_TRANSIENT_AGE s is reset and logged.
@@ -126,29 +182,45 @@ reset_transient() {
     since=$(sed -n 's/^StateChangeTimestamp=@//p' <<<"$props")
     [ -n "$since" ] && [ $((now - since)) -ge "${SENTINEL_TRANSIENT_AGE:-600}" ] || continue
     desc=$(sed -n 's/^Description=//p' <<<"$props")
-    pc units reset-failed "$u" --user --apply >/dev/null 2>&1 &&
+    [ -z "$PROFILE" ] && pc units reset-failed "$u" --user --apply >/dev/null 2>&1 &&
       log "reset failed transient $u after $(( (now - since) / 60 )) min: ${desc:0:120}"
   done
 }
-reset_transient
+step transient reset_transient
 
 # pipewire log.level creeps up from debug tools left running; keep it at the default (2).
-pw_lvl=$(pw-metadata -n settings 0 log.level 2>/dev/null | sed -n "s/.*value:'\([0-9]*\)'.*/\1/p")
-if [ -n "$pw_lvl" ] && [ "$pw_lvl" -gt 2 ] 2>/dev/null; then
-  pw-metadata -n settings 0 log.level 2 >/dev/null 2>&1
-  log "pipewire log.level was $pw_lvl, reset to 2"
-fi
+fix_pipewire() {
+  local pw_lvl
+  pw_lvl=$(pw-metadata -n settings 0 log.level 2>/dev/null | sed -n "s/.*value:'\([0-9]*\)'.*/\1/p")
+  if [ -z "$PROFILE" ] && [ -n "$pw_lvl" ] && [ "$pw_lvl" -gt 2 ] 2>/dev/null; then
+    pw-metadata -n settings 0 log.level 2 >/dev/null 2>&1
+    log "pipewire log.level was $pw_lvl, reset to 2"
+  fi
+}
+step pipewire fix_pipewire
 
-# Orbiters whose subagent died without a SubagentStop go out here.
+# Orbiters whose subagent died without a SubagentStop go out here (sweep writes its claims: not profiled).
 orbit=${ORBIT_HOOK:-$HOME/agents/bin/orbit-hook}
-[ -x "$orbit" ] && "$orbit" sweep </dev/null
+[ -z "$PROFILE" ] && [ -x "$orbit" ] && "$orbit" sweep </dev/null
 
-json="$(snapshot)"; all="$(failures "$json")"
+# pc status --brief judges the same verdict table for ~0.2 CPU s less than --json (T988): a clean
+# FAIL=none tick stops there; any FAIL, or no brief line, reads the full JSON.
+triage() {
+  if [[ "$(${SENTINEL_BRIEF_CMD:-pc status --brief} 2>/dev/null)" == *" FAIL=none" ]]; then json='{"sections":{}}'; all=""; return; fi
+  json="$(snapshot "$@")"; all="$(failures "$json")"
+}
+step status triage
+if [ -n "$PROFILE" ]; then
+  step owner_only eval 'owner_only <<<"$all" | profile_only'
+  cpu_now
+  printf '%-10s %6d ms  cgroup %s\n' total $((CPU - p0)) "$([ "$CG" -ge 0 ] && echo "$((CG - g0)) ms" || echo n/a)"
+  exit 0
+fi
 mkdir -p "$st/tries"
 for f in "$st"/tries/*; do
   [ -e "$f" ] && ! grep -q "^${f##*/}"$'\t' <<<"$all" && rm -f "$f"
 done
-fails="$(owner_only --push <<<"$all")"
+fails="$(owner_only --push <<<"$all" | profile_only)"
 grep -qE '^(agents.orchestrator|status.probe)' <<<"$fails" || rm -f "$st/orch-repaired" "$st/orch-notified"
 if [ -z "$fails" ]; then date -Is >"$st/last-ok"; exit 0; fi
 log "FAIL: $(tr '\n' ';' <<<"$fails")"
@@ -172,7 +244,7 @@ if [ -n "$unmatched" ]; then
   log "no bash fix for $unmatched re-checking in ${SENTINEL_SETTLE:-30} s"
   sleep "${SENTINEL_SETTLE:-30}"
 fi
-json="$(snapshot --fresh)"; left="$(failures "$json" | owner_only)"
+json="$(snapshot --fresh)"; left="$(failures "$json" | owner_only | profile_only)"
 orch=$(awk -F'\t' '$1=="agents.orchestrator"{print $2}' <<<"$left")
 if [ -n "$orch" ]; then
   if [ ! -e "$st/orch-notified" ]; then
@@ -196,7 +268,8 @@ if [ "$sig" = "$prev_sig" ] && [ $((now - prev_t)) -lt "$COOLDOWN" ]; then
   if [ ! -e "$st/suppressing" ]; then
     : >"$st/suppressing"
     notify-owner -p high -t sentinel \
-      "sentinel: $sig still failing after a Claude repair; escalation paused 6h, bash fixes keep running" || true
+      "sentinel: $sig still failing after a Claude repair; escalation paused 6h, bash fixes keep running" \
+      || log "sentinel-check: notify-owner failed rc $?"
   fi
   exit 0
 fi

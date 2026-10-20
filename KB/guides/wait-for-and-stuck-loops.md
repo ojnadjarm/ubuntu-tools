@@ -1,6 +1,6 @@
 # Wait on a background job, and how the sentinel catches stuck wait loops
 
-Ticket: T67, T408, T438, T449 · Last verified: 2026-10-19 (T449: `wait-for.test.sh` 18, `sentinel-waits.test.sh` 29, `wait-nudge.test.py` 29, the 4 pgrep forms below re-measured; T438: 2 handback-schema checks, replay of the T429 transcript; T408: `wait-for.test.sh` 18, `sentinel-waits.test.sh` 4 new owner checks, replay of the T407 transcript); before: 2026-09-24 by both fixture suites (12 + 17 checks pass; the 2 workflow-owner fixtures added 2026-09-24 by code-review F04 not yet run under bwrap) and `sentinel-waits --dry-run`
+Ticket: T67, T408, T438, T449 · Last verified: 2026-10-20 (T947: dash front read from code, miss/hit timed); before: 2026-10-20 by T846 audit (`wait-for`/`sentinel-waits --help`, MIN_AGE 1200 / STALL 900 / WAITING_IDLE 10800 / HANDBACK_IDLE 120, 15-min timer, hook registration; suites not run); before: 2026-10-19 (T449: `wait-for.test.sh` 18, `sentinel-waits.test.sh` 29, `wait-nudge.test.py` 29, the 4 pgrep forms below re-measured; T438: 2 handback-schema checks, replay of the T429 transcript; T408: `wait-for.test.sh` 18, `sentinel-waits.test.sh` 4 new owner checks, replay of the T407 transcript); before: 2026-09-24 by both fixture suites (12 + 17 checks pass; the 2 workflow-owner fixtures added 2026-09-24 by code-review F04 not yet run under bwrap) and `sentinel-waits --dry-run`
 
 ## When to use
 - You started something long (a build, a benchmark, a render, a subagent's log) and need to be told when it ends: use `wait-for`.
@@ -86,7 +86,10 @@ condition held (exit 3)`, `stalled: … (exit 3)`, `killed by SIGTERM after N s,
   denies an `until/while … sleep` or `X && break` loop before it runs, in subagents too (measured: a haiku subagent got the deny
   and the line); the reason is the `wait-for` line to run. Loops in quoted data or heredoc bodies pass; `bash -c '…'`/`eval` loops
   are blocked. A deliberate loop fixture (reaper tests) goes in a script file run with `bash f.sh`. Replay of 7 days of audit
-  summaries: 139 denies of 15 269, 0 on data. Live once the owner reruns `adapters/claude/install`.
+  summaries: 139 denies of 15 269, 0 on data. Live: registered as a PreToolUse Bash hook in `~/.claude/settings.json` (checked 2026-10-20).
+  Dash front (T896): `hooks/sleep-loop-block.py` is a `#!/bin/dash` script that reads stdin (`gnucat` when present) and exits 0
+  unless the call holds `pkill`/`pgrep`, or `sleep` with `until`/`while`/`for`; only then it execs `python3 -IS
+  sleep-loop-block-impl.py` (the parser). Measured 2026-10-20 (T947, 15 runs): miss 1.7 ms median, hit 28 ms (T896: miss 3.0 ms with the front, 39 ms without).
   Test: `python3 ~/agents/hooks/sleep-loop-block.test.py`.
 - Testing the reaper against real processes could kill a live agent (FLEET §5.6). The suite re-execs itself under
   `bwrap --unshare-pid --proc /proc` and a selftest first proves the host's `claude` processes are invisible.

@@ -1,6 +1,6 @@
 # Runaway processes the sentinel kills, and forgotten headless browsers
 
-Ticket: T113, T114, T115 (rules 1-5: EF03, T67, TSP-016) · Last verified: 2026-10-15 by `sentinel-runaway.test.sh` (63 checks, 8 for rule 6, 4 for the rule-3 read-back, 10 for rule 4), `sentinel-check.test.sh`; real `sentinel-runaway --dry-run` last run 2026-09-26 (0.12 s, no rule-3 or rule-6 line)
+Ticket: T113, T114, T115 (rules 1-5: EF03, T67, TSP-016) · Last verified: 2026-10-20 (T846: `--help`, paths, env knobs, thresholds 50 %/1800 s/2 strikes, 15-min timer read); 2026-10-15 by `sentinel-runaway.test.sh` (63 checks, 8 for rule 6, 4 for the rule-3 read-back, 10 for rule 4), `sentinel-check.test.sh`; real `sentinel-runaway --dry-run` last run 2026-09-26 (0.12 s, no rule-3 or rule-6 line)
 
 ## When to use
 - A process burned CPU or memory for hours and the sentinel did not catch it: add or tune a rule in `bin/sentinel-runaway`.
@@ -71,4 +71,4 @@ grep 'rule6' ~/agents/sentinel/state/sentinel.log        # past browser closes
 ## Links
 - Code: `~/agents/bin/sentinel-runaway`, called by `~/agents/bin/sentinel-check`
 - Tests: `~/agents/bin/tests/sentinel-runaway.test.sh`, `~/agents/bin/tests/sentinel-check.test.sh`
-- State: `~/agents/sentinel/state/{sentinel.log,runaway.tsv,runaway-browsers.tsv}` · Toolbox: `KB/toolbox.md` item 10
+- State: `~/agents/sentinel/state/{sentinel.log,runaway.tsv,runaway-browsers.tsv}` (the last exists only while a Chrome tree has strikes; 0 `rule6` lines on 2026-10-20) · Toolbox: `KB/toolbox.md` item 10

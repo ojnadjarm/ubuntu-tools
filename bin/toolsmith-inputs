@@ -5,13 +5,13 @@ One JSON object with the sections bench_last, bench_failures, audit, failures, g
 qa, idle, tokens and hold; --check exits 1 when a `hold` row changed since state/last-seen.json.
 Reads only; runs no mutating verb. Root: TOOLSMITH_ROOT, else HARNESS_HOME,
 else ~/agents. A live probe is replaced by $ROOT/mock/<name>.json (doctor, power, top) or
-$ROOT/mock/qa.tsv when that file exists, so tests never call pc.
+$ROOT/mock/qa.tsv when that file exists; TOOLSMITH_NO_LIVE=1 skips the rest, so tests never call pc.
 """
-import argparse, gzip, json, os, re, subprocess, sys, time
+import argparse, json, os, re, subprocess, sys, time
 from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
-from auditlib import error_class, error_cluster, outcome_rows, raw_call, rotated_rows, row_kind
+from auditlib import error_class, error_cluster, outcome_rows, parse_age, raw_call, read_jsonl, rotated_rows, row_kind
 
 ROOT = os.environ.get('TOOLSMITH_ROOT') or os.environ.get('HARNESS_HOME') \
     or os.path.expanduser('~/agents')
@@ -22,13 +22,6 @@ PC_RE = re.compile(r'\bpc ([a-z][a-z0-9-]*)')
 
 def die(msg):
     sys.exit(f'toolsmith-inputs: {msg}')
-
-
-def since_seconds(s):
-    m = re.fullmatch(r'(\d+)([smhd])', s)
-    if not m:
-        die('bad --since (use 30m, 2h, 4d)')
-    return int(m[1]) * {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}[m[2]]
 
 
 def ts_epoch(s):
@@ -46,21 +39,6 @@ def read_json(path, default=None):
         return default
 
 
-def read_jsonl(path):
-    rows = []
-    try:
-        fh = gzip.open(path, 'rt') if path.endswith('.gz') else open(path)
-    except OSError:
-        return rows
-    with fh:
-        for line in fh:
-            try:
-                rows.append(json.loads(line))
-            except ValueError:
-                continue
-    return rows
-
-
 def strip_money(obj):
     """Drop every cost key: this collector reports tokens, never amounts."""
     if isinstance(obj, dict):
@@ -76,7 +54,9 @@ def probe(name, argv):
     mock = os.path.join(MOCK, name + '.json')
     if os.path.exists(mock):
         return read_json(mock)
-    pc = os.path.join(ROOT, 'bin', 'pc')
+    if os.environ.get('TOOLSMITH_NO_LIVE') == '1':
+        return None
+    pc =os.path.join(ROOT, 'bin', 'pc')
     argv = [pc if os.path.exists(pc) else 'pc'] + argv
     try:
         out = subprocess.run(argv, capture_output=True, text=True, timeout=20).stdout
@@ -503,7 +483,10 @@ def main():
             print(f"hold changed: {k} now {h['rows'].get(k, 'gone')}")
         print(f"hold: {len(h['rows'])} rows, {len(h['changed'])} changed")
         sys.exit(1 if h['changed'] else 0)
-    cut = time.time() - since_seconds(a.since)
+    try:
+        cut = time.time() - parse_age(a.since)
+    except ValueError as e:
+        die(e)
     d = {
         'generated': time.strftime('%Y-%m-%dT%H:%M:%S'), 'since': a.since,
         'bench_last': sec_bench_last(), 'bench_failures': sec_bench_failures(),

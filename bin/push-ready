@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# push-ready <repo>: read-only "can I push?" verdict for a git repo (T394). Never runs a git write command.
+# push-ready [--untracked] <repo>: read-only "can I push?" verdict for a git repo (T394). Never runs a git write command.
 # Prints "READY (<n> files)" or "NOT READY: <n> issues" plus one "kind<TAB>where<TAB>detail" line per issue.
+# --untracked: untracked files grouped by dir, fleet-needed ones flagged, and the owner's `git add` line (T955).
 # Exit 0 ready, 1 not ready, 2 usage. Guide: ~/agents/KB/guides/push-ready.md
 set -uo pipefail
 HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
@@ -9,8 +10,12 @@ ALLOW="${PUSH_READY_ALLOW:-$HOME/.config/pc-harness/push-ready.allow}"
 MAX_KB="${PUSH_READY_MAX_KB:-5120}"
 JUNK_SEG='^(node_modules|dist|mocks?|mockups?|qa|reviews?|__pycache__|\.pytest_cache|\.vite|coverage|\.env(\..+)?|\.DS_Store|.*\.(log|pyc|swp))$'
 JUNK_OK='^\.env\.(example|sample|template)$'
+FIXTURE_RE='(^|/)tests/fixtures/'   # recorded test data: no uid rule, junk names only from FIXTURE_JUNK
+FIXTURE_JUNK='^(node_modules|__pycache__|\.pytest_cache|\.env(\..+)?|\.DS_Store|.*\.(pyc|swp))$'
+VECTOR_MARK='push-ready: test vector'
 
-usage() { echo "usage: push-ready <repo-dir>" >&2; exit 2; }
+usage() { echo "usage: push-ready [--untracked] <repo-dir>" >&2; exit 2; }
+MODE=check; [ "${1:-}" = --untracked ] && { MODE=untracked; shift; }
 [ $# -eq 1 ] || usage
 case "$1" in -h|--help) usage ;; esac
 REPO="$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" || { echo "push-ready: not a git repo: $1" >&2; exit 2; }
@@ -33,12 +38,12 @@ check_machine() {
     && printf 'machine\t-\tno-machine-values check itself failed\n'
   printf '%s\n' "$out" | awk '/^FAIL no machine values in /{on=1; next} on && /^ +[0-9]+ [^ ]/ {n=$1; sub(/^ *[0-9]+ /,""); printf "machine\t%s\t%s hits of a config.env/private value\n", $0, n}'
   grep_files -E '/run/user/[0-9]+|user-[0-9]+\.slice|user@[0-9]+\.service' | cut -d: -f1,2 \
-    | while IFS= read -r w; do printf 'machine\t%s\thardcoded uid path\n' "$w"; done
+    | grep -vE "^[^:]*$FIXTURE_RE" | while IFS= read -r w; do printf 'machine\t%s\thardcoded uid path\n' "$w"; done
 }
 
 check_secrets() {
   local re='-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{35}|[MN][A-Za-z0-9_-]{23,25}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}'
-  grep_files -E -e "$re" | cut -d: -f1,2 | while IFS= read -r w; do printf 'secret\t%s\ttoken pattern\n' "$w"; done
+  grep_files -E -e "$re" | grep -vF "$VECTOR_MARK" | cut -d: -f1,2 | while IFS= read -r w; do printf 'secret\t%s\ttoken pattern\n' "$w"; done
   [ -d "$SECRETS_DIR" ] || return 0
   python3 -I - "$SECRETS_DIR" > "$tmp/lit" <<'PY'
 import json, os, re, sys
@@ -63,10 +68,11 @@ PY
 }
 
 junk_of() { # junk_of <path>: the path prefix up to its first junk segment, or nothing
-  local p="" seg IFS=/
+  local p="" seg re="$JUNK_SEG" IFS=/
+  [[ "$1" =~ $FIXTURE_RE ]] && re="$FIXTURE_JUNK"
   for seg in $1; do
     p="${p:+$p/}$seg"
-    [[ "$seg" =~ $JUNK_SEG ]] && ! [[ "$seg" =~ $JUNK_OK ]] && { printf '%s\n' "$p"; return; }
+    [[ "$seg" =~ $re ]] && ! [[ "$seg" =~ $JUNK_OK ]] && { printf '%s\n' "$p"; return; }
   done
 }
 
@@ -83,6 +89,79 @@ check_large() {
   (cd "$REPO" && tr '\n' '\0' < "$tmp/files" | xargs -0 -r stat -c '%s %n') \
     | awk -v max="$MAX_KB" '$1 > max*1024 {kb=int($1/1024); sub(/^[0-9]+ /,""); printf "large\t%s\t%d KB > %d KB\n", $0, kb, max}'
 }
+
+untracked() { # untracked files by dir; fleet-needed = reachable from the tracked tree (see the guide)
+  (cd "$REPO" && git ls-files -z --others --exclude-standard | tr '\0' '\n' | sort) > "$tmp/u"
+  python3 -I - "$REPO" "$tmp/u" "$tmp/tracked" "$FIXTURE_RE" <<'PY'
+import os, re, sys
+repo, ufile, tfile, fixture_re = sys.argv[1:5]
+read = lambda f: [l for l in open(f).read().split('\n') if l]
+untracked, tracked = read(ufile), [t for t in read(tfile) if os.path.isfile(os.path.join(repo, t))]
+fixture, is_test = re.compile(fixture_re), re.compile(r'(^|/)(tests/|test_[^/]*$|[^/]*[._-]test\.[^/]*$)')
+
+def needles(f):  # (needle, same-dir only) pairs a file would use to name f
+    parts = f.split('/')
+    if len(parts) == 1 or (len(parts) == 2 and parts[0] in ('bin', 'units')): out = [parts[-1]]
+    elif len(parts) == 2: out = [f]
+    else: out = ['/'.join(parts[-2:])]
+    out += ['/'.join(parts[i - 2:i]) for i in range(3, len(parts))]
+    if parts[0] == 'lib' and len(parts) > 1: out.append('py:' + parts[1].removesuffix('.py'))
+    local = {parts[-1], parts[-1].split('.')[0]} - {''}
+    return [(n, False) for n in out] + [(n, True) for n in local]
+
+TOKEN, IMPORT = re.compile(r'[\w.*/-]+'), re.compile(r'^\s*(?:from|import)\s+(\w+)', re.M)
+def names(s):  # needle-shaped strings in s: '/'-delimited runs of each token, python import heads, dir globs
+    try:
+        if os.path.getsize(os.path.join(repo, s)) > 1 << 20: return set(), set()
+        text = open(os.path.join(repo, s), errors='ignore').read()
+    except OSError: return set(), set()
+    out, globs = {'py:' + m for m in IMPORT.findall(text)}, set()
+    for tok in set(TOKEN.findall(text)):
+        segs = tok.split('/')
+        runs = {'/'.join(segs[i:j]) for i in range(len(segs)) for j in range(i + 1, len(segs) + 1)} - {''}
+        out |= runs
+        globs |= {r for r in runs if '*' in r and '/' in r.strip('/') and any(g and '*' not in g for g in r.split('/'))}
+    return out, globs
+
+files, index, glob_rx = untracked + tracked, {}, {}
+for f in files:
+    for n, local in needles(f): index.setdefault(n, []).append((f, local))
+def glob_hits(g):  # files a glob like units/* (files) or skills/*/ (whole dirs) matches, as a path suffix
+    if g not in glob_rx:
+        rx = re.compile('(^|/)' + '/'.join(re.escape(p).replace(r'\*', '[^/]*') for p in g.rstrip('/').split('/')) + ('/.+' if g.endswith('/') else '') + '$')
+        glob_rx[g] = {f for f in files if rx.search(f)}
+    return glob_rx[g]
+def named_by(s):
+    words, globs = names(s)
+    hits = {f for n in words & index.keys() for f, local in index[n] if not local or os.path.dirname(f) == os.path.dirname(s)}
+    return hits | {f for g in globs for f in glob_hits(g)}
+edges = {s: named_by(s) for s in files if not fixture.search(s)}
+
+fleet, need, frontier = set(tracked), {}, [t for t in tracked if t in edges]
+tests = {f for f in untracked if is_test.search(f) and not fixture.search(f)}
+while frontier:
+    new = set()
+    for s in frontier:
+        for f in edges[s] - fleet: need.setdefault(f, []).append(s); new.add(f)
+    fleet |= new
+    for t in sorted(tests - fleet):
+        hit = sorted(edges[t] & fleet)
+        if hit: need[t] = ['tests ' + hit[0]]; fleet.add(t); new.add(t)
+    frontier = [f for f in new if f in edges]
+need = {f: sorted(set(by)) for f, by in need.items()}
+print(f'UNTRACKED: {len(untracked)} files in {os.path.basename(repo)}, {len(need)} fleet-needed (named by a tracked or fleet-needed file, or a test of one)')
+groups = {}
+for f in untracked: groups.setdefault(os.path.dirname(f) or '.', []).append(f)
+for d in sorted(groups):
+    fs = groups[d]
+    print(f'{d}/  {len(fs)} files, {sum(f in need for f in fs)} fleet-needed')
+    for f in fs:
+        by = need.get(f)
+        print(f'  fleet-needed  {f}  ({by[0]}' + (f' +{len(by) - 1}' if len(by) > 1 else '') + ')' if by else f'  -             {f}')
+if need: print(f'owner: git -C {repo} add -- ' + ' '.join(sorted(need)))
+PY
+}
+[ "$MODE" = untracked ] && { untracked; exit 0; }
 
 {
   check_machine

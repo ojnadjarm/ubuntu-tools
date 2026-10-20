@@ -4,9 +4,7 @@ set -uo pipefail
 BIN="$HOME/agents/bin"
 FIX="$BIN/tests/fixtures/improve-gate"
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 
 # 1. every fixture's expected class is its file-name prefix.
 hit=0; n=0

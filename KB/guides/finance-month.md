@@ -1,6 +1,6 @@
 # Monthly finances: bank export (.xlsx) → categorised ledger → private spending page (T147)
 
-Ticket: T147, page redesign T149, page actions T150 · Last verified: 2026-10-01 by `tests/test_finance.py` (4/4) and `tests/test_web.py` (7/7) on synthetic fixtures and the September 2026 run
+Ticket: T147, page redesign T149, page actions T150 · Last verified: 2026-10-20 by T846 audit (`finance-month --help`, paths, units active, 11 + 7 tests defined); 2026-10-01 by `tests/test_finance.py` (4/4) and `tests/test_web.py` (7/7) on synthetic fixtures and the September 2026 run
 (76 rows, 0 running-balance gaps, net matches closing − opening balance).
 
 ## When to use
@@ -87,5 +87,5 @@ python3 ~/.claude/skills/finance-month/tests/test_web.py
 
 ## Links
 - Code: `~/.claude/skills/finance-month/`, CLI symlink `~/agents/bin/finance-month`
-- Tests: `~/.claude/skills/finance-month/tests/test_finance.py`
+- Tests: `~/.claude/skills/finance-month/tests/{test_finance,test_web}.py`
 - Data (private, 700): `~/finance/` (inbox, ledger.json, rules.yaml, site, shots)

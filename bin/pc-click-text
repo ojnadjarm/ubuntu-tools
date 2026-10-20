@@ -5,8 +5,8 @@ q=""; idx=0; region=""; clickargs=()
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help) echo 'usage: pc click-text "text" [--index N] [--region X,Y,W,H] [left|right|middle] [--double]'; exit 0;;
-    --index) idx="$2"; shift 2;;
-    --region) region="$2"; shift 2;;
+    --index) idx="$2"; shift 2 || exit 2;;
+    --region) region="$2"; shift 2 || exit 2;;
     left|right|middle|--double) clickargs+=("$1"); shift;;
     *) q="$1"; shift;;
   esac

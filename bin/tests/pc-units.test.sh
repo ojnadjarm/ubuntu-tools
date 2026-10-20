@@ -4,10 +4,7 @@ set -uo pipefail
 BIN="$HOME/agents/bin"
 FIX="$BIN/tests/fixtures/units"
 U="$BIN/pc-units"
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
-is()  { [ "$2" = "$3" ] && ok "$1" || nok "$1" "expected '$3', got '$2'"; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 REAL_LEDGER="$HOME/agents/log/changes.jsonl"
 real_rows=$(cat "$REAL_LEDGER" 2>/dev/null | wc -l)
 export PC_LEDGER; PC_LEDGER=$(mktemp); trap 'rm -f "$PC_LEDGER"' EXIT
@@ -100,6 +97,50 @@ is 'reset-failed ssh is refused (guard)' "$?" 3
 is 'selftest: the stub saw only show/reset-failed of run-fixture.scope' \
   "$(grep -cv -e '^--user show run-fixture.scope -p ActiveState --value$' -e '^--user reset-failed -- run-fixture.scope$' "$RF/argv")" 0
 rm -rf "$RF"
+
+## --- fixture: start of a oneshot (T533) — stubbed systemctl, per-unit state files ----
+OS=$(mktemp -d); mkdir -p "$OS/bin"
+for x in os-ok os-bad os-slow; do printf 'inactive\nsuccess\noneshot\nno\n' >"$OS/$x"; done
+printf 'inactive\nsuccess\nsimple\nno\n' >"$OS/svc-simple"
+cat >"$OS/bin/systemctl" <<S
+#!/bin/sh
+echo "\$*" >>"$OS/argv"
+u=\$3; f="$OS/\$3"
+case "\$2" in
+  show) case "\$5" in ActiveState) n=1;; Result) n=2;; Type) n=3;; RemainAfterExit) n=4;; *) exit 1;; esac
+        if [ "\$u" = os-slow ] && [ \$n = 1 ] && [ "\$(sed -n 1p "\$f")" = activating ]; then
+          c=\$(( \$(cat "$OS/slow-reads" 2>/dev/null || echo 0) + 1 )); echo \$c >"$OS/slow-reads"
+          [ \$c -ge 3 ] && sed -i '1s/.*/inactive/' "\$f"
+        fi
+        sed -n "\${n}p" "\$f";;
+  start) u=\$4; f="$OS/\$4"
+         case "\$u" in
+           os-ok) ;;
+           os-bad) sed -i '1s/.*/failed/;2s/.*/exit-code/' "\$f"; exit 3;;
+           os-slow) sed -i '1s/.*/activating/' "\$f";;
+           svc-simple) sed -i '1s/.*/active/' "\$f";;
+         esac;;
+  *) exit 1;;
+esac
+S
+chmod +x "$OS/bin/systemctl"
+row() { jq -s -c --arg i "$1" 'map(select(.id==$i)) | add' "$PC_LEDGER"; }
+o=$(PATH="$OS/bin:$PATH" "$U" start os-ok --user)
+is 'oneshot start dry run expects inactive success' "$o" 'would: os-ok inactive → inactive success'
+o=$(PATH="$OS/bin:$PATH" "$U" start os-ok --user --apply); r=$(row "$(sed -n 's/^rollback: pc undo //p' <<<"$o")")
+is 'oneshot ok: ledger row verified' "$(jq -r '.verified' <<<"$r")" true
+is 'oneshot ok: observed inactive success' "$(jq -r '.observed' <<<"$r")" 'inactive success'
+o=$(PATH="$OS/bin:$PATH" "$U" start os-bad --user --apply); r=$(row "$(sed -n 's/^rollback: pc undo //p' <<<"$o")")
+is 'oneshot failed: ledger row unverified' "$(jq -r '.verified' <<<"$r")" false
+is 'oneshot failed: observed starts with failed' "$(jq -r '.observed|startswith("failed")' <<<"$r")" true
+o=$(PATH="$OS/bin:$PATH" "$U" start os-slow --user --apply); r=$(row "$(sed -n 's/^rollback: pc undo //p' <<<"$o")")
+is 'oneshot still activating: polled until inactive, verified' "$(jq -r '.verified' <<<"$r")" true
+o=$(PATH="$OS/bin:$PATH" "$U" start svc-simple --user --apply); r=$(row "$(sed -n 's/^rollback: pc undo //p' <<<"$o")")
+is 'simple service: after stays active' "$(jq -r '.after' <<<"$r")" active
+is 'simple service: verified on ActiveState alone' "$(jq -r '"\(.verified) \(.observed)"' <<<"$r")" 'true active'
+is 'selftest: the oneshot stub saw only show/start of fixture units' \
+  "$(grep -cvE '^--user (show (os-ok|os-bad|os-slow|svc-simple) -p [A-Za-z]+ --value|start -- (os-ok|os-bad|os-slow|svc-simple))$' "$OS/argv")" 0
+rm -rf "$OS"
 
 ## --- live: fleet, cost, guard --------------------------------------------
 "$U" fleet --json | jq -e 'map(.unit)|index("sentinel-check.timer")' >/dev/null

@@ -2,6 +2,7 @@
 # ci-autofix — run a CI command; on red, one fixer agent per cause per 24 h, one re-run, a high push only if still red (T402).
 # Load contention (the CI log's `ci-load: contention` line or the fixer's `Cause: … contention` report) re-runs once when quiet (T407).
 # Targets: ailearning-ci-daily.service (T402), fleet-ci-daily.service (T459) in ~/agents/units.
+# Every re-run keeps the first log as <log>.first.<ext>; after a fix attempt it exports CI_AUTOFIX_RERUN=<that copy> (T733).
 set -uo pipefail
 usage() { echo "usage: ci-autofix --repo <dir> --log <ci log> <label> -- <ci command>...   (fixer: agent-run \${CI_AUTOFIX_AGENT:-ci-fix})" >&2; exit "${1:-2}"; }
 REPO=""; LOG=""
@@ -45,11 +46,13 @@ rerun() {
     echo "budget: $left s left before the unit timeout, a re-run needs $CI_RUN_NEED s; skipped" | tee -a "$NOTE"
     push "(no time left for a re-run before the unit timeout)"; exit "$rc"
   fi
+  cp -p "$LOG" "$FIRST" 2>/dev/null
   "${CMD[@]}"; rc=$?
   case "$rc" in 2|75|143) echo "re-run: rc $rc, left to the CI command" >>"$NOTE"; exit "$rc";; esac
   if [ "$rc" -eq 0 ]; then
     echo "re-run: green $1" >>"$NOTE"
-    "$B/pc" need resolve "$LABEL ci failed" --fixed "ci-autofix: green $1 (${NOTE/#$HOME/\~})" --apply || true
+    "$B/pc" need resolve "$LABEL ci failed" --fixed "ci-autofix: green $1 (${NOTE/#$HOME/\~})" --apply \
+      || echo "ci-autofix: need resolve failed rc $?" >>"$NOTE"
     exit 0
   fi
   CAUSE="$(cluster "$rc")"; KEY="$(printf '%s' "$CAUSE" | tr -d '0-9')"
@@ -57,9 +60,11 @@ rerun() {
   push "$2"
   exit "$rc"
 }
-push() { "$B/notify-owner" -p high -t "$LABEL" -k "$LABEL ci: $KEY" "$LABEL ci failed $1: ${CAUSE:0:120} · ${NOTE/#$HOME/\~}" || true; }
+push() { "$B/notify-owner" -p high -t "$LABEL" -k "$LABEL ci: $KEY" "$LABEL ci failed $1: ${CAUSE:0:120} · ${NOTE/#$HOME/\~}" \
+  || echo "ci-autofix: notify-owner failed rc $?" >>"$NOTE"; }
 
-CMD0="$1"; CMD=("$@"); ATT=""; REPORT="$HOME/agents/$AGENT/REPORT.md"
+CMD0="$1"; CMD=("$@"); ATT=""; REPORT="$HOME/agents/$AGENT/REPORT.md"; FIRST="${LOG%.*}.first.${LOG##*.}"
+unset CI_AUTOFIX_RERUN
 "$@"; rc=$?
 case "$rc" in 0|2|75|143) exit "$rc";; esac
 
@@ -83,4 +88,5 @@ AGENT_RUN_NO_PUSH=1 "$B/agent-run" "$AGENT"; arc=$?
 echo "attempt: agent-run $AGENT exit $arc" >>"$NOTE"
 
 contended && quiet
+export CI_AUTOFIX_RERUN="$FIRST"
 rerun "after the fix attempt" "after one auto-fix attempt"

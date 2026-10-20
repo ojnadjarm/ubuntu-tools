@@ -17,6 +17,9 @@ sentinel-runaway
 sentinel-waits 
 systemctl --user list-units --state=failed --plain --no-legend
 pw-metadata -n settings 0 log.level
+docker ps -a --filter label=com.docker.compose.project=moodle-shared --format {{.Label "com.docker.compose.project.config_files"}}
+docker compose -p moodle-shared -f $WORK/moodle-envs/shared/docker-compose.yml config --services
+docker ps --filter label=com.docker.compose.project=moodle-shared --format {{.Label "com.docker.compose.service"}}
 docker compose -f $WORK/moodle-envs/shared/docker-compose.yml up -d
 == ydotoold rc=0
 FAIL: services.ydotoold	inactive;

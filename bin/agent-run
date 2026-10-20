@@ -19,15 +19,16 @@ MODEL=opus; TIMEOUT=3600
 mkdir -p "$dir/logs" "$dir/state"
 fleet_lock "$dir/.lock" 8 || { echo "agent-run: $name is already running" >&2; exit 0; }
 
-ts="$(date +%Y-%m-%d-%H%M%S)-$(tr -dc 'a-z0-9' </dev/urandom | head -c4)"
+ts="$(date +%Y-%m-%d-%H%M%S)-$(printf '%04x' "$RANDOM")"
 log="$dir/logs/$ts.log"; out="$dir/logs/$ts.json"; idx="$dir/logs/index.tsv"
 meta="$dir/logs/$ts.meta.json"
 cols="$(printf 'tokens_in\ttokens_out\tcache_r\ttool_calls\thistogram')"
 if [ -s "$idx" ]; then
   # Append the new columns to the header only; existing rows stay exactly as they were written.
-  head -1 "$idx" | grep -q 'tokens_in' ||
+  if ! head -1 "$idx" | grep -q 'tokens_in'; then
     { printf '%s\t%s\n' "$(head -1 "$idx")" "$cols"; tail -n +2 "$idx"; } >"$idx.tmp" &&
       mv "$idx.tmp" "$idx"
+  fi
 else
   printf 'start\tend\texit\tseconds\tcost_usd\tlog\t%s\n' "$cols" >"$idx"
 fi

@@ -1,6 +1,6 @@
 # Daily ailearning full suite on a timer
 
-Ticket: T140, T340 · Last verified: 2026-09-29 by a hand run (`systemctl --user start ailearning-ci-daily.service`): rc 0, 423 s; dumps 2026-10-11 (T314); changed-only declutter 2026-10-12 by `bin/tests/ailearning-ci-daily.test.sh` (T340); oldest-marker-first order 2026-10-17 (F46); auto-fix first 2026-10-18 by `bin/tests/ci-autofix.test.sh` (T402); load guard 2026-10-19 by `ci-autofix.test.sh`, `ailearning-ci-daily.test.sh`, `ci-window.test.sh` (T407); shared wait budget 2026-10-19 by the same three suites (T408)
+Ticket: T140, T340 · Last verified: 2026-10-20 by `--help`, unit files, `systemctl --user list-timers`, `ailearning-ci.jsonl` (T846); earlier: 2026-09-29 by a hand run (`systemctl --user start ailearning-ci-daily.service`): rc 0, 423 s; dumps 2026-10-11 (T314); changed-only declutter 2026-10-12 by `bin/tests/ailearning-ci-daily.test.sh` (T340); oldest-marker-first order 2026-10-17 (F46); auto-fix first 2026-10-18 by `bin/tests/ci-autofix.test.sh` (T402); load guard 2026-10-19 by `ci-autofix.test.sh`, `ailearning-ci-daily.test.sh`, `ci-window.test.sh` (T407); shared wait budget 2026-10-19 by the same three suites (T408)
 
 ## When to use
 Reading, changing or re-running the once-a-day `npm run ci` of ailearning. Agents run `npm run test:changed`, never the full suite.
@@ -51,7 +51,7 @@ clock starts after the guard, so a long wait does not defer every unit. The rend
 
 ## Exact commands
 ```bash
-systemctl --user start ailearning-ci-daily.service     # run it now (~8 min + declutter of changed units; TimeoutStartSec=3600, source ~/agents/units)
+systemctl --user start ailearning-ci-daily.service     # run it now (~8 min + declutter of changed units; run budget 3600 s, unit TimeoutStartSec=10800, source ~/agents/units)
 systemctl --user start ailearning-ci-weekly.service    # full declutter U01–U07 at 1366 (~2.3 h; log ~/agents/log/ailearning-ci-full.log)
 ailearning-ci-daily --mark 02-layers                    # after `npm run declutter -- 02 --size 1366x768` passed by hand: the nightly skips it
 ls ~/agents/state/ailearning-declutter/                 # one marker per unit green at its current files

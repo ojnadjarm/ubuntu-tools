@@ -1,6 +1,6 @@
 # Weekly code review of the fleet: find bugs, fix them, retire what is not useful (code-review swarm)
 
-Ticket: T74 · Last verified: 2026-10-19 (T449: `bin/tests/run.sh` timed), 2026-10-15 (T347-02) and 2026-09-24 by `bin/tests/code-review.test.sh` 37/37 and the fixture selftest `code-review/selftest/run.sh` (harden run 2: oracle 16/16, 421 s, $8.02; effectiveness fixture: valuable tool kept)
+Ticket: T74 · Last verified: 2026-10-20 (T1005: split into runner + `lib/code_review/`, outputs byte-identical on the fixture; T846: paths, `--help`, timer, agent.env read), 2026-10-19 (T449: `bin/tests/run.sh` timed), 2026-10-15 (T347-02) and 2026-09-24 by `bin/tests/code-review.test.sh` 37/37 and the fixture selftest `code-review/selftest/run.sh` (harden run 2: oracle 16/16, 421 s, $8.02; effectiveness fixture: valuable tool kept)
 
 ## When to use
 - Reading or changing the Saturday 03:00 `agent@code-review` run, its lanes, its rules, or what it may touch.
@@ -40,7 +40,7 @@ Ticket: T74 · Last verified: 2026-10-19 (T449: `bin/tests/run.sh` timed), 2026-
 
 ## Exact commands
 ```bash
-bash ~/agents/bin/tests/code-review.test.sh            # 46 fixture checks, no model, ~60 s (2026-09-24, 37 then); in the code-review sandbox the agents-stop/agents-start checks fail or skip (systemctl shimmed)
+bash ~/agents/bin/tests/code-review.test.sh            # 52 fixture checks (2026-10-20), no model, ~60 s (2026-09-24, 37 then); in the code-review sandbox the agents-stop/agents-start checks fail or skip (systemctl shimmed)
 bash ~/agents/code-review/selftest/run.sh              # real swarm on the seeded fixture (model, ~6-10 min, ~$7-10)
 code-review-sandbox --selftest                         # proves hidden secrets, read-only containment, Claude-only network
 code-review restore <run> <F-id>                       # undo one fix; what it left goes to the backup's displaced/
@@ -77,11 +77,17 @@ agent-now code-review                                  # one real run now, throu
   "API Error: Connection dropped (ECONNRESET)"). The push is the same generic "run error", so it can hide either
   cause: read `logs/<run>.log`. Before paying for a new run, try `resumeFromRunId` (`research-swarm-and-judge.md`);
   finished lanes come from cache. Untested for a headless run whose session died.
+- `lib/code_review/common.py` reads CR_HOME/CR_DATE/CR_NOW at import, so one process serves one home: the test's warm
+  driver pre-imports everything except `code_review`, which each forked child imports fresh (T1005).
+- `lib/code_review` is in `CONTAINMENT` (forbidden to lanes, read-only in the sandbox) like `bin/code-review` (T1005).
 - Workflow lanes have no network to the Eye: they no longer appear as orbiters.
 - Never SendMessage to a running workflow agent (see `research-swarm-and-judge.md`); steer by editing `LANES.md`.
 
 ## Links
-- Code: `bin/code-review`, `bin/code-review-sandbox`, `bin/code-review-netproxy`,
+- Code: `bin/code-review` (argparse runner, dispatch) over `lib/code_review/`: `common` (roots from CR_HOME/CR_DATE/CR_NOW, run id,
+  `AREAS`), `policy` (`CONTAINMENT`, `policy()`), `evidence` (usage, refs), `claims`, `backups` (backup/restore), `fixes`
+  (tests, lint, cleanup), `retire` (+ queue-new), `lanes` (`LENSES`, focus, prep), `report` (finish, deliver), `snapshot`;
+  `bin/code-review-sandbox`, `bin/code-review-netproxy`,
   `code-review/{BRIEF.md,LANES.md,swarm.js,agent.env}`, `code-review/selftest/{build.py,template/,oracle.sh,run.sh}`
 - Tests: `bin/tests/code-review.test.sh`, `bin/tests/agent-run.test.sh` (AGENT_WRAP), `code-review/selftest/run.sh`,
   effectiveness fixture `research/2026-09-24/T74/critic-eff/run.sh`

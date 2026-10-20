@@ -5,15 +5,12 @@ set -uo pipefail
 BIN="$HOME/agents/bin"
 FIX="$BIN/tests/fixtures/power"
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
-is()  { [ "$2" = "$3" ] && ok "$1" || nok "$1" "expected '$3', got '$2'"; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 # between <name> <value> <lo> <hi>
 between() { awk -v v="$2" -v l="$3" -v h="$4" 'BEGIN{exit !(v>=l && v<=h)}' \
   && ok "$1" || nok "$1" "$2 not in [$3,$4]"; }
-# fx <args…> — pc power against the recorded tree; sys2 is the second RAPL/rc6 sample.
-fx() { PC_FIXTURE="$FIX" PC_SYS2="$FIX/sys2" XDG_RUNTIME_DIR="$WORK" PC_LEDGER="$WORK/l.jsonl" \
+# fx <args…> — pc power against the recorded tree; sys2 is the second RAPL/rc6 sample, 300 ms apart.
+fx() { PC_FIXTURE="$FIX" PC_POWER_ELAPSED_US=300000 PC_SYS2="$FIX/sys2" XDG_RUNTIME_DIR="$WORK" PC_LEDGER="$WORK/l.jsonl" \
   "$BIN/pc-power" "$@"; }
 
 J=$(fx --json)

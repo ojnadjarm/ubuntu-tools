@@ -1,6 +1,6 @@
 # Timed Moodle upgrade rehearsal 4.5 -> 5.3 with a tested rollback
 
-Ticket: T423 · Last verified: 2026-10-19 by a full run (up, run, rollback, report, down) on a throwaway upstream site
+Ticket: T423 · Last verified: 2026-10-20 by T846 read-only audit (`--help`, paths, code); before: 2026-10-19 by a full run (up, run, rollback, report, down) on a throwaway upstream site
 
 ## When to use
 Pricing or planning a Moodle upgrade: you need measured step times and a proven rollback. Not for a customer's real site; for its plugin list use /moodle-upgrade-audit.

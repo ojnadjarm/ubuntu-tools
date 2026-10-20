@@ -1,28 +1,108 @@
 #!/usr/bin/env bash
-# fleet-ci-daily — the nightly fleet suite (bin/tests/run.sh -j 8) once the machine is quiet; output in ~/agents/log/fleet-ci/<date>.txt (T459).
-# Red ends the log with `✖ fleet ci red: <files>` (ci-autofix's cause line) and `ci-load: contention …` when the 1-min load was > 6.
+# fleet-ci-daily — the nightly fleet suite (bin/tests/run.sh -j 8 --skills) once the machine is quiet; output in ~/agents/log/fleet-ci/<date>.txt (T459).
+# Red files re-run once serially after a quiet wait: green ones print `load-noise: <files>`; `✖ fleet ci red: <files>` (ci-autofix's cause line)
+# names only files red twice, after `ci-load: contention …` when the 1-min load was > 6.
+# Mon–Sat it passes --skip-unchanged (heavy green skill tests nothing touched are skipped, T717); Sunday or FLEET_CI_FULL=1 runs all.
+# CI_AUTOFIX_RERUN=<first log> (ci-autofix after a fix attempt, T733): only that log's red files plus tests the fixer touched re-run.
+# --recheck (T853): today's (else the newest) log's red files re-run alone; all green clears the failed unit and the fleet nightly need (rc 3 when the reset or that resolve fails).
 set -uo pipefail
 B="$HOME/agents/bin"
 LOG="$HOME/agents/log/fleet-ci/$(date +%F).txt"
 LOADAVG="${CI_LOADAVG:-/proc/loadavg}"
+. "$B/quiet-gate"
 
+RECHECK=
 case "${1:-}" in
-  -h|--help) echo "usage: fleet-ci-daily   (waits for ci-window --quiet, runs $B/tests/run.sh -j 8, writes ${LOG/#$HOME/\~}; nightly via fleet-ci-daily.timer)"; exit 0;;
+  -h|--help) echo "usage: fleet-ci-daily [--recheck]   (--recheck: re-run the last log's red files alone, append \`recheck <time>: N/M green\`, all green → reset the failed unit + resolve the fleet nightly need; rc 1 on any red, rc 3 when the reset or the resolve failed)"
+    echo "       fleet-ci-daily   (waits for ci-window --quiet, runs $B/tests/run.sh -j 8 --skills [--skip-unchanged Mon–Sat; Sunday or FLEET_CI_FULL=1: all], writes ${LOG/#$HOME/\~}; nightly via fleet-ci-daily.timer)"; exit 0;;
   "") ;;
+  --recheck) RECHECK=1;;
   *) echo "usage: fleet-ci-daily   (unknown argument $1; see --help)" >&2; exit 2;;
 esac
+# Test labels whose file, bin/ tool or skill dir is newer than $1.
+touched() {
+  local f n d s ds
+  for f in "$HOME/agents"/bin/tests/*.test.sh "$HOME/agents"/bin/tests/*.test.py; do
+    [ -f "$f" ] || continue
+    n=${f##*/}; n=${n%.test.*}
+    { [ "$f" -nt "$1" ] || [ "$HOME/agents/bin/$n" -nt "$1" ]; } && echo "bin/tests/${f##*/}"
+  done
+  IFS=: read -ra ds <<<"${RUN_TESTS_SKILLS:-$HOME/.claude/skills:$HOME/agents/skills}"
+  for d in "${ds[@]}"; do
+    for s in "$d"/*/; do
+      [ -n "$(find -L "$s" -path '*/__pycache__' -prune -o -newer "$1" -print -quit 2>/dev/null)" ] || continue
+      for f in "$s"tests/*.test.sh "$s"tests/*.test.py "$s"tests/*.test.js; do [ -f "$f" ] && echo "skills/${f#"$d"/}"; done
+    done
+  done | sort -u
+}
+# Re-run the newest log's red files alone; all green → reset the failed unit and resolve the fleet nightly need.
+recheck() {
+  local log="$LOG" red f ok=() bad=()
+  [ -f "$log" ] || log="$(ls "${LOG%/*}"/*.txt 2>/dev/null | grep -v '\.first\.txt$' | sort | tail -1)"
+  red="$([ -f "$log" ] && sed -nE 's/^✖ fleet ci red: //p' "$log" | tail -1)"
+  case "$red" in "run.sh rc "*) red=;; esac
+  [ -n "$red" ] || { echo "recheck: nothing red"; return 0; }
+  "$B/ci-window" --quiet
+  for f in $red; do
+    bash "$B/tests/run.sh" -j 1 --only "$f" 2>&1 | sed 's/^/  recheck | /'
+    [ "${PIPESTATUS[0]}" -eq 0 ] && ok+=("$f") || bad+=("$f")
+  done
+  echo "recheck $(date +%T): ${#ok[@]}/$(( ${#ok[@]} + ${#bad[@]} )) green ($red)" | tee -a "$log"
+  [ "${#bad[@]}" -eq 0 ] || return 1
+  "$B/pc" units reset-failed fleet-ci-daily.service --user --apply \
+    || { echo "fleet-ci-daily: reset-failed failed rc $?" | tee -a "$log"; return 3; }
+  "$B/pc" need resolve "fleet nightly" --fixed "recheck green: $red" --apply \
+    || { echo "fleet-ci-daily: need resolve failed rc $?" | tee -a "$log"; return 3; }
+}
 mkdir -p "${LOG%/*}" "$HOME/agents/state"
 exec 9>"$HOME/agents/state/fleet-ci.lock"
 flock -n 9 || { echo "fleet-ci-daily: a run is already going" >&2; exit 75; }
+[ -n "${RECHECK:-}" ] && { recheck; exit; }
 
 exec >"$LOG" 2>&1
 echo "fleet-ci-daily $(date -Is)"
 "$B/ci-window" --quiet
-read -r l0 _ <"$LOADAVG"
-bash "$B/tests/run.sh" -j 8; rc=$?
+F="${CI_AUTOFIX_RERUN:-}"
+if [ -f "$F" ] && grep -q '^✖ fleet ci red: ' "$F"; then
+  red="$(sed -nE 's/^✖ fleet ci red: //p' "$F" | tail -1)"
+  case "$red" in "run.sh rc "*) red=;; esac
+  scope=($red); n=${#scope[@]}
+  while read -r f; do [[ " $red " == *" $f "* ]] || scope+=("$f"); done < <(touched "$F")
+  echo "rerun scope: $n red + $(( ${#scope[@]} - n )) touched (first pass: ${F/#$HOME/\~})"
+  if [ "${#scope[@]}" -eq 0 ]; then
+    rc="$(sed -nE 's/^✖ fleet ci red: run\.sh rc ([0-9]+)$/\1/p' "$F" | tail -1)"; exit "${rc:-1}"
+  fi
+  still=()
+  for f in "${scope[@]}"; do
+    bash "$B/tests/run.sh" -j 1 --only "$f" 2>&1 | sed 's/^/  re-run | /'
+    [ "${PIPESTATUS[0]}" -eq 0 ] || still+=("$f")
+  done
+  echo "$([ "${#still[@]}" -eq 0 ] && echo PASS || echo FAIL) $(( ${#scope[@]} - ${#still[@]} ))/${#scope[@]} files in the rerun scope"
+  [ "${#still[@]}" -eq 0 ] && exit 0
+  echo "✖ fleet ci red: ${still[*]}"
+  exit 1
+fi
+l0=$(qg_load1 "$LOADAVG")
+skipu=--skip-unchanged
+{ [ "${FLEET_CI_DOW:-$(date +%u)}" = 7 ] || [ "${FLEET_CI_FULL:-}" = 1 ]; } && skipu=
+bash "$B/tests/run.sh" -j 8 --skills $skipu; rc=$?
+[ -x "$B/agent-verify" ] && { "$B/agent-verify" --recheck || echo "fleet-ci-daily: agent-verify --recheck failed rc $?"; }
 [ "$rc" -eq 0 ] && exit 0
-read -r l1 _ <"$LOADAVG"
+l1=$(qg_load1 "$LOADAVG")
 awk -v a="$l0" -v b="$l1" 'BEGIN {exit !(a > 6 || b > 6)}' && echo "ci-load: contention (1-min load $l0 before, $l1 after)"
 red="$(sed -nE 's/^FAIL ([^ ]+) [0-9.]+( timeout)?$/\1/p' "$LOG" | paste -sd ' ')"
-echo "✖ fleet ci red: ${red:-run.sh rc $rc}"
+[ -n "$red" ] || { echo "✖ fleet ci red: run.sh rc $rc"; exit "$rc"; }
+# Second look (T553): each red file once more, serially, on a quiet machine; green twice-tried files are load noise.
+cap="${CI_QUIET_CAP:-900}"; [ "$cap" -gt 900 ] && cap=900
+CI_QUIET_CAP="$cap" "$B/ci-window" --quiet
+noise=() still=()
+for f in $red; do
+  bash "$B/tests/run.sh" -j 1 --only "$f" 2>&1 | sed 's/^/  re-run | /'
+  [ "${PIPESTATUS[0]}" -eq 0 ] && noise+=("$f") || still+=("$f")
+done
+[ "${#noise[@]}" -gt 0 ] && echo "load-noise: ${noise[*]}"
+read -r okn tot < <(sed -nE 's/^FAIL ([0-9]+)\/([0-9]+) files.*/\1 \2/p' "$LOG" | tail -1)
+[ -n "${tot:-}" ] && echo "$([ "${#still[@]}" -eq 0 ] && echo PASS || echo FAIL) $(( okn + ${#noise[@]} ))/$tot files after a serial re-run of ${#noise[@]}+${#still[@]}"
+[ "${#still[@]}" -eq 0 ] && exit 0
+echo "✖ fleet ci red: ${still[*]}"
 exit "$rc"

@@ -1,6 +1,6 @@
 # Write a full narrated lesson: chapters, script with numbers checked by the sim, plate, callouts, numbered badges, framing (ailearning)
 
-Ticket: T84 (U01 "The neuron", builds 2 and 3 of 3, fix pass) · Last verified: 2026-09-25 by `npm run ci` green in `~/projects/personal/ailearning`
+Ticket: T84 (U01 "The neuron", builds 2 and 3 of 3, fix pass) · Last verified: 2026-10-20 by paths, npm scripts and code anchors (`INSET`, `STAGES`, bar size in `tests/lib/framing.mjs`; T846); 2026-09-25 by `npm run ci` green in `~/projects/personal/ailearning`
 (node tests incl. words vs numbers, framing and play; unit and whole-lesson e2e 0 faults, also on the drop link) and stills at 400–2560 px.
 
 ## When to use
@@ -50,7 +50,7 @@ HYGIENE_DENY=~/agent-work/research/2026-09-24/T79/hygiene-deny.txt npm run hygie
   (a test re-does each row from its own digits). A true minus (−), brackets on negative operands, one decimal on the clicks, two off them.
 - The caption covers the bottom 216 px of the stage (two lines at 21 px + CTA + bar). Close-ups inside the machine always put a part under
   it: U01 dropped its dials/gauge/right shots; every shot box ends on bare paper. The test checks the caption band (52rem) and the bar
-  (64rem × 72 px) separately: the bar is wider.
+  (64rem wide, 56 px tall, 16 px off the stage foot) separately: the bar is wider.
 - A shot fitted at 1920 can cut at 1366 or in a short window: test 5 stages (1442×895, 2051×1195, 1442×760, 2051×1055, 993×604).
   At 1366 the side column leaves a 993 px stage: 22-unit text is ~7.8 px there. The side column mirrors the drawn working as 13 px
   text (`LIVE.working` in `unit/live.ts`, kit `Live.working`), gated on the block being in the camera box (`inShot`), or it lists
@@ -76,4 +76,4 @@ HYGIENE_DENY=~/agent-work/research/2026-09-24/T79/hygiene-deny.txt npm run hygie
 ## Links
 - Code: `~/projects/personal/ailearning/units/01-neuron/` (`unit.json`, `unit/`, `plate/`, `sim/`, `entry.ts`), `src/site/sheet/narrow.mjs`
 - Tests: `tests/unit/{lesson,framing,play}.test.mjs`, `tests/lib/{lesson,framing,solve}.mjs`, `tests/e2e/{site,unit,lesson}.mjs`
-- Design / results: `~/agent-work/research/2026-09-24/T84/{lesson-design.md,ARCHITECTURE.md,build-2.md,build-3.md,findings.md,stills-2/,stills-3/,stills-4/}`, brief `~/agent-work/briefs/T84-u01-full-lesson.md`
+- Design / results: `~/agent-work/research/2026-09-24/T84/{lesson-design.md,ARCHITECTURE.md,build-1.md,build-2.md,revisions.md,critic-*.md,stills-2/,stills-3/,stills-4/}`, brief `~/agent-work/briefs/T84-u01-full-lesson.md`

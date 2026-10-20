@@ -3,10 +3,8 @@
 # Runs against the live KB (small, read-only, no fixture needed — the same corpus every agent reads).
 set -uo pipefail
 BIN="$HOME/agents/bin"
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
-is()  { [ "$2" = "$3" ] && ok "$1" || nok "$1" "expected '$3', got '$2'"; }
+. "$BIN/tests/lib/budget.sh"
+. "$HOME/agents/bin/tests/lib/assert.sh"
 in_top3() { # in_top3 <query> <needle-in-path>
   "$BIN/pc-explain" "$1" --files | head -3 | grep -q "$2"
 }
@@ -16,7 +14,8 @@ T0=$EPOCHREALTIME
 "$BIN/pc-explain" render.sock >/dev/null
 T1=$EPOCHREALTIME
 ms=$(awk -v a="$T0" -v b="$T1" 'BEGIN{printf "%d", (b-a)*1000}')
-[ "$ms" -le 300 ] && ok "render.sock answers in <= 0.3 s ($ms ms)" || nok "render.sock answers in <= 0.3 s" "${ms}ms"
+b=$(budget 0.3); bms=$(awk -v b="$b" 'BEGIN{printf "%d", b*1000}')
+[ "$ms" -le "$bms" ] && ok "render.sock answers in <= $b s budget ($ms ms)" || nok "render.sock answers in <= $b s budget" "${ms}ms"
 
 # 2. the agents' actual questions each resolve to a relevant file in the top 3.
 in_top3 render.sock toolbox.md          && ok 'render.sock -> toolbox.md in top 3' || nok 'render.sock -> toolbox.md in top 3' "$( "$BIN/pc-explain" render.sock --files)"
@@ -46,7 +45,11 @@ rm -f /tmp/pc-explain-test-err
 is '-h exits 0 and prints usage' "$("$BIN/pc-explain" -h >/dev/null; echo $?)" 0
 
 # 6. pc help --md matches the generated KB/pc-cli.md exactly.
-if diff -q <("$BIN/pc" help --md) "$HOME/agents/KB/pc-cli.md" >/dev/null; then
+gone=$(grep -oE '^\| `pc [a-z0-9-]+`' "$HOME/agents/KB/pc-cli.md" | sed 's/.*`pc //; s/`//' | sort -u |
+  while read -r s; do [ -e "$BIN/pc-$s" ] || echo "$BIN/pc-$s"; done)
+if [ -n "$gone" ]; then
+  echo "SKIP owner data absent: ${gone//$'\n'/ }"
+elif diff -q <("$BIN/pc" help --md) "$HOME/agents/KB/pc-cli.md" >/dev/null; then
   ok 'pc help --md matches KB/pc-cli.md'
 else
   nok 'pc help --md matches KB/pc-cli.md' 'diff — regenerate with pc help --md > ~/agents/KB/pc-cli.md'

@@ -4,9 +4,7 @@
 set -uo pipefail
 W="${PW_WRAPPER:-$HOME/agents/bin/playwright-mcp}"
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 
 bin="$WORK/.nvm/versions/node/v24.20.0/bin"; mkdir -p "$bin"
 printf 'nvm() { :; }\n' >"$WORK/.nvm/nvm.sh"

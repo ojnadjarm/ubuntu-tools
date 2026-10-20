@@ -34,6 +34,9 @@ LOOP = re.compile(r"\b(until|while)\b")
 PIDREF = re.compile(r"(?:kill -0|ps -p|/proc/|--pid[= ])\s*(\d+)")
 PATHREF = re.compile(r"""(?:^|[\s'"=<>;|&(])((?:~|/|\.{1,2}/|[\w.-]+/)?[\w.@%+-][\w.@%+/-]*\.[A-Za-z0-9]+)""")
 HZ = os.sysconf("SC_CLK_TCK")
+BOOT = next((int(l.split()[1]) for l in open("/proc/stat") if l.startswith("btime ")), 0)
+TX_SLACK = int(os.environ.get("WAITS_TX_SLACK") or 2)
+OWNERS, OWNERS_NOW = {}, {}  # task id -> the subagent transcript naming it: last tick's, and this tick's (saved)
 
 
 def snapshot():
@@ -133,11 +136,20 @@ def owner(procs, pid, waiting=False):
         out = ""
     task = os.path.basename(out)[:-len(".output")] if "/tasks/" in out and out.endswith(".output") else ""
     if session and task:
-        txs = glob.glob(os.path.join(PROJECTS, "*", session, "subagents", "**", "agent-*.jsonl"), recursive=True)
-        hit = subprocess.run(["grep", "-lF", task, *txs], capture_output=True, text=True).stdout.split() if txs else []
+        hit = OWNERS.get(task)
+        if hit is None or (hit and not os.path.exists(hit)):
+            # Only a transcript written since the shell started can name its task (T988: 1.5 GB grep per tick).
+            since = BOOT + int(procs[ts]["start"]) / HZ - TX_SLACK if "start" in procs[ts] else 0
+            txs = [t for t in glob.glob(os.path.join(PROJECTS, "*", session, "subagents", "**", "agent-*.jsonl"), recursive=True)
+                   if os.path.getmtime(t) >= since]
+            found = subprocess.run(["grep", "-lF", task, *txs], capture_output=True, text=True).stdout.split() if txs else []
+            hit = found[0] if found else ""
+        # A miss older than a minute is the main session's own shell: remembered, so it is not grepped again.
+        if hit or procs[ts].get("age", 0) > 60:
+            OWNERS_NOW[task] = hit
         if hit:
-            aid = os.path.basename(hit[0])[len("agent-"):-len(".jsonl")][:6]
-            return transcript_ended(hit[0], waiting), f"agent {aid}"
+            aid = os.path.basename(hit)[len("agent-"):-len(".jsonl")][:6]
+            return transcript_ended(hit, waiting), f"agent {aid}"
     return False, f"session {session[:8] or claude}"
 
 
@@ -254,6 +266,12 @@ def _state(pid):
 
 
 def main():
+    global OWNERS
+    owners_path = os.path.join(ST, "waits-owners.json")
+    try:
+        OWNERS = json.load(open(owners_path))
+    except (OSError, ValueError):
+        OWNERS = {}
     procs = snapshot()
     registered = set()
     for f in glob.glob(os.path.join(REG, "*.json")):
@@ -294,6 +312,8 @@ def main():
         os.makedirs(ST, exist_ok=True)
         with open(seen_path, "w") as f:
             f.write("\n".join(sorted(now_seen)))
+        with open(owners_path, "w") as f:
+            json.dump(OWNERS_NOW, f)
 
 
 if __name__ == "__main__":

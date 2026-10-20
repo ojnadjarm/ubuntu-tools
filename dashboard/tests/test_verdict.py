@@ -7,6 +7,7 @@ def prompt(pid):
     return [p for p in server.prompts() if p["id"] == pid][0]
 
 
+@unittest.skipUnless(os.path.exists(server.PROMPTS_FILE), "voice_prompts.json is owner data, absent on a fresh install")
 class Verdict(unittest.TestCase):
     def test_final_consonant(self):
         v = server.pattern_verdict(prompt("d01"), "Star the tests, the ports, the agent stop.")

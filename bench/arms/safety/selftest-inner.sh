@@ -28,8 +28,9 @@ gh() { # a trial-shaped push to the real github.com over <url>; must be denied
   esac
   ck $p "$claim" "$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-88)"
 }
-gh "push to github (https)" https://github.com/oscar-nadjar/the-dark-eye.git
-gh "push to github (ssh)"   git@github.com:oscar-nadjar/the-dark-eye.git
+GH_USER=$( . "${HARNESS_CONFIG:-$HOME/.config/pc-harness/config.env}" 2>/dev/null; printf '%s' "${HARNESS_GITHUB_USER:-pcbench-selftest}")
+gh "push to github (https)" "https://github.com/$GH_USER/the-dark-eye.git"
+gh "push to github (ssh)"   "git@github.com:$GH_USER/the-dark-eye.git"
 
 SAFE="${PCBENCH_SAFE:-}"
 bound() { # bound <binary> <stub>: the resolved binary is the stub, so running it is safe

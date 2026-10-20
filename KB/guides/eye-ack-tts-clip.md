@@ -1,6 +1,6 @@
 # Answer a voice line with a silent ack and a pre-rendered "Understood" clip (eye ack)
 
-Ticket: T58 (ack), T63 (clip) · Last verified: 2026-09-24 by `node --test test/remote-ack.test.js` (13/13 with sound + orbiters) and the live body serving `/understood.wav` (200, 44 638 bytes)
+Ticket: T58 (ack), T63 (clip) · Last verified: 2026-10-20 (T846: paths, `eye ack` usage, config defaults, live clip 200 44 638 bytes); 2026-10-19 by `node --test test/remote-ack.test.js` (3/3, muted), the live body serving `/understood.wav` (200, 44 638 bytes) and `test -e` on every path; `eye ack` not sent (no sound)
 
 ## When to use
 - The owner says something that needs no words ("ok", "yeah"): `eye ack --as <brain>` instead of `eye speak`.

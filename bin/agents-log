@@ -14,16 +14,30 @@ ap.add_argument('--raw', action='store_true',
                 help='raw tool calls (op at command position) by class: covered, by-design, gap')
 ap.add_argument('--kind', choices=('agent', 'bench', 'interactive'),
                 help='only rows of one kind: rostered agent runs, pcbench trials, interactive sessions')
-ap.add_argument('--errors', action='store_true', help='only failed calls (ok: false rows)')
+ap.add_argument('--errors', action='store_true',
+                help='only failed calls (ok: false rows); pcbench trials and sandbox refusals hidden unless --all')
+ap.add_argument('--all', action='store_true', help='with --errors: keep pcbench trials and sandbox refusals')
 ap.add_argument('--cluster', action='store_true',
                 help='failed calls grouped by the command that failed + the line naming the error (paths, ids, digits '
                      'folded), with the failure rate from the first call that logged an outcome')
 ap.add_argument('--agent', help='match agent_id prefix (a subagent or workflow lane)')
 ap.add_argument('--tokens', action='store_true',
                 help='context/token cost per Claude session (subagents and workflow lanes rolled in), from the transcripts')
-ap.add_argument('--by', choices=('kind',),
-                help='with --tokens: totals per kind (interactive, headless, worker, workflow)')
+ap.add_argument('--by', choices=('kind', 'file', 'cmd', 'ticket'),
+                help='with --tokens: totals per kind (interactive, headless, worker, workflow), '
+                     'the top 20 Read paths by est tok (images by pixels, text chars/4; ~ = header unreadable, '
+                     'counted as 1920x1080), the top 20 Bash commands (op + first argument, paths folded; '
+                     'a chain under its only output producer, else chain: <first> + <last>) by est tok '
+                     '(both count only results stamped inside --since), '
+                     'or one row per ticket (T-id or TSP-id in the '
+                     'subagent meta.json description, else other:<first word>; workflow lanes take the '
+                     "T-id opening their task text, else their run's; untagged = no meta.json)")
+ap.add_argument('--split', action='store_true',
+                help="with --tokens --by cmd: calls per member word of every Bash command (a chain counts once "
+                     "for each word in it; KB not split)")
 a = ap.parse_args()
+if a.split and not (a.tokens and a.by == 'cmd'):
+    ap.error('--split needs --tokens --by cmd')
 
 cut = 0.0
 if a.since:
@@ -44,12 +58,249 @@ def transcripts(root):
         yield f, sub[i - 1][:8], 'workflow' if 'workflows' in sub[i:] else 'worker'
 
 
+STAMP = re.compile(r'"timestamp":\s*"([^"]*)"')
+KEEP = ('"assistant"', '"tool_result"', '"image"')
+PREFILTER = os.environ.get('AGENTS_LOG_PREFILTER', '1') != '0'
+
+
+def epoch(t):
+    """UTC epoch of a 'YYYY-MM-DDTHH:MM:SS' stamp, 0.0 when empty or malformed."""
+    import calendar, datetime
+    if len(t) == 19 and t[10] == 'T':
+        try:
+            return datetime.datetime.fromisoformat(t).replace(tzinfo=datetime.timezone.utc).timestamp()
+        except ValueError:
+            pass
+    try:
+        return float(calendar.timegm(time.strptime(t, '%Y-%m-%dT%H:%M:%S'))) if t else 0.0
+    except ValueError:
+        return 0.0
+
+
+def image_tokens(b64):
+    """API tokens of a base64 PNG/JPEG/WebP from its header: long edge scaled to <= 1568 px, w*h/750; None if unreadable."""
+    import base64, binascii, struct
+    try:
+        b = base64.b64decode(b64[:65536 if b64.startswith('/9j/') else 64] if len(b64) > 64 else b64)
+    except (binascii.Error, ValueError):
+        return None
+    wh = None
+    if b[:8] == b'\x89PNG\r\n\x1a\n' and len(b) >= 24:
+        wh = struct.unpack('>II', b[16:24])
+    elif b[:4] == b'RIFF' and b[8:12] == b'WEBP' and len(b) >= 30:
+        if b[12:16] == b'VP8 ':
+            wh = (struct.unpack('<H', b[26:28])[0] & 0x3fff, struct.unpack('<H', b[28:30])[0] & 0x3fff)
+        elif b[12:16] == b'VP8L':
+            v = struct.unpack('<I', b[21:25])[0]
+            wh = ((v & 0x3fff) + 1, (v >> 14 & 0x3fff) + 1)
+        elif b[12:16] == b'VP8X':
+            wh = (int.from_bytes(b[24:27], 'little') + 1, int.from_bytes(b[27:30], 'little') + 1)
+    elif b[:2] == b'\xff\xd8':
+        i = 2
+        while i + 9 <= len(b) and b[i] == 0xff:
+            if 0xc0 <= b[i + 1] <= 0xcf and b[i + 1] not in (0xc4, 0xc8, 0xcc):
+                h, w = struct.unpack('>HH', b[i + 5:i + 9])
+                wh = (w, h)
+                break
+            i += 2 + struct.unpack('>H', b[i + 2:i + 4])[0]
+    if not wh or not all(wh):
+        return None
+    return wh_tokens(*wh)
+
+
+def wh_tokens(w, h):
+    """API tokens of a w x h image: long edge scaled to <= 1568 px, w*h/750."""
+    s = min(1.0, 1568 / max(w, h))
+    return round(w * h * s * s / 750)
+
+
+FALLBACK_TOK = wh_tokens(1920, 1080)
+PATH_EXT = re.compile(r'\.(?:sh|bash|py|js|mjs|cjs|ts|tsx|jsx|json|jsonl|md|txt|log|php|html|css|scss|ya?ml|toml|'
+                      r'ini|conf|cfg|env|xml|csv|tsv|png|jpe?g|webp|svg|gif|mp4|gd|tscn|tres|c|cc|cpp|h|hpp|rs|go|'
+                      r'java|kt|lua|sql|pickle|pdf)$', re.I)
+
+
+def path_like(tok, cwd):
+    """True for an absolute, ~ or ./ path, or x/y with a known extension or an existing first directory."""
+    tok = tok.strip('\'"')
+    if tok.startswith(('/', '~', './', '../')):
+        return True
+    if '/' not in tok or '://' in tok:
+        return False
+    return bool(PATH_EXT.search(tok)) or bool(cwd) and os.path.isdir(os.path.join(cwd, tok.split('/')[0]))
+
+
+def bash_key(cmd, cwd='', _hook=[]):
+    """'op first-arg' of a Bash command as the audit hook logs it, a path-like first-arg as <path>, urls and paths
+    folded as in --cluster."""
+    if not _hook:
+        import importlib.util
+        sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+        from auditlib import FOLD
+        spec = importlib.util.spec_from_file_location('audit_core', os.path.join(
+            os.path.dirname(os.path.realpath(__file__)), '..', 'hooks', 'audit-log.py'))
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        _hook += [m.summarise, FOLD[:2], lambda c: m.first_segment(m.redact(c)).split()]
+    op = _hook[0]('Bash', {'command': cmd})[0]
+    toks = _hook[2](cmd)
+    if len(toks) > 1 and op.count(' ') == 1 and path_like(toks[1], cwd):
+        op = op.split(' ')[0] + ' <path>'
+    for rx, to in _hook[1]:
+        op = rx.sub(to, op)
+    return op or '?'
+
+
+SEPS = ('&&', '||', ';', '|', '\n')
+SYNTAX = {'for', 'done', 'fi', 'esac', 'case', '}', ')'}
+KEYWORDS = ('if', 'then', 'else', 'elif', 'do', 'while', 'until', '!', '{', '(')
+SILENT = {'cd', 'export', 'set', 'unset', 'source', '.', 'mkdir', 'touch', 'rm', 'cp', 'mv', 'ln', 'chmod',
+          'chown', 'sleep', 'true', 'false', ':', 'test', '[', '[[', 'local', 'shift', 'read', 'trap', 'umask',
+          'pushd', 'popd', 'wait'} | SYNTAX
+
+
+def segments(cmd):
+    """(text, masked) per command of cmd split on ; && || | and newlines outside quotes, $(...), comments and
+    heredoc bodies; masked has quoted characters blanked."""
+    out, cur, mask, docs = [], [], [], []
+    i, n, q, depth = 0, len(cmd), '', []
+
+    def cut():
+        if ''.join(cur).strip():
+            out.append((''.join(cur).strip(), ''.join(mask).strip()))
+        cur.clear()
+        mask.clear()
+
+    while i < n:
+        c = cmd[i]
+        if q:
+            cur.append(c)
+            mask.append(' ' if c != q else c)
+            if c == '\\' and q == '"' and i + 1 < n:
+                cur.append(cmd[i + 1])
+                mask.append(' ')
+                i += 1
+            elif c == q:
+                q = ''
+            i += 1
+            continue
+        if c == '\\' and i + 1 < n:
+            cur.append(cmd[i:i + 2])
+            mask.append('  ')
+            i += 2
+            continue
+        if c in '\'"`':
+            q = c
+        elif c == '#' and (not cur or cur[-1][-1:].isspace()):
+            j = cmd.find('\n', i)
+            i = n if j < 0 else j
+            continue
+        elif c == '(':
+            depth.append(')')
+        elif cmd.startswith('${', i) or c == '{' and cmd[i + 1:i + 2].isspace() and not ''.join(cur).strip(' \t('):
+            depth.append('}')
+        elif c in ')}' and depth[-1:] == [c]:
+            depth.pop()
+        elif cmd.startswith('<<', i) and not cmd.startswith('<<<', i) and not depth:
+            m = re.match(r'<<(-?)\s*([\'"]?)([\w.-]+)\2', cmd[i:])
+            if m:
+                docs.append((m[3], bool(m[1])))
+                cur.append(m[0])
+                mask.append(m[0])
+                i += len(m[0])
+                continue
+        elif c == '\n' and docs and not depth:
+            for word, tabs in docs:
+                while i < n:
+                    j = cmd.find('\n', i + 1)
+                    line = cmd[i + 1:n if j < 0 else j]
+                    i = n if j < 0 else j
+                    if (line.lstrip('\t') if tabs else line) == word:
+                        break
+            docs.clear()
+            cut()
+            continue
+        if not depth:
+            sep = next((s for s in SEPS if cmd.startswith(s, i)), None)
+            if sep and not (sep == '|' and cur and cur[-1].endswith('>')):
+                cut()
+                i += len(sep) + (sep == '|' and cmd.startswith('&', i + 1))
+                continue
+        cur.append(c)
+        mask.append(' ' if depth else c)
+        i += 1
+    cut()
+    return out
+
+
+def seg_word(text):
+    """(first word, text from it) of one command: past shell keywords and VAR=value prefixes, word as basename."""
+    while True:
+        toks = text.split()
+        if toks and toks[0] in KEYWORDS:
+            text = text[text.index(toks[0]) + len(toks[0]):].lstrip()
+            continue
+        if text.startswith('(('):
+            return '', text
+        if toks and toks[0][0] in '({' and len(toks[0]) > 1:
+            text = text.lstrip('({').lstrip()
+            continue
+        if toks and toks[0] == 'case' and 'in' in toks[2:]:
+            text = text.split(None, toks.index('in', 2) + 1)[-1] if len(toks) > toks.index('in', 2) + 1 else ''
+            continue
+        if toks and toks[0].endswith(')') and '(' not in toks[0]:
+            text = text[text.index(toks[0]) + len(toks[0]):].lstrip()
+            continue
+        break
+    m = re.match(r'(?:[A-Za-z_]\w*=(?:\$\([^)]*\)|"[^"]*"|\'[^\']*\'|\S*)(?:\s+|$))*', text)
+    rest = text[m.end():]
+    w = rest.split()[0] if rest.split() else ''
+    return (w[w.rfind('/') + 1:] if '/' in w and not w.endswith('/') else w), text
+
+
+STDOUT = re.compile(r'(?<![0-9<>&])(?:1|&)?>>?(?![&>(])')
+
+
+def flat(cmd):
+    """segments() of cmd with each ( subshell ) or { group } whose output is not redirected opened into its members."""
+    out = []
+    for t, m in segments(cmd):
+        end = {'(': ')', '{': '}'}.get(t[:1])
+        if end and not t.startswith('((') and end in t[1:] and not STDOUT.search(m) and (end == ')' or t[1:2].isspace()):
+            out += flat(t[1:t.rindex(end)])
+        else:
+            out.append((t, m))
+    return out
+
+
+def chain_key(cmd, cwd=''):
+    """(bucket, member words) of a Bash command: a single command keeps bash_key; a chain goes to its only output
+    producer when the rest are known silent, else to 'chain: <first> + <last>' when the two words differ."""
+    segs = flat(cmd)
+    words, texts = zip(*(seg_word(t) for t, _ in segs)) if segs else ((), ())
+    if len(segs) < 2:
+        return bash_key(cmd, cwd), tuple(dict.fromkeys(w for w in words if w and w not in SYNTAX))
+    live = [(t, w) for (_, m), w, t in zip(segs, words, texts)
+            if w and w not in SILENT and not STDOUT.search(m)]
+    members = tuple(dict.fromkeys(w for w in words if w and w not in SYNTAX))
+    if len(live) == 1:
+        return bash_key(live[0][0], cwd), members
+    if len(live) > 1 and live[0][1] != live[-1][1]:
+        return f'chain: {live[0][1]} + {live[-1][1]}', members
+    return bash_key(cmd, cwd), members
+
+
 def scan(f):
-    """One transcript: turns keyed by message id, result bytes per tool, images, Read paths, last stamp, entrypoint."""
-    import calendar
+    """One transcript: turns, result bytes per tool, images, Read paths, (stamp, path, calls, bytes, images, est tok,
+    approx) Read events, (stamp, command key, calls, bytes, est tok) Bash events, last stamp, entrypoint."""
     res, names, imgs, reads, turns, stamps = Counter(), {}, 0, [], {}, {}
+    rpath, files, bkey, cmds, used = {}, [], {}, [], {}
     last, entry = 0.0, None
     for i, line in enumerate(open(f, errors='replace')):
+        if PREFILTER and not any(k in line for k in KEEP) and (entry is not None or '"entrypoint"' not in line):
+            m = STAMP.search(line)
+            last = max(last, epoch(m[1][:19]) if m else 0.0)
+            continue
         try:
             r = json.loads(line)
         except ValueError:
@@ -57,13 +308,7 @@ def scan(f):
         if entry is None and r.get('entrypoint'):
             entry = r['entrypoint']
         t = r.get('timestamp', '')[:19]
-        stamp = 0.0
-        if t:
-            try:
-                stamp = calendar.timegm(
-                    time.strptime(t, '%Y-%m-%dT%H:%M:%S'))
-            except ValueError:
-                stamp = 0.0
+        stamp = epoch(t)
         last = max(last, stamp)
         if r.get('type') == 'assistant':
             u = (r.get('message') or {}).get('usage') or {}
@@ -75,12 +320,21 @@ def scan(f):
                 u.get('input_tokens', 0)
                 + u.get('cache_read_input_tokens', 0)
                 + u.get('cache_creation_input_tokens', 0),
-                u.get('cache_read_input_tokens', 0), u.get('output_tokens', 0))
+                u.get('cache_read_input_tokens', 0), u.get('output_tokens', 0),
+                u.get('cache_creation_input_tokens', 0))
             for b in (r.get('message') or {}).get('content') or []:
                 if isinstance(b, dict) and b.get('type') == 'tool_use':
                     names[b.get('id')] = b.get('name', '?')
+                    used[b.get('id')] = stamp
                     if b.get('name') == 'Read':
                         reads.append((b.get('input') or {}).get('file_path'))
+                        rpath[b.get('id')] = reads[-1]
+                        if reads[-1]:
+                            files.append((stamp, reads[-1], 1, 0, 0, 0, 0))
+                    elif b.get('name') == 'Bash':
+                        k, ws = chain_key(str((b.get('input') or {}).get('command') or ''), r.get('cwd') or '')
+                        bkey[b.get('id')] = k
+                        cmds.append((stamp, k, 1, 0, 0, ws))
         elif r.get('type') == 'user':
             c = (r.get('message') or {}).get('content')
             for b in c if isinstance(c, list) else []:
@@ -90,34 +344,86 @@ def scan(f):
                     imgs += 1
                 elif b.get('type') == 'tool_result':
                     body = b.get('content')
+                    k = tok = approx = 0
                     if isinstance(body, list):
                         n = 0
                         for x in body:
                             if isinstance(x, dict) and x.get('type') == 'image':
-                                imgs += 1
-                                n += len(((x.get('source') or {})
-                                          .get('data') or ''))
+                                k += 1
+                                data = (x.get('source') or {}).get('data') or ''
+                                n += len(data)
+                                it = image_tokens(data)
+                                approx |= it is None
+                                tok += FALLBACK_TOK if it is None else it
                             elif isinstance(x, dict):
                                 n += len(x.get('text') or '')
+                                tok += len(x.get('text') or '') // 4
                     else:
                         n = len(body or '')
+                        tok = n // 4
+                    imgs += k
                     res[names.get(b.get('tool_use_id'), '?')] += n
-    return turns, stamps, res, imgs, reads, last, entry
+                    when = stamp or used.get(b.get('tool_use_id'), 0.0)
+                    if rpath.get(b.get('tool_use_id')):
+                        files.append((when, rpath[b['tool_use_id']], 0, n, k, tok, approx))
+                    elif b.get('tool_use_id') in bkey:
+                        cmds.append((when, bkey[b['tool_use_id']], 0, n, tok, ()))
+    return turns, stamps, res, imgs, reads, files, cmds, last, entry
 
 
-def tokens_view(session, cut, by=None):
+def cached_scan(root):
+    """scan() memoised per (path, size, mtime) in a pickle; live root only unless AGENTS_LOG_CACHE names a file."""
+    import pickle
+    path = os.environ.get('AGENTS_LOG_CACHE') or (
+        None if 'CLAUDE_PROJECTS_DIR' in os.environ else os.path.expanduser('~/agents/state/agents-log-tokens.pickle'))
+    zone = (os.environ.get('TZ'), time.tzname, time.timezone, PREFILTER, 7)
+    old = {}
+    if path:
+        try:
+            with open(path, 'rb') as h:
+                got = pickle.load(h)
+            old = got['files'] if got.get('zone') == zone else {}
+        except (OSError, EOFError, pickle.PickleError, AttributeError, KeyError, TypeError):
+            pass
+    new, missed = {}, []
+
+    def get(f):
+        st = os.stat(f)
+        key = (st.st_size, st.st_mtime_ns)
+        hit = old.get(f)
+        if not hit or hit[0] != key:
+            hit = key, scan(f)
+            missed.append(f)
+        new[f] = hit
+        return hit[1]
+
+    def save():
+        if not path or not missed:
+            return
+        keep = {f: v for f, v in old.items() if f not in new and os.path.exists(f)}
+        keep.update(new)
+        tmp = f'{path}.{os.getpid()}'
+        os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+        with open(tmp, 'wb') as h:
+            pickle.dump({'zone': zone, 'files': keep}, h, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(tmp, path)
+    return get, save
+
+
+def tokens_view(session, cut, by=None, split=False):
     """One row per session (its subagents and workflow lanes rolled in): turns, context, results, re-reads."""
     import statistics
     root = os.environ.get('CLAUDE_PROJECTS_DIR',
                           os.path.expanduser('~/.claude/projects'))
-    sess, days, kinds = {}, {}, {}
+    sess, days, kinds, paths, bash, words = {}, {}, {}, {}, {}, {}
+    scan_one, save = cached_scan(root)
     for f, sid, kind in transcripts(root):
         if session and not sid.startswith(session):
             continue
         if cut and os.path.getmtime(f) < cut:
             continue
-        turns, stamps, res, imgs, reads, last, entry = scan(f)
-        for k, (d, c, _, _) in turns.items():
+        turns, stamps, res, imgs, reads, files, cmds, last, entry = scan_one(f)
+        for k, (d, c, *_) in turns.items():
             if cut and stamps[k] < cut:
                 continue
             days[d] = days.get(d, [0, 0])
@@ -128,18 +434,57 @@ def tokens_view(session, cut, by=None):
         kind = kind or ('interactive' if entry == 'cli' else 'headless')
         kt = kinds.setdefault(kind, [0, 0, 0])
         kt[0] += len(turns)
-        kt[1] += sum(r for _, _, r, _ in turns.values())
-        kt[2] += sum(o for _, _, _, o in turns.values())
+        kt[1] += sum(t[2] for t in turns.values())
+        kt[2] += sum(t[3] for t in turns.values())
         m = sess.setdefault(sid, [[], Counter(), 0, 0])
         m[0].extend(turns.values())
         m[1].update(res)
         m[2] += imgs
         m[3] += len(reads) - len({p for p in reads if p})
+        for when, p, calls, n, k, tok, approx in files:
+            if cut and when < cut:
+                continue
+            ps = paths.setdefault(p, [0, 0, 0, set(), 0, 0])
+            ps[0] += n
+            ps[1] += calls
+            ps[2] += k
+            ps[4] += tok
+            ps[5] |= approx
+            if calls:
+                ps[3].add(sid)
+        for when, c, calls, n, tok, ws in cmds:
+            if cut and when < cut:
+                continue
+            for w in ws:
+                words.setdefault(w, [0, set()])[0] += 1
+                words[w][1].add(sid)
+            cs = bash.setdefault(c, [0, 0, 0, set()])
+            cs[0] += n
+            cs[1] += tok
+            cs[2] += calls
+            if calls:
+                cs[3].add(sid)
+    save()
+    if by == 'file':
+        print(f"{'KB':>8} {'est tok':>9} {'reads':>6} {'sess':>5} {'re-rd':>6} {'imgs':>5}  path")
+        for p, (n, r, k, ss, tok, approx) in sorted(paths.items(), key=lambda x: (-x[1][4], x[0]))[:20]:
+            print(f"{n / 1024:8.0f} {('~' if approx else '') + str(tok):>9} {r:6} {len(ss):5} {r - len(ss):6} {k:5}  {p}")
+        return
+    if by == 'cmd' and split:
+        print(f"{'calls':>6} {'sess':>5}  word")
+        for w, (calls, ss) in sorted(words.items(), key=lambda x: (-x[1][0], x[0]))[:20]:
+            print(f'{calls:6} {len(ss):5}  {w}')
+        return
+    if by == 'cmd':
+        print(f"{'KB':>8} {'est tok':>9} {'calls':>6} {'sess':>5}  command")
+        for c, (n, tok, calls, ss) in sorted(bash.items(), key=lambda x: (-x[1][1], x[0]))[:20]:
+            print(f'{n / 1024:8.0f} {tok:9} {calls:6} {len(ss):5}  {c}')
+        return
     rows = []
     for sid, (turns, res, imgs, rereads) in sess.items():
-        ctx = [c for _, c, _, _ in turns]
-        cread = sum(r for _, _, r, _ in turns)
-        out = sum(o for _, _, _, o in turns)
+        ctx = [t[1] for t in turns]
+        cread = sum(t[2] for t in turns)
+        out = sum(t[3] for t in turns)
         rows.append((sid, len(ctx), statistics.mean(ctx),
                      statistics.median(ctx), max(ctx), cread, out,
                      res, imgs, max(rereads, 0)))
@@ -175,8 +520,101 @@ def tokens_view(session, cut, by=None):
                   f'{(100 * r / allr if allr else 0):5.0f}%')
 
 
+TICKET = re.compile(r'\b(TSP-\d+|T\d+)')
+META_FIELD = re.compile(r"""\b(name|description):\s*['"`]([^'"`]*)""")
+
+
+def ticket_key(text, fallback=''):
+    """T-id or TSP-id in text, else 'other:<first word>' of fallback or text."""
+    m = TICKET.search(text)
+    if m:
+        return m[1]
+    w = re.match(r'[\w-]+', (fallback or text).strip())
+    return 'other:' + (w[0].lower() if w else '-')
+
+
+def lane_parent(f, cache):
+    """Ticket of the workflow run a lane belongs to, from <session>/workflows/<run>.json meta; None if unreadable."""
+    parts = f.split(os.sep)
+    i = len(parts) - 1 - parts[::-1].index('workflows')
+    run = os.sep.join(parts[:i - 1] + ['workflows', parts[i + 1] + '.json'])
+    if run not in cache:
+        try:
+            with open(run) as h:
+                script = json.load(h).get('script') or ''
+            meta = dict(META_FIELD.findall(script[:4000]))
+            cache[run] = ticket_key(f"{meta.get('name', '')} {meta.get('description', '')}",
+                                    meta.get('name', '')) if meta else None
+        except (OSError, ValueError, AttributeError):
+            cache[run] = None
+    return cache[run]
+
+
+RELAY = '[Workflow harness — user request]'
+TASK_BODY = 'The computed task text follows:'
+TASK_LEAD = 60
+
+
+def lane_task(f):
+    """T-id or TSP-id opening a lane's task text (first user message past the harness relay), else None."""
+    try:
+        with open(f, errors='replace') as h:
+            for _, line in zip(range(20), h):
+                if '"user"' not in line:
+                    continue
+                r = json.loads(line)
+                c = (r.get('message') or {}).get('content') if r.get('type') == 'user' else None
+                text = c if isinstance(c, str) else ' '.join(
+                    b.get('text') or '' for b in c or [] if isinstance(b, dict))
+                if text and not text.startswith(RELAY):
+                    m = TICKET.search(text.split(TASK_BODY, 1)[-1].lstrip())
+                    return m[1] if m and m.start() < TASK_LEAD else None
+    except (OSError, ValueError, AttributeError):
+        pass
+    return None
+
+
+def ticket_view(session, cut):
+    """One row per ticket (T-id, TSP-id, other:<word>; lanes take their task's, else their workflow's) from subagent meta.json."""
+    root = os.environ.get('CLAUDE_PROJECTS_DIR', os.path.expanduser('~/.claude/projects'))
+    scan_one, save = cached_scan(root)
+    rows, runs = {}, {}
+    for f, sid, kind in transcripts(root):
+        if not kind or (session and not sid.startswith(session)) or (cut and os.path.getmtime(f) < cut):
+            continue
+        turns, stamps, *_, last, _ = scan_one(f)
+        if not turns or (cut and last < cut):
+            continue
+        try:
+            with open(f[:-len('.jsonl')] + '.meta.json') as h:
+                key = ticket_key(json.load(h).get('description') or '')
+        except (OSError, ValueError, AttributeError):
+            key = 'untagged'
+        if kind == 'workflow':
+            key = lane_task(f) or lane_parent(f, runs) or key
+        r = rows.setdefault(key, [0, 0, 0, 0, 0.0, 0])
+        r[0] += len(turns)
+        r[1] += sum(t[2] for t in turns.values())
+        r[2] += sum(t[4] for t in turns.values())
+        r[3] += sum(t[3] for t in turns.values())
+        got = [s for s in stamps.values() if s]
+        r[4] += (max(got) - min(got)) / 60 if got else 0
+        r[5] += 1
+    save()
+    w = max([9] + [len(t) for t in rows])
+    print(f"{'ticket':{w}} {'turns':>6} {'cacheR M':>9} {'cacheW M':>9} {'out k':>7} {'wall min':>9} {'agents':>6}")
+    tot = [0, 0, 0, 0, 0.0, 0]
+    for t, r in sorted(rows.items(), key=lambda x: (-x[1][1], x[0])):
+        tot = [x + y for x, y in zip(tot, r)]
+        print(f'{t:{w}} {r[0]:6} {r[1] / 1e6:9.1f} {r[2] / 1e6:9.1f} {r[3] / 1000:7.1f} {r[4]:9.0f} {r[5]:6}')
+    print(f"{'TOTAL':{w}} {tot[0]:6} {tot[1] / 1e6:9.1f} {tot[2] / 1e6:9.1f} {tot[3] / 1000:7.1f} {tot[4]:9.0f} {tot[5]:6}")
+
+
+if a.tokens and a.by == 'ticket':
+    ticket_view(a.session, cut)
+    sys.exit(0)
 if a.tokens:
-    tokens_view(a.session, cut, a.by)
+    tokens_view(a.session, cut, a.by, a.split)
     sys.exit(0)
 
 def stamp(r):
@@ -196,7 +634,8 @@ def log_rows(cut):
 
 
 rows, src = [], log_rows(cut)
-from auditlib import row_kind
+from auditlib import row_kind, error_class
+hidden = Counter()
 for r in src:
     if cut:
         t = stamp(r)
@@ -206,6 +645,13 @@ for r in src:
         continue
     if a.kind and row_kind(r) != a.kind:
         continue
+    if a.errors and not a.all:
+        if not a.kind and row_kind(r) == 'bench':
+            hidden['bench'] += r.get('ok') is False
+            continue
+        if r.get('ok') is False and error_class(r) == 'guarded':
+            hidden['sandbox'] += 1
+            continue
     if a.errors and not a.cluster and r.get('ok') is not False:
         continue
     if a.agent and not r.get('agent_id', '').startswith(a.agent):
@@ -218,21 +664,28 @@ for r in src:
 PIXEL = re.compile(r'\bpc (?:shot|find|click-text)\b|\bpc wait [0-9]')
 TEXT = re.compile(r'\bpc (?:see|wait-for|tree|a11y-click)\b|\bpc win (?:list|focused)\b')
 
+def hidden_line():
+    return f"hidden: {hidden['bench']} bench, {hidden['sandbox']} sandbox (--all keeps them)"
+
+
 if a.cluster:
     from auditlib import error_cluster
     bad = [r for r in rows if r.get('ok') is False]
-    counts, sessions = Counter(), {}
+    counts, sessions, agents = Counter(), {}, {}
     for r in bad:
         k = error_cluster(r)
         counts[k] += 1
         sessions.setdefault(k, set()).add(r.get('session', ''))
-    print(f"{'count':>5} {'sess':>4}  cluster")
+        agents.setdefault(k, set()).add((r.get('session', ''), r.get('agent_id', '')))
+    print(f"{'count':>5} {'sess':>4} {'agents':>6}  cluster")
     for k, n in counts.most_common():
-        print(f'{n:5} {len(sessions[k]):4}  {k}')
+        print(f'{n:5} {len(sessions[k]):4} {len(agents[k]):6}  {k}')
     first = next((i for i, r in enumerate(rows) if 'ok' in r), len(rows))
     if first:
         since = rows[first]['ts'][:16] if first < len(rows) else 'none yet'
         print(f'note: rate counts calls from {since}, the first with a logged outcome ({first} older left out)')
+    if a.errors and not a.all:
+        print(hidden_line())
     calls = len(rows) - first
     pct = 100 * len(bad) / calls if calls else 0
     print(f'TOTAL {len(bad)} failed of {calls} calls ({pct:.1f}%) \u00b7 {len(counts)} clusters')
@@ -280,3 +733,6 @@ else:
         err = f"  \u2717 {r['error'][:80]}" if r.get('ok') is False else ''
         print(f"{r['ts'][11:19]}  {r.get('session',''):8}  {r.get('tool',''):12} "
               f"{r.get('op',''):18} {(r.get('summary','')[:120] + err).replace('\n', '\u23ce')}")
+    if a.errors and not a.all:
+        sys.stdout.flush()
+        print(hidden_line(), file=sys.stderr)

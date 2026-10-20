@@ -1,6 +1,6 @@
 # Eye voice latency per turn: why is the reply slow
 
-Ticket: T48-L4 · Last verified: 2026-10-07 by `~/the-dark-eye/bridge/relay/tests/latency.test.sh` (18/18 ok) and a fixture run
+Ticket: T48-L4 · Last verified: 2026-10-20 by `eye-latency --help`, parser patterns vs `body/src/main.js`/`replies.js` log lines (T846); 2026-10-07 by `~/the-dark-eye/bridge/relay/tests/latency.test.sh` (18/18 ok) and a fixture run
 
 ## When to use
 You need p50/p95 of how long The Dark Eye takes to answer a voice turn (mic or phone), per stage.

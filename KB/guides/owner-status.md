@@ -1,6 +1,6 @@
 # "What's pending?" — one owner status screen (running, done, waiting on you, queued)
 
-Ticket: T395 · Last verified: 2026-10-18 by bin/tests/agents-status-owner.test.py (10/10) and live dashboard shots at 5 widths
+Ticket: T395 · Last verified: 2026-10-20 (T846) by `agents-status --owner --help`, `lib/owner_status.py` read and paths; 2026-10-18 by bin/tests/agents-status-owner.test.py (10/10) and live dashboard shots at 5 widths
 
 ## When to use
 The owner asks what is running, pending, left or waiting on him. Answer from `agents-status --owner`, not by hand.

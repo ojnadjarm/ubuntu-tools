@@ -1,6 +1,6 @@
 # Run a Moodle plugin's PHPUnit / Behat and check only the phpcs violations a change adds
 
-Ticket: T389, T420 (behat --parallel) · Last verified: 2026-10-19 by fixture local_t420par (6 features) on 5.2, `tests/mtest-parallel.test.sh` 10/10, `tests/phpcs-delta.test.sh` 4/4
+Ticket: T389, T420 (behat --parallel) · Last verified: 2026-10-20 by T846 audit (`mtest --help`, `phpcs-delta --help`, paths, selenium 3.141.59 status); 2026-10-19 by fixture local_t420par (6 features) on 5.2, `tests/mtest-parallel.test.sh` 10/10, `tests/phpcs-delta.test.sh` 4/4
 
 ## When to use
 Any Moodle plugin work in a docker env (`~/moodle-envs/<ver>`, vass on 4.5): running tests after a change, or checking

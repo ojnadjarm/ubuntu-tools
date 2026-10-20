@@ -34,6 +34,9 @@ first() {
 # `cached()` and its cache dir live in pclib.sh now (same TTL policy, EF04/EF09).
 . "$BIN/pclib.sh"
 . "$BIN/moodlelib.sh"
+# slow <name> <ttl> <cmd…> — `cached`, but --fresh keeps the entry: probes that move in minutes or hours and
+# that the sentinel never repairs (T943). --fresh still re-reads services, docker, tailscale and the rest.
+slow() { FRESH=0 cached "$@"; }
 
 ## --- cheap probes (also used by --brief) ------------------------------------
 p_ac=$(first /sys/class/power_supply/A[CD]*/online)
@@ -51,18 +54,11 @@ read -r r_load l5 l15 _ </proc/loadavg
 r_temp=$(sensors -j 2>/dev/null | jq -r '[..|objects|to_entries[]|select(.key|test("^temp[0-9]+_input$"))|.value]|max // 0' 2>/dev/null)
 r_temp=${r_temp%%.*}; : "${r_temp:=0}"
 
-# SMART (NVMe) and battery wear — smartctl needs root, passwordless sudo is on; cached 1 h.
-_smart() {
-  pc_timeout 5 sudo -n smartctl -H -A /dev/nvme0 2>/dev/null | awk '
-    { i=index($0,":"); if(!i) next
-      k=substr($0,1,i-1); v=substr($0,i+1); gsub(/^[ \t]+|[ \t]+$/,"",v)
-      if(k=="SMART overall-health self-assessment test result") h=v
-      else if(k=="Percentage Used"){sub(/%.*/,"",v); u=v}
-      else if(k=="Available Spare"){sub(/%.*/,"",v); s=v}
-      else if(k=="Media and Data Integrity Errors"){gsub(/,/,"",v); e=v} }
-    END{printf "%s\t%s\t%s\t%s\n", (h==""?"n/a":h), (u==""?"-1":u), (s==""?"-1":s), (e==""?"n/a":e)}'
-}
-IFS=$'\t' read -r s_health s_used s_spare s_err < <(cached smart 3600 _smart)
+# SMART (NVMe, pc_smart_json: root, cached 1 h) and battery wear.
+IFS=$'\t' read -r s_health s_used s_spare s_err < <(pc_smart_json | jq -r '
+  .nvme_smart_health_information_log as $h
+  | [(.smart_status.passed | if . == true then "PASSED" elif . == false then "FAILED" else "n/a" end),
+     ($h.percentage_used // -1), ($h.available_spare // -1), ($h.media_errors // "n/a")] | @tsv' 2>/dev/null)
 : "${s_health:=n/a}"; : "${s_used:=-1}"; : "${s_spare:=-1}"; : "${s_err:=n/a}"
 
 b_full=$(first /sys/class/power_supply/BAT*/energy_full)
@@ -85,26 +81,32 @@ IFS=$'\t' read -r n_ts_state n_ts_ip < <(cached ts_pair 60 _ts_pair)
 : "${n_ts_state:=n/a}"; : "${n_ts_ip:=n/a}"
 
 _dline() {
-  docker ps -a --format '{{.Label "com.docker.compose.project"}}|{{.State}}|{{.Names}}|{{.Ports}}' \
+  docker ps -a --format '{{.Label "com.docker.compose.project"}}|{{.State}}|{{.Names}}|{{.Ports}}|{{.Label "com.docker.compose.service"}}' \
     2>/dev/null | awk 'NF{sub(/^\|/,"(no project)|"); print}'
 }
 d_line=$(cached docker 60 _dline)
-# Expected projects come from the compose files, so a whole stack that was `down`ed is still missed.
+# Expected services per project (compose-services: profile-aware), from the compose files and the
+# containers seen, so a whole stack that was `down`ed is still missed.
 _dexp() {
-  for f in ~/moodle-envs/*/docker-compose.yml; do
-    [ -f "$f" ] || continue
-    awk '/^name:[[:space:]]/{n=$2}
-         /^services:[[:space:]]*$/{ins=1;next}
-         ins && /^[^[:space:]#]/{ins=0}
-         ins && /^  [A-Za-z0-9_.-]+:[[:space:]]*$/{c++}
-         END{if(n!="" && c>0) print n"|"c}' "$f"
+  local p
+  { sed -n 's/^name:[[:space:]]*//p' "$d_envs"/*/docker-compose.yml 2>/dev/null
+    cut -d'|' -f1 <<<"$d_line"; } | sort -u | while read -r p; do
+    [ -n "$p" ] && [ "$p" != "(no project)" ] || continue
+    printf '%s|%s\n' "$p" "$("$BIN/compose-services" "$p" | tr '\n' ' ')"
   done
 }
-d_exp=$(cached docker_expected 86400 _dexp)
-# run/tot/ports per project: tot is the expected service count when the compose file is known.
+d_envs=${MOODLE_ENVS_DIR:-$HOME/moodle-envs}
+# A compose file edited after the entry was written drops it, --fresh or not.
+for _f in "$d_envs"/*/docker-compose.yml; do [ "$_f" -nt "$CACHE/docker_expected" ] && rm -f "$CACHE/docker_expected" && break; done
+d_exp=$(slow docker_expected 86400 _dexp)
+# run/tot/ports per project: tot is the expected service count when known; other services' containers are
+# skipped. A bare number in d_exp is the older count-only cache line.
 d_stat=$(awk -F'|' '
-  NR==FNR { if (NF>1) e[$1]=$2; next }
+  NR==FNR { if ($2 ~ /^[0-9]+$/) e[$1]=$2
+            else if ((n = split($2, sv, " ")) > 0) { e[$1]=n; for (i=1;i<=n;i++) want[$1,sv[i]]=1; byname[$1]=1 }
+            next }
   NF>1 {
+    if (($1 in byname) && !(($1 SUBSEP $5) in want)) next
     seen[$1]++; if ($2=="running") run[$1]++
     s=$4
     while (match(s, /0\.0\.0\.0:[0-9]+/)) {
@@ -131,6 +133,7 @@ while IFS='|' read -r _p _r _t _; do
   [ -n "$_p" ] || continue; d_run=$((d_run + _r)); d_tot=$((d_tot + _t))
 done <<<"$d_stat"
 
+: "${USER:=$(id -un)}"
 sess=$(loginctl show-user "$USER" -p Display --value 2>/dev/null)
 [ -n "$sess" ] || sess=$(loginctl list-sessions --no-legend 2>/dev/null | awk -v u="$USER" '$3==u{print $1;exit}')
 _lockstate() {
@@ -139,7 +142,7 @@ _lockstate() {
 k_lock=$(cached lock 900 _lockstate); : "${k_lock:=n/a}"
 
 _pcmode() { . "$BIN/pc-mode" status; }
-k_mode=$(cached mode 900 _pcmode); : "${k_mode:=unknown}"
+k_mode=$(slow mode 900 _pcmode); : "${k_mode:=unknown}"
 
 tmux has-session -t "$ORCHESTRATOR_TMUX_SESSION" 2>/dev/null && a_tmux=alive || a_tmux=down
 # Orchestrator pane: the session existing is not the same as Claude serving in it.
@@ -197,8 +200,8 @@ for _s in $SERVICES; do
   gate "svc_$_s" [ "${SV[$_s]%% *}" != active ]
 done
 # Keepalive (T269): user units that must be active and local sites that must answer 200.
-KEEPALIVE_UNITS=${KEEPALIVE_UNITS:-vass-middleware.service vass-frontend.service vass-frontend-proxy.service moodle45-cron.timer}
-KEEPALIVE_HTTP=${KEEPALIVE_HTTP:-moodle45=http://127.0.0.1:8045/login/index.php}
+KEEPALIVE_UNITS=${KEEPALIVE_UNITS:-}
+KEEPALIVE_HTTP=${KEEPALIVE_HTTP:-}
 _keepalive() {
   local u h
   for u in $KEEPALIVE_UNITS; do printf '%s %s\n' "$u" "$(systemctl --user is-active "$u" 2>/dev/null)"; done
@@ -248,16 +251,19 @@ _failed() {
     [ "$(systemctl --user show -p Transient --value "$u" 2>/dev/null)" = yes ] && echo "t:user:$u" || echo "user:$u"
   done
 }
-h_failed=(); h_failed_transient=(); h_apport=()
+h_failed=(); h_failed_transient=(); h_apport=(); h_foreign=()
 while read -r _u; do
   _n=${_u#t:}
   [ -n "$_n" ] && [[ " $FAILED_UNITS_IGNORE " != *" ${_n#user:} "* ]] || continue
   if [ "$_n" != "$_u" ]; then h_failed_transient+=("$_n")
   elif [[ $_n = apport-autoreport.service || $_n = apport-autoreport.path ]]; then h_apport+=("$_n")
+  elif [[ ${_n#user:} =~ $PC_NOT_OURS ]]; then h_foreign+=("$_n")
   else h_failed+=("$_n"); fi
 done < <(cached failed_transient 60 _failed)
 gate failed_units [ "${#h_failed[@]}" -gt 0 ]
 V[failed_transient]=OK; [ "${#h_failed_transient[@]}" -gt 0 ] && V[failed_transient]=WARN
+# A failed unit that is not ours (PC_NOT_OURS, Vass) is information: a WARN, never a host FAIL (T721).
+V[failed_foreign]=OK; [ "${#h_foreign[@]}" -gt 0 ] && V[failed_foreign]=WARN
 # A failed crash-report upload (T442) is a WARN naming each /var/crash report, never a host FAIL.
 h_crash=()
 if [ "${#h_apport[@]}" -gt 0 ]; then
@@ -295,12 +301,22 @@ _fleet() {
 mapfile -t a_fleet < <(cached fleet 60 _fleet)
 [ -n "${a_fleet[0]:-}" ] || a_fleet=()
 gate fleet [ "${#a_fleet[@]}" -gt 0 ]
-a_loops=$(cached unit_loops 60 pc_unit_loops)
+a_loops=$(slow unit_loops 60 pc_unit_loops)
+# A loop of a unit that is not ours (PC_NOT_OURS, Vass) is a WARN row of its own, never unit_loops (T734).
+a_loops_foreign=$(sed -n 's/^foreign: //p' <<<"$a_loops"); a_loops=$(grep -v '^foreign: ' <<<"$a_loops")
 gate unit_loops [ -n "$a_loops" ]
+V[unit_loops_foreign]=OK; [ -n "$a_loops_foreign" ] && V[unit_loops_foreign]=WARN
 # sentinel-check stamps last-run on every tick it gets the lock; over an hour old = it is not running.
 a_sent=-1
 [ -e "$HOME/agents/sentinel/state/last-run" ] && a_sent=$(( (NOW - $(stat -c %Y "$HOME/agents/sentinel/state/last-run")) / 60 ))
 gate sentinel [ "$a_sent" -lt 0 -o "$a_sent" -gt 60 ]
+# moodle-cron marks each container whose site upgrade is pending (T501); its cron skips quietly, this line WARNs.
+a_mup=()
+for _m in "$HOME/agents/state"/moodle-cron-*.pending; do
+  [ -e "$_m" ] || continue
+  _c=${_m##*/moodle-cron-}; a_mup+=("${_c%.pending} since $(date -r "$_m" +%H:%M)")
+done
+V[moodle_upgrade]=OK; [ "${#a_mup[@]}" -gt 0 ] && V[moodle_upgrade]=WARN
 
 ## --- brief ------------------------------------------------------------------
 if [ "$MODE" = brief ]; then
@@ -413,7 +429,7 @@ $(docker ps --format '{{.Names}}|{{.Label "com.docker.compose.project"}}|{{.Port
         echo "| $pt | $n | $p |"; done; done | sort -t'|' -k2 -n)
 
 ## Exposure (T25 firewall)
-ufw is $(sudo -n ufw status 2>/dev/null | sed -n '1s/Status: //p' || echo unknown): default deny incoming,
+ufw is $(cached ufw-status 300 sudo -n ufw status | sed -n '1s/Status: //p' || echo unknown): default deny incoming,
 allow outgoing, everything allowed in on \`tailscale0\`, and only these ports from the LAN
 \`192.168.1.0/24\`. Docker-published ports bypass ufw's INPUT chain, so the same source policy is
 repeated in the \`DOCKER-USER\` chain (\`/etc/ufw/after.rules\`, matched on \`conntrack --ctorigdstport\`
@@ -489,6 +505,7 @@ add host os "$(. /etc/os-release; echo "$PRETTY_NAME")"
 joined() { local -n _a=$1; local o; printf -v o '%s, ' "${_a[@]}"; printf '%s' "${o%, }"; }
 add host failed_units "${#h_failed[@]}$([ ${#h_failed[@]} -gt 0 ] && echo ": $(joined h_failed)")" "${V[failed_units]}"
 add host failed_transient "${#h_failed_transient[@]}$([ ${#h_failed_transient[@]} -gt 0 ] && echo ": $(joined h_failed_transient)")" "${V[failed_transient]}"
+add host failed_foreign "${#h_foreign[@]}$([ ${#h_foreign[@]} -gt 0 ] && echo ": $(joined h_foreign) (not ours)")" "${V[failed_foreign]}"
 add host crash_report "$([ ${#h_crash[@]} -gt 0 ] && joined h_crash || echo none)" "${V[crash_report]}"
 add host reboot_required "$h_reboot" "${V[reboot]}"
 nd=(); [ ${#h_nd_crit[@]} -gt 0 ] && nd+=("${#h_nd_crit[@]} CRITICAL"); [ ${#h_nd_warn[@]} -gt 0 ] && nd+=("${#h_nd_warn[@]} WARNING")
@@ -504,8 +521,12 @@ add power battery_health "$([ "$b_health" -ge 0 ] 2>/dev/null && echo "$b_health
 add power battery_limit "$(first /sys/class/power_supply/BAT*/charge_control_end_threshold)%"
 _tte() { upower -i /org/freedesktop/UPower/devices/battery_BAT0 2>/dev/null | sed -n 's/.*time to empty: *//p' | head -1; }
 add power time_to_empty "$(cached time_to_empty 60 _tte)"
-_profile() { powerprofilesctl get 2>/dev/null || echo n/a; }
-add power profile "$(cached power_profile 60 _profile)"
+# One D-Bus read (~5 ms) instead of powerprofilesctl's Python start-up (~0.3 s).
+_profile() {
+  local r; r=$(busctl get-property org.freedesktop.UPower.PowerProfiles /org/freedesktop/UPower/PowerProfiles \
+    org.freedesktop.UPower.PowerProfiles ActiveProfile 2>/dev/null); r=${r#s \"}; echo "${r%\"}"
+}
+add power profile "$(slow power_profile 60 _profile)"
 add power lid "$p_lid"
 
 add resources ram_available "${r_ramav} MB of ${r_ramtot} MB" "${V[ram]}"
@@ -523,7 +544,7 @@ add network lan_ip "$n_lan"
 add network tailscale_ip "$n_ts_ip"
 add network tailscale "$n_ts_state" "${V[tailscale]}"
 _dns() { resolvectl dns 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1; }
-add network dns "$(cached dns 3600 _dns)"
+add network dns "$(slow dns 3600 _dns)"
 add network internet "$n_inet" "${V[internet]}"
 
 for s in $SERVICES; do add services "$s" "${SV[$s]}" "${V[svc_$s]}"; done
@@ -584,10 +605,13 @@ add agents orchestrator "$a_orch" "${V[orchestrator]}"
 nt=$(awk 'NF{print $NF" at "$1" "$2" "$3; exit}' <<<"$timers")
 add agents fleet "$([ ${#a_fleet[@]} -gt 0 ] && joined a_fleet || echo "enabled fleet units running")" "${V[fleet]}"
 add agents unit_loops "${a_loops:-no timer-driven unit failing >= 10/h}" "${V[unit_loops]}"
+add agents unit_loops_foreign "${a_loops_foreign:-none}${a_loops_foreign:+ (not ours)}" "${V[unit_loops_foreign]}"
+add agents moodle_upgrade "$([ ${#a_mup[@]} -gt 0 ] && echo "pending: $(joined a_mup)" || echo "none pending")" "${V[moodle_upgrade]}"
 add agents sentinel_age "$([ "$a_sent" -ge 0 ] && echo "$a_sent min" || echo "no tick recorded")" "${V[sentinel]}"
 add agents user_timers "$a_timers${nt:+ (next: $nt)}"
 _sessions() { claude agents --json 2>/dev/null | jq 'length' 2>/dev/null || echo n/a; }
-add agents claude_sessions "$(cached claude_sessions 60 _sessions)"
+# `claude agents` is a ~0.4 s Node start-up; 1 h outlives the 15-min sentinel tick (T943).
+add agents claude_sessions "$(slow claude_sessions 3600 _sessions)"
 
 ## --- render -----------------------------------------------------------------
 case "$MODE" in
@@ -595,7 +619,7 @@ case "$MODE" in
     if [ "$fails" -gt 0 ]; then awk -F'\t' '$4=="FAIL"{print "FAIL "$1"."$2": "$3}' "$REC"; exit 1; fi
     echo "OK — all checks passed"; exit 0;;
   json)
-    ratio=$(cached look_ratio 3600 "$BIN/agents-log" --pc --since 24h | awk '$1=="TOTAL"{print $4}')
+    ratio=$(slow look_ratio 3600 "$BIN/agents-log" --pc --since 24h | awk '$1=="TOTAL"{print $4}')
     jq -Rn --argjson fails "$fails" --argjson ratio "${ratio:-0}" '
       [inputs|split("\t")|{section:.[0],key:.[1],value:.[2],state:.[3]}]
       | {generated:(now|todate), fails:$fails, pc_look_ratio_24h:$ratio,

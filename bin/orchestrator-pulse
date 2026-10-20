@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Hourly pulse: types one prompt into the orchestrator's tmux session, only when it sits idle at an empty prompt
-# and the standing queue changed since the last fire (a new need id, a new failed unit, a new HEALTH.md) or the last fire
+# and the standing queue changed since the last fire (a new need id, a new failed unit not in PC_NOT_OURS, a new HEALTH.md) or the last fire
 # is PULSE_FLOOR_H old; the queue at each fire is kept in PULSE_QUEUE (default pulse-queue.json beside the log).
 # Fires only into the exact session's pane when it runs the orchestrator claude (--append-system-prompt-file …ORCHESTRATOR.md) and
 # ~/.claude/sessions/<pid>.json confirms that pane and an idle status; anything unverifiable is a logged skip.
 case "${1:-}" in -h|--help) awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; exit 0 ;; esac
 set -uo pipefail
+. "$(dirname "$(readlink -f "$0")")/pclib.sh"
 SESSION=${PULSE_SESSION:-${ORCHESTRATOR_TMUX_SESSION:-claude}}
 LOG=${PULSE_LOG:-$HOME/agents/log/pulse.log}
 SNAP=${PULSE_QUEUE:-$(dirname "$LOG")/pulse-queue.json}
@@ -73,7 +74,7 @@ rest=$(printf '%s' "$line" | sed -e 's/^❯//' -e 's/^>//' | tr -d ' \302\240')
 
 plan-usage --check 80 >/dev/null 2>&1; [ $? -ne 1 ] || { log skip "plan >= 80%"; exit 0; }
 need_ids=$(pc need list --json 2>/dev/null | jq -r '.[].id' 2>/dev/null | sort -u)
-failed_units=$(systemctl --user list-units --state=failed --plain --no-legend 2>/dev/null | awk 'NF{print $1}' | sort -u)
+failed_units=$(systemctl --user list-units --state=failed --plain --no-legend 2>/dev/null | awk 'NF{print $1}' | grep -vE "$PC_NOT_OURS" | sort -u)
 needs=$(printf '%s' "$need_ids" | grep -c .); failed=$(printf '%s' "$failed_units" | grep -c .)
 # Ids in $1 (newline list) absent from snapshot key $2.
 fresh() { comm -23 <(printf '%s\n' "$1" | grep .) <(jq -r ".$2[]?" "$SNAP" 2>/dev/null | sort -u) | paste -sd' ' -; }

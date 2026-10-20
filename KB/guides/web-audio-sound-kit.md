@@ -1,6 +1,6 @@
 # Add subtle UI sounds to a web page with procedural Web Audio (no samples, no speakers)
 
-Ticket: T57 · Last verified: 2026-09-24 by `node --test test/remote-sound.test.js` (with ack/orbiter tests: 13/13 pass)
+Ticket: T57 · Last verified: 2026-10-20 (T846: paths, sound.js 286 lines, store key, 7 kHz low-pass, `PUBLIC` allowlist, 2 tests, T333 exports read); 2026-10-19 by `node --test test/remote-sound.test.js` (2/2), `./nosound node levels.js` on the :18657 stub (events −23.1 to −27.1, beds −33.7 dBFS) and `test -e` on every path
 
 ## When to use
 - A page needs soft UI sound: taps, chimes, whooshes, ambient beds that follow a live value (mic level, state).
@@ -43,6 +43,8 @@ cd ~/agent-work/research/2026-09-23/T57/build            # a stub Eye on :18657 
   (`PUBLIC` in `body/src/remote.js`). A new page asset needs an entry there and a dark-eye restart (the owner's call).
 - fps unchanged (60 → 60 at 400 and 1920); idle CPU 20.2 → 19.8 % because the context naps; +2.5 % while a bed plays.
 - The listening bed plays while the mic is open (≤ −38.7 dBFS at first); browser echo cancellation must remove it.
+- Killing the backgrounded `./nosound node dev-server.js` job kills bwrap only: node keeps :18657 (2026-10-19). Stop it with
+  `pkill -f '[d]ev-server.js'`, then check `ss -ltn | grep -c :18657` is 0.
 - `tools/analyze-sound.mjs` in the skill shells out to ffmpeg with a quoted path: give it plain filenames.
 
 ## Links

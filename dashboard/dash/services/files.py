@@ -211,6 +211,20 @@ def ls_route(h, path):
     h.json(out, code)
 
 
+_md = None
+_md_lock = threading.Lock()
+
+
+def md_html(text):
+    """Markdown to HTML on one reused converter; a new converter per call grew RSS ~140 KB a preview."""
+    global _md
+    with _md_lock:
+        if _md is None:
+            import markdown
+            _md = markdown.Markdown(extensions=["extra", "sane_lists"], output_format="html5")
+        return _md.reset().convert(text)
+
+
 @route("GET", "/files/", prefix=True)
 def files_route(h, path):
     drop_file(h, path[7:], h.path.partition("?")[2])
@@ -231,8 +245,7 @@ def drop_file(h, raw, query):
                 data = f.read(PREVIEW_MAX + 1)
             text = data[:PREVIEW_MAX].decode("utf-8", errors="replace")
             if ext == ".md":
-                import markdown
-                body = markdown.markdown(text, extensions=["extra", "sane_lists"], output_format="html5")
+                body = md_html(text)
             else:
                 body = "<pre>%s</pre>" % (text.replace("&", "&amp;").replace("<", "&lt;"))
             if len(data) > PREVIEW_MAX:
@@ -271,12 +284,6 @@ def drop_file(h, raw, query):
         h.end_headers()
         if getattr(h, "head_only", False):
             return
+        h.wfile.flush()
         with open(full, "rb") as f:
-            f.seek(start)
-            left = end - start + 1
-            while left > 0:
-                chunk = f.read(min(1 << 16, left))
-                if not chunk:
-                    break
-                h.wfile.write(chunk)
-                left -= len(chunk)
+            h.request.sendfile(f, start, end - start + 1)

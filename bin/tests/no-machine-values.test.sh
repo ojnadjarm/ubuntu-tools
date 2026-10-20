@@ -10,8 +10,7 @@ CONF="${HARNESS_CONFIG:-$HOME/.config/pc-harness/config.env}"
 PRIV="${PRIVATE_VALUES:-$HOME/.config/pc-harness/private-values}"
 # Recorded history keeps its literals on purpose (frozen benchmark arms and trajectories).
 SKIP="${NO_MACHINE_VALUES_SKIP:-^bench/}"
-bad=0
-ok() { if [ "$1" = 1 ]; then echo "PASS $2"; else echo "FAIL $2"; bad=$((bad+1)); fi; }
+. "$HERE/lib/assert.sh"
 
 values() {
   local fqdn
@@ -47,21 +46,21 @@ scan() {
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 patterns > "$tmp/pat"
 n="$(wc -l < "$tmp/pat")"
-[ "$n" -ge 3 ] && ok 1 "machine values read at run time ($n)" || ok 0 "machine values read at run time ($n)"
+[ "$n" -ge 3 ] && truthy "machine values read at run time ($n)" 1 || truthy "machine values read at run time ($n)" 0
 
 # Selftest: a throwaway repo with one planted value must go red, a clean one green.
 mkdir -p "$tmp/fx" && git -C "$tmp/fx" init -q && echo "clean" > "$tmp/fx/a.txt"
-[ -z "$(scan "$tmp/fx" "$tmp/pat")" ] && ok 1 "selftest: clean fixture passes" || ok 0 "selftest: clean fixture passes"
+[ -z "$(scan "$tmp/fx" "$tmp/pat")" ] && truthy "selftest: clean fixture passes" 1 || truthy "selftest: clean fixture passes" 0
 printf 'url http://%s:8070/\n' "$(hostname)" > "$tmp/fx/b.txt"
-[ -n "$(scan "$tmp/fx" "$tmp/pat")" ] && ok 1 "selftest: planted value caught" || ok 0 "selftest: planted value caught"
+[ -n "$(scan "$tmp/fx" "$tmp/pat")" ] && truthy "selftest: planted value caught" 1 || truthy "selftest: planted value caught" 0
 
 out="$(scan "$REPO" "$tmp/pat")"
-if [ -z "$out" ]; then ok 1 "no machine values in $(basename "$REPO")"
+if [ -z "$out" ]; then truthy "no machine values in $(basename "$REPO")" 1
 else
-  ok 0 "no machine values in $(basename "$REPO") ($(printf '%s\n' "$out" | wc -l) hits)"
+  truthy "no machine values in $(basename "$REPO") ($(printf '%s\n' "$out" | wc -l) hits)" 0
   printf '%s\n' "$out" | cut -d: -f1 | sort | uniq -c | sort -rn | head -40
   printf '%s\n' "$out" | cut -c1-160 | head -20
 fi
 
-[ "$bad" = 0 ] && echo "all no-machine-values cases pass" || echo "$bad FAILURES"
-exit $([ "$bad" = 0 ] && echo 0 || echo 1)
+[ "$bad" = 0 ] && echo "all no-machine-values cases pass"
+exit $bad

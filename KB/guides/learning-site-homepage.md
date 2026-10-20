@@ -1,6 +1,6 @@
 # ailearning homepage: shared content JSON, promise copy, path map data, mockup lessons
 
-Ticket: T78 (1a content; 1b mockups add their lessons below), T82 port, T83 sheet set, T96 smooth sheet changes · Last verified: 2026-09-25 (T96: frame capture + press trials, no suite run); 2026-09-24 by `npm run ci` green (incl. `tests/e2e/sheet-change.mjs`)
+Ticket: T78 (1a content; 1b mockups add their lessons below), T82 port, T83 sheet set, T96 smooth sheet changes · Last verified: 2026-10-20 (T846: paths, `package.json` scripts, content JSON counts, hygiene/bundle-check rules read; no run); 2026-09-25 (T96: frame capture + press trials, no suite run); 2026-09-24 by `npm run ci` green (incl. `tests/e2e/sheet-change.mjs`)
 
 ## When to use
 Building or changing the `ailearning` homepage, its path map, or any mockup of it: read the copy and the 43 path entries from the
@@ -43,7 +43,7 @@ node --import ./tests/lib/register.mjs --test tests/unit/content.test.mjs   # ea
 **Pitfalls (measured)**
 - A 13th silhouette is caught by the schema (`maxProperties: 12`) first, so semantic checks never run on it; a test that adds a
   spare silhouette to prove "unused" fails for the wrong reason. Test "unused" by re-pointing the only user of one (`gears`, U06).
-- `hygiene.mjs`'s wording tier includes `\bT\d{2}\b` and `\bdrop\b`: plate copy like "T71" or "drop" fails; write "drops"/"falls".
+- `hygiene.mjs`'s wording tier includes `\bT\d{2,}[a-z]?\b` and `\bdrop\b(?!-shadow)`: plate copy like "T71" or "drop" fails; write "drops"/"falls".
 - The validator returns schema errors alone when there are any; fix those before reading semantic output.
 
 ## Mockups (ticket 1b)

@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
+# host-only: live listeners, Moodle containers and tailscale of this box
 # PT06: pc net against tests/fixtures/net (listener join, port owner, exposure summary, tailscale,
 # JSON validity, wall). Read-only — no verb here ever writes anything.
 set -uo pipefail
 BIN="$HOME/agents/bin"
 FIX="$BIN/tests/fixtures/net"
+. "$BIN/tests/lib/budget.sh"
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
-is()  { [ "$2" = "$3" ] && ok "$1" || nok "$1" "expected '$3', got '$2'"; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 
 fx() { PC_FIXTURE="$FIX" XDG_RUNTIME_DIR="$WORK" PC_LEDGER="$WORK/l.jsonl" "$BIN/pc-net" "$@"; }
 
@@ -70,7 +69,8 @@ grep -q '^  pc net ' <<<"$("$BIN/pc" help)" && ok 'pc help lists pc net' || nok 
 if command -v /usr/bin/time >/dev/null; then
   "$BIN/pc-net" >/dev/null 2>/dev/null # warm any cache
   t=$(/usr/bin/time -f '%e' "$BIN/pc-net" 2>&1 >/dev/null | tail -1)
-  awk -v t="$t" 'BEGIN{exit !(t<=0.5)}' && ok "wall $t s <= 0.5 s budget" || nok "wall budget" "$t s"
+  b=$(budget 0.5)
+  awk -v t="$t" -v b="$b" 'BEGIN{exit !(t<=b)}' && ok "wall $t s <= $b s budget" || nok "wall $b s budget" "$t s"
 fi
 
 [ $bad = 0 ] && echo 'PASS pc-net' || echo 'FAIL pc-net'

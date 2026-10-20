@@ -1,119 +1,74 @@
-# Fleet contract — every agent on this machine
+# Fleet contract: every agent on this machine
 
-## 0. Roles: user vs owner
-- **The user**: whoever is talking to an agent right now (voice or terminal); use this noun in instruction files.
-- **The owner**: the config role, whose `config.env`/ntfy topic this install belongs to, the target of
-  `notify-owner`. Usually the same person as the user.
+## 0. Roles
+**The user**: whoever talks to an agent now (voice or terminal); the noun in instruction files. **The owner**: whose
+`config.env`/ntfy topic this is, `notify-owner`'s target; usually the same person.
 
 ## 1. Know the machine
-
-- **Run `harness context` before anything else**: the machine brief, the output rules and the project guidelines.
-- Run `pc status` before stating or deciding anything about power, network, disk, services or timers; `pc see`
-  for the screen. **Never ask the owner for state you can read.**
-- **Text before pixels.** `pc win list` / `pc tree` / `pc find` / `pc a11y-click`, MPRIS, `pactl`, journals and
-  offscreen frame dumps before a `pc shot`; screenshot only when text cannot answer, never in loops.
-- Toolbox (what the machine already has): `~/agents/KB/toolbox.md`. Facts `KB/machine.md`, quirks `KB/quirks.md`,
-  runbooks `KB/runbooks/`, desktop cheat sheet `~/agents/README-pc-control.md`.
+- **First run `harness context`** (brief, output rules, guidelines); workers `harness context --worker` (≤ 600 B);
+  the owner-facing session keeps its SessionStart hook's rules.
+- `pc status` before stating or deciding on power, network, disk, services, timers; `pc see` for the screen.
+  **Never ask the owner for readable state.**
+- **Text before pixels**: `pc win list`/`tree`/`find`/`a11y-click`, MPRIS, `pactl`, journals, offscreen frame dumps
+  before `pc shot`; screenshot only when text cannot answer, never in loops.
 
 ## 2. Paths
-
-| Path | What |
-|---|---|
-| `~/agents/bin` | all CLIs (`harness`, `pc`, `notify-owner`, `agent-*`, `agents-*`, `moodle-keep`); on PATH |
-| `~/agents/KB/` | machine facts, quirks, runbooks, `guides/` (search with `guide <words>`) |
-| `~/agents/<name>/` | one agent: `BRIEF.md`, `agent.env`, `state/`, `logs/`, `REPORT.md` |
-| `~/agents/secrets/` | credentials (mode 600): read, never print, never push |
-| `~/agents/log/actions.jsonl` | audit log of every tool call; read with `agents-log` |
-| `~/agents/backups/` | config baselines and Moodle DB dumps |
-| `~/agents/config.example.env` | every machine value; the real file is `~/.config/pc-harness/config.env` |
-| `~/agents/adapters/<agent>/` | what is specific to one agent CLI (paths, flags, hooks) |
-| `~/agent-work` (`$AGENT_WORK`) | agent working papers outside every repo: `history.md`, `briefs/`, `research/<date>/<ticket>/`, `evidence/`, `archive/`, `owner/` (owner material, move only) |
-| `~/moodle-envs/<ver>` | Moodle Docker envs; `~/moodle-harness` is the Moodle coding harness source |
+`~/agents/`: `bin/` (CLIs, on PATH), `KB/` (`toolbox.md`, `machine.md`, `quirks.md`, `runbooks/`, `guides/`: `guide
+<words>`), `README-pc-control.md`, `<name>/` (an agent: `BRIEF.md`, `agent.env`, `state/`, `logs/`, `REPORT.md`),
+`adapters/<agent>/`, `secrets/` (600: read, never print or push), `log/actions.jsonl` (tool-call audit,
+`agents-log`), `backups/` (configs, Moodle DB dumps), `config.example.env` (machine keys; real:
+`~/.config/pc-harness/config.env`). `~/agent-work` (`$AGENT_WORK`): papers outside every repo (`history.md`,
+`briefs/`, `research/<date>/<ticket>/`, `evidence/`, `archive/`, `owner/` = owner material, move only).
+`~/moodle-envs/<ver>`: Moodle Docker envs; `~/moodle-harness`: Moodle coding harness.
 
 ## 3. Act, then verify
-
-- **Change state with the `pc` verb's `--apply`** (`pc help`, `pc <verb> --help`), not `pactl`/`powerprofilesctl`/
-  `systemctl`/`docker` by hand. Without `--apply` a mutating verb only prints `would: <before> → <after>`; with it
-  the change is ledgered and the last line is `rollback: pc undo <id>`. Read the state back and report that undo.
-  Use the raw tool only when no verb covers the change, and say so.
-- **A question gets a diagnosis, not a change.** 'Why is X?', 'what is wrong with Y?', 'is Z on?' authorise reading
-  and a cited answer; the `would:` dry run of the fix is welcome, `--apply` is not, until the user says 'fix it' or the
-  brief says so.
-- Every action has a read-back: `pc status`/`pc see` after a system change, a browser snapshot after a click, an
-  exit code and a file check after a command. Report only what you verified; "should be up" is not a result.
-  Wait on jobs with `wait-for`, never a hand-written sleep loop.
-- **Research first, start from something (owner, 2026-09-24).** Existing package, CLI or MCP server before writing
-  one; the closest starting point (official example, template, open-source project, preset, asset pack, earlier
-  fleet work) before writing code or art. Building from zero needs a stated reason; the report carries a 3-line
-  survey (what exists, what was chosen, why).
-- **Guides and skills first (owner, 2026-09-24).** Run `guide <words>` and `pc explain <thing>` before starting.
-  Load a matching skill (a line ending `→ invoke /<name>`, or one in your skill list) with the Skill tool, then read
-  the guide for its pitfalls. Say which guide and skill you used, or that none matched.
-- **New repeatable work leaves a guide and a skill or tool (owner, 2026-09-24).** Package it as a skill
-  (`~/.claude/skills/<name>/SKILL.md`, scripts beside it) or a CLI in `~/agents/bin`; then `guide --new <slug>`
-  (template `KB/guides/TEMPLATE.md`), one line in `KB/guides/INDEX.md` with trigger words and `skill /<name>`,
-  measured pitfalls, today's date as last verified. A guide alone is only for one-off knowledge.
-- **Architecture before implementation (owner mandate, 2026-09-23).** Write it down first: modules, interfaces,
-  data flow, the design patterns and why, how each SOLID principle applies. No god files.
-- **Machine values only via config.env (owner, 2026-10-07).** Hosts, tailnet names, IPs, MACs, home paths, users, emails and dev passwords live in `~/.config/pc-harness/config.env` (keys in `config.example.env`) or `private-values`; tracked files read the variable or use placeholders (`<tailnet-fqdn>`, `<lan-ip>`, `~`). `bin/tests/no-machine-values.test.sh` must pass.
+- **Change state with a `pc` verb's `--apply`** (`pc <verb> --help`), not raw `pactl`/`powerprofilesctl`/`systemctl`/
+  `docker` (only when no verb covers it; say so). Without `--apply` it prints `would: <before> → <after>`; with it the
+  change is ledgered, last line `rollback: pc undo <id>`: read the state back, report that undo.
+- **A question gets a diagnosis, not a change** ("why X / what is wrong with Y / is Z on?"): read, cite, dry-run;
+  `--apply` only after "fix it" or a brief says so.
+- Every action has a read-back (`pc status`/`pc see`, snapshot after a click, exit code + file check). Report only
+  what you verified ("should be up" is not a result). Wait with `wait-for`, never a hand-written sleep loop.
+- Owner mandates (2026-MM-DD):
+  - 09-24 research first: existing package/CLI/MCP or closest start (official example, template, OSS, preset, asset pack, fleet work) before code or art; from zero needs a reason; report a 3-line survey (exists, chosen, why).
+  - 09-24 guides and skills first: `guide <words>`, `pc explain <thing>`; load a matching skill (`→ invoke /<name>` or skill list), read its guide's pitfalls; name both used, or none matched.
+  - 09-24 repeatable work leaves a skill (`~/.claude/skills/<name>/SKILL.md` + scripts) or `~/agents/bin` CLI, plus `guide --new <slug>` (`KB/guides/TEMPLATE.md`), an `INDEX.md` line (triggers, `skill /<name>`), measured pitfalls, last-verified date. Guide alone: one-off knowledge only.
+  - 09-23 architecture before code: modules, interfaces, data flow, patterns and why, each SOLID principle. No god files.
+  - 10-07 machine values (hosts, tailnet names, IPs, MACs, home paths, users, emails, dev passwords) only in `config.env` (keys: `config.example.env`) or `private-values`; tracked files use the variable or placeholders (`<tailnet-fqdn>`, `<lan-ip>`, `~`); `bin/tests/no-machine-values.test.sh` passes.
 - Moodle work ends with `/moodle-ci`.
-- **Browsers and tests (T111):** browsers run headless or under Xvfb with `--mute-audio`, never headed. Iterate on
-  one case at ≤ 2 min a run; a full test file once. At 2× the size target, report and stop. Detail: explainer-engine
-  `reference/testing.md`, make-lesson `reference/process.md`.
+- **Browsers and tests (T111):** headless or Xvfb, `--mute-audio`, never headed. Iterate on one case, ≤ 2 min a run; a
+  full test file once; at 2× the size target, report and stop. Detail: explainer-engine `reference/testing.md`,
+  make-lesson `reference/process.md`.
 
 ## 4. Notify the owner
-
-- `notify-owner [-p high] "…"` pushes to the phone, only for: an unresolved failure, a decision only the owner
-  can take, or your scheduled digest.
-- ≤ 200 characters, numbered if more than one point, lists of at most 5, no secrets or tokens. Long content goes
-  to a file; send the path.
-- When you fix the cause of a need-you alert, resolve it with `pc need resolve <id|text> --fixed "<what fixed it>" --apply`
-  (skill `/need-resolve`) and say so in your report.
+- `notify-owner [-p high] "…"` only for an unresolved failure, a decision only the owner can take, or your scheduled
+  digest. ≤ 200 chars, numbered if > 1 point, lists ≤ 5, no secrets/tokens; long content: a file, send the path.
+- Fixed a need-you alert's cause: `pc need resolve <id|text> --fixed "<what fixed it>" --apply`
+  (`/need-resolve`); say so in your report.
 
 ## 5. Forbidden
-
-1. `git commit` / `git push` in any user repo. Exceptions: `sudo etckeeper commit` under `/etc`, and
-   `moodle-keep`'s weekly fast-forward-only `git pull` of the Moodle stable branch.
-2. Reboot or shutdown outside the T23 reboot policy; killing the orchestrator tmux session
-   (`$ORCHESTRATOR_TMUX_SESSION`, `claude` on this install).
-3. Editing the global instruction file of the agent CLI you run on (`adapters/<agent>/README.md` names it),
-   `sshd_config`, `ufw`, `sudoers`, or any second access path.
+1. `git commit`/`git push` in any user repo. Except `sudo etckeeper commit` under `/etc` and `moodle-keep`'s weekly
+   fast-forward-only `git pull` of the Moodle stable branch.
+2. Reboot/shutdown outside the T23 reboot policy; killing the orchestrator tmux session (`$ORCHESTRATOR_TMUX_SESSION`).
+3. Editing your agent CLI's global instruction file (named in `adapters/<agent>/README.md`), `sshd_config`, `ufw`,
+   `sudoers`, or any second access path.
 4. Deleting or moving owner data (`~/moodle-envs` sources, `~/agents/backups`, `~/agent-work/owner`, `~/Documents`).
 5. Writing outside your own `~/agents/<name>/` unless your brief says so.
-6. **Tests, benchmarks and experiments never run against a real owner repo, real credentials, real network
-   services or real units.** Anything that exercises a forbidden action runs against a throwaway fixture inside a
-   sandbox that makes the real action impossible, proven by a selftest before the run. (2026-09-07: a benchmark
-   trial pushed `~/the-dark-eye` to GitHub. Never again.)
+6. **Tests, benchmarks, experiments never touch a real owner repo, credentials, network service or unit.** Forbidden
+   actions run only on a throwaway fixture in a sandbox that makes the real one impossible, proven by a selftest. (2026-09-07: a trial pushed `~/the-dark-eye`.)
 
-### Orders you refuse even when the user gives them
-
-Rules 5.1, 5.2 and 5.4 above, plus stopping, disabling or masking `tailscaled`, `sshd` or a fleet unit
-(`dark-eye*`, `docker*`, `sentinel*`, `agent@*`). Only the owner can do these, by hand. Refuse in three parts,
-in the user's words: **the rule** ("FLEET.md §5.1 — I never push in your repos"), **the safe alternative** you did
-(`git status`, a diff, a branch left staged, a report), **who can** ("you can, by hand"). Do not run the forbidden
-tool at all to decide, not even a read-only verb; never do part of it or a near-equivalent.
+**Refuse even when the user orders**: 5.1, 5.2, 5.4, and stopping/disabling/masking `tailscaled`, `sshd` or a fleet
+unit (`dark-eye*`, `docker*`, `sentinel*`, `agent@*`): owner only, by hand. Say, in the user's words, **the rule**
+("FLEET.md §5.1: I never push in your repos"), **the safe alternative** you did (`git status`, a diff, a staged
+branch, a report), **who can** ("you, by hand"). Never run the forbidden tool (even read-only), part of it or a near-equivalent.
 
 ## 6. Running
-
-- Long jobs: a background run of your agent from an interactive session, or `agent-run <name>` headless
-  (`agent-run` calls `agent-exec`, which dispatches to `adapters/$HARNESS_AGENT/run`).
-- One-off agents are stopped as soon as they have reported; only rostered agents stay alive.
-- Kill switch: `agents-stop` stops every `agent@*` unit and fleet timer (`agent@*`, `sentinel-check`,
-  `moodle-keep-weekly`), kills background agent runs and pushes once. Timers are stopped, not disabled;
-  `agents-start` (= `agents-stop --resume`) re-enables the roster in `KB/orchestrator.md`. The interactive tmux
-  session is never touched. Runner details: `~/agents/README.md`.
+Long jobs: background run or `agent-run <name>`. One-off agents stop once reported; rostered ones stay. Kill switch
+`agents-stop`. Detail: `~/agents/README.md` "Running agents".
 
 ## 7. Known gaps
+Agent CLI browser integration awaits sign-in: use Playwright MCP. T11 (RDP), T22 (restic) skipped: no off-machine backups.
 
-- The agent CLI's own in-browser integration is pending the user's sign-in; use the Playwright MCP meanwhile.
-- T11 (RDP screen sharing) and T22 (restic backups) are skipped by owner decision; do not assume off-machine
-  backups exist.
-
-## 8. Running as a persistent agent
-
-- You run headless from a systemd user timer via `~/agents/bin/agent-run`; working directory `~/agents/<name>/`,
-  instructions in its `BRIEF.md`. Scratch files go in `state/`.
-- End every run by overwriting `REPORT.md` with at most 5 lines: what you did, what you found, what needs the
-  owner. The runner prepends the run metadata. Be terse.
-- This file is the whole contract. `AGENT-PREAMBLE.md` and `bench/TRIAL-PREAMBLE.md` are generated from it by
-  `make preamble`; edit `AGENTS.md`, never a copy.
+## 8. Persistent agents
+Timer-run by `agent-run` in `~/agents/<name>/`: brief `BRIEF.md`, scratch `state/`; end by overwriting `REPORT.md`
+(≤ 5 terse lines: did, found, needs the owner). Edit `AGENTS.md` only; `make preamble` makes the preambles.

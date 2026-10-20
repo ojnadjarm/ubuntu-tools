@@ -4,11 +4,9 @@
 set -uo pipefail
 BIN="$HOME/agents/bin"
 FIX="$BIN/tests/fixtures/hw"
+. "$BIN/tests/lib/budget.sh"
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
-is()  { [ "$2" = "$3" ] && ok "$1" || nok "$1" "expected '$3', got '$2'"; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 fx() { PC_FIXTURE="$FIX" XDG_RUNTIME_DIR="$WORK" PC_LEDGER="$WORK/l.jsonl" "$BIN/pc-hw" "$@"; }
 
 # 1. summary: the five sanity-check tokens each on their own line, one match each.
@@ -82,8 +80,9 @@ is 'cached pci call forks no lspci' "$n2" 0
 RT=$(mktemp -d); trap 'rm -rf "$WORK" "$RT"' EXIT
 cold=$(XDG_RUNTIME_DIR="$RT" /usr/bin/time -f '%e' "$BIN/pc-hw" summary --fresh 2>&1 >/dev/null | tail -1)
 warm=$(XDG_RUNTIME_DIR="$RT" /usr/bin/time -f '%e' "$BIN/pc-hw" summary 2>&1 >/dev/null | tail -1)
-awk -v c="$cold" 'BEGIN{exit !(c<=1.5)}' && ok "live cold <= 1.5s ($cold)" || nok 'live cold budget' "$cold"
-awk -v w="$warm" 'BEGIN{exit !(w<=0.5)}' && ok "live warm <= 0.5s ($warm)" || nok 'live warm budget' "$warm"
+bc=$(budget 1.5); bw=$(budget 0.5)
+awk -v c="$cold" -v b="$bc" 'BEGIN{exit !(c<=b)}' && ok "live cold <= $bc s budget ($cold)" || nok "live cold <= $bc s budget" "$cold"
+awk -v w="$warm" -v b="$bw" 'BEGIN{exit !(w<=b)}' && ok "live warm <= $bw s budget ($warm)" || nok "live warm <= $bw s budget" "$warm"
 
 [ $bad = 0 ] && echo 'PASS pc-hw' || echo 'FAIL pc-hw'
 exit $bad

@@ -7,9 +7,7 @@ BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/plan-publish"
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 SHIM="$WORK/shim"; CALLS="$WORK/calls.log"; BLOCKED="$WORK/blocked.log"; PLANS="$WORK/home/agents/dashboard/plans"
 mkdir -p "$SHIM" "$WORK/home"; : >"$CALLS"
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 
 for c in systemctl gsettings tmux etckeeper sudo notify-owner; do
   printf '#!/bin/sh\necho "BLOCKED %s $*" >>"%s"\nexit 97\n' "$c" "$BLOCKED" >"$SHIM/$c"

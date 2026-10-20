@@ -1,6 +1,6 @@
 # Serve a Vite site locally like GitHub Pages (ailearning, portfolio) at a stable https link
 
-Ticket: T85 · Last verified: 2026-10-19 (T425) by `sites.test.sh` (stale build.json fails verify, fresh passes) and a live publish
+Ticket: T85 · Last verified: 2026-10-20 (T846: `sites --help`, paths, caddy 2.6.2, coreutils 9.7, listeners, `tailscale serve status`); 2026-10-19 (T425) by `sites.test.sh` (stale build.json fails verify, fresh passes) and a live publish
 
 ## When to use
 - **ailearning: the only test site (T271, owner 2026-10-07).** `.local/drop.sh` = `sites publish ailearning` (build env `REVIEW=toggle` from `BUILD_ENV`
@@ -37,7 +37,7 @@ systemctl --user status sites.service; tailscale serve status   # want :8472 →
 - LAN: no ufw rule for 8072 (agents may not edit ufw, FLEET §5.3); tailnet works. Owner command in `KB/machine.md`.
 - `sites publish ailearning --no-build` snapshots whatever `dist/` holds: a plain `npm run build` there has no review switch. Rebuild through `sites`.
 - `tools/link-check.mjs` read `/u/x/?review=1` as a missing page until T271 stripped the query; `base-check` refuses a bare `?review=1` (use the page's own path).
-- A stray `python3 -m http.server 8071` (portfolio preview, 2026-09-21) still runs with a LAN ufw rule; this replaces it, owner's call to stop it.
+- The stray `python3 -m http.server 8071` (portfolio preview, 2026-09-21) is gone (nothing listens on 8071, 2026-10-20); its LAN ufw rule remains, owner's call to drop it.
 
 - Build stamp (T403): ailearning's `src/site/stamp.mjs` writes `dist/build.json` {commit, built to the second} and a `build <hash> · <time>` line in the
   homepage colophon; same-minute builds differ by seconds. Portfolio (T425): `scripts/stamp.mjs` emits only `build.json` (no page change,

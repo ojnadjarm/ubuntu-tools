@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Recorded busctl for the pc-dbus tests: replays ../resp/<sha1 of the argv> (see record.sh).
-d="$(cd "$(dirname "$(readlink -f "$0")")/../resp" && pwd)"
-k=$(printf '%s\0' "$@" | sha1sum | cut -c1-16)
+d=${BASH_SOURCE[0]%/*}/../resp
+read -r k _ < <(printf '%s\0' "$@" | sha1sum); k=${k:0:16}
 [ -r "$d/$k" ] || { printf 'fixture busctl: nothing recorded for: %s\n' "$*" >&2; exit 70; }
-cat "$d/$k"
+IFS= read -r -d '' out <"$d/$k"; printf '%s' "$out"

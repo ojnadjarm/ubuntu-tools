@@ -15,9 +15,11 @@
 #   pc_root <cmd…>                  pc_timeout ${PC_ROOT_TIMEOUT:-5} sudo -n <cmd…>
 #   pc_cmd <name> [args…]           run $PC_FIXTURE/bin/<name> (recorded stdout) when it exists, else the real binary
 #   cached <name> <ttl> <cmd…>      stdout of cmd, reused while the cache entry is younger than ttl; FRESH=1 bypasses
+#   pc_smart_json                   `smartctl -j -H -A /dev/nvme0` (root; fixture under PC_FIXTURE), cached io_smart 1 h unless empty
 #   pc_fleet_enabled                the enabled user units matching PC_FLEET_GLOBS, one per line
 #   pc_fleet_states [--system] <u…> "unit<TAB>active<TAB>sub<TAB>OK|FAIL" per unit (failed, failed oneshot, enabled but down)
-#   pc_unit_loops                   timer-driven user units failing >= 10/h in the last hour; exit 1 when any
+#   pc_unit_loops                   timer-driven user units failing >= 10/h in the last hour; exit 1 when any is ours
+#   PC_NOT_OURS                     ERE of unit names the fleet must never touch (Vass): listed `not ours`, never a fleet failure
 #   pc_guard <cmd-string…>          exit 3 with the FLEET §5 line when the command is on the deny-list
 #   pc_guard_unit <unit>            exit 3 when the unit is guarded, by bare name or with any type suffix
 #   pc_unit_why <unit>              the reason string for a guarded unit, empty when it is allowed
@@ -27,7 +29,7 @@
 #                                   without APPLY prints "would: <target> <before> → <after>"; with it appends the
 #                                   ledger entry, runs the command, appends {id,verified,observed} and prints
 #                                   "rollback: pc undo <id>" as the last line; `redo` records $PC_REDO or the verb's own argv
-# Globals: PC_SYS PC_PROC PC_BAT PC_FIXTURE PC_LEDGER PC_ROOT_TIMEOUT PC_TIMEOUT_BIN PC_READ_CMD PC_USAGE PC_SUB JSON APPLY FRESH
+# Globals: PC_NOT_OURS PC_SYS PC_PROC PC_BAT PC_FIXTURE PC_LEDGER PC_ROOT_TIMEOUT PC_TIMEOUT_BIN PC_READ_CMD PC_USAGE PC_SUB JSON APPLY FRESH
 #          SECONDS_ PC_ARGS[] PC_EXTRA_FLAGS[] PC_EXTRA[] PC_OPT[]
 
 # shellcheck disable=SC2034
@@ -137,8 +139,19 @@ cached() {
   printf '%s\n%s\n' "$NOW" "$data" >"$f" 2>/dev/null
   printf '%s\n' "$data"
 }
+_pc_smart() {
+  if [ -n "$PC_FIXTURE" ]; then pc_cmd smartctl -j -H -A /dev/nvme0
+  else pc_root smartctl -j -H -A /dev/nvme0; fi
+}
+pc_smart_json() {  # an empty read (sudo or smartctl failed) is not cached
+  local d; d=$(cached io_smart 3600 _pc_smart)
+  [ -n "$d" ] || rm -f "$CACHE/io_smart"
+  printf '%s\n' "$d"
+}
 
 ## --- fleet unit verdicts (T347-10) -------------------------------------------
+# Units that are not ours (decisions/vass.md); pc-failures reads this default too (T721).
+: "${PC_NOT_OURS:=^(moodle45|vass)}"
 # User units the fleet owns by name (AGENTS.md §5): an enabled one is judged even off a roster.
 PC_FLEET_GLOBS='dark-eye*.service sentinel*.service agent@*.service'
 pc_fleet_enabled() {
@@ -163,17 +176,25 @@ pc_fleet_states() {
     END { out() }'
 }
 # pc_unit_loops — a timer that re-fires a failing service every tick never stays `failed` (TSP-038):
-# the last hour's unit-failure journal entries per timer-driven user unit, ">= 10" listed.
+# the last hour's unit-failure journal entries per timer-driven user unit, ">= 10" listed,
+# unless its newest run succeeded after its newest failure (recovered, T463).
+# Units matching PC_NOT_OURS go on a second line, `foreign: …`, and never set exit 1 (T734).
 pc_unit_loops() {
-  local n svc last bad=
+  local n svc tfail last res ex bad= foreign=
   declare -A timed
   for svc in $(pc_cmd systemctl --user list-timers --all -o json 2>/dev/null | jq -r '.[].activates'); do timed[$svc]=1; done
-  while read -r n svc; do
+  while read -r n svc tfail; do
     [ "$n" -ge 10 ] && [ -n "${timed[$svc]:-}" ] || continue
+    read -r res ex < <(pc_cmd systemctl --user show "$svc" -p Result -p ExecMainExitTimestamp --timestamp=unix 2>/dev/null |
+      awk -F= '$1=="Result"{r=$2} $1=="ExecMainExitTimestamp"{e=substr($2,2)} END{print r, e+0}')
+    [ "$res" = success ] && [ "${tfail:-0}" -gt 0 ] && [ "$ex" -gt $((tfail / 1000000)) ] && continue
+    [[ $svc =~ $PC_NOT_OURS ]] && { foreign="$foreign${foreign:+ · }$svc $n fails/h"; continue; }
     last=$(pc_timeout 2 journalctl --user "_SYSTEMD_USER_UNIT=$svc" --since -1h -n 1 -o cat --no-pager 2>/dev/null)
     bad="$bad${bad:+ · }$svc $n fails/h${last:+: $last}"
   done < <(pc_timeout 2 journalctl --user --since -1h MESSAGE_ID=d9b373ed55a64feb8242e02dbe79a49c -o json --no-pager 2>/dev/null |
-           jq -r '.USER_UNIT // .UNIT // empty' | sort | uniq -c)
+           jq -r '(.USER_UNIT // .UNIT) as $u | select($u) | "\($u) \(.__REALTIME_TIMESTAMP // 0)"' |
+           awk '{n[$1]++; if ($2 > t[$1]) t[$1] = $2} END {for (u in n) print n[u], u, t[u]}')
+  [ -n "$foreign" ] && printf 'foreign: %s\n' "$foreign"
   [ -z "$bad" ] && return 0
   printf '%s\n' "$bad"; return 1
 }

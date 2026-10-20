@@ -61,9 +61,11 @@ candidates() {
 
 candidates | awk -F'\t' -v q="$*" '
   # BM25 per candidate, + idf when the title (slug/name + triggers) has the term, + a bonus for adjacent query pairs; weak matches are cut.
-  function toks(s, a,   n, i, m, x) {
-    n = split(s, raw, /[^a-z0-9.]+/); m = 0
-    for (i = 1; i <= n; i++) { x = raw[i]; gsub(/^\.+|\.+$/, "", x); if (x != "") a[++m] = x }
+  # an underscore name (CI_UNITS) is one token and its parts
+  function toks(s, a,   n, i, m, x, k, p, j) {
+    n = split(s, raw, /[^a-z0-9._]+/); m = 0
+    for (i = 1; i <= n; i++) { x = raw[i]; gsub(/^[._]+|[._]+$/, "", x); if (x == "") continue
+      a[++m] = x; if (x ~ /_/) { k = split(x, p, /_+/); for (j = 1; j <= k; j++) if (p[j] != "") a[++m] = p[j] } }
     return m
   }
   # a term hits a word it starts, when the rest is an inflection ("narrat" hits "narration", "lan" misses "lanes")
@@ -74,9 +76,9 @@ candidates | awk -F'\t' -v q="$*" '
   BEGIN {
     split("the and for with how what from into that this when use add new make seems small some our its", sw, " ")
     for (i in sw) stop[sw[i]] = 1
-    n = split(tolower(q), raw, /[^a-z0-9.]+/)
+    n = split(tolower(q), raw, /[^a-z0-9._]+/)
     for (i = 1; i <= n; i++) {
-      x = raw[i]; gsub(/^\.+|\.+$/, "", x)
+      x = raw[i]; gsub(/^[._]+|[._]+$/, "", x)
       if (length(x) < 3 || x in stop) continue
       # crude stem so "narrated" finds "narration" and "windows" finds "window"
       if (length(x) > 5 && x ~ /ing$/) x = substr(x, 1, length(x) - 3)

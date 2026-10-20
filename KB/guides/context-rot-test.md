@@ -1,6 +1,6 @@
 # Context-rot test: where a Claude model's long-context recall drops, and the compaction limit
 
-Ticket: T129, T142, T144 · Last verified: 2026-09-29 by a 28-trial run (T144: 41 calls) (`claude-opus-5-5[1m]`, 32k-970k) plus `selftest.py`
+Ticket: T129, T142, T144 · Last verified: 2026-10-20 (T846) by `ctxrot --help` flags/defaults and `test -e` on every path; 2026-10-19 by `selftest.py` (ok, 0.9 s), `ctxrot report` on a scratch copy of T129, `ctxrot run --help` flags and `test -e` on every path; no `ctxrot run` (paid calls) / 2026-09-29 by a 28-trial run
 
 ## When to use
 Choosing `autoCompactWindow`, checking a new model or effort level for long-context recall, or answering "where does
@@ -26,7 +26,8 @@ mkdir -p "$OUT/drop" && cp -rT "$OUT/page" "$OUT/drop/context-rot" && ~/agents/b
 ```
 
 ## Pitfalls (measured)
-- `~/agents/bin` may not be on PATH in agent shells: call `~/agents/bin/ctxrot` and `~/agents/bin/drop-link` by full path.
+- `~/agents/bin` may not be on PATH in agent shells: call `~/agents/bin/ctxrot` and `~/agents/bin/drop-link` by full path
+  (both are also linked in `~/.local/bin` since 2026-10-07).
 - 1M is not a usable target: token targeting overshoots by about +1.5 % (800k → 810-814k), so 970k (→ 978-985k) is the
   largest that fits the 1M window.
 - A trial can take 2 API calls and double its input count (T129: 800k hard seed 2 = 1.63M tokens); the row records
@@ -46,7 +47,7 @@ mkdir -p "$OUT/drop" && cp -rT "$OUT/page" "$OUT/drop/context-rot" && ~/agents/b
   A driver bug: a bare `"429" in err` matches `duration_ms`, so match `api_error_status":429` instead.
 - Latency and cost, per call: plain 3.3 s at 32k, 6.1 s at 300k, 14.4 s at 970k; stress6 up to 66 s; about $0.8 per 100k
   input tokens uncached. 28 trials took 10 min wall and $130 list price.
-- Node for the chart validator and headless shots is not on PATH: `~/.nvm/versions/node/v24.20.0/bin/node`; playwright-core
+- Node for the chart validator and headless shots: `~/.nvm/versions/node/v24.20.0/bin/node` (on PATH as `~/.local/bin/node` since 2026-10-07); playwright-core
   lives in `.../lib/node_modules/@playwright/mcp/node_modules/playwright-core`.
 
 ## Links

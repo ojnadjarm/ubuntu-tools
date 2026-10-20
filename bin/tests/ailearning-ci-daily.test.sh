@@ -9,8 +9,9 @@ bad=0
 ok() { if [ "$2" = "$3" ]; then echo "PASS $1"; else echo "FAIL $1 (want $2, got $3)"; bad=$((bad+1)); fi; }
 
 H="$WORK/home"; mkdir -p "$H/agents/bin" "$H/agents/log" "$H/.nvm" "$WORK/repo/tests/lib" "$WORK/path"
-cp "$SRC" "$HOME/agents/bin/ci-window" "$HOME/agents/bin/wait-for" "$H/agents/bin/"; : >"$H/agents/bin/env.sh"
-export CI_LOADAVG="$WORK/loadavg" WAIT_FOR_DIR="$WORK/waits" CI_QUIET_EVERY=1
+cp "$SRC" "$HOME/agents/bin/ci-window" "$HOME/agents/bin/quiet-gate" "$HOME/agents/bin/wait-for" "$H/agents/bin/"; : >"$H/agents/bin/env.sh"
+unset CI_DEADLINE CI_BUDGET CI_RUN_NEED CI_AUTOFIX   # a nightly under ci-autofix exports its own budget
+export CI_UNITS= CI_LOADAVG="$WORK/loadavg" WAIT_FOR_DIR="$WORK/waits" CI_QUIET_EVERY=1
 echo "1.00 1 1 1/100 1" >"$CI_LOADAVG"
 printf '#!/bin/sh\nprintf "%%s\\n" "$*" >>"%s"\n' "$WORK/pushes" >"$H/agents/bin/notify-owner"
 echo 'nvm() { :; }' >"$H/.nvm/nvm.sh"

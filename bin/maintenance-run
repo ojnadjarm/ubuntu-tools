@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Weekly maintenance: apt full-upgrade, autoremove, needrestart, docker prune, reboot gate.
+# Weekly maintenance: /tmp sweep (pc tmp), apt full-upgrade, autoremove, needrestart, docker prune, reboot gate.
 # Exit 0 ok · 3 reboot required but refused (deferred) · 4 reboot scheduled · 1 error.
 set -uo pipefail
 export LC_ALL=C DEBIAN_FRONTEND=noninteractive
 export PATH="$HOME/.local/bin:$HOME/agents/bin:$PATH"
-. "$HOME/agents/bin/fleetlib.sh"
+. "$(dirname "$(readlink -f "$0")")/fleetlib.sh"
 
 WINDOW_START=4                                 # inclusive hour, Europe/Madrid — not overridable
 WINDOW_END=5                                   # exclusive hour — not overridable
@@ -39,6 +39,13 @@ run() { if [ "$dry" = 1 ]; then out "would run: $*"; else "$@" >>"$STATE/last-ap
 
 out "maintenance-run $(date -Is)$([ "$dry" = 1 ] && echo " (dry-run)")"
 
+# --- /tmp leftovers (tmpfs, held in RAM) --------------------------------------
+if [ "$dry" = 1 ]; then out "would run: pc tmp --apply"
+else
+  tmp=$(pc tmp --apply 2>&1); trc=$?; ledger=$(grep '^ledger ' <<<"$tmp")
+  if [ "$trc" = 0 ] && [ -n "$ledger" ]; then out "tmp: $ledger"; else out "maintenance-run: pc tmp failed rc $trc"; fi
+fi
+
 # --- packages ---------------------------------------------------------------
 held=""
 if [ "$with_docker" = 0 ]; then
@@ -64,7 +71,7 @@ fi
 [ -n "$held" ] && { run sudo apt-mark unhold $held; trap - EXIT INT TERM; }
 if [ "$apt_rc" != 0 ]; then
   out "apt FAILED (rc $apt_rc): see $STATE/last-apt.log"
-  notify-owner -t maintenance "apt FAILED (rc $apt_rc) on ${HARNESS_HOST:-this machine}: see last-apt.log" || true
+  notify-owner -t maintenance "apt FAILED (rc $apt_rc) on ${HARNESS_HOST:-this machine}: see last-apt.log" || out "maintenance-run: notify-owner failed rc $?"
   exit 1
 fi
 
@@ -86,7 +93,7 @@ if [ "$AUTO_REBOOT" != 1 ]; then
   out "REBOOT REFUSED: auto-reboot-disabled-by-owner"
   msg="reboot required on ${HARNESS_HOST:-this machine} (auto-reboot off): do it yourself when convenient"
   if [ "$dry" = 1 ]; then out "would run: notify-owner -t maintenance \"$msg\""
-  else notify-owner -t maintenance "$msg" || true; fi
+  else notify-owner -t maintenance "$msg" || out "maintenance-run: notify-owner failed rc $?"; fi
   exit 3
 fi
 
@@ -102,7 +109,10 @@ if ! st_out=$(pc status --check 2>/dev/null); then
     refuse="$refuse pc-status-check${fails:+($fails)};"
   fi
 fi
-"$HOME/agents/bin/boot-check.sh" >/dev/null 2>&1 || refuse="$refuse boot-check;"
+if ! bc_out=$("$HOME/agents/bin/boot-check.sh" 2>/dev/null); then
+  fails=$(awk '/^FAIL / && n < 3 {sub(/^FAIL /, ""); printf "%s%s", (n++ ? ", " : ""), $0}' <<<"$bc_out")
+  refuse="$refuse boot-check${fails:+($fails)};"
+fi
 busy=$(systemctl --user list-units --state=active --no-legend 'agent@*.service' 2>/dev/null \
        | awk '{print $1}' | grep -v "^agent@maintenance\.service$" | tr '\n' ' ')
 [ -z "$busy" ] || refuse="$refuse agents-active($busy);"
@@ -113,7 +123,7 @@ if [ -n "$refuse" ]; then
   msg="reboot pending, window missed: $refuse"
   [ "${#msg}" -le 200 ] || msg="${msg:0:197}..."
   if [ "$dry" = 1 ]; then out "would run: notify-owner -t maintenance \"$msg\""
-  else notify-owner -t maintenance "$msg" || true; fi
+  else notify-owner -t maintenance "$msg" || out "maintenance-run: notify-owner failed rc $?"; fi
   exit 3
 fi
 
@@ -123,7 +133,7 @@ if [ "$dry" = 1 ]; then
   out "would run: sudo shutdown -r +${REBOOT_DELAY}"
   exit 4
 fi
-notify-owner -p high -t reboot "rebooting ${HARNESS_HOST:-this machine} in ${REBOOT_DELAY} min (kernel update)" || true
+notify-owner -p high -t reboot "rebooting ${HARNESS_HOST:-this machine} in ${REBOOT_DELAY} min (kernel update)" || out "maintenance-run: notify-owner failed rc $?"
 sudo shutdown -r "+${REBOOT_DELAY}"
 out "reboot scheduled: $(date -Is)"
 exit 4

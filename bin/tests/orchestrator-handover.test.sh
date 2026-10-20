@@ -9,9 +9,7 @@ WORK=$(mktemp -d); SHIM="$WORK/shim"; CALLS="$WORK/calls.log"; BLOCKED="$WORK/bl
 mkdir -p "$SHIM" "$FX" "$ST"; : >"$CALLS"
 pids=()
 trap 'kill "${pids[@]}" 2>/dev/null; rm -rf "$WORK"' EXIT
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 
 for c in tmux etckeeper gsettings sudo; do
   printf '#!/bin/sh\necho "BLOCKED %s $*" >>"%s"\nexit 97\n' "$c" "$BLOCKED" >"$SHIM/$c"

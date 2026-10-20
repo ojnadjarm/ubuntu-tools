@@ -173,6 +173,7 @@ read-only without `--apply`; the ledger, `pc undo` and the guard exits are in
 - Remotion 4.0.536 and Motion Canvas 3.17.2 per project (npm, templates in the skill); Blender 5.0.1 (apt, EEVEE on the Iris Xe in `-b`); Manim CE 0.21.0 (pipx).
 - ffmpeg 8.0.1: libx264/libx265/SVT-AV1/libvpx; VA-API H.264/HEVC encode via `intel-media-va-driver-non-free` (`vainfo`); no AV1 hw encode, QSV not set up. sox 14.7; fonts Inter + JetBrains Mono.
 - T453: `mv-render variants|bench`, `mv-encode --lut film|bleach|F.cube --burn F.ass --subs F.srt`, presets `hevc-10`/`av1-10`; `mv-mix` (VO + ducked music + SFX, -16 LUFS), `mv-captions` (Kokoro cues.json -> SRT + word-highlight ASS), `mv-assets fetch|list` (CC0 music/SFX in `~/.local/share/motion-video`), `mv-lut`; Remotion `Camera3D` (three.js + motion blur), concurrency default 6.
+- T478: `mv-new <name> --kind promo|explainer|3d` (template + `brand.json` tokens + `build.sh`: VO -> 16:9 + 9:16 -> mix + captions -> LUT -> h264 -> review), `mv-review <video>` (1 fps contact sheet, LUFS/true peak, black/frozen check, JSON, exit 1 on FAIL), `MV_SIZE=WxH mv-render mc` (PNG-sequence master), Lottie via `@remotion/lottie` (`LottieCard`).
 
 ## 4c. Game dev and GPU profiling (T440, skill `/gamedev`, guide `gamedev-toolchain`)
 
@@ -182,6 +183,7 @@ read-only without `--apply`; the ledger, `pc undo` and the guard exits are in
 - Tracy 0.14.1: client lib `~/opt/gamedev/tracy-0.14.1/build-client/libTracyClient.a` (localhost only), `tracy-capture`, `tracy-csvexport`, GUI `tracy`; `perf`.
 - Pipeline (T454, `~/.claude/skills/gamedev/scripts/`): `asset-pipeline.sh` (Blender -> glb -> gltfpack 1.3 LODs + KTX2 in `~/opt/gamedev/gltfpack-1.3` -> Godot import check), `godot-perfgate.sh` (fps CSV, exit 1 regression / 3 skip on load), `godot-test.sh` (GUT 9.7.1 in `~/opt/gamedev/gut-9.7.1`, JUnit), `shader-check.sh` (glslang + spirv-val + spirv-cross), `cc0-fetch.sh` (Poly Haven / ambientCG / Kenney + LICENSES.csv).
 - Native C++ (T457): `~/.claude/skills/gamedev/scripts/new-cpp-game [--build] DIR` copies `templates/cpp-vulkan/` (CMake presets + vcpkg manifest: SDL3 3.4.18, vk-bootstrap, volk; clang + mold + ccache); `cpp-vk-run.sh [--frames N] BINARY` runs it on the Iris Xe under headless weston with validation (rc 2 on any error). vcpkg in `~/opt/gamedev/vcpkg`, binary cache `~/.cache/vcpkg/archives`.
+- CI + slice (T479): `game-ci [--out DIR] [--no-wine] PROJECT` = import -> GUT -> shader check (GLSL + `.gdshader` errors from the GPU run) -> perf gate -> Linux + Windows export -> 10 s Movie Maker capture to mp4 under headless weston -> Windows build headless under Wine 10; `OUT/summary.json`, exit 1 on any failed stage, waits for load1 < 16. Template `~/.claude/skills/gamedev/templates/godot-slice/` (top-down coin loop, PBR, HUD, audio, GUT; `assets.sh` fetches its CC0 assets).
 - Build: clang/lld 21, mold 2.40, ninja 1.13, ccache 4.12, CMake 4.2, dotnet 10. Assets: Krita 6.0, GIMP 3.2, Inkscape 1.4, gltfpack 0.22, assimp 6.0; OpenAL 1.25. UE5 not installed (Epic account, 60-225 GB).
 
 ## 5. Fleet and comms
@@ -193,7 +195,7 @@ read-only without `--apply`; the ledger, `pc undo` and the guard exits are in
   (`agent-run`, `agent-now`, `agent-enable`, `agents-status`, `agents-stop`/`agents-start`) is in
   `~/agents/RUNNER.md`. Roster of record: `~/agents/KB/orchestrator.md`. Owner-facing summary: `~/agents/README.md`.
 - Logs and state: `agents-log [--since 24h] [--session ID] [--grep X] [--stats] [--pc] [--raw] [--kind K]`,
-  `agents-log --errors --cluster` (failed calls grouped by the failing command + the line naming the error, rate from the first logged outcome),
+  `agents-log --errors --cluster` (failed calls grouped by the failing command + the line naming the error, rate from the first logged outcome; bench and sandbox-guard rows hidden, `--all` shows them),
   `agents-log --tokens` (context per turn of each Claude session, from the transcripts), `~/agents/<name>/logs/`,
   `~/agents/<name>/REPORT.md`, status page http://$HARNESS_TAILNET_FQDN:19998, netdata :19999.
 - Agent working papers: `$AGENT_WORK` (default `~/agent-work`: `briefs/`, `research/<date>/<ticket>/`, `evidence/`,
@@ -203,11 +205,13 @@ read-only without `--apply`; the ledger, `pc undo` and the guard exits are in
   `baseline.sh` (config tarball before changing user config), `maintenance-run`, `moodle-keep`,
   `pcbench-weekly` (Sunday 02:00 A/B run, gated on `pcbench away` — never starts while the owner
   is at the machine; `pcbench-weekly --dry-run` prints the verdict),
+  `compose-services <project>` (services `up -d` starts, profile-aware; the one rule pc-status uses),
   `moodle-envs` (list Moodle envs), `moodle-login-check`, `power-profile-auto`, `sentinel-check`,
   `sentinel-runaway` (runaway-process killer, called by `sentinel-check`; `--dry-run` to preview),
   `wait-for` (wait on a job: `--pid P` | `--file F --match RE [--job P]` | `--until CMD [--job P]`; exits when the job ends or dies; `--list` shows live waits) and
   `sentinel-waits` (kills wait loops whose job or owner agent is gone, called by `sentinel-check`; `--dry-run` to preview),
   `ci-window` (exit 1 in the nightly CI window 00:50–01:50: `ci-window && <heavy run>`; `--quiet` waits until the 1-min load < 4, cap 30 min),
+  `quiet-gate` (one quiet-machine rule: rc 0 when load1 < `--max-per-cpu F` × nproc (default 0.25) or `--max-load1 N`, rc 3 busy; `--gpu [PCT]` also busy when the user's other GPU clients (gnome-shell/Xwayland excluded, i915 fdinfo) keep the render engine > PCT % (default 15) over 1 s, `--json` adds `gpu_busy_pct`; `--wait S`, `--json`; game-ci, perfgate, cpp-ci, gamedev-perf, motion-video build use it; sourceable `qg_load1`, `qg_gpu_pct`),
   `playwright-mcp` (headless unless `PW_HEADED=1`, `PW_PROFILE=<name>`).
 - Skills: `/desktop` (pc), `/browser` + `/moodle-web` (Playwright MCP), `/eye`, `/moodle-ci`,
   `/moodle-docs` (offline moodledev.io mirror — never web-fetch it), `/moodle-guidelines`,

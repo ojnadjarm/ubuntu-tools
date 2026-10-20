@@ -38,6 +38,19 @@
         "hooks": [
           { "type": "command", "command": "@HARNESS_HOME@/hooks/sleep-loop-block.py", "timeout": 5 }
         ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          { "type": "command", "command": "@HARNESS_HOME@/hooks/image-reread.py", "timeout": 5 }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          { "type": "command", "command": "@HARNESS_HOME@/hooks/image-reread.py", "timeout": 5 }
+        ]
       }
     ],
     "PostToolUse": [

@@ -1,19 +1,35 @@
 """Shared reader for logrotated jsonl logs (live file plus moodle-keep's .N.gz rotations)."""
-import gzip, json, os, re, shlex, time
+import gzip, json, os, re, shlex
+from datetime import datetime
 
 
 def row_stamp(row):
     """Epoch of a row's local 'ts' stamp, or None when it has none."""
     try:
-        return time.mktime(time.strptime(row['ts'][:19], '%Y-%m-%dT%H:%M:%S'))
+        return datetime.fromisoformat(row['ts'][:19]).timestamp()
     except (ValueError, KeyError, TypeError):
         return None
 
 
-def _rows(p):
-    """Parsed rows of one plain or gzipped jsonl file; bad lines skipped."""
+AGE = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}
+
+
+def parse_age(span):
+    """Seconds in an age like 90s, 30m, 2h or 7d; ValueError otherwise."""
+    m = re.fullmatch(r'(\d+)([smhd])', span or '')
+    if not m:
+        raise ValueError(f'bad --since {span!r} (use 90s, 30m, 2h, 7d)')
+    return int(m[1]) * AGE[m[2]]
+
+
+def read_jsonl(p):
+    """Parsed rows of one plain or gzipped jsonl file; bad lines skipped, a missing file is empty."""
     rows = []
-    with (gzip.open(p, 'rt') if p.endswith('.gz') else open(p)) as f:
+    try:
+        f = gzip.open(p, 'rt') if p.endswith('.gz') else open(p)
+    except OSError:
+        return rows
+    with f:
         for line in f:
             try:
                 rows.append(json.loads(line))
@@ -26,7 +42,7 @@ def rotated_rows(path, cut):
     """Rows oldest first: live file, then each .N.gz until one starts before cut (cut 0 = live only)."""
     chunks, p, n = [], path, 1
     while os.path.exists(p):
-        rows = _rows(p)
+        rows = read_jsonl(p)
         chunks.append(rows)
         start = next((t for t in map(row_stamp, rows) if t is not None), None)
         if not cut or (start is not None and start < cut):

@@ -1,6 +1,6 @@
 # Owner to-do: one "waiting on you" list (owner-only steps)
 
-Ticket: T372, T421 (decide) · Last verified: 2026-10-19 by `bin/tests/owner-todo.test.py`, `dashboard/tests/test_owner_todo.py` and headless shots at 400/768/1366/1920/2560
+Ticket: T372, T421 (decide) · Last verified: 2026-10-20 by T846 read-only audit (`--help`, paths, code); before: 2026-10-19 by `bin/tests/owner-todo.test.py`, `dashboard/tests/test_owner_todo.py` and headless shots at 400/768/1366/1920/2560
 
 ## When to use
 A step only the owner can take (sudo/ufw command, a Discord or account setting, a `go TSP-…`, a decision, a restore from Trash):

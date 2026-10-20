@@ -1,6 +1,6 @@
 # Audit a Moodle site's plugins for an upgrade (keep / replace / remove per add-on)
 
-Ticket: T414 · Last verified: 2026-10-19 by tests/audit.test.sh (9/9, no network) and a live run on the 5.2 env
+Ticket: T414 · Last verified: 2026-10-20 (T846) by `audit.py --help`, the cached pluglist counts, `unshare -rn` probe and paths; 2026-10-19 by tests/audit.test.sh (9/9, no network) and a live run on the 5.2 env
 
 ## When to use
 Step 1 of the upgrade offer: every add-on checked for a target-release version. Not for core plugins (skipped) and

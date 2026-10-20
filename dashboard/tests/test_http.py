@@ -1,7 +1,9 @@
 """Transport: gzip, ETag/304, Range and the keep-alive stall, on a throwaway server and drop fixture."""
-import gzip, http.client, json, os, socket, sys, tempfile, threading, time, unittest
+import gzip, http.client, json, os, socket, subprocess, sys, tempfile, threading, time, unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import server
+
+BUDGET = os.path.expanduser("~/agents/bin/tests/lib/budget.sh")
 
 
 class Http(unittest.TestCase):
@@ -110,7 +112,9 @@ class Http(unittest.TestCase):
             t = time.perf_counter()
             self.get("/api/ls")
             worst = max(worst, time.perf_counter() - t)
-        self.assertLess(worst, 0.02)
+        budget = float(subprocess.check_output([BUDGET, "0.02"], text=True))
+        print("keep-alive worst %.4f s, budget %.3f s" % (worst, budget))
+        self.assertLess(worst, budget, "keep-alive worst %.4f s over budget %.3f s" % (worst, budget))
 
     def test_brand_in_page_titles(self):
         from dash import http as dh

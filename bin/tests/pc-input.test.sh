@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# host-only: live evdev devices
+# live-sudo: the uinput round trip and live reads use the real sudo -n
 # PT10: pc input against tests/fixtures/input (device parsing, fd holders, the grab guess)
 # plus one live --device-only uinput round trip: the events are read back from the virtual
 # device's own node while it is grabbed, so nothing reaches libinput or gnome-shell.
@@ -6,10 +8,7 @@ set -uo pipefail
 BIN="$HOME/agents/bin"
 FIX="$BIN/tests/fixtures/input"
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
-is()  { [ "$2" = "$3" ] && ok "$1" || nok "$1" "expected '$3', got '$2'"; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 fx() { PC_FIXTURE="$FIX" XDG_RUNTIME_DIR="$WORK" PC_LEDGER="$WORK/l.jsonl" "$BIN/pc-input" "$@"; }
 
 # 1. devices: the recorded tree parses into nodes with names, buses and EV types.

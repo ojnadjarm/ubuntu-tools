@@ -1,24 +1,52 @@
 #!/usr/bin/env python3
-"""pc failures [--since 24h] [--json] — every failure of the window on one screen: units, agent runs, CI, crashes, audit."""
-import glob, json, os, re, subprocess, sys, time
+"""pc failures [--since 24h] [--json] [--all] — every failure of the window on one screen: units, agent runs, CI, creative CI, crashes, audit, needs, checks."""
+import sys
 
-USAGE = """usage: pc failures [--since 24h] [--json]
+USAGE = """usage: pc failures [--since 24h] [--json] [--all]
 
 One read-only screen of what failed in the window (default 24h; 30m, 6h, 7d):
-  unit    failed now (user + system) and journal "Failed with result" counts with the last time
+  unit    failed now (user + system) and journal "Failed with result" counts with the last time;
+          a SIGTERM exit (143) within 5 s of its `Stopping` is a clean stop, not counted
   agent   ~/agents/*/logs/index.tsv runs with exit != 0
-  ci      ~/agents/state/ci-fix/*.md "red at" entries
+  ci      ~/agents/state/ci-fix/*.md "red at" entries; red cpp-ci, game-ci and mv-build runs from
+          $HARNESS_HOME/log/creative-ci.jsonl (CREATIVE_CI_LOG), one row per tool and project (json key creative); runs of scratch projects (summary or its
+          project under CI_SCRATCH_ROOTS, default $TMPDIR and /tmp, /run/user/*/fleet-tests or a Claude
+          scratchpad) fold into one `dev` row (json key creative_dev, dim: true; --all lists them);
+          an unreadable summary counts as real; a red whose (tool, project path) has a later green run is
+          healed (json key creative_healed with healed_at; --all lists it as `healed <time>`); a fleet
+          nightly red whose log ends in a green `recheck` line is healed the same way (json key ci_healed)
   crash   /var/crash/*.crash written in the window
-  audit   ~/agents/log/actions.jsonl failed tool calls / calls with an outcome
+  audit   ~/agents/log/actions.jsonl (+ rotations) failed tool calls / calls with an outcome; bench, sandbox hidden
   need    open "need you" pushes (pc need)
-Units the fleet must never touch (moodle45*, vass*) are tagged `not ours`."""
+  check   red ticket CHECKs: $AGENT_WORK/evidence/*/check.json last run in the window (re-run by agent-verify --recheck)
+Units the fleet must never touch (PC_NOT_OURS, pclib.sh: moodle45*, vass*) are tagged `not ours`."""
+if '-h' in sys.argv[1:] or '--help' in sys.argv[1:]:
+    print(USAGE)
+    sys.exit(0)
+
+import glob, json, os, re, subprocess, time
 
 HOME = os.path.expanduser('~')
 FIX = os.environ.get('PC_FIXTURE', '')
 CRASH_DIR = os.environ.get('PC_CRASH_DIR', '/var/crash')
 BIN = os.path.dirname(os.path.realpath(__file__))
-NOT_OURS = re.compile(r'^(moodle45|vass)')
+
+
+def not_ours():
+    """PC_NOT_OURS from the environment, else its one definition in pclib.sh."""
+    pat = os.environ.get('PC_NOT_OURS')
+    if not pat:
+        with open(os.path.join(BIN, 'pclib.sh')) as f:
+            pat = re.search(r'PC_NOT_OURS:=([^}]+)\}', f.read()).group(1)
+    return re.compile(pat)
+
+
+NOT_OURS = not_ours()
 UNIT_FAILED = 'MESSAGE_ID=d9b373ed55a64feb8242e02dbe79a49c'
+UNIT_STOPPING = 'de5b426a63be47a7b6ac3eaac82e2f6f'
+UNIT_EXITED = '98e322203f7a4ed290d09fe03c09fe15'
+UNIT_STARTING = '7d4958e842da4a758f6c1cdc7b36dcc5'
+TEST_SCOPE = re.compile(r'^run-[pu][\w-]+\.scope$')
 
 
 def cmd(name, *args):
@@ -38,20 +66,39 @@ def units(since):
     for scope, flag in (('user', ['--user']), ('system', [])):
         for u in json.loads(cmd('systemctl', *flag, 'list-units', '--failed', '--output=json') or '[]'):
             rows[u['unit']] = {'unit': u['unit'], 'scope': scope, 'failed_now': True, 'count': 0, 'last': 0, 'result': 'failed'}
-    for line in cmd('journalctl', '--since', '@%d' % since, '-o', 'json', UNIT_FAILED).splitlines():
+    stopping, exited = {}, {}
+    for line in cmd('journalctl', '--since', '@%d' % since, '-o', 'json', UNIT_FAILED,
+                    'MESSAGE_ID=' + UNIT_STOPPING, 'MESSAGE_ID=' + UNIT_EXITED).splitlines():
         e = json.loads(line)
         name = e.get('UNIT') or e.get('USER_UNIT')
         if not name:
             continue
+        t = int(e.get('__REALTIME_TIMESTAMP', 0)) / 1e6
+        if e.get('MESSAGE_ID') == UNIT_STOPPING:
+            stopping[name] = t
+            continue
+        if e.get('MESSAGE_ID') == UNIT_EXITED:
+            exited[name] = e.get('EXIT_STATUS') in ('143', '15', 'TERM')
+            continue
+        if exited.pop(name, False) and 0 <= t - stopping.get(name, -1e9) <= 5:
+            continue  # SIGTERM exit of a requested stop is a clean stop
         r = rows.setdefault(name, {'unit': name, 'scope': 'user' if e.get('USER_UNIT') else 'system',
                                    'failed_now': False, 'count': 0, 'last': 0, 'result': ''})
-        t = int(e.get('__REALTIME_TIMESTAMP', 0)) / 1e6
         r['count'] += 1
         if t >= r['last']:
             r['last'], r['result'] = t, e.get('UNIT_RESULT', r['result'])
+    for scope, flag in (('user', ['--user']), ('system', [])):
+        names = [r['unit'] for r in rows.values() if r['scope'] == scope and not r['failed_now']]
+        states = cmd('systemctl', *flag, 'show', '-p', 'LoadState', '--value', *names).split() if names else []
+        for n, st in zip(names, states):
+            rows[n]['gone'] = st == 'not-found'
     for r in rows.values():
         r['ours'] = not NOT_OURS.match(r['unit'])
         r['last'] = int(r['last'])
+        r['gone'] = r.get('gone', False)
+        r['test_oom'] = r['result'] == 'oom-kill' and bool(TEST_SCOPE.match(r['unit']))
+        if r['unit'] == 'fleet-ci-daily.service' and not r['failed_now'] and (at := healed_by_recheck(r['last'])):
+            r['healed_at'] = at
     return sorted(rows.values(), key=lambda r: (not r['failed_now'], -r['count']))
 
 
@@ -73,13 +120,127 @@ def agents(since):
     return sorted(out, key=lambda r: -r['start'])
 
 
+def fleet_ci_log(t):
+    """The fleet-ci day log path for epoch t."""
+    return os.path.join(os.environ.get('PC_FLEET_CI_DIR') or f'{HOME}/agents/log/fleet-ci', time.strftime('%Y-%m-%d.txt', time.localtime(t)))
+
+
+def answered(start):
+    """True when the nightly started at `start` left a verdict: its day log begins at or after it and has a summary or recheck line."""
+    try:
+        lines = open(fleet_ci_log(start), errors='replace').read().splitlines()
+    except OSError:
+        return False
+    m = lines and re.match(r'fleet-ci-daily (\S+)', lines[0])
+    return bool(m) and iso(m[1]) >= int(start) and any(re.match(r'(PASS|FAIL) \d+/\d+ files|recheck \d+:\d+:\d+: ', x) for x in lines)
+
+
+def healed_by_recheck(red):
+    """Epoch of the green recheck (N = M) that is the verdict of red's day fleet-ci log (its last `PASS|FAIL N/M files` or `recheck T: N/M green` line), else 0; a time before red's is the next day.
+    Only red < healed <= now counts, and a later fleet-ci-daily start without a verdict voids it."""
+    lt, at = time.localtime(red), None
+    try:
+        lines = open(fleet_ci_log(red), errors='replace')
+    except OSError:
+        return 0
+    for line in lines:
+        if re.match(r'(PASS|FAIL) \d+/\d+ files', line):
+            at = None
+        elif m := re.match(r'recheck (\d+):(\d+):(\d+): (\d+)/(\d+) green', line):
+            at = tuple(map(int, m.group(1, 2, 3))) if m[4] == m[5] else None
+    if not at:
+        return 0
+    healed = int(time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday + (at < tuple(lt[3:6])), *at, 0, 0, -1)))
+    if not red < healed <= time.time():
+        return 0
+    starts = cmd('journalctl', '--user', '-u', 'fleet-ci-daily.service', '--since', '@%d' % (healed + 1), '-o', 'json',
+                 'MESSAGE_ID=' + UNIT_STARTING).splitlines()
+    if any(t > healed and not answered(t) for t in (int(json.loads(x).get('__REALTIME_TIMESTAMP', 0)) / 1e6 for x in starts)):
+        return 0
+    return healed
+
+
 def ci(since):
+    """ci-fix "red at" entries in the window; a fleet nightly whose log ends green by recheck gets healed_at."""
     out = []
     for f in glob.glob(f'{HOME}/agents/state/ci-fix/*.md'):
         for m in re.finditer(r'^## (.+?) red at (\S+) \(rc (\w+)\)', open(f, errors='replace').read(), re.M):
             if iso(m[2]) >= since:
-                out.append({'what': m[1], 'at': iso(m[2]), 'rc': m[3], 'note': f})
+                r = {'what': m[1], 'at': iso(m[2]), 'rc': m[3], 'note': f}
+                if m[1] == 'fleet nightly' and (at := healed_by_recheck(r['at'])):
+                    r['healed_at'] = at
+                out.append(r)
     return sorted(out, key=lambda r: -r['at'])
+
+
+def scratch(p):
+    """True when p is under CI_SCRATCH_ROOTS (default $TMPDIR and /tmp), /run/user/*/fleet-tests or a Claude scratchpad."""
+    p = os.path.realpath(p)
+    roots = (os.environ.get('CI_SCRATCH_ROOTS') or f'{os.environ.get("TMPDIR") or "/tmp"} /tmp').split()
+    return ('/scratchpad/' in p or bool(re.match(r'/run/user/\d+/fleet-tests/', p))
+            or any(p.startswith(os.path.realpath(r) + '/') for r in roots))
+
+
+def summary_project(s, cache={}):
+    """The `project` field of a summary JSON, '' when unreadable or absent."""
+    if s not in cache:
+        try:
+            with open(s) as fh:
+                cache[s] = json.load(fh).get('project') or ''
+        except (OSError, ValueError, AttributeError):
+            cache[s] = ''
+    return cache[s]
+
+
+def dev_run(r):
+    """True when the run's summary path or the summary's project is scratch; an unreadable summary is a real run."""
+    s = r.get('summary') or ''
+    if s and scratch(s):
+        return True
+    p = summary_project(s) if s else ''
+    return bool(p) and scratch(p)
+
+
+def project_path(r):
+    """The summary's project, else the summary's project dir (<dir>/ci|out/<file>), else the ledger project name."""
+    s = r.get('summary') or ''
+    p = summary_project(s) if s else ''
+    if p:
+        return os.path.realpath(p)
+    d = os.path.dirname(s)
+    return os.path.dirname(d) if os.path.basename(d) in ('ci', 'out') else r.get('project')
+
+
+def creative(since):
+    """Red runs in the creative CI ledger, grouped by tool and project path (scratch apart, dim); a key whose latest run is green is healed."""
+    f = os.environ.get('CREATIVE_CI_LOG') or os.path.join(os.environ.get('HARNESS_HOME', f'{HOME}/agents'), 'log/creative-ci.jsonl')
+    if not os.path.exists(f):
+        return []
+    rows, latest, green = {}, {}, {}
+    for line in open(f, errors='replace'):
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        t = iso(r.get('ts', ''))
+        if t < since:
+            continue
+        dim = dev_run(r)
+        key = (r.get('tool'), project_path(r), dim)
+        red = r.get('ok') is False
+        if t >= latest.get(key, (0,))[0]:
+            latest[key] = (t, red)
+        if not red:
+            green[key] = max(t, green.get(key, 0))
+            continue
+        g = rows.setdefault(key, {'tool': r.get('tool'), 'project': r.get('project'), 'count': 0, 'last': 0, 'dim': dim})
+        g['count'] += 1
+        if t >= g['last']:
+            g.update(last=t, failed=r.get('failed', []), summary=r.get('summary', ''))
+    for key, g in rows.items():
+        if not latest[key][1]:
+            g['healed_at'] = green[key]
+    return sorted(rows.values(), key=lambda r: -r['last'])
 
 
 def exe_of(f):
@@ -101,55 +262,105 @@ def crashes(since):
 
 
 def audit(since):
+    """Failed tool calls in the window from the live log and its rotations; bench rows and sandbox refusals are `hidden`."""
+    sys.path.insert(0, BIN)
+    from auditlib import rotated_rows, row_stamp, row_kind, error_class
     calls = failed = 0
-    path = f'{HOME}/agents/log/actions.jsonl'
-    if os.path.exists(path):
-        for line in open(path, errors='replace'):
-            try:
-                r = json.loads(line)
-            except ValueError:
-                continue
-            if 'ok' in r and iso(r.get('ts', '')) >= since:
-                calls += 1
-                failed += r['ok'] is False
-    return {'calls': calls, 'failed': failed, 'rate': round(failed / calls, 3) if calls else 0.0}
+    hidden = {'bench': 0, 'sandbox': 0}
+    for r in rotated_rows(f'{HOME}/agents/log/actions.jsonl', since):
+        if 'ok' not in r or (row_stamp(r) or 0) < since:
+            continue
+        if row_kind(r) == 'bench':
+            hidden['bench'] += r['ok'] is False
+            continue
+        if r['ok'] is False and error_class(r) == 'guarded':
+            hidden['sandbox'] += 1
+            continue
+        calls += 1
+        failed += r['ok'] is False
+    return {'calls': calls, 'failed': failed, 'rate': round(failed / calls, 3) if calls else 0.0, 'hidden': hidden}
 
 
 def needs(_since):
     return json.loads(cmd('pc-need', 'list', '--json') or '[]')
 
 
-COLLECTORS = {'units': units, 'agents': agents, 'ci': ci, 'crashes': crashes, 'audit': audit, 'needs': needs}
+def age(t):
+    s = max(0, int(time.time() - t))
+    return f'{s // 86400}d' if s >= 86400 else f'{s // 3600}h' if s >= 3600 else f'{s // 60}m'
 
 
-def table(d):
+def checks(since):
+    out = []
+    aw = os.environ.get('AGENT_WORK', f'{HOME}/agent-work')
+    for f in glob.glob(f'{aw}/evidence/*/check.json'):
+        try:
+            d = json.load(open(f))
+        except (OSError, ValueError):
+            continue
+        runs = d.get('runs', [])
+        if d.get('ok') is False and not d.get('superseded') and iso(d.get('started', '')) >= since:
+            out.append({'ticket': d.get('ticket') or f.split('/')[-2], 'at': iso(d['started']), 'rc': d.get('rc'),
+                        'runs': len(runs) + 1, 'first': iso((runs[0] if runs else d)['started']), 'file': f})
+    return sorted(out, key=lambda r: -r['at'])
+
+
+COLLECTORS = {'units': units, 'agents': agents, 'ci': ci, 'creative': creative, 'crashes': crashes, 'audit': audit, 'needs': needs, 'checks': checks}
+
+
+def table(d, every=False):
     rows = []
-    for u in d['units']:
-        note = ('not ours' if not u['ours'] else '') + (' FAILED NOW' if u['failed_now'] else '')
-        rows.append(('unit', f"{u['unit']} ({u['scope']})", u['count'], stamp(u['last']), (u['result'] + note).strip()))
+    live = [u for u in d['units'] if not u.get('gone') and not u.get('test_oom')]
+    for u in live:
+        note = [u['result'], 'not ours' if not u['ours'] else '', 'FAILED NOW' if u['failed_now'] else '']
+        rows.append(('unit', f"{u['unit']} ({u['scope']})", u['count'], stamp(u['last']), '  '.join(filter(None, note))))
+    for label, us in (('test oom: {} run.sh scopes', [u for u in d['units'] if u.get('test_oom')]),
+                      ('gone: {} one-off units', [u for u in d['units'] if u.get('gone') and not u.get('test_oom')])):
+        if us:
+            names = list(dict.fromkeys(re.sub(r'-[0-9a-f-]{36}$', '', u['unit'].rsplit('.', 1)[0]) for u in us))
+            rows.append(('unit', label.format(len(us)), sum(u['count'] for u in us), stamp(max(u['last'] for u in us)),
+                         f"({', '.join(names[:3])}{', …' if len(names) > 3 else ''})"))
+    if every:
+        rows += [('unit', f"{u['unit']} ({u['scope']})", u['count'], stamp(u['last']), f"healed {stamp(u['healed_at'])}  {u['result']}")
+                 for u in d['units_healed']]
     rows += [('agent', a['agent'], 1, stamp(a['start']), f"exit {a['exit']}") for a in d['agents']]
     rows += [('ci', c['what'], 1, stamp(c['at']), f"rc {c['rc']}") for c in d['ci']]
+    if every:
+        rows += [('ci', c['what'], 1, stamp(c['at']), f"healed {stamp(c['healed_at'])}  rc {c['rc']}") for c in d['ci_healed']]
+    rows += [('ci', f"{c['tool']} {c['project']}", c['count'], stamp(c['last']), ','.join(c['failed'])) for c in d['creative']]
+    dev = d['creative_dev']
+    if every:
+        rows += [('ci', f"{c['tool']} {c['project']}", c['count'], stamp(c['last']), 'dev  ' + ','.join(c['failed'])) for c in dev]
+    elif dev:
+        n, names = sum(c['count'] for c in dev), list(dict.fromkeys(c['project'] for c in dev))
+        rows.append(('ci', f'dev: {n} scratch runs (red first by design)', n, stamp(max(c['last'] for c in dev)),
+                     f"({', '.join(names[:3])}{', …' if len(names) > 3 else ''})"))
+    if every:
+        rows += [('ci', f"{c['tool']} {c['project']}", c['count'], stamp(c['last']), f"healed {stamp(c['healed_at'])}  " + ','.join(c['failed']))
+                 for c in d['creative_healed']]
     rows += [('crash', c['exe'], 1, stamp(c['at']), c['file']) for c in d['crashes']]
     rows += [('need', n.get('text', '').split('\n')[0][:60], 1, n.get('t', '-')[5:16].replace('T', ' '), n.get('kind', ''))
              for n in d['needs']]
+    rows += [('check', f"{c['ticket']} {age(c['first'])}", c['runs'], stamp(c['at']), f"rc {c['rc']}") for c in d['checks']]
     a = d['audit']
-    rows.append(('audit', 'tool calls failed', a['failed'], '-', f"{a['rate'] * 100:.1f}% of {a['calls']}"))
+    h = a.get('hidden', {})
+    rows.append(('audit', 'tool calls failed', a['failed'], '-', f"{a['rate'] * 100:.1f}% of {a['calls']}"
+                 f"; hidden {h.get('bench', 0)} bench, {h.get('sandbox', 0)} sandbox"))
     rows += [('error', k, 0, '-', v) for k, v in d['errors'].items()]
     w = max(len(r[1]) for r in rows)
-    print(f"{'SOURCE':<6} {'WHAT':<{w}} {'N':>4} {'LAST':<11} NOTE   (since {stamp(d['since'])})")
+    print(f"{'SOURCE':<6} {'WHAT':<{w}} {'N':>4} {'LAST':<11}  NOTE   (since {stamp(d['since'])})")
     for r in rows:
-        print(f'{r[0]:<6} {r[1]:<{w}} {r[2]:>4} {r[3]:<11} {r[4]}')
+        print(f'{r[0]:<6} {r[1]:<{w}} {r[2]:>4} {r[3]:<11}  {r[4]}')
 
 
 def main(argv):
-    if '-h' in argv or '--help' in argv:
-        print(USAGE)
-        return 0
-    js, span = False, '24h'
+    js, every, span = False, False, '24h'
     it = iter(argv)
     for a in it:
         if a == '--json':
             js = True
+        elif a == '--all':
+            every = True
         elif a == '--since':
             span = next(it, '')
         elif a.startswith('--since='):
@@ -157,11 +368,13 @@ def main(argv):
         else:
             print(f'pc failures: unknown option {a}', file=sys.stderr)
             return 2
-    m = re.fullmatch(r'(\d+)([mhd])', span)
-    if not m:
-        print('pc failures: bad --since (use 30m, 24h, 7d)', file=sys.stderr)
+    sys.path.insert(0, BIN)
+    from auditlib import parse_age
+    try:
+        since = int(time.time()) - parse_age(span)
+    except ValueError as e:
+        print(f'pc failures: {e}', file=sys.stderr)
         return 2
-    since = int(time.time()) - int(m[1]) * {'m': 60, 'h': 3600, 'd': 86400}[m[2]]
     d = {'since': since, 'errors': {}}
     for k, fn in COLLECTORS.items():
         try:
@@ -169,7 +382,14 @@ def main(argv):
         except Exception as e:  # one broken source must not hide the others
             d[k] = {'calls': 0, 'failed': 0, 'rate': 0.0} if k == 'audit' else []
             d['errors'][k] = f'{type(e).__name__}: {e}'
-    print(json.dumps(d, indent=1)) if js else table(d)
+    d['units_healed'] = [u for u in d['units'] if 'healed_at' in u]
+    d['units'] = [u for u in d['units'] if 'healed_at' not in u]
+    d['ci_healed'] = [c for c in d['ci'] if 'healed_at' in c]
+    d['ci'] = [c for c in d['ci'] if 'healed_at' not in c]
+    d['creative_healed'] = [c for c in d['creative'] if 'healed_at' in c]
+    d['creative_dev'] = [c for c in d['creative'] if c['dim'] and 'healed_at' not in c]
+    d['creative'] = [c for c in d['creative'] if not c['dim'] and 'healed_at' not in c]
+    print(json.dumps(d, indent=1)) if js else table(d, every)
     return 0
 
 

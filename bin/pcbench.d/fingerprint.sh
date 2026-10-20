@@ -8,7 +8,9 @@ export LC_ALL=C
 # TSP-011: the uutils `timeout` costs a flat ~100 ms; prefer the GNU binary.
 export PC_TIMEOUT_BIN="${PC_TIMEOUT_BIN:-$(command -v gnutimeout || echo timeout)}"
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
-f() { local n=$1; shift; ( printf '%s' "$( "$@" 2>/dev/null )" > "$W/$n" ) & }
+# PCBENCH_FP_<FIELD>=<file> replaces that field's live read with the file (test fixtures).
+f() { local n=$1 o="PCBENCH_FP_${1^^}"; shift; [ -n "${!o:-}" ] && set -- cat "${!o}"
+  ( printf '%s' "$( "$@" 2>/dev/null )" > "$W/$n" ) & }
 
 f default_sink      "$PC_TIMEOUT_BIN" 2 pactl get-default-sink
 f null_modules      bash -c 'pactl list modules short 2>/dev/null | grep -c module-null-sink'

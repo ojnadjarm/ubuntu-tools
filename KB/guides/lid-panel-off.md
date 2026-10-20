@@ -1,6 +1,6 @@
 # Turn the OLED panel off while the lid is closed: `pc lid` and the pc-lid.service policy unit
 
-Ticket: T44 · Last verified: 2026-10-15 by comparing with `KB/runbooks/lid-panel-off.md` and `KB/pc-cli.md`
+Ticket: T44 · Last verified: 2026-10-20 by T846 audit (`pc lid --help`, pc-lid.service active, FLOOD_N/S = 5/10 in `pc_lid.py`); before: 2026-10-15 by comparing with `KB/runbooks/lid-panel-off.md` and `KB/pc-cli.md`
 
 ## When to use
 The built-in panel stays lit with the lid closed, or you need the lid, PowerSaveMode, eDP dpms or reassert state.

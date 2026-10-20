@@ -1,6 +1,6 @@
 # Runaway guard: one ballooning child must not take the orchestrator pane down (OOMPolicy, MemoryMax scopes)
 
-Ticket: T401, T407 · Last verified: 2026-10-19 (CI window, `ci-window.test.sh` 13/13); 2026-10-18 by a sandbox balloon (512M scope) on a private tmux socket and `bin/tests/brief-check.test.sh` (12/12)
+Ticket: T401, T407, T462 · Last verified: 2026-10-20 by T846 audit (oom.conf, run.sh/agent-verify scope flags, ci-window/brief-lint --help, `oomctl`); before: 2026-10-19 (T462 `run-sh.test.sh` 19/19; CI window, `ci-window.test.sh` 13/13); 2026-10-18 by a sandbox balloon (512M scope) on a private tmux socket and `bin/tests/brief-check.test.sh` (12/12)
 
 ## When to use
 Running a test, benchmark or experiment that can grow without bound (pty readers, `script`, `tmux attach`, renderers,
@@ -16,6 +16,9 @@ model loads, fuzzers). Not for CPU or idle runaways: that is `sentinel-runaway.m
   The cgroup OOM killer then kills only `<cmd>` (rc 137) before the machine swaps; the caller keeps running.
 - Guard 4, lint: `brief-lint` warns (rc unchanged) on `/dev/zero` fed into `script`/`tmux` in a brief, and
   `brief-lint --tests` scans `~/agents/bin/tests/*.sh`. Hold a client attached with `</dev/null` or `sleep inf |`.
+- Guard 6, test runners (T462): `bin/tests/run.sh` runs each test file, and `agent-verify` each CHECK, in its own
+  scope (`MemoryMax=${TEST_MEM_MAX:-6G}`, `MemorySwapMax=0`, `OOMPolicy=continue`); plain run when no user bus.
+  run.sh reads the scope's `memory.events` and reports `FAIL <file> <s> oom`.
 
 - Guard 5, the CI window (T407): **rule — heavy browser/test runs, swarms and renders by agents do not start 00:50–01:50.**
   The ailearning nightly (01:00) measures frame budgets; T405's visualcheck held load ~14 on 2026-10-19 and turned it red.
@@ -39,7 +42,9 @@ tmux -L t401 kill-server
 - Without `MemorySwapMax=0` a capped job swaps instead of dying; T399 hit 56 kB of 8 GB swap free.
 - Sandbox 2026-10-18: balloon in a 512M pane scope → rc 137, pane and sibling alive, scope `active`/`success`.
   Same balloon with `OOMPolicy=stop` → scope stopped, sibling and caller gone (rc 143).
-- Only the kernel's cgroup or global OOM kill is contained; `systemd-oomd` is not running here (T399: no entries).
+- `systemd-run` expands `$VAR`/`${VAR}` in the command line by default (T462: `${2#dashboard/}` became empty, so
+  every dashboard file ran the whole pytest suite). Pass `--expand-environment=no` when wrapping a shell command.
+- Only the kernel's cgroup or global OOM kill is contained; `systemd-oomd` runs (since 2026-10-15) but `oomctl` lists no swap- or pressure-monitored cgroups, so it kills nothing (T399: no entries).
 
 ## Links
 - Code: `~/.config/systemd/user/tmux-spawn-.scope.d/oom.conf`, `~/agents/bin/brief-lint`

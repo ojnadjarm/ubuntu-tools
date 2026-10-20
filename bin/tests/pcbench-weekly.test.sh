@@ -86,10 +86,13 @@ w=$(sed -n 's/.*would run: //p' "$W/o2")
 } && ok || no "rc=$rc cmd='$w'"
 
 t "the idle row is sampled after the gate, never on a dry run"
+IDLE="$BIN/../bench/BASELINE-IDLE.tsv"
+if [ ! -f "$IDLE" ]; then echo "SKIP owner data absent: $IDLE"; else
 { grep -q 'pc idle --seconds 60 --tsv >>"$BENCH/BASELINE-IDLE.tsv"' "$RUNNER" &&
   ! grep -q 'BASELINE-IDLE' "$W/o2" &&
-  [ "$(sed -n '2s/^#//p' "$BIN/../bench/BASELINE-IDLE.tsv" | awk -F'\t' '{print NF}')" = 12 ]
+  [ "$(sed -n '2s/^#//p' "$IDLE" | awk -F'\t' '{print NF}')" = 12 ]
 } && ok || no "idle line missing, sampled on --dry-run, or the header is not 9 columns"
+fi
 
 t "the weekly selection includes the confirming C02/C04 re-run"
 sel=$("$BIN/pcbench" list --set night | awk '{print $1}' | tr '\n' ' ')
@@ -101,13 +104,16 @@ t "away run resets the streak file only on success"
 rm -rf "$W"
 
 # --- 4. registration -------------------------------------------------------
+ROSTER="$HOME/agents/KB/orchestrator.md"
+if [ ! -f "$ROSTER" ]; then echo "pcbench-weekly: SKIP owner data absent: $ROSTER"; else
 t "roster row in KB/orchestrator.md"
-grep -q '`pcbench-weekly.timer`' "$HOME/agents/KB/orchestrator.md" && ok || no "no roster row"
+grep -q '`pcbench-weekly.timer`' "$ROSTER" && ok || no "no roster row"
 
 t "agents-start would re-enable it from the roster"
-u=$(grep 'pcbench-weekly.timer' "$HOME/agents/KB/orchestrator.md" | head -1 | awk -F'|' '{print $3}' |
+u=$(grep 'pcbench-weekly.timer' "$ROSTER" | head -1 | awk -F'|' '{print $3}' |
     grep -o '`[^`]*`' | head -1 | tr -d '`')
 [ "$u" = pcbench-weekly.timer ] && ok || no "agents-start would parse '$u'"
+fi
 
 t "agents-stop stops the service and the timer"
 { grep -q 'pcbench-weekly.service' "$BIN/agents-stop" &&

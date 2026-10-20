@@ -8,24 +8,24 @@ set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SENTINEL="$(dirname "$here")/sentinel-check"
 PCS="$(dirname "$here")/pc-status"
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 has() { case "$2" in *"$3"*) ok "$1";; *) nok "$1" "'$3' not in: $2";; esac; }
 lacks() { case "$2" in *"$3"*) nok "$1" "'$3' found in: $2";; *) ok "$1";; esac; }
 
 WORK=$(mktemp -d)
+# tmux socket paths cap at 108 bytes: a short dir, not one under a nested run.sh TMPDIR.
+TMX=$(mktemp -d /tmp/tmx.XXXXXX)
 BIN="$WORK/agents/bin"; ST="$WORK/agents/sentinel/state"; CALLS="$WORK/calls.log"
 FXS="claude-fx-$$"; FXU="claude-fx-$$.service"
-mkdir -p "$BIN" "$ST" "$WORK/tmux" "$WORK/xdg/pc-status" "$WORK/fxbin"
+mkdir -p "$BIN" "$ST" "$WORK/xdg/pc-status" "$WORK/fxbin"
 REAL_TMUX=$(command -v tmux)
-fx() { env -u TMUX TMUX_TMPDIR="$WORK/tmux" HOME="$WORK" HARNESS_HOME="$WORK/agents" \
+fx() { env -u TMUX TMUX_TMPDIR="$TMX" HOME="$WORK" HARNESS_HOME="$WORK/agents" \
        XDG_RUNTIME_DIR="$WORK/xdg" ORCHESTRATOR_TMUX_SESSION="$FXS" ORCHESTRATOR_UNIT="$FXU" \
        KEEPALIVE_UNITS=fx-keep.service KEEPALIVE_HTTP=fx=http://127.0.0.1:1/ HARNESS_ENV_LOADED=1 \
        PATH="$BIN:$PATH" CALLS="$CALLS" SENTINEL_STATUS_CMD="$BIN/status-real" SENTINEL_ORCH_WAIT=1 SENTINEL_SETTLE=0 FX_UNIT_ENABLED="${FX_UNIT_ENABLED:-enabled}" "$@"; }
 printf 'set -g remain-on-exit on\n' >"$WORK/tmux.conf"
 ftmux() { fx "$REAL_TMUX" -f "$WORK/tmux.conf" "$@"; }
-cleanup() { ftmux kill-server 2>/dev/null; rm -rf "$WORK"; }
+cleanup() { ftmux kill-server 2>/dev/null; rm -rf "$WORK" "$TMX"; }
 trap cleanup EXIT
 
 # --- shims: record, change nothing -------------------------------------------

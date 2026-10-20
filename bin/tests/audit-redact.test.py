@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Redaction cases for the audit core ~/agents/hooks/audit-log.py (D3, GH09).
 Run: python3 audit-redact.test.py"""
-import importlib.util, os, sys
+import importlib.util, os, resource, statistics, subprocess, sys, tempfile
 
-_p = os.path.expanduser('~/agents/hooks/audit-log.py')
+H = os.path.expanduser('~/agents')
+_p = H + '/hooks/audit-log.py'
 _s = importlib.util.spec_from_file_location('audit_core', _p)
 m = importlib.util.module_from_spec(_s)
 _s.loader.exec_module(m)
@@ -11,7 +12,7 @@ _s.loader.exec_module(m)
 CASES = [
     ('curl -H "Authorization: Bearer sk-ant-SECRET123456789" x', 'sk-ant-SECRET123456789'),
     ('Bearer ghp_abcdefghijklmnopqrstuvwxyz0123', 'ghp_abcdefghijklmnopqrstuvwxyz0123'),
-    ('{"token": "sk-live-9999999999999999"}', 'sk-live-9999999999999999'),
+    ('{"token": "sk-live-9999999999999999"}', 'sk-live-9999999999999999'),  # push-ready: test vector
     ('{"password": "hunter2"}', 'hunter2'),
     ('{"secret": "s3cr3tvalue"}', 's3cr3tvalue'),
     ('{"api_key": "abc123def456"}', 'abc123def456'),
@@ -24,7 +25,7 @@ CASES = [
     ('curl -u admin:hunter2 https://x', 'hunter2'),
     ('curl -s --user admin:hunter2 https://x', 'hunter2'),
     ('mysqldump --password=topsecret db', 'topsecret'),
-    ('echo sk-ant-api03-AAAAAAAAAAAAAAAAAAAA', 'sk-ant-api03-AAAAAAAAAAAAAAAAAAAA'),
+    ('echo sk-ant-api03-AAAAAAAAAAAAAAAAAAAA', 'sk-ant-api03-AAAAAAAAAAAAAAAAAAAA'),  # push-ready: test vector
     ('S=0123456789abcdef0123456789abcdef0123456789abcdef; curl -H "x-dark-eye-key: $S" x', '0123456789abcdef0123456789abcdef0123456789abcdef'),
     ('EYE_KEY=0123456789abcdef0123456789abcdef0123456789abcdef eye health', '0123456789abcdef0123456789abcdef0123456789abcdef'),
     ('EYE_KEY="0123456789abcdef0123456789abcdef0123456789abcdef" eye health', '0123456789abcdef0123456789abcdef0123456789abcdef'),
@@ -49,7 +50,7 @@ CASES = [
     ('tool --client-secret abcd1234', 'abcd1234'),
     ("tool --access-token 'abcd 1234'", 'abcd 1234'),
     ('tool --pass hunter2', 'hunter2'),
-    ('aws configure set aws_access_key_id AKIAFAKEFAKEFAKE1234', 'AKIAFAKEFAKEFAKE1234'),
+    ('aws configure set aws_access_key_id AKIAFAKEFAKEFAKE1234', 'AKIAFAKEFAKEFAKE1234'),  # push-ready: test vector
     ('echo eyJmYWtlIjoxfQx.eyJmYWtlIjoyfQ.ZmFrZXNpZ25hdHVyZQ', 'eyJmYWtlIjoxfQx'),
     ('curl -d "msg" "https://ntfy.example/x?topic=fake-topic-abc"', 'fake-topic-abc'),
 ]
@@ -114,7 +115,7 @@ for cmd, want_op in OP_CASES:
     ok = op == want_op
     bad += not ok
     print(('PASS ' if ok else 'FAIL ') + 'op %r -> %r' % (cmd, op))
-op, _ = m.summarise('Task', {'prompt': 'token=sk-live-1234567890123456'})
+op, _ = m.summarise('Task', {'prompt': 'token=sk-live-1234567890123456'})  # push-ready: test vector
 ok = 'sk-live' not in op
 bad += not ok
 print(('PASS ' if ok else 'FAIL ') + 'summarise redacts non-Bash args: %r' % op)
@@ -127,6 +128,47 @@ ok = len(op) <= 60
 bad += not ok
 print(('PASS ' if ok else 'FAIL ') + 'op truncated to %d chars' % len(op))
 
-n = len(CASES) + len(KEEP) + len(SUMMARY_CASES) + len(OP_CASES) + 3
+
+# T669: the adapters.test.sh reference event gives today's row, byte for byte after ts.
+with tempfile.TemporaryDirectory() as hh:
+    subprocess.run([sys.executable, '-SI', _p], env=dict(os.environ, HARNESS_HOME=hh),
+                   input=b'{"tool":"Bash","input":{"command":"ls"},"cwd":"/c","session":"s","agent":"a"}')
+    row = open(hh + '/log/actions.jsonl').read()
+want = '", "session": "s", "agent": "a", "cwd": "/c", "tool": "Bash", "op": "ls", "summary": "ls"}\n'
+ok = row.startswith('{"ts": "') and row[8:].index('"') == 24 and row[32:] == want
+bad += not ok
+print(('PASS ' if ok else 'FAIL ') + 'reference row byte-identical: %r' % row)
+
+# T669: the Claude hook's common path imports neither os, json nor re and costs <= 15 ms CPU p50 of 10 runs
+# against a temp HARNESS_HOME, scaled by the load budget (lib/budget.sh) or by 1.5x a bare python3 -SI run
+# interleaved with it (~10 ms at idle; E-cores and low clocks slow both alike).
+hook = H + '/adapters/claude/hooks/audit-log.py'
+ev = (b'{"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": "git status --short"},'
+      b' "cwd": "/w", "session_id": "t669perf"}')
+with tempfile.TemporaryDirectory() as hh:
+    env = dict(os.environ, HARNESS_HOME=hh)
+    env.pop('AGENT_NAME', None), env.pop('PCBENCH_RUN', None)
+    cpu = {'hook': [], 'bare': []}
+    for _ in range(10):
+        for k, cmd in (('bare', [sys.executable, '-SI', '-c', '']), ('hook', [hook])):
+            r0 = resource.getrusage(resource.RUSAGE_CHILDREN)
+            subprocess.run(cmd, input=ev, env=env, stdout=subprocess.DEVNULL)
+            r1 = resource.getrusage(resource.RUSAGE_CHILDREN)
+            cpu[k].append((r1.ru_utime - r0.ru_utime + r1.ru_stime - r0.ru_stime) * 1000)
+    imp = subprocess.run([sys.executable, '-SI', '-X', 'importtime', hook], input=ev, env=env,
+                         capture_output=True).stderr.decode()
+    rows = open(hh + '/log/actions.jsonl').read().count('\n')
+mods = {l.split('|')[-1].strip() for l in imp.splitlines()[1:]}
+ok = rows == 11 and not mods & {'os', 'json', 're'}
+bad += not ok
+print(('PASS ' if ok else 'FAIL ') + 'common path: %d rows, heavy imports %s' % (rows, sorted(mods & {'os', 'json', 're'})))
+budget = float(subprocess.run(['bash', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lib', 'budget.sh'),
+                               '0.015'], capture_output=True, text=True).stdout) * 1000
+p50, bare = statistics.median(cpu['hook']), statistics.median(cpu['bare'])
+ok = p50 <= max(budget, 1.5 * bare)
+bad += not ok
+print(('PASS ' if ok else 'FAIL ') + 'hook CPU p50 %.1f ms <= max(load budget %.1f, 1.5 x bare %.1f) ms' % (p50, budget, bare))
+
+n = len(CASES) + len(KEEP) + len(SUMMARY_CASES) + len(OP_CASES) + 6
 print(('all %d cases pass' % n) if not bad else ('%d FAILURES' % bad))
 sys.exit(1 if bad else 0)

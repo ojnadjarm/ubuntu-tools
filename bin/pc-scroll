@@ -6,7 +6,7 @@ dir=""; n=3; ax=""; ay=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help) echo "$u"; exit 0;;
-    --at) ax="$2"; ay="$3"; shift 3;;
+    --at) ax="$2"; ay="$3"; shift 3 || { echo "$u" >&2; exit 2; };;
     up|down) dir="$1"; shift;;
     *) n="$1"; shift;;
   esac

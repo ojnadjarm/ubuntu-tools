@@ -6,7 +6,14 @@ set -uo pipefail
 
 EYE=${DARK_EYE_DIR:-$HOME/the-dark-eye}
 BRIEF=""
-[ "${1:-}" = --brief ] && BRIEF=1
+usage() { echo 'usage: agent-preflight [--brief]   Dark-Eye state, rules, commands; --brief: state only'; }
+for a in "$@"; do
+  case "$a" in
+    --brief) BRIEF=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "agent-preflight: unknown argument: $a" >&2; usage >&2; exit 2 ;;
+  esac
+done
 
 # --- the probes, all at once ------------------------------------------------
 {

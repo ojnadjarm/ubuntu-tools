@@ -22,3 +22,9 @@ Project ledgers: `$AGENT_WORK/decisions/<project>.md` (ailearning, portfolio, va
 - 2026-09-24 · Review material lives on this machine as a local link; no cloud artifacts · "everything should be on our server"
 - 2026-10-16 · Automatic reboots re-enabled inside the gated window · "we can re-enable the autorestart"
 - 2026-10-19 · Money: keep the research/plans (~/drop/money), build nothing more until he says so · "keep the money plans but we are not going to implement anything yet"
+- 2026-10-19 · ai-avatars: T702's posed-SDF method is the avatar standard, packaged as skill /pixel-avatar (T705); walks refined, rest kept · "702 win over 701 ... we create the skill over T702 But we need to refine the walk animations"
+- 2026-10-19 · Maps: the T703/T707 slice method is the map standard, packaged as skill /pixel-scene (T709); it calls /pixel-foliage for all vegetation · "After that skill for the map and JUST FOR THE FOLLIAGE"
+- 2026-10-20 · ai-avatars: drop T701 for good; T702 avatars stay, animations kept, hands rebuilt as mitten + grip-state model in /pixel-avatar (T712) · "keep just T702 avatars T701 Not good enough ... we need to improve hands but the animations looks really good"
+- 2026-10-20 · Foliage: T715 rigid-piece method (whole-pixel cluster/leaf steps, baked atlases, no displacement shader) is the /pixel-foliage standard; T710/T713 code kept in legacy/ and served to pixel-scene by a species.py shim until maps switch · brief T715 "throw away the T710/T713 foliage method ... build a new one from zero"
+- 2026-10-20 · Ticket ids: wave 18 #1/#2/#3 keep T716/T717/T718 for evidence and history, referred to as T700#1/T700#2/T700#3; the Vass briefs/reports (MIRASMANT-26 T716/T717, MIRASMANT-5 T718) are never renamed; new ids only from `ticket-id next` (planners `--reserve`) (T741) · brief T741 "Vass briefs never renamed"
+- 2026-10-20 T735 self-kill guard: owner accepted 10/17 replay coverage as final.

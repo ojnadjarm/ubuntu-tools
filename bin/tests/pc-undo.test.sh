@@ -8,10 +8,7 @@ export PC_LEDGER="$WORK/changes.jsonl"
 export FAKE_FILE="$WORK/target"
 export PCLIB="$BIN/pclib.sh"
 FAKE="$BIN/tests/fixtures/undo/pc-fake"
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
-is()  { [ "$2" = "$3" ] && ok "$1" || nok "$1" "expected '$3', got '$2'"; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 
 printf 'red' >"$FAKE_FILE"
 

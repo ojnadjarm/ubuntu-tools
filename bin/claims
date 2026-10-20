@@ -1,15 +1,159 @@
 #!/usr/bin/env python3
 """claims — add, release, list and expire rows on the file-claims board (~/agents/FILE-CLAIMS.md)."""
-import argparse, fcntl, os, re, sys
+import argparse, difflib, fcntl, hashlib, os, re, shutil, sys, time
 from datetime import datetime, timedelta
 
 FLOOR_H = 24
 STALE_H = max(FLOOR_H, int(os.environ.get("CLAIMS_STALE_H", "48")))
 PIN = re.compile(r"\b(pin|pinned|do not move)\b", re.I)
+WORD = re.compile(r"(?:\{[^}]*\}|[^,\s{])+")
+
+
+FILE_MAX, FILES_MAX, TICKET_MAX = 1 << 20, 200, 5 << 20
+KEEP_S = 7 * 86400
+NEVER = re.compile(r"(^|/)(secrets|backups)(/|$)")
 
 
 def board():
     return os.environ.get("CLAIMS_FILE") or os.path.expanduser("~/agents/FILE-CLAIMS.md")
+
+
+def snap_root():
+    return os.environ.get("CLAIMS_SNAP") or os.path.expanduser("~/agents/state/claims-snap")
+
+
+def absolute(p):
+    """A claimed path made absolute; a relative one is relative to the board's dir (~/agents), never the cwd."""
+    return os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(board())), p))
+
+
+def sha(path):
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+def manifest(d):
+    """Manifest rows (kind, path) of a snapshot dir; kind is a sha256, `absent`, `dir` or `skipped`."""
+    m = os.path.join(d, "manifest.tsv")
+    return [tuple(l.split("\t", 1)) for l in open(m).read().splitlines()] if os.path.exists(m) else []
+
+
+def walk(top):
+    return sorted(os.path.join(r, f) for r, ds, fs in os.walk(top) if not NEVER.search(r) for f in fs)
+
+
+def prune(root, live, now):
+    """Drop snapshots released (or orphaned) more than 7 days ago."""
+    for t in os.listdir(root) if os.path.isdir(root) else []:
+        d = os.path.join(root, t)
+        mark = os.path.join(d, "done") if os.path.exists(os.path.join(d, "done")) else None if t in live else os.path.join(d, "manifest.tsv")
+        if mark and os.path.exists(mark) and now - os.path.getmtime(mark) > KEEP_S:
+            shutil.rmtree(d)
+
+
+def snapshot(ticket, paths):
+    """Copy each not-yet-held path of a ticket into its snapshot dir; return (files copied, skip messages)."""
+    d = os.path.join(snap_root(), ticket)
+    rows = manifest(d)
+    held = {p for _, p in rows}
+    used = sum(os.path.getsize(os.path.join(d, "files", p.lstrip("/"))) for k, p in rows if k not in ("absent", "dir", "skipped"))
+    count = sum(k not in ("absent", "dir", "skipped") for k, _ in rows)
+    new, notes = [], []
+    for raw in paths:
+        top = absolute(raw)
+        if top in held or any(top.startswith(h + "/") for k, h in rows if k == "dir") or NEVER.search(top):
+            continue
+        if os.path.isdir(top):
+            new.append(("dir", top))
+            files = walk(top)
+        elif os.path.exists(top):
+            files = [top]
+        else:
+            new.append(("absent", top))
+            if not os.path.isabs(raw):
+                notes.append("claims: %s is absent; relative paths are under %s, pass an absolute path if you meant another dir" % (top, absolute(".")))
+            continue
+        for f in files:
+            size = os.path.getsize(f) if os.path.isfile(f) else -1
+            why = "not a file" if size < 0 else "> 1 MB" if size > FILE_MAX else "> 200 files" if count >= FILES_MAX else \
+                  "> 5 MB per ticket" if used + size > TICKET_MAX else None
+            if why:
+                new.append(("skipped", f))
+                notes.append("claims: snapshot skipped %s (%s)" % (f, why))
+                continue
+            dst = os.path.join(d, "files", f.lstrip("/"))
+            try:
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copy2(f, dst)
+                new.append((sha(f), f))
+            except OSError as e:
+                if os.path.isfile(dst):
+                    os.remove(dst)
+                new.append(("skipped", f))
+                notes.append("claims: snapshot skipped %s (%s)" % (f, e.strerror or e))
+                continue
+            used, count = used + size, count + 1
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "manifest.tsv"), "a") as m:
+        m.write("".join("%s\t%s\n" % r for r in new))
+    if os.path.exists(os.path.join(d, "done")):
+        os.remove(os.path.join(d, "done"))
+    return sum(k not in ("absent", "dir", "skipped") for k, _ in new), notes
+
+
+def lines_of(path):
+    if path is None or not os.path.isfile(path):
+        return []
+    try:
+        return open(path, encoding="utf-8").read().splitlines(keepends=True)
+    except UnicodeDecodeError:
+        return None
+
+
+def diff(ticket, stat):
+    """Unified diff (or --stat) of a ticket's snapshot against the files now; 0 printed `untouched` when equal."""
+    d = os.path.join(snap_root(), ticket)
+    rows = manifest(d)
+    if not rows:
+        print("claims: no snapshot for %s" % ticket, file=sys.stderr)
+        return 1
+    pairs, seen = [], {p for _, p in rows}
+    dirs = [p for k, p in rows if k == "dir"]
+    own = [r for r in rows_of_board() if r["ticket"] == ticket]
+    for p in sorted({absolute(q) for r in own for q in paths_of(r["paths"])}):
+        if p not in seen and not any(p.startswith(h + "/") for h in dirs):
+            print("no baseline: %s (claimed before its snapshot; not in this diff)" % p)
+    for kind, p in rows:
+        if kind == "dir":
+            pairs += [(None, f) for f in walk(p) if f not in seen]
+        elif kind == "skipped":
+            print("skipped at claim: %s" % p)
+        else:
+            pairs.append((None if kind == "absent" else os.path.join(d, "files", p.lstrip("/")), p))
+    changed = adds = dels = 0
+    for old, p in pairs:
+        a, b = lines_of(old), lines_of(p)
+        if a is None or b is None:
+            if (open(old, "rb").read() if old else b"") != (open(p, "rb").read() if os.path.isfile(p) else b""):
+                changed += 1
+                print("Binary %s differs" % p)
+            continue
+        u = list(difflib.unified_diff(a, b, "/dev/null" if old is None else "a" + p, "b" + p if os.path.isfile(p) else "/dev/null"))
+        if not u:
+            continue
+        changed += 1
+        plus = sum(l.startswith("+") and not l.startswith("+++") for l in u)
+        minus = sum(l.startswith("-") and not l.startswith("---") for l in u)
+        adds, dels = adds + plus, dels + minus
+        if stat:
+            print("%s | +%d -%d" % (p, plus, minus))
+        else:
+            sys.stdout.write("".join(l if l.endswith("\n") else l + "\n\\ No newline at end of file\n" for l in u))
+    if not changed:
+        print("untouched")
+    elif stat:
+        print("%d file%s changed, +%d -%d" % (changed, "" if changed == 1 else "s", adds, dels))
+    return 0
 
 
 def since_of(field):
@@ -56,7 +200,7 @@ class Board:
 
 def paths_of(field):
     """Normalised paths of a paths field: comma/space separated, `{a,b}` expanded, globs cut to their directory."""
-    words = re.findall(r"(?:\{[^}]*\}|[^,\s{])+", field)
+    words = WORD.findall(field)
     out = []
     while words:
         w = words.pop()
@@ -79,6 +223,10 @@ def rows(lines, now):
     return [r for r in (parse(l, now) for l in lines) if r]
 
 
+def rows_of_board():
+    return rows(open(board()).read().splitlines(), datetime.now()) if os.path.exists(board()) else []
+
+
 def fmt(r):
     age = "?" if r["age_h"] is None else "%dh" % max(0, r["age_h"])
     mark = "PIN  " if r["pinned"] else "STALE" if r["stale"] else "ok   "
@@ -87,36 +235,77 @@ def fmt(r):
 
 def main(argv):
     p = argparse.ArgumentParser(prog="claims", description="Board %s; rows `- <ticket> · <paths> · <since>`; "
-                                "unpinned rows older than %d h are stale." % (board(), STALE_H))
+                                "unpinned rows older than %d h are stale." % (board(), STALE_H),
+                                formatter_class=argparse.RawDescriptionHelpFormatter,
+                                epilog="examples:\n  claims add T42 ~/agents/bin/foo bin/tests/foo.test.sh\n  claims diff T42 --stat\n  claims check ~/agents/bin/foo KB/guides/foo.md")
     sub = p.add_subparsers(dest="cmd")
-    a = sub.add_parser("add", help="claim paths for a ticket")
+    a = sub.add_parser("add", help="claim paths for a ticket and snapshot them for `diff` (a second add appends new paths to its row; relative paths are under the board's dir, not the cwd)", epilog="example: claims add T42 ~/agents/bin/foo bin/tests/foo.test.sh")
     a.add_argument("ticket")
-    a.add_argument("paths")
+    a.add_argument("paths", nargs="+")
     a.add_argument("--pin", action="store_true", help="never stale (owner rows)")
     a.add_argument("--force", action="store_true", help="add even when a path overlaps another ticket's live row")
-    d = sub.add_parser("done", help="release every row of a ticket")
+    d = sub.add_parser("done", aliases=["release"], help="release every row of a ticket (its snapshot stays 7 days)")
     d.add_argument("ticket")
+    f = sub.add_parser("diff", help="unified diff of a ticket's claimed paths: snapshot at add vs now; `untouched` when equal",
+                       epilog="example: claims diff T42 --stat")
+    f.add_argument("ticket")
+    f.add_argument("--stat", action="store_true", help="one `path | +N -M` line per changed file")
     sub.add_parser("list", help="every row with its age (default)")
-    sub.add_parser("check", help="one summary line; exit 2 when a row is stale")
+    c = sub.add_parser("check", help="one summary line, exit 2 when a row is stale; with paths: free/held per path, exit 1 when any is held",
+                       epilog="example: claims check ~/agents/bin/foo bin/tests/foo.test.sh")
+    c.add_argument("paths", nargs="*")
     e = sub.add_parser("expire", help="drop stale rows (dry run without --apply)")
     e.add_argument("--apply", action="store_true")
     o = p.parse_args(argv)
+    o.cmd = {"release": "done"}.get(o.cmd, o.cmd)
+    if o.cmd == "diff":
+        return diff(o.ticket, o.stat)
+    if o.cmd == "add":
+        o.paths = " ".join(o.paths)
     now = datetime.now()
     with Board() as b:
         rs = rows(b.lines, now)
         if o.cmd == "add":
-            if any(r["ticket"] == o.ticket for r in rs):
-                print("claims: %s already holds a row; `claims done %s` first" % (o.ticket, o.ticket), file=sys.stderr)
-                return 1
-            hits = [(r["ticket"], q) for r in rs if not r["stale"] for q in paths_of(r["paths"])
-                    if any(overlaps(n, q) for n in paths_of(o.paths))]
+            own = next((r for r in rs if r["ticket"] == o.ticket), None)
+            if own:
+                held = set(paths_of(own["paths"]))
+                words = []
+                for w in WORD.findall(o.paths):
+                    ps = set(paths_of(w))
+                    if not all(any(p == h or p.startswith(h + "/") for h in held) for p in ps):
+                        words.append(w)
+                        held |= ps
+                o.paths = ", ".join(words)
+            mine = paths_of(o.paths) + (paths_of(own["paths"]) if own and own["stale"] else [])
+            hits = [(r["ticket"], q) for r in rs if not r["stale"] and r["ticket"] != o.ticket for q in paths_of(r["paths"])
+                    if any(overlaps(n, q) for n in mine)]
             for t, q in hits:
                 print("overlap: %s %s" % (t, q), file=sys.stderr)
             if hits and not o.force:
                 return 3
-            b.lines.append("- %s · %s%s · %s" % (o.ticket, o.paths, " · pin" if o.pin else "", now.strftime("%Y-%m-%d %H:%M")))
-            b.save()
-            print(b.lines[-1])
+            if own:
+                parts = own["line"].split(" · ")
+                if o.paths:
+                    parts[1] += ", " + o.paths
+                if o.pin and not own["pinned"]:
+                    parts.insert(-1, "pin")
+                if own["stale"]:
+                    parts[-1] = now.strftime("%Y-%m-%d %H:%M")
+                line = " · ".join(parts)
+                if line != own["line"]:
+                    b.lines[b.lines.index(own["line"])] = line
+                    b.save()
+                print("%s: +%d paths%s%s" % (o.ticket, len(words), ", pinned" if o.pin and not own["pinned"] else "",
+                                             ", since refreshed" if own["stale"] else ""))
+            else:
+                b.lines.append("- %s · %s%s · %s" % (o.ticket, o.paths, " · pin" if o.pin else "", now.strftime("%Y-%m-%d %H:%M")))
+                b.save()
+                print(b.lines[-1])
+            prune(snap_root(), {r["ticket"] for r in rs}, time.time())
+            n, notes = snapshot(o.ticket, paths_of(o.paths))
+            for line in notes:
+                print(line, file=sys.stderr)
+            print("snapshot: +%d files (claims diff %s)" % (n, o.ticket))
         elif o.cmd == "done":
             keep = [l for l in b.lines if not (parse(l, now) or {}).get("ticket") == o.ticket]
             if len(keep) == len(b.lines):
@@ -124,7 +313,18 @@ def main(argv):
                 return 1
             b.lines = keep
             b.save()
+            d = os.path.join(snap_root(), o.ticket)
+            if os.path.isdir(d):
+                open(os.path.join(d, "done"), "w").close()
             print("released %s" % o.ticket)
+        elif o.cmd == "check" and o.paths:
+            held = 0
+            for arg in o.paths:
+                hits = sorted({r["ticket"] for r in rs if not r["stale"] for q in paths_of(r["paths"])
+                               if any(overlaps(n, q) for n in paths_of(arg))})
+                print("held: %s by %s" % (arg, " ".join(hits)) if hits else "free: %s" % arg)
+                held += bool(hits)
+            return 1 if held else 0
         elif o.cmd == "check":
             stale = [r["ticket"] for r in rs if r["stale"]]
             print("%d claims, %d stale%s, %d pinned (stale > %d h)" % (len(rs), len(stale), " (%s)" % " ".join(stale) if stale else "",

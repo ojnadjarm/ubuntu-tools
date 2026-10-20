@@ -1,6 +1,6 @@
 # Lesson visual self-check: no duplicate tooltips, no overlaps, no flicker or jitter while dragging (`npm run visualcheck`)
 
-Ticket: T405 · Last verified: 2026-10-19 by `node --import ./tests/lib/register.mjs --test tests/unit/visualcheck.test.mjs` (3/3) and U04 runs; baseline in progress (see Links)
+Ticket: T405 · Last verified: 2026-10-20 by `node --import ./tests/lib/register.mjs --test tests/unit/visualcheck.test.mjs` (3/3) and U04 runs; paths, flags, `THRESH` and caps re-read 2026-10-20 (T846); baseline 14 units in 1621 s (`baseline.log`)
 
 ## When to use
 Before a sheet goes to the owner's QA, or when he says "flicker", "duplicated tooltips", "messy", "labels jump". Not for step counts or
@@ -37,4 +37,4 @@ node --import ./tests/lib/register.mjs --test tests/unit/visualcheck.test.mjs
 
 ## Links
 - Code: `tools/visualcheck.mjs`, `tools/visual/*`; tests `tests/unit/visualcheck.test.mjs`, fixtures `tests/unit/fixtures/visual/*.json`
-- Design / results: `~/agent-work/research/2026-10-18/night/T405/` (ARCH.md, FAILS.md, tables/), frames `~/drop/T405/`
+- Design / results: `~/agent-work/research/2026-10-18/night/T405/` (ARCH.md, FAILS.md, baseline.log, tables/); the `~/drop/T405/` frames are gone (2026-10-20)

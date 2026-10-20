@@ -1,6 +1,6 @@
 # Dashboard pronunciation: drill prompts, Kokoro references and the machine error floor
 
-Ticket: T30 · Last verified: 2026-10-15 by reading the code and counting state/floor.json against voice_prompts.json
+Ticket: T30 · Last verified: 2026-10-20 by reading the code and counting state/floor.json against voice_prompts.json
 
 ## When to use
 You edit or add a prompt in `~/agents/dashboard/voice_prompts.json`, the Voice page says "floor.json missing" or
@@ -27,7 +27,7 @@ voice-progress [--json]     # drill progress: errors per 100 target words per pa
 ## Pitfalls (measured)
 - floor.json covers drill prompts only: 30 of the 90 prompts on 2026-10-15, all 30 current. The other 60 always score raw.
 - Changing a drill prompt's text makes its floor stale (dropped) until `node src/floor.js` runs again.
-- Sentence wavs are named `s-<id>.wav`; tts-gen remakes one when its text differs from `state/tts/texts.json`. A wav with no entry there is remade too, so the first run after 2026-10-17 remakes every wav.
+- Sentence wavs are named `s-<id>.wav`; tts-gen remakes one when its text differs from `state/tts/texts.json`. A wav with no entry there is remade too, so the first run after 2026-10-17 remakes every wav (`state/tts/texts.json` still absent on 2026-10-20).
 - transcribe.js loads a ~1.1 GB model; the dashboard runs it in a transient unit with MemoryMax=2G.
 
 ## Links

@@ -9,10 +9,7 @@ if [ -z "${NO_SANDBOXED:-}" ]; then
   exec bwrap --dev-bind / / --unshare-net --setenv NO_SANDBOXED 1 --setenv NOTIFY_OWNER_SRC "$SRC" \
     --setenv NETDATA_DRAIN_SRC "$DRAIN" -- bash "$SELF"
 fi
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
-is()  { [ "$2" = "$3" ] && ok "$1" || nok "$1" "expected '$3', got '$2'"; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 
 WORK=$(mktemp -d); trap 'kill "${SRV:-0}" 2>/dev/null; rm -rf "$WORK"' EXIT
 if curl -sS -m 3 -o /dev/null https://ntfy.sh 2>/dev/null; then echo 'FAIL selftest: sandbox reaches the network'; exit 1; fi

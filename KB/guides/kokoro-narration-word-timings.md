@@ -1,6 +1,6 @@
 # Narrate with local Kokoro TTS, word timings and a cue sheet that drives the animation
 
-Ticket: T65 (narration lane), used by T65 mockups, T69, T70 ports · Last verified: 2026-09-26 (T111 review; render path) / 2026-09-24 by rendering a 2-clip fixture with the skill script (marks land on the named word +40 ms)
+Ticket: T65 (narration lane), used by T65 mockups, T69, T70 ports · Last verified: 2026-10-20 by T846 read-only audit (`--help`, paths, code); before: 2026-10-19 by rendering the SKILL.md fixture offline with the skill script (marks tubes 0.515 s, input 4.065 s, 42 s wall at load ~9), the Ogg command and `test -e` on every path
 
 ## When to use
 - A narrated explainer, voice-over or tutorial where visuals must land on spoken words: use the skill `/kokoro-narration`.
@@ -46,7 +46,7 @@ cd ~/agent-work/research/2026-09-23/T65/tts/scripts && cat run_all.sh     # r_*.
 - Native Kokoro word starts sit a constant **61 ms early** vs the MMS_FA forced aligner (57–63 ms per voice, SD 19 ms,
   1,089 words). Hence the +40 ms bias; p95 residual after it 41 ms. Cue on starts: word *ends* jitter ~110 ms.
 - The Eye's **int8 sherpa-onnx Kokoro** scored UTMOSv2 2.26 vs 3.55 for the same voice in fp32, and was slower here
-  (RTF 1.6 vs 0.8). `toolchain/sync/render-narration.cjs` used it with Parakeet timings, which sit on an **80 ms grid**:
+  (RTF 1.6 vs 0.8). `~/agent-work/research/2026-09-23/T65/toolchain/sync/render-narration.cjs` used it with Parakeet timings, which sit on an **80 ms grid**:
   too coarse for a clock. Use fp32 `kokoro` for anything shipped.
 - Autoregressive models drop words silently (Orpheus `tara` skipped "the result", WER 4.4 %). Any non-Kokoro voice
   needs an ASR gate (`score.py`). The shipped renderer only checks the word count, and it has no WER gate.

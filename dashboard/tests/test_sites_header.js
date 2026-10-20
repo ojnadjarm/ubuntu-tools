@@ -1,8 +1,12 @@
 // Machine screens at 400 px: the screen title and summary never sit under the sub-tabs, at any scroll position; fixture API, no live services.
-// Run: node tests/test_sites_header.js   (PWC = path to playwright-core, defaults to the Playwright MCP copy)
+// Run: node tests/test_sites_header.js   (PWC = path to playwright-core, defaults to the Playwright MCP copy under `npm root -g` of this node)
 "use strict";
 const fs = require("fs"), path = require("path"), http = require("http"), assert = require("assert");
-const { chromium } = require(process.env.PWC || path.join(require("os").homedir(), ".nvm/versions/node/v24.20.0/lib/node_modules/@playwright/mcp/node_modules/playwright-core"));
+const pwc = () => {
+  const root = require("child_process").execFileSync("npm", ["root", "-g"], { encoding: "utf8", env: { ...process.env, PATH: path.dirname(process.execPath) + path.delimiter + process.env.PATH } }).trim();
+  return [path.join(root, "@playwright/mcp/node_modules/playwright-core"), path.join(root, "playwright-core")].find((d) => fs.existsSync(d));
+};
+const { chromium } = require(process.env.PWC || pwc());
 const STATIC = path.join(__dirname, "..", "static");
 const TYPES = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".json": "application/json", ".svg": "image/svg+xml" };
 const row = (i) => ({ port: 9000 + i, path: "/", name: "site " + i, what: "fixture row " + i, url: "http://fixture:" + (9000 + i) + "/", group: ["mine", "moodle", "metrics"][i % 3], state: "up", ms: 3, uptime: "1 h", tls: false });
@@ -20,7 +24,7 @@ const srv = http.createServer((req, res) => {
 (async () => {
   await new Promise((ok) => srv.listen(0, "127.0.0.1", ok));
   const base = "http://127.0.0.1:" + srv.address().port;
-  const b = await chromium.launch();
+  const b = await chromium.launch({ args: ["--disable-3d-apis"] }); // no WebGL stage: its SwiftShader frames cost ~130 CPU s
   try {
     const p = await (await b.newContext({ viewport: { width: 400, height: 860 }, deviceScaleFactor: 2, reducedMotion: "reduce" })).newPage();
     for (const screen of ["sites", "services"]) {

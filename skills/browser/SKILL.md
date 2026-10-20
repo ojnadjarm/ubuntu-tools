@@ -1,7 +1,9 @@
 ---
 name: browser
-description: Drive a web page with the Playwright MCP - persistent logins, headless by default, headed on the real desktop with PW_HEADED=1. Use for web scraping, web app testing; Moodle UI work: load /moodle-web. Not for native apps or the owner's Chrome profile (use the `desktop` skill / `pc` CLI).
+description: Drive a web page with the Playwright MCP. Use for web scraping, web app testing; Moodle UI work loads /moodle-web. Persistent logins, headless by default, headed with PW_HEADED=1. Not for native apps or the owner's Chrome profile (`desktop` skill).
 ---
+
+Triggers: real desktop, pc CLI.
 
 # Browser automation (Playwright MCP, T12)
 
@@ -11,7 +13,7 @@ description: Drive a web page with the Playwright MCP - persistent logins, headl
 - Never script `google-chrome` by hand for web work.
 
 ## How it is wired
-- Launcher `~/agents/bin/playwright-mcp` (sources nvm, execs pinned `@playwright/mcp` 0.0.80),
+- Launcher `~/agents/bin/playwright-mcp` (sources nvm, execs the global `@playwright/mcp` 0.0.83 under node v24.20.0; exits 3 below 0.0.81, no idle timeout),
   config `~/.claude/playwright-mcp.json`. Registered user-scope; config changes affect **new** sessions only.
 - Viewport 1280x720. Downloads/screenshots/traces land in `~/agents/browser/out`.
   The launcher deletes files there older than 7 days at start: copy anything you keep elsewhere

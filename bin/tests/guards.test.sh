@@ -5,10 +5,7 @@ set -uo pipefail
 BIN="$HOME/agents/bin"; G="$BIN/guards"
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 export HARNESS_GUARD_LOG="$WORK/guards.jsonl"
-bad=0
-ok()  { printf 'ok   %s\n' "$1"; }
-nok() { printf 'FAIL %s: %s\n' "$1" "$2"; bad=1; }
-is()  { [ "$2" = "$3" ] && ok "$1" || nok "$1" "expected '$3', got '$2'"; }
+. "$HOME/agents/bin/tests/lib/assert.sh"
 
 # Stubs stand in for the real binaries the guard forwards to.
 mkdir -p "$WORK/real"

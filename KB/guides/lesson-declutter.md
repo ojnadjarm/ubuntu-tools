@@ -1,6 +1,6 @@
 # Lesson declutter: ≤ 7 labelled things per step, checked by `npm run declutter`
 
-Ticket: T325, T328 · Last verified: 2026-10-18 (T368 parallel pages), 2026-10-12 by `npm run declutter` on U01–U07 at 1366x768, 1920x1080 and 2560x1440 plus `node --test tests/unit/declutter.test.mjs`
+Ticket: T325, T328 · Last verified: 2026-10-20 by T846 audit (paths, package.json scripts, rules.mjs), 2026-10-18 (T368 parallel pages), 2026-10-12 by `npm run declutter` on U01–U07 at 1366x768, 1920x1080 and 2560x1440 plus `node --test tests/unit/declutter.test.mjs`
 
 ## When to use
 Building, fixing or reviewing any ailearning lesson (sheet/unit), or writing a lesson brief: every step must meet the declutter budget and

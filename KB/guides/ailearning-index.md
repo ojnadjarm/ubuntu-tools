@@ -4,7 +4,7 @@
 `~/drop/units/` and every `~/drop/tNNN/` lesson build were deleted on 2026-10-07 (not archived); rebuild from the repo or use the :8472 site. Restore the CLI: column 3 of
 `~/agents/backups/retired/2026-10-07/MANIFEST.tsv`. History below.
 
-Ticket: T247 · Last verified: 2026-10-05 by `ailearning-index` (14 units, 15/15 links 200) and headless shots at 400/768/1366/1920/2560
+Ticket: T247 · Last verified: 2026-10-20 by retired-state check (CLI absent from PATH, MANIFEST row present, `~/drop/units` and `~/drop/ailearning` gone); before retirement 2026-10-05 by `ailearning-index` (14 units, 15/15 links 200) and headless shots at 400/768/1366/1920/2560
 
 ## When to use
 After any ailearning unit drop, or when the owner asks "where is the link for plate N". Not for publishing the site itself (`.local/drop.sh` / `sites`).
