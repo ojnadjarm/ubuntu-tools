@@ -1,0 +1,2 @@
+#!/bin/sh
+echo "wineserver $*" >>"${STUB_CALLS:-/dev/null}"

@@ -1,0 +1,3 @@
+#!/bin/sh
+echo "ffprobe $*" >>"${STUB_CALLS:-/dev/null}"
+echo 10.000000

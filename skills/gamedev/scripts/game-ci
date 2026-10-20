@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# One-command CI for a Godot project: import, GUT, shaders, perf gate, Linux+Windows export, 10 s capture mp4, Wine smoke; OUT/summary.json.
+set -uo pipefail
+usage() {
+	cat <<-'EOF'
+	usage: game-ci [--out DIR] [--capture-seconds N] [--perf-runs N] [--perf-max-load L] [--perf-wait N] [--max-load L] [--no-wine] [--keep] PROJECT_DIR
+	  stages: import test shader perf export capture wine; summary in OUT/summary.json (default OUT=PROJECT/ci)
+	  perf skips at once when load1 >= --perf-max-load (default 0.5 × nproc), unless --perf-wait N (s) sees it drop first
+	  export waits for load1 < --max-load (default 1 × nproc); both through quiet-gate
+	  exit 0 when no stage failed (a perf SKIP on a busy machine is not a failure)
+	EOF
+	exit "${1:-2}"
+}
+here=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+S=$here/scripts
+. "$S/ci-lib.sh"
+out="" cap=10 runs=3 perfload="" perfwait=0 maxload="" wine=1 keep=0 proj=""
+while [ $# -gt 0 ]; do
+	case $1 in
+		--out) out=$2; shift 2 ;;
+		--capture-seconds) cap=$2; shift 2 ;;
+		--perf-runs) runs=$2; shift 2 ;;
+		--perf-max-load) perfload=$2; shift 2 ;;
+		--perf-wait) perfwait=$2; shift 2 ;;
+		--max-load) maxload=$2; shift 2 ;;
+		--no-wine) wine=0; shift ;;
+		--keep) keep=1; shift ;;
+		-h|--help) usage 0 ;;
+		*) proj=$1; shift ;;
+	esac
+done
+[ -n "$proj" ] && [ -f "$proj/project.godot" ] || usage >&2
+proj=$(cd "$proj" && pwd)
+ci_init GAMECI "${out:-$proj/ci}"
+export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+wp=""
+trap '[ -n "$wp" ] && kill "$wp" 2>/dev/null' EXIT
+
+weston_up() {  # headless weston on the real GPU; sets WAYLAND_DISPLAY
+	local sock=wl-gameci-$$
+	weston --backend=headless --renderer=gl --width=1280 --height=720 --socket=$sock --idle-time=0 > "$out/logs/weston.log" 2>&1 &
+	wp=$!
+	for _ in $(seq 400); do [ -S "$XDG_RUNTIME_DIR/$sock" ] && break; sleep 0.05; done
+	export WAYLAND_DISPLAY=$sock
+}
+
+stage_import() {
+	godot --headless --path "$proj" --import > "$out/logs/import.log" 2>&1
+	local rc=$? errs; errs=$(grep -c "ERROR" "$out/logs/import.log")
+	[ $rc -eq 0 ] && [ "$errs" -eq 0 ] && st=pass || st=fail
+	x=$(jq -n --argjson rc $rc --argjson e "$errs" '{rc: $rc, errors: $e}')
+}
+stage_test() {
+	"$S/godot-test.sh" --junit "$out/junit.xml" "$proj" > "$out/logs/test.log" 2>&1
+	local rc=$?
+	cp "$proj/gut.log" "$out/logs/gut.log" 2>/dev/null
+	local t f
+	t=$(grep -o 'tests="[0-9]*"' "$out/junit.xml" | head -1 | tr -dc 0-9); f=$(grep -o 'failures="[0-9]*"' "$out/junit.xml" | head -1 | tr -dc 0-9)
+	[ $rc -eq 0 ] && st=pass || st=fail
+	x=$(jq -n --argjson rc $rc --argjson t "${t:-0}" --argjson f "${f:-0}" '{rc: $rc, tests: $t, failures: $f}')
+}
+stage_shader() {  # GLSL files through glslang/spirv-val; .gdshader files compile in the GPU capture run (checked there)
+	local work; work=$(mktemp -d)
+	mapfile -t glsl < <(find "$proj" -path "$proj/addons" -prune -o -path "$proj/.godot" -prune -o -path "$out" -prune -o \
+		-type f \( -name '*.vert' -o -name '*.frag' -o -name '*.comp' -o -name '*.glsl' \) -print)
+	gds=$(find "$proj" -path "$proj/addons" -prune -o -name '*.gdshader' -print | wc -l)
+	local files=() rc=0
+	for f in "${glsl[@]}"; do  # Godot .glsl: drop "#[stage]" headers, check as compute
+		case $f in *.glsl) grep -v '^#\[' "$f" > "$work/$(basename "${f%.glsl}").comp"; files+=("$work/$(basename "${f%.glsl}").comp") ;; *) files+=("$f") ;; esac
+	done
+	[ ${#files[@]} -gt 0 ] && { "$S/shader-check.sh" "${files[@]}" > "$out/logs/shader.log" 2>&1; rc=$?; }
+	rm -rf "$work"
+	[ $rc -eq 0 ] && st=pass || st=fail
+	x=$(jq -n --argjson g ${#files[@]} --argjson rc $rc --argjson gd "$gds" '{glsl_files: $g, rc: $rc, gdshader_files: $gd, gdshader_errors: null}')
+}
+stage_perf() {  # godot-perfgate.sh owns the skip; wait only with --perf-wait
+	[ "$perfwait" -gt 0 ] && ci_gate "$perfwait" --max-per-cpu 0.5 --max-load1 "$perfload" --gpu 15
+	"$S/godot-perfgate.sh" --runs "$runs" ${perfload:+--max-load "$perfload"} --csv "$out/perf.csv" "$proj" > "$out/logs/perf.log" 2>&1
+	local rc=$? line med
+	line=$(grep "^PERFGATE" "$out/logs/perf.log" | tail -1)
+	med=$(grep -o 'median_fps=[0-9.]*' <<< "$line" | cut -d= -f2)
+	case $rc in 0) st=pass ;; 3) st=skip ;; *) st=fail ;; esac
+	x=$(jq -n --argjson rc $rc --arg l "$line" --argjson m "${med:-null}" '{rc: $rc, median_fps: $m, line: $l}')
+}
+stage_export() {
+	ci_gate 86400 --max-per-cpu 1 --max-load1 "$maxload"
+	local p bin rc=0 sizes='{}' r
+	for p in Linux Windows; do
+		bin=$(awk -v n="$p" '/^name=/ {cur = ($0 == "name=\"" n "\"")} cur && /^export_path=/ {gsub(/export_path=|"/, ""); print; exit}' "$proj/export_presets.cfg")
+		[ -n "$bin" ] || { rc=1; continue; }
+		mkdir -p "$proj/$(dirname "$bin")"
+		godot --headless --path "$proj" --export-release "$p" "$proj/$bin" > "$out/logs/export-$p.log" 2>&1; r=$?
+		[ $r -eq 0 ] && [ -s "$proj/$bin" ] || rc=1
+		sizes=$(jq --arg p "$p" --arg b "$proj/$bin" --argjson s "$(stat -c %s "$proj/$bin" 2>/dev/null || echo 0)" '.[$p] = {bytes: $s, path: $b}' <<< "$sizes")
+	done
+	[ $rc -eq 0 ] && st=pass || st=fail
+	x=$(jq -n --argjson b "$sizes" '{builds: $b}')
+}
+stage_capture() {  # Movie Maker at fixed 30 fps under headless weston -> AVI -> H.264 mp4
+	ci_gate 86400 --max-per-cpu 1 --max-load1 "$maxload"
+	weston_up
+	SMOKE_SECONDS=$cap timeout $((cap * 20 + 120)) godot --path "$proj" --display-driver wayland --audio-driver Dummy \
+		--resolution 1280x720 --fixed-fps 30 --write-movie "$out/capture.avi" > "$out/logs/capture.log" 2>&1 &
+	local gp=$! rc hung=false serr mp4=$out/capture.mp4 dur=0
+	wait-for --label game-ci-capture --every 2 --file "$out/logs/capture.log" --match '^SMOKE done' --job $gp > /dev/null
+	# Godot sometimes hangs at exit under weston (guide pitfall): 20 s grace after the last frame, then kill
+	timeout 20 tail --pid=$gp -f /dev/null || { hung=true; pkill -P $gp; kill $gp 2>/dev/null; }
+	wait $gp; rc=$?
+	kill "$wp" 2>/dev/null; wp=""
+	serr=$(grep -c "SHADER ERROR" "$out/logs/capture.log")
+	if [ -s "$out/capture.avi" ]; then
+		ffmpeg -y -loglevel error -i "$out/capture.avi" -c:v libx264 -preset medium -crf 26 -maxrate 8M -bufsize 16M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart "$mp4" 2> "$out/logs/ffmpeg.log"
+		rm -f "$out/capture.avi"
+		dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$mp4" 2>/dev/null || echo 0)
+	fi
+	local tmp; tmp=$(mktemp)
+	jq --argjson e "$serr" '.stages.shader.gdshader_errors = $e | if $e > 0 then .stages.shader.status = "fail" else . end' "$summary" > "$tmp" && mv "$tmp" "$summary"
+	local done; done=$(grep '^SMOKE done' "$out/logs/capture.log")
+	[ -n "$done" ] && [ -s "$mp4" ] && st=pass || st=fail
+	x=$(jq -n --argjson rc $rc --argjson h $hung --arg f "$mp4" --argjson d "${dur:-0}" --arg done "$done" \
+		--argjson b "$(stat -c %s "$mp4" 2>/dev/null || echo 0)" '{rc: $rc, hung_at_exit: $h, file: $f, duration_s: $d, bytes: $b, game: $done}')
+}
+stage_wine() {  # Windows build under Wine: headless run in a throwaway prefix (no display, no GPU)
+	local exe; exe=$(jq -r '.stages.export.builds.Windows.path // empty' "$summary")
+	if [ "$wine" = 0 ] || ! command -v wine > /dev/null || [ ! -s "$exe" ]; then st=skip; x='{"reason": "no wine or no windows build"}'; return; fi
+	local pfx; pfx=$(mktemp -d "${TMPDIR:-/tmp}/game-ci-wine.XXXX")
+	WINEPREFIX=$pfx WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" DISPLAY="" WAYLAND_DISPLAY="" SMOKE_SECONDS=3 \
+		timeout 240 wine "$exe" --headless --audio-driver Dummy > "$out/logs/wine.log" 2>&1
+	local rc=$? done; done=$(grep -a '^SMOKE done' "$out/logs/wine.log" | tr -d '\r')
+	wineserver -k 2>/dev/null; rm -rf "$pfx"
+	[ -n "$done" ] && st=pass || st=fail
+	x=$(jq -n --argjson rc $rc --arg v "$(wine --version)" --arg d "$done" '{rc: $rc, wine: $v, game: $d}')
+}
+
+ci_run import test shader perf export capture wine
+# shader status may change after capture
+jq -e '.stages.shader.status == "fail"' "$summary" > /dev/null && ci_fail=1
+[ "$keep" = 1 ] || rm -rf "$proj/build"
+ci_finish "$proj" "$(jq -n --arg g "$(godot --version 2>/dev/null)" '{godot: $g}')"

@@ -1,0 +1,9 @@
+[Unit]
+Description=Pulse after each 5-hour plan reset (every 10 min check)
+
+[Timer]
+OnCalendar=*-*-* *:02/10:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target

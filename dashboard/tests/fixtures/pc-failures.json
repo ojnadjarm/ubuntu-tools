@@ -1,0 +1,113 @@
+{
+ "since": 1792316103,
+ "errors": {
+  "crashes": "permission denied"
+ },
+ "units": [
+  {
+   "unit": "apport-autoreport.service",
+   "scope": "system",
+   "failed_now": false,
+   "count": 5,
+   "last": 1792399198,
+   "result": "exit-code",
+   "ours": true,
+   "gone": false,
+   "test_oom": false
+  },
+  {
+   "unit": "moodle45-cron.service",
+   "scope": "user",
+   "failed_now": true,
+   "count": 1,
+   "last": 1792396241,
+   "result": "exit-code",
+   "ours": false,
+   "gone": false,
+   "test_oom": false
+  },
+  {
+   "unit": "run-p337466-i4293799.scope",
+   "scope": "user",
+   "failed_now": false,
+   "count": 1,
+   "last": 1792358756,
+   "result": "oom-kill",
+   "ours": true,
+   "gone": true,
+   "test_oom": true
+  },
+  {
+   "unit": "moodle52-cron.service",
+   "scope": "user",
+   "failed_now": false,
+   "count": 33,
+   "last": 1792395018,
+   "result": "exit-code",
+   "ours": true,
+   "gone": true,
+   "test_oom": false
+  },
+  {
+   "unit": "tmux-spawn-00e52df2.scope",
+   "scope": "user",
+   "failed_now": false,
+   "count": 1,
+   "last": 1792401155,
+   "result": "resources",
+   "ours": true,
+   "gone": true,
+   "test_oom": false
+  }
+ ],
+ "agents": [
+  {
+   "agent": "ci-fix",
+   "start": 1792390000,
+   "exit": "1",
+   "log": "~/agents/ci-fix/logs/run.log"
+  }
+ ],
+ "ci": [
+  {
+   "what": "ailearning nightly",
+   "at": 1792365049,
+   "rc": "1",
+   "note": "~/agents/state/ci-fix/2026-10-19.md"
+  }
+ ],
+ "crashes": [
+  {
+   "file": "/var/crash/_usr_bin_foo.1000.crash",
+   "at": 1792380000,
+   "exe": "/usr/bin/foo"
+  }
+ ],
+ "audit": {
+  "calls": 5908,
+  "failed": 104,
+  "rate": 0.018,
+  "hidden": {
+   "bench": 1,
+   "sandbox": 0
+  }
+ },
+ "needs": [
+  {
+   "kind": "ask",
+   "t": "2026-10-19T08:00:00+00:00",
+   "text": "Pick a theme\nsecond line",
+   "id": "abc1234567"
+  }
+ ],
+ "checks": [
+  {
+   "ticket": "T473",
+   "at": 1792398280,
+   "rc": 1,
+   "runs": 2,
+   "first": 1792398000,
+   "file": "~/agent-work/evidence/T473/check.json"
+  }
+ ]
+}

@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily pc tmp sweep (03:30, outside the 00:50-01:50 CI window)
+
+[Timer]
+OnCalendar=*-*-* 03:30
+Persistent=true
+
+[Install]
+WantedBy=timers.target

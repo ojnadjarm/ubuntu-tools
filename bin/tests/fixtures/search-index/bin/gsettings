@@ -1,0 +1,9 @@
+#!/bin/sh
+# Stateful gsettings stub: the list lives in $GS_STATE; with GS_STATE unset it fails, never the real schema.
+[ -n "${GS_STATE:-}" ] || { echo 'gsettings stub: GS_STATE unset' >&2; exit 1; }
+[ "$2 $3" = 'org.freedesktop.Tracker3.Miner.Files ignored-directories' ] || { echo "gsettings stub: $2 $3" >&2; exit 1; }
+case $1 in
+  get) cat "$GS_STATE";;
+  set) printf '%s\n' "$4" >"$GS_STATE";;
+  *) exit 1;;
+esac

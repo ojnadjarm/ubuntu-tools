@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+# mv-encode: encode a render (video file or image-sequence pattern) with a named quality preset.
+set -euo pipefail
+
+usage() {
+  cat <<'U'
+usage: mv-encode <input> <output> [--preset NAME] [--crf N] [--fps N] [--loudnorm] [--target NAME] [--audio FILE]
+                 [--lut film|bleach|FILE.cube] [--burn FILE.ass|.srt] [--subs FILE.srt]
+                 [--finish film|clean|none] [--grain SIGMA] [--x265-preset NAME]
+       mv-encode --codec-args PRESET   print the preset's encoder + BT.709 tag args, one per line (for a caller's own graph)
+  input   video file, or an image sequence pattern like frames/frame_%04d.png (needs --fps)
+presets (default h264-master):
+  h264-master  libx264 slow crf 16, yuv420p, faststart  - delivery master, plays everywhere
+  h264-web     libx264 slow crf 20                       - web/social upload
+  hevc         libx265 crf 18, hvc1 tag                  - smaller master, Apple-friendly
+  hevc-10      libx265 main10 crf 16, yuv420p10le        - 10-bit master, no banding in gradients/grades
+  av1          libsvtav1 preset 5 crf 28                 - smallest web file (YouTube/Chrome/Firefox)
+  av1-10       libsvtav1 preset 5 crf 24, yuv420p10le    - 10-bit web master
+  h264-hw      h264_vaapi qp 20 (Iris Xe, iHD driver)    - fast draft/preview, ~4x libx264
+  hevc-hw      hevc_vaapi qp 22                          - fast draft, smaller
+  vp9-alpha    libvpx-vp9 yuva420p .webm                 - transparent overlay
+  hevc-hdr10   libx265 main10 crf 16, BT.2020 PQ          - HDR10: mastering-display (P3-D65 1000 nit) + MaxCLL/MaxFALL SEI
+  av1-hlg      libsvtav1 preset 5 crf 24, BT.2020 HLG     - HLG web master, same metadata as AV1 metadata OBUs
+  --crf        override the preset's CRF (QP for the VA-API presets)
+  --x265-preset  libx265 speed preset for hevc/hevc-10/hevc-hdr10 (ultrafast..placebo; default $MV_X265_PRESET or slow)
+  --loudnorm   two-pass linear loudness on the audio track via mv-mix (target web: -16 LUFS / -1.5 dBTP)
+  --target     loudness.json target web|youtube|broadcast|podcast; implies --loudnorm
+  --lut        3D LUT grade (name from the skill's luts/ or a .cube path), tetrahedral
+  --burn       burn captions in (libass; .ass from mv-captions keeps its style)
+  --subs       soft caption track (mov_text in .mp4/.mov, webvtt in .webm)
+  --finish     clean: deband flat gradients in 16-bit, then ordered dither to the output depth (kills 8-bit banding;
+               vp9-alpha keeps its alpha plane)
+               film: clean + red-shifted halation of highlights > 0.8 + luma-weighted temporal grain; none (default)
+  --grain      film grain sigma in 8-bit code values at mid-grey, fading to 0 at black and white (stays legal) (default 2; 0 = none);
+               grain is ~2 px, temporal; x264/x265 get -tune grain and a VBV cap scaled from 1080p24 (-maxrate = -bufsize:
+               h264-master 20, h264-web 8, hevc 10, hevc-10 12 Mbps); av1/av1-10 ship it as AV1 film-grain synthesis
+               (svt-av1 film-grain=50 estimates the grain, denoises it out of the coded picture, the decoder adds it back)
+every preset converts to BT.709 limited range, clamps to legal levels (limiter: Y 16-235, C 16-240; 10-bit 64-940/960)
+and tags matrix, primaries, transfer and range; an untagged YUV input is read as BT.709
+hevc-hdr10/av1-hlg read the input as BT.709 SDR, place its white at 203 nit (BT.2408) in BT.2020 PQ/HLG via zscale,
+and measure MaxCLL/MaxFALL (nit, max(R,G,B) per pixel) in a linear-light pre-pass; --finish none only
+U
+}
+
+[[ ${1:-} == -h || ${1:-} == --help ]] && { usage; exit 0; }
+codec() {   # preset name -> pf, trc, hw, v (encoder args)
+  case $1 in
+    h264-master) pf=yuv420p v=(-c:v libx264 -preset slow -crf 16 -profile:v high) ;;
+    h264-web) pf=yuv420p v=(-c:v libx264 -preset slow -crf 20 -profile:v high) ;;
+    hevc) pf=yuv420p v=(-c:v libx265 -preset "$x265" -crf 18 -tag:v hvc1 -x265-params log-level=error) ;;
+    hevc-10) pf=yuv420p10le v=(-c:v libx265 -preset "$x265" -crf 16 -profile:v main10 -tag:v hvc1 -x265-params log-level=error) ;;
+    av1) pf=yuv420p v=(-c:v libsvtav1 -preset 5 -crf 28 -svtav1-params tune=0) ;;
+    av1-10) pf=yuv420p10le v=(-c:v libsvtav1 -preset 5 -crf 24 -svtav1-params tune=0) ;;
+    h264-hw) hw=1 pf=nv12 v=(-c:v h264_vaapi -qp 20) ;;
+    hevc-hw) hw=1 pf=nv12 v=(-c:v hevc_vaapi -qp 22 -tag:v hvc1) ;;
+    vp9-alpha) pf=yuva420p v=(-c:v libvpx-vp9 -crf 24 -b:v 0 -row-mt 1) ;;
+    hevc-hdr10) pf=yuv420p10le trc=smpte2084 v=(-c:v libx265 -preset "$x265" -crf 16 -profile:v main10 -tag:v hvc1 -x265-params log-level=error) ;;
+    av1-hlg) pf=yuv420p10le trc=arib-std-b67 v=(-c:v libsvtav1 -preset 5 -crf 24 -svtav1-params tune=0) ;;
+    *) echo "mv-encode: unknown preset $1" >&2; usage; exit 2 ;;
+  esac
+}
+if [[ ${1:-} == --codec-args ]]; then
+  x265=${MV_X265_PRESET:-slow} trc="" hw=0; codec "${2:-}"
+  [[ -z $trc && $hw == 0 ]] || { echo "mv-encode: --codec-args takes an SDR software preset" >&2; exit 2; }
+  printf '%s\n' "${v[@]}" -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv; exit 0
+fi
+[[ $# -lt 2 ]] && { usage; exit 2; }
+in=$1 out=$2; shift 2
+preset=h264-master x265=${MV_X265_PRESET:-slow} crf="" fps="" trc="" loud=0 target=web audio="" hw=0 lut="" burn="" subs="" finish=none grain=2
+LUT_DIR=$(cd "$(dirname "$(readlink -f "$0")")/../luts" && pwd)
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --preset) preset=$2; shift 2 ;;
+    --crf) crf=$2; shift 2 ;;
+    --x265-preset) x265=$2; shift 2 ;;
+    --fps) fps=$2; shift 2 ;;
+    --loudnorm) loud=1; shift ;;
+    --target) loud=1 target=$2; shift 2 ;;
+    --audio) audio=$2; shift 2 ;;
+    --lut) lut=$2; shift 2 ;;
+    --burn) burn=$2; shift 2 ;;
+    --subs) subs=$2; shift 2 ;;
+    --finish) finish=$2; shift 2 ;;
+    --grain) grain=$2; shift 2 ;;
+    *) echo "mv-encode: unknown option $1" >&2; exit 2 ;;
+  esac
+done
+
+inargs=()
+if [[ $in == *%* ]]; then
+  [[ -n $fps ]] || { echo "mv-encode: image sequence needs --fps" >&2; exit 2; }
+  inargs=(-framerate "$fps" -i "$in")
+else
+  [[ -f $in ]] || { echo "mv-encode: no such file $in" >&2; exit 2; }
+  inargs=(-i "$in")
+fi
+vin=("${inargs[@]}")
+src=${audio:-$in}
+if [[ $loud == 1 && -n $(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$src" 2>/dev/null) ]]; then
+  norm=$(mktemp --suffix=.wav)
+  trap 'rm -f "$norm"' EXIT
+  [[ $in == *%* ]] && d=$src || d=$in
+  "$(dirname "$(readlink -f "$0")")/mv-mix" --out "$norm" --vo "$src" --target "$target" \
+    --duration "$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$d")" | sed 's/^mv-mix: [^ ]*/mv-encode: audio/'
+  audio=$norm
+fi
+[[ -n $audio ]] && inargs+=(-i "$audio")
+[[ -n $subs ]] && inargs+=(-i "$subs")
+[[ -n $lut && ! -f $lut ]] && lut=$LUT_DIR/$lut.cube
+[[ -z $lut || -f $lut ]] || { echo "mv-encode: no LUT $lut" >&2; exit 2; }
+vf=()
+[[ $in != *%* && $(ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt,color_space -of csv=p=0 "$in") =~ ^(yuv|nv)[^,]*(,unknown)?$ ]] &&
+  vf+=("setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709")
+[[ -n $lut ]] && vf+=("lut3d=file='$lut':interp=tetrahedral")
+[[ -n $burn ]] && vf+=("subtitles='$burn'")
+[[ $finish =~ ^(film|clean|none)$ ]] || { echo "mv-encode: --finish film|clean|none" >&2; exit 2; }
+[[ $finish == film && $preset == vp9-alpha ]] && { echo "mv-encode: --finish film drops alpha, not with vp9-alpha" >&2; exit 2; }
+alpha=0
+[[ $finish == clean && $preset == vp9-alpha && $(ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of csv=p=0 "$in") =~ ^(yuva|rgba|bgra|argb|abgr|gbrap|ya) ]] &&
+  alpha=1 vf+=("split[ac][aa];[aa]alphaextract[al];[ac]null")
+
+codec "$preset"
+[[ ${v[1]} != libx265 || $x265 =~ ^(ultrafast|superfast|veryfast|faster|fast|medium|slow|slower|veryslow|placebo)$ ]] ||
+  { echo "mv-encode: --x265-preset ultrafast..placebo" >&2; exit 2; }
+
+if [[ -n $crf ]]; then
+  [[ $crf =~ ^[0-9]+$ ]] || { echo "mv-encode: --crf N" >&2; exit 2; }
+  for i in "${!v[@]}"; do [[ ${v[i]} == -crf || ${v[i]} == -qp ]] && v[i + 1]=$crf; done
+fi
+a=(-c:a aac -b:a 192k)
+[[ $preset == vp9-alpha ]] && a=(-c:a libopus -b:a 160k)
+maps=(-map 0:v:0)
+if [[ -n $audio ]]; then
+  maps+=(-map 1:a:0)
+  maps+=(-t "$(ffprobe -v error -show_entries format=duration -of csv=p=0 "${vin[@]}")")
+else
+  maps+=(-map '0:a?')
+fi
+if [[ -n $subs ]]; then
+  maps+=(-map "$([[ -n $audio ]] && echo 2 || echo 1):s:0")
+  [[ $out == *.webm ]] && a+=(-c:s webvtt) || a+=(-c:s mov_text -metadata:s:s:0 language=eng)
+fi
+[[ $pf == *10le ]] && lo=64 hi=940 chi=960 || lo=16 hi=235 chi=240
+fmt=${pf/nv12/yuv420p}
+cs=bt709 pr=bt709 tc=bt709
+if [[ -n $trc ]]; then
+  [[ $finish == none ]] || { echo "mv-encode: $preset takes --finish none only" >&2; exit 2; }
+  lin="zscale=tin=bt709:pin=bt709:min=bt709:t=linear:p=bt2020:npl=203,format=gbrpf32le"
+  IFS=, read -r w h < <(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$in")
+  read -r cll fall < <(ffmpeg -hide_banner -loglevel error "${vin[@]}" -map 0:v:0 -vf "$(IFS=,; echo "${vf[*]+${vf[*]},}")$lin" \
+    -f rawvideo -pix_fmt gbrpf32le - | python3 -c '
+import sys, numpy as np
+n, cll, fall = int(sys.argv[1]) * int(sys.argv[2]), 0.0, 0.0
+while len(b := sys.stdin.buffer.read(n * 12)) == n * 12:
+    m = np.frombuffer(b, np.float32).reshape(3, n).max(0).clip(0, 49.26)
+    cll, fall = max(cll, float(m.max())), max(fall, float(m.mean()))
+print(round(cll * 203), round(fall * 203))' "$w" "$h")
+  echo "mv-encode: hdr $trc maxcll=$cll maxfall=$fall nit"
+  cs=bt2020nc pr=bt2020 tc=$trc
+  vf+=("$lin" "zscale=t=$tc:m=$cs:r=tv:npl=203:dither=ordered")
+  [[ ${v[1]} == libx265 ]] && v[-1]+=":hdr10=1:hdr10-opt=1:repeat-headers=1:master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1):max-cll=$cll,$fall"
+  [[ ${v[1]} == libsvtav1 ]] && v[-1]+=":mastering-display=G(0.2650,0.6900)B(0.1500,0.0600)R(0.6800,0.3200)WP(0.3127,0.3290)L(1000,0.0001):content-light=$cll,$fall"
+elif [[ $finish == none ]]; then
+  vf+=("scale=out_color_matrix=bt709:out_range=tv")
+else
+  [[ $finish == film ]] && vf+=("format=gbrp16le,split[ho][hi];[hi]lutrgb=r=max(val-52428\\,0)*1.5:g=max(val-52428\\,0)*0.5:b=max(val-52428\\,0)*0.15,gblur=sigma=20:steps=3[hb];[ho][hb]blend=all_mode=addition")
+  d="clip(65535-(val-128)*128\\,0\\,65535)"
+  vf+=("scale=out_color_matrix=bt709:out_range=tv" "format=yuv444p16le"
+    "split[do][dc];[dc]split[d1][d2];[d1]gblur=sigma=40:steps=2,split[db][db2];[d2][db2]blend=all_mode=difference,lutyuv=y=$d:u=$d:v=$d[dm];[do][db][dm]maskedmerge")
+  gs=$(awk -v g="$grain" -v k="$([[ ${v[1]} == libsvtav1 ]] && echo 1.15 || echo 1)" 'BEGIN{printf "%d", k * g / 0.21 + 0.5}')
+  w="clip(min(10*(val/256-16)/219\\,2-2*(val/256-16)/219)*65535\\,0\\,65535)"
+  [[ $finish == film && $gs -gt 0 ]] && vf+=("split=3[go][ga][gw];[ga]split[ga1][ga2];[ga2]lutyuv=y=32768:u=32768:v=32768,noise=c0s=$gs:c0f=t:c0_seed=579,gblur=sigma=1[gn];[ga1][gn]blend=all_mode=grainmerge[gg];[gw]lutyuv=y=$w[gm];[go][gg][gm]maskedmerge=planes=1")
+  vf+=("zscale=dither=ordered")
+fi
+vf+=("format=$fmt" "limiter=min=$lo:max=$hi:planes=1" "limiter=min=$lo:max=$chi:planes=6")
+[[ $alpha == 1 ]] && vf+=("null[cc];[cc][al]alphamerge")
+vf+=("format=$pf" "setparams=colorspace=$cs:color_primaries=$pr:color_trc=$tc:range=tv")
+[[ $hw == 1 ]] && vf+=(hwupload "scale_vaapi=out_color_matrix=bt709:out_range=tv")
+if [[ $finish == film && ${v[1]} == libx26[45] ]]; then
+  declare -A mbps=([h264-master]=20 [h264-web]=8 [hevc]=10 [hevc-10]=12)
+  IFS=, read -r w h r < <(ffprobe -v error -select_streams v:0 -show_entries stream=width,height,r_frame_rate -of csv=p=0 "$in")
+  k=$(awk -v m="${mbps[$preset]}" -v w="$w" -v h="$h" -v r="${fps:-$r}" 'BEGIN{n=split(r,f,"/"); printf "%d", m*1000*w*h*(n>1?f[1]/f[2]:r)/(1920*1080*24)}')
+  v+=(-tune grain -maxrate "${k}k" -bufsize "${k}k")
+fi
+[[ $finish == film && ${v[1]} == libsvtav1 && $gs -gt 0 ]] && v[-1]+=":film-grain=50:film-grain-denoise=1"
+v+=(-colorspace $cs -color_primaries $pr -color_trc $tc -color_range tv)
+v=(-vf "$(IFS=,; echo "${vf[*]}")" "${v[@]}")
+mux=()
+[[ $out == *.mp4 || $out == *.mov ]] && mux=(-movflags +faststart)
+
+[[ $hw == 1 ]] && inargs=(-vaapi_device "${MV_VAAPI_DEVICE:-/dev/dri/renderD128}" "${inargs[@]}")
+export SVT_LOG=1
+start=$(date +%s.%N)
+ffmpeg -hide_banner -loglevel error -y "${inargs[@]}" "${maps[@]}" "${v[@]}" "${a[@]}" "${mux[@]}" "$out"
+secs=$(echo "$(date +%s.%N) - $start" | bc)
+frames=$(ffprobe -v error -count_packets -select_streams v:0 -show_entries stream=nb_read_packets -of csv=p=0 "$out")
+bytes=$(stat -c %s "$out")
+printf 'mv-encode: %s preset=%s frames=%s encode_s=%.1f encode_fps=%.1f size_kb=%d kbps=%d\n' \
+  "$out" "$preset" "$frames" "$secs" "$(echo "$frames / $secs" | bc -l)" $((bytes / 1024)) \
+  "$(ffprobe -v error -show_entries format=bit_rate -of csv=p=0 "$out" | awk '{printf "%d", $1/1000}')"

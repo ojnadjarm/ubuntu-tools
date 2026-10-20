@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""mv-lut: write a house-look or shot-match 3D LUT (.cube, 33^3, sRGB in/out) for `mv-encode --lut`."""
+import json
+import subprocess
+import sys
+
+SIZE = 33
+SAMPLE_W, SAMPLE_H = 320, 180
+
+
+def smooth(x, k):
+    """Filmic S-curve around mid grey; k=0 is identity."""
+    s = x * x * (3 - 2 * x)
+    return x + (s - x) * k
+
+
+def film(r, g, b):
+    """Teal shadows, warm highlights, soft S-curve, +10% saturation."""
+    r, g, b = (smooth(c, 0.55) for c in (r, g, b))
+    y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    sh, hi = (1 - y) ** 2, y ** 2
+    r += -0.035 * sh + 0.045 * hi
+    g += 0.012 * sh + 0.012 * hi
+    b += 0.040 * sh - 0.045 * hi
+    return tuple(y + (c - y) * 1.1 for c in (r, g, b))
+
+
+def bleach(r, g, b):
+    """Bleach bypass: hard contrast, 45% saturation."""
+    r, g, b = (smooth(c, 0.9) for c in (r, g, b))
+    y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    return tuple(y + (c - y) * 0.45 for c in (r, g, b))
+
+
+LOOKS = {'film': film, 'bleach': bleach}
+USAGE = (f"usage: mv-lut {'|'.join(LOOKS)} <out.cube>\n"
+         "       mv-lut match REF.(png|mp4) SRC.(png|mp4) <out.cube> [--strength 0..1] [--sheet out.jpg]")
+
+
+def write_cube(path, title, rows):
+    """Write 33^3 RGB rows (red fastest) as a .cube file."""
+    with open(path, 'w') as f:
+        f.write(f'TITLE "{title}"\nLUT_3D_SIZE {SIZE}\n')
+        for out in rows:
+            f.write(' '.join(f'{min(1.0, max(0.0, c)):.6f}' for c in out) + '\n')
+
+
+def frame_times(path):
+    """Sample times: None for a still, else 25/50/75% of the duration."""
+    probe = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration:stream=nb_frames',
+                            '-of', 'json', path], capture_output=True, text=True)
+    if probe.returncode:
+        sys.exit(f'mv-lut: cannot read {path}')
+    info = json.loads(probe.stdout)
+    dur = float(info.get('format', {}).get('duration') or 0)
+    frames = info.get('streams', [{}])[0].get('nb_frames')
+    if dur <= 0 or frames in ('1', None) and dur < 0.1:
+        return [None]
+    return [dur * k for k in (0.25, 0.5, 0.75)]
+
+
+def frames(path):
+    """Decoded sRGB samples (N x 3, 0..1) from a still or 3 video frames."""
+    import numpy as np
+    out = []
+    for t in frame_times(path):
+        seek = [] if t is None else ['-ss', f'{t:.3f}']
+        raw = subprocess.run(['ffmpeg', '-v', 'error', *seek, '-i', path, '-frames:v', '1',
+                              '-vf', f'scale={SAMPLE_W}:{SAMPLE_H}:flags=area', '-f', 'rawvideo',
+                              '-pix_fmt', 'rgb24', '-'], capture_output=True).stdout
+        if len(raw) == SAMPLE_W * SAMPLE_H * 3:
+            out.append(np.frombuffer(raw, np.uint8).reshape(-1, 3))
+    if not out:
+        sys.exit(f'mv-lut: no frames decoded from {path}')
+    return np.concatenate(out).astype(np.float64) / 255
+
+
+def oklab(rgb):
+    """sRGB (0..1) to Oklab."""
+    import numpy as np
+    lin = np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
+    lms = lin @ np.array([[0.4122214708, 0.5363325363, 0.0514459929],
+                          [0.2119034982, 0.6806995451, 0.1073969566],
+                          [0.0883024619, 0.2817188376, 0.6299787005]]).T
+    return np.cbrt(lms) @ np.array([[0.2104542553, 0.7936177850, -0.0040720468],
+                                    [1.9779984951, -2.4285922050, 0.4505937099],
+                                    [0.0259040371, 0.7827717662, -0.8086757660]]).T
+
+
+def srgb(lab):
+    """Oklab to sRGB (0..1, gamut-clipped)."""
+    import numpy as np
+    lms = (lab @ np.array([[1, 0.3963377774, 0.2158037573],
+                           [1, -0.1055613458, -0.0638541728],
+                           [1, -0.0894841775, -1.2914855480]]).T) ** 3
+    lin = np.clip(lms @ np.array([[4.0767416621, -3.3077115913, 0.2309699292],
+                                  [-1.2684380046, 2.6097574011, -0.3413193965],
+                                  [-0.0041960771, -0.7034186147, 1.7076147010]]).T, 0, 1)
+    return np.where(lin <= 0.0031308, lin * 12.92, 1.055 * lin ** (1 / 2.4) - 0.055)
+
+
+def sqrtm(m, lo=0.0, hi=None):
+    """Symmetric matrix square root, eigenvalues clamped to [lo, hi]."""
+    import numpy as np
+    w, v = np.linalg.eigh(m)
+    return (v * np.sqrt(np.clip(w, lo, hi))) @ v.T
+
+
+def fit(ref, src):
+    """Linear Monge-Kantorovich transport in Oklab: per-channel means plus a 3x3 matrix matching covariance."""
+    import numpy as np
+    mr, ms = ref.mean(0), src.mean(0)
+    cr, cs = np.cov(ref.T) + np.eye(3) * 1e-7, np.cov(src.T) + np.eye(3) * 1e-7
+    s = sqrtm(cs)
+    s_inv = np.linalg.inv(s)
+    a = s_inv @ sqrtm(s @ cr @ s) @ s_inv
+    w, v = np.linalg.eig(a)
+    a = (v * np.clip(w.real, 0.25, 4)) @ np.linalg.inv(v)
+    return ms, mr, a.real
+
+
+def match(argv):
+    """mv-lut match: grade SRC toward REF and write the .cube (and optional contact sheet)."""
+    import numpy as np
+    pos, strength, sheet = [], 1.0, None
+    it = iter(argv)
+    for a in it:
+        if a == '--strength':
+            strength = float(next(it, 'x'))
+        elif a == '--sheet':
+            sheet = next(it, None)
+        else:
+            pos.append(a)
+    if len(pos) != 3 or not 0 <= strength <= 1 or (sheet is None and '--sheet' in argv):
+        sys.exit(USAGE)
+    ref_path, src_path, out = pos
+    ms, mr, a = fit(oklab(frames(ref_path)), oklab(frames(src_path)))
+    n = SIZE - 1
+    b, g, r = np.meshgrid(*[np.arange(SIZE) / n] * 3, indexing='ij')
+    grid = np.stack([r, g, b], -1).reshape(-1, 3)
+    lab = (oklab(grid) - ms) @ a.T + mr
+    lab[:, 0] = np.clip(lab[:, 0], 0, 1)
+    rows = grid + (srgb(lab) - grid) * strength
+    write_cube(out, 'mv match', rows.tolist())
+    print(f'mv-lut: {out} match ref={ref_path} src={src_path} strength={strength:g} size={SIZE} '
+          f'dL={mr[0] - ms[0]:+.3f} da={mr[1] - ms[1]:+.3f} db={mr[2] - ms[2]:+.3f}')
+    if sheet:
+        def seek(path):
+            t = frame_times(path)
+            t = t[len(t) // 2]
+            return [] if t is None else ['-ss', f'{t:.3f}']
+        vf = ('[0:v]scale=-2:360,setsar=1[r];[1:v]scale=-2:360,setsar=1,split[s][m0];'
+              f"[m0]lut3d=file='{out}':interp=tetrahedral[m];[r][s][m]hstack=3")
+        subprocess.run(['ffmpeg', '-v', 'error', '-y', *seek(ref_path), '-i', ref_path, *seek(src_path), '-i', src_path,
+                        '-filter_complex', vf, '-frames:v', '1', '-q:v', '3', sheet], check=True)
+        print(f'mv-lut: sheet {sheet} (ref | src | matched)')
+
+
+def main():
+    if sys.argv[1:] in (['-h'], ['--help']):
+        print(USAGE)
+        return
+    if sys.argv[1:2] == ['match']:
+        match(sys.argv[2:])
+        return
+    if len(sys.argv) != 3 or sys.argv[1] not in LOOKS:
+        sys.exit(USAGE)
+    fn, n = LOOKS[sys.argv[1]], SIZE - 1
+    write_cube(sys.argv[2], f'mv {sys.argv[1]}',
+               (fn(ri / n, gi / n, bi / n) for bi in range(SIZE) for gi in range(SIZE) for ri in range(SIZE)))
+    print(f'mv-lut: {sys.argv[2]} look={sys.argv[1]} size={SIZE}')
+
+
+main()

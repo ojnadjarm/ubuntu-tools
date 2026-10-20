@@ -1,0 +1,5 @@
+{"type":"init","session_id":"gemini-sess-0001"}
+{"type":"tool_use","name":"Bash","input":{"command":"ls -la /tmp"},"cwd":"/work/g","session_id":"gemini-sess-0001"}
+{"type":"tool_use","name":"Grep","input":{"pattern":"TODO"}}
+{"type":"tool_use" ,, malformed}
+{"type":"result","status":"success"}

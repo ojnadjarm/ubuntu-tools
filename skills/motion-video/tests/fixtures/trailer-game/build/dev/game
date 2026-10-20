@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# game (fixture stub): replays one recorded 160x90 run of a cpp-vulkan game (rec/: GAME log, audio, the 36 frames mv-trailer's draft windows pick).
+set -euo pipefail
+REC=$(cd "$(dirname "$(readlink -f "$0")")/../../rec" && pwd)
+audio="" cap=""
+while (($#)); do
+  case $1 in
+    --audio-out) audio=$2; shift 2 ;;
+    --capture-every) cap=$2; shift 2 ;;
+    --frames|--replay|--size) shift 2 ;;
+    *) shift ;;
+  esac
+done
+cat "$REC/game.log"
+[[ -z $audio ]] || ffmpeg -v error -y -threads 1 -i "$REC/game.opus" -ar 48000 -ac 2 -c:a pcm_s16le "$audio"
+[[ -z $cap ]] || cp "$REC"/cap/frame_*.png "$cap/"

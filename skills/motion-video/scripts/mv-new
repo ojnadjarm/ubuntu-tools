@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# mv-new: scaffold a motion project (promo|explainer|3d|film|trailer) from the best template, with brand.json and build.sh.
+set -euo pipefail
+SKILL_DIR=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+
+usage() {
+  cat <<'U'
+usage: mv-new <name|path> --kind promo|explainer|3d|film|trailer [--game DIR] [--brand brand.json]
+  promo      Remotion, comp Main (kinetic type, UI, Lottie in LottieCard)       render ~15 fps 1080p60
+  3d         Remotion + three.js, comp Camera3D (camera move, motion blur)      render ~6-11 fps 1080p60
+  explainer  Motion Canvas (diagrams, sequenced reveals)                        render ~18 fps 1080p60
+  film       3 Blender plates (orbit, crane, push; brand logo) cut on downbeats + Remotion alpha Title + SFX/mix,
+             film LUT, h264-web 16x9 + 9x16, mv-quality + mv-review; ./build.sh [--draft] (draft: 320x180, 3 s)
+  trailer    film whose plates are 3 replay windows (round pickups/win) of a built cpp-vulkan game (--game DIR:
+             build/dev/game + input/trailer.json), captured 1080p60, the game's audio under the music; 30 s
+  a name (a/b too) goes under ~/agent-work/motion/, a path starting with / or . is used as is; brand tokens (fonts, palette) live in <dir>/brand.json.
+  then: edit src/, optional vo.unit.json (Kokoro script), run ./build.sh -> out/<name>-16x9.mp4 + -9x16.mp4
+U
+}
+
+name="" kind="" game="" brand=$SKILL_DIR/templates/brand.json
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --kind) kind=$2; shift 2 ;;
+    --brand) brand=$2; shift 2 ;;
+    --game) game=$(readlink -f "$2"); shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "mv-new: unknown option $1" >&2; usage; exit 2 ;;
+    *) name=$1; shift ;;
+  esac
+done
+[[ -n $name && -n $kind ]] || { usage; exit 2; }
+case $kind in
+  promo) src=remotion comp=Main ;;
+  3d) src=remotion comp=Camera3D ;;
+  explainer) src=motion-canvas comp=main ;;
+  film) src=film comp=Title ;;
+  trailer) src=film comp=Title; [[ -x $game/build/dev/game ]] || { echo "mv-new: --game needs a built cpp-vulkan project (build/dev/game)" >&2; exit 2; } ;;
+  *) echo "mv-new: unknown kind $kind" >&2; usage; exit 2 ;;
+esac
+[[ -f $brand ]] || { echo "mv-new: no brand file $brand" >&2; exit 2; }
+[[ $name == /* || $name == .* ]] && dir=$(readlink -m "$name") || dir=$HOME/agent-work/motion/$name
+[[ -e $dir ]] && { echo "mv-new: $dir exists" >&2; exit 2; }
+
+mkdir -p "$(dirname "$dir")"
+cp -r "$SKILL_DIR/templates/$src" "$dir"
+rm -rf "$dir/node_modules" "$dir/out" "$dir/output"
+cp "$brand" "$dir/brand.json"
+build=$SKILL_DIR/templates/build.sh
+[[ $src == film ]] && build=$dir/build.sh
+[[ $src == film && $(jq -r '.logo // ""' "$dir/brand.json") == "" ]] && jq '.logo = "logo.svg"' "$brand" >"$dir/brand.json"
+sed -e "s/__KIND__/$kind/" -e "s/__COMP__/$comp/" -e "s/__NAME__/$(basename "$dir")/" -e "s|__GAME__|$game|" "$build" > "$dir/build.sh.new"
+mv "$dir/build.sh.new" "$dir/build.sh"
+chmod +x "$dir/build.sh"
+echo "mv-new: $kind project at $dir (template $src, comp $comp); next: cd $dir && ./build.sh"

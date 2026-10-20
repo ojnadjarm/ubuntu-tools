@@ -1,0 +1,9 @@
+shader	instr	arith	tex	branch	loop	barrier
+mesh.vert	38	9	0	0	0	0
+post.vert	17	7	0	0	0	0
+shadow.vert	11	1	0	0	0	0
+skinned.vert	101	30	0	0	0	0
+mesh.frag	274	161	6	4	2	0
+post.frag	682	486	19	19	1	0
+bloom.comp	146	66	14	5	0	0
+ibl_prefilter.comp	405	218	3	19	8	1

@@ -1,0 +1,139 @@
+# External tools the fleet calls: bin/*, its tests (bin/tests, dashboard/tests, hooks tests) and the motion-video + gamedev skill scripts. install.sh checks them; bin/tests/deps-manifest.test.sh keeps the list complete.
+# apt: Ubuntu package(s) to install, `-` when not from the Ubuntu archive (install hint in the `# hint` lines below).
+# level: required stops install.sh; advisory only disables the verbs; test is needed by the test suite; optional:media (/motion-video) and
+# optional:gamedev (/gamedev) only by those skills. A tool used in several places sits in the strongest: required > advisory > test > optional.
+# min (optional 5th field, `>= N`): lowest major version; install.sh flags an older one; install-fresh.sh --suite puts the latest N.x node in the box.
+# The test-also line names tools the suite needs whose row sits at a stronger level; `install.sh --test-deps` installs them with level test.
+# test-also: bwrap tmux column curl time node npm sudo logrotate python3:evdev python3:PIL python3:markdown python3:numpy unzip run-clang-tidy
+# gamedev-cpp (apt packages `install.sh --gamedev` adds, then vcpkg and the flip venv: the C++ template build and its run on lavapipe):
+# gamedev-cpp: cmake ninja-build gcc g++ clang mold ccache glslang-tools spirv-tools binutils git curl zip unzip tar pkg-config weston libegl-mesa0 libgl1-mesa-dri mesa-vulkan-drivers vulkan-validationlayers python3-venv python3-dev
+# hint node npx npm: node >= 22.15 (Ubuntu 24.04 apt has 18: use nvm or NodeSource); this box runs node 24 from nvm.
+# hint godot: Godot 4.7.2 from godotengine.org into ~/opt/gamedev, linked as ~/.local/bin/godot (/gamedev).
+# hint gltfpack: upstream 1.3 with BasisU in ~/opt/gamedev/gltfpack-1.3 (apt gltfpack lacks -tc).
+# hint renderdoccmd: RenderDoc 1.46 tarball into ~/opt/gamedev, linked into ~/.local/bin.
+# hint gltf_validator ktx: glTF-Validator 2.0.0-dev.3.10 and KTX-Software 4.4.2 release tarballs into ~/opt/gamedev (sha256 in ~/opt/gamedev/dl/SHA256-LOG.txt), linked into ~/.local/bin (T560).
+# hint flip: pip flip-evaluator 1.7 in ~/opt/gamedev/flip-venv (not on PATH; cpp-ci reads CPPCI_FLIP or that venv), used by the cpp-ci golden stage (T593).
+# hint tracy-capture tracy-csvexport: built from Tracy 0.14.1 (capture + csvexport) into ~/opt/gamedev, linked into ~/.local/bin (T546).
+# hint manim lizard: pipx install manim / pipx install lizard.
+# hint mv-otio: uv venv -p 3.12 ~/.local/opt/mv-otio + opentimelineio 0.18.1, otio-kdenlive-adapter 0.0.3, otio-fcpx-xml-adapter 1.0.0 (mv-otio prints the line; T646).
+# hint npm:playwright-core playwright:chromium-headless-shell: `npm install -g playwright-core`, then `playwright-core install --with-deps chromium-headless-shell` (install-fresh.sh --suite does both).
+# hint claude eye body-sandbox tailscale: the agent CLI, The Dark Eye repo, tailscale.com/install.sh.
+# tool	apt	verbs	level
+bc	bc	improve-meter.test.sh,mv-encode,mv-mix,mv-render	test
+blender	blender	asset-pipeline.sh,mv-render	optional:media
+bluetoothctl	bluez	pc-bt	advisory
+body-sandbox	-	sentinel-runaway	advisory
+bpftrace	bpftrace	pc-trace	advisory
+busctl	systemd	code-review-sandbox,pc-bt,pc-dbus,pc-doctor,pc-lid,pc-status	advisory
+bwrap	bubblewrap	code-review-sandbox	advisory
+caddy	caddy	sites.test.sh	test
+cc	gcc	godot-smoke.sh	optional:gamedev
+claude	-	agents-stop,pc-status	advisory
+cmake	cmake	new-cpp-game	optional:gamedev
+column	bsdextrautils	pc-audio,pc-bt,pc-crashes,pc-dbus,pc-docker,pc-hw,pc-journal,pc-kernel,pc-mutter,pc-net,pc-trace,pc-undo,pc-units	advisory
+curl	curl	code-review-sandbox,drop-link,moodle-keep,moodle-login-check,notify-owner,pc-docker,pc-status,sites	advisory
+dbus-run-session	dbus-daemon	pc-dbus.test.sh,pc-win.test.sh	test
+dconf	dconf-cli	baseline.sh	advisory
+dmidecode	dmidecode	pc-hw	advisory
+docker	docker.io	boot-check.sh,moodle-envs,moodle-keep,pc-docker,pc-doctor,pc-net,pc-status,sentinel-check	advisory
+eye	-	agent-preflight,plan-publish	advisory
+ffmpeg	ffmpeg	game-ci,mv-encode,mv-mix,mv-render,mv-review,test_voice.py	test
+ffprobe	ffmpeg	game-ci,mv-encode,mv-render,mv-review	optional:media
+fwupdmgr	fwupd	pc-hw	advisory
+gcc	gcc libc6-dev	orchestrator-handover.test.sh	test
+gdbus	libglib2.0-bin	boot-check.sh,lockcheck.sh,pc-mode,pc-status	advisory
+gio	libglib2.0-bin	test_delete.py	test
+git	git	agent-preflight,ailearning-ci-daily,moodle-keep,push-ready,sites	advisory
+glslang	glslang-tools	shader-check.sh	optional:gamedev
+gltf_validator	-	asset-pipeline.sh	optional:gamedev
+gltfpack	-	asset-pipeline.sh	optional:gamedev
+gnome-extensions	gnome-shell	pc-mode	advisory
+godot	-	asset-pipeline.sh,game-ci,godot-smoke.sh,godot-test.sh	optional:gamedev
+gsettings	libglib2.0-bin	lockcheck.sh,pc-mode,pc-mutter	advisory
+ip	iproute2	pc-net,pc-status	advisory
+iw	iw	pc-net	advisory
+journalctl	systemd	agent-preflight,pc-journal,pc-units,pclib.sh	advisory
+jq	jq	agent-exec,agent-run,agents-stop,orchestrator-pulse,pc-audio,pc-bench,pc-bt,pc-crashes,pc-dbus,pc-docker,pc-doctor,pc-explain,pc-hw,pc-idle,pc-input,pc-io,pc-journal,pc-kernel,pc-lid,pc-mutter,pc-need,pc-net,pc-power,pc-status,pc-thermal,pc-trace,pc-undo,pc-units,pcbench-weekly,pclib.sh,sentinel-check,wait-for	required
+killall	psmisc	pc-selftest	advisory
+ktx	-	asset-pipeline.sh	optional:gamedev
+lizard	-	qa-metrics.sh	test
+localsearch	localsearch	pc-search-index	advisory
+loginctl	systemd	boot-check.sh,pc-status	advisory
+logrotate	logrotate	moodle-keep	advisory
+lspci	pciutils	pc-hw	advisory
+lsusb	usbutils	pc-hw	advisory
+manim	-	motion-video	optional:media
+melt	melt	mv-otio.test.sh	optional:media
+modinfo	kmod	pc-kernel	advisory
+needrestart	needrestart	maintenance-run	advisory
+nethogs	nethogs	pc-net	advisory
+nft	nftables	pc-net	advisory
+nmcli	network-manager	pc-net,pc-status	advisory
+nm-online	network-manager	orchestrator-boot.test.sh	test
+node	nodejs	ailearning-ci-daily,improve-meter,resp-check	advisory	>= 22
+notify-send	libnotify-bin	pc-notify	advisory
+npm	npm	ailearning-ci-daily	advisory
+npx	npm	mv-render	optional:media
+npm:playwright-core	-	test_sites_header.js	test
+offcputime-bpfcc	bpfcc-tools	pc-trace	advisory
+pactl	pulseaudio-utils	agent-preflight,pc-audio,pc-bt,pc-doctor,pc-spotify	advisory
+perf	linux-perf	pc-trace	advisory
+ping	iputils-ping	pc-status	advisory
+playwright:chromium-headless-shell	-	test_sites_header.js	test
+playerctl	playerctl	pc-spotify,pc-status	advisory
+powerprofilesctl	power-profiles-daemon	pc-power,pc-status,power-profile-auto	advisory
+pw-dump	pipewire-bin	pc-audio,pc-doctor	advisory
+pw-metadata	pipewire-bin	agent-preflight,pc-audio,sentinel-check	advisory
+pw-top	pipewire-bin	pc-audio	advisory
+python3	python3	agents-status,ci-autofix,code-review-sandbox,ctxrot,drop-link,env.sh,harness,orchestrator-pulse,pc-a11y-click,pc-bt,pc-doctor,pc-find,pc-input,pc-io,pc-need,pc-see,pc-selftest,pc-shot,pc-spotify,pc-top,pc-tree,pc-type,pulse-5h-reset,push-ready	required
+python3:PIL	python3-pil	ocr_find.py,pc-shot	advisory
+python3:bcc	python3-bpfcc	pc-doctor	advisory
+python3:evdev	python3-evdev	pc_input.py	advisory
+python3:gi	python3-gi gir1.2-atspi-2.0	a11y_tree.py,pc-win,pc_dbus.py,pc_lid.py,portal_shot.py,rd_type.py	advisory
+python3:markdown	python3-markdown	plan-publish	advisory
+python3:numpy	python3-numpy	ocr_find.py	advisory
+python3:pytest	python3-pytest	run.sh	test
+renderdoccmd	-	godot-smoke.sh	optional:gamedev
+resolvectl	systemd-resolved	pc-net,pc-status	advisory
+rsync	rsync	ailearning-ci-daily	advisory
+run-clang-tidy	clang-tidy	cpp-tidy	optional:gamedev
+sensors	lm-sensors	pc-hw,pc-status,pc-thermal	advisory
+shellcheck	shellcheck	qa-metrics.sh	test
+shutdown	systemd	maintenance-run	advisory
+smartctl	smartmontools	pc-hw,pc-io,pc-status	advisory
+snap	snapd	machine-inventory	advisory
+spirv-cross	spirv-cross	shader-check.sh	optional:gamedev
+spirv-val	spirv-tools	shader-check.sh	optional:gamedev
+ss	iproute2	pc-net	advisory
+ssh-add	openssh-client	code-review-sandbox	advisory
+strace	strace	pc-bench	advisory
+sudo	sudo	maintenance-run,pc-doctor,pc-status,pc_input.py,sentinel-check,sentinel-runaway	advisory
+systemctl	systemd	agent-disable,agent-enable,agent-now,agent-preflight,agents-start,agents-status,agents-stop,code-review-sandbox,maintenance-run,orchestrator-handover,orchestrator-pulse,pc-crashes,pc-doctor,pc-kernel,pc-lid,pc-search-index,pc-status,pc-units,pclib.sh,sentinel-check,sentinel-runaway,sites	required
+systemd-analyze	systemd	agent-enable	advisory
+systemd-run	systemd	agent-verify,code-review-sandbox,orchestrator-handover	advisory
+tailscale	-	moodle-envs,pc-doctor,pc-net,pc-status,sentinel-check	advisory
+tesseract	tesseract-ocr	ocr_find.py	advisory
+time	time	pc-bench	advisory
+tinysparql	tinysparql	pc-search-index	advisory
+tmux	tmux	orchestrator-pulse,pc-status	advisory
+turbostat	linux-tools-common	pc-power	advisory
+ufw	ufw	pc-net	advisory
+unzip	unzip	cc0-fetch.sh,mv-assets	optional:media
+upower	upower	pc-status	advisory
+vulkaninfo	vulkan-tools	gamedev	optional:gamedev
+weston	weston	cpp-vk-run.sh,game-ci,godot-smoke.sh	optional:gamedev
+wine	wine	game-ci	optional:gamedev
+wl-copy	wl-clipboard	pc-clip	advisory
+wl-paste	wl-clipboard	a11y_tree.py	advisory
+wpctl	wireplumber	pc-audio	advisory
+xdg-open	xdg-utils	spotify_api.py	advisory
+xrandr	x11-xserver-utils	a11y_tree.py,env.sh,pc-mutter,pc-win	advisory
+ydotool	ydotool	env.sh,pc-click,pc-drag,pc-key,pc-move,pc-scroll,rd_type.py	advisory
+ydotoold	ydotool	pc-doctor,pc-status	advisory
+zip	zip	gamedev-tools.test.sh	test
+tracy-capture	-	cpp-ci	optional:gamedev
+tracy-csvexport	-	cpp-ci	optional:gamedev
+addr2line	binutils	cpp-ci	optional:gamedev
+ccache	ccache	cpp-ci	optional:gamedev
+clang-tidy	clang-tidy	cpp-tidy	optional:gamedev
+readelf	binutils	cpp-ci	optional:gamedev

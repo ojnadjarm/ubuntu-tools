@@ -1,0 +1,248 @@
+#!/usr/bin/env python3
+"""mv-quality: score what an encode did to the picture - VMAF, 1 % low, worst second, PSNR-Y, SSIM against the master.
+
+  mv-quality REF ENC [--json] [--min-vmaf 93] [--sheet FILE.jpg] [--subsample N]
+  mv-quality --search REF --preset NAME [--target 95] [--json]
+
+ENC is scaled to the REF size, frame rate, matrix and range (an untagged stream is read as BT.709); runs at nice 10, vmaf on nproc/4 threads (less under load); both go to the Netflix vmaf CLI as y4m pipes.
+--subsample N scores every Nth frame (vmaf --subsample); default MV_VMAF_SUBSAMPLE, else auto: 1 up to 600 frames, else ceil(frames/600).
+--search bisects the mv-encode preset's CRF (mv-encode --crf; QP for VA-API) in 5 encodes and prints the highest one meeting --target.
+Exit 0 pass, 1 below --min-vmaf (or --target not met), 2 error.
+"""
+import argparse
+import json
+import math
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+
+import numpy as np
+
+from mvlib import MvError, probe
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+VMAF = os.environ.get('MV_VMAF', os.path.expanduser('~/.local/opt/mv-quality/vmaf'))
+STEPS = 5
+
+
+def threads():
+    """vmaf threads: MV_VMAF_THREADS, else nproc/4 shrunk by the 1-min load, at least 1."""
+    if os.environ.get('MV_VMAF_THREADS'):
+        return int(os.environ['MV_VMAF_THREADS'])
+    n = os.cpu_count()
+    return max(1, min(n // 4, int(n - os.getloadavg()[0])))
+
+
+THREADS = threads()
+SAMPLED = 600
+
+
+def subsample(arg, ref):
+    """Frame step: --subsample, else MV_VMAF_SUBSAMPLE, else 1 up to SAMPLED frames and ceil(frames/SAMPLED) above."""
+    n = arg or os.environ.get('MV_VMAF_SUBSAMPLE', 'auto')
+    if str(n) != 'auto':
+        return max(1, int(n))
+    return max(1, math.ceil(round(ref['duration'] * ref['rate']) / SAMPLED))
+
+
+def die(msg):
+    """Print to stderr and exit 2."""
+    print(msg, file=sys.stderr)
+    sys.exit(2)
+
+
+def chain(ref, scaled, src):
+    """Filter chain that puts stream src on the reference grid: 709 tag if untagged, frame rate, size, matrix, range, pixel format."""
+    tag = 'setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709,' if src['untagged'] else ''
+    head = tag + (f"fps={ref['fps']},scale={ref['width']}:{ref['height']}:flags=bicubic:out_color_matrix={ref['matrix']}:"
+            f"out_range={ref['range']}," if scaled else '')
+    return f"{head}format={ref['pix']}"
+
+
+def measure(ref_path, enc_path, ref, enc, step):
+    """Every step-th frame's frameNum and vmaf/psnr_y/float_ssim from the vmaf CLI fed by two ffmpeg y4m pipes."""
+    with tempfile.TemporaryDirectory(prefix='mv-quality-') as tmp:
+        fr, fd, out = (os.path.join(tmp, n) for n in ('r.y4m', 'd.y4m', 'o.json'))
+        os.mkfifo(fr)
+        os.mkfifo(fd)
+        feed = lambda src, dst, scaled, info: subprocess.Popen(
+            ['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-map', '0:v:0',
+             '-vf', chain(ref, scaled, info), '-f', 'yuv4mpegpipe', '-strict', '-1', dst])
+        p = [feed(ref_path, fr, False, ref), feed(enc_path, fd, True, enc)]
+        model = 'vmaf_4k_v0.6.1' if ref['height'] >= 2160 else 'vmaf_v0.6.1'
+        r = subprocess.run([VMAF, '-r', fr, '-d', fd, '-m', f'version={model}', '--feature', 'psnr',
+                            '--feature', 'float_ssim', '--threads', str(THREADS), '--subsample', str(step), '-q', '--json', '-o', out],
+                           capture_output=True, text=True)
+        for q in p:
+            q.kill() if r.returncode else q.wait()
+        if r.returncode or not os.path.exists(out):
+            die(f'mv-quality: vmaf failed\n{r.stderr[-2000:]}')
+        return [dict(f['metrics'], n=f['frameNum']) for f in json.load(open(out))['frames']], model
+
+
+def summarise(frames, rate):
+    """Mean VMAF, 1st-percentile VMAF, worst whole second, mean PSNR-Y and SSIM over the scored frames."""
+    v = np.array([f['vmaf'] for f in frames])
+    sec = (np.array([f['n'] for f in frames]) // rate).astype(int)
+    per_sec = [float(v[sec == s].mean()) for s in np.unique(sec)]
+    worst = int(np.argmin(per_sec))
+    return {'frames': len(v), 'vmaf': round(float(v.mean()), 3),
+            'vmaf_1pct_low': round(float(np.percentile(v, 1)), 3),
+            'min_second': {'t': worst, 'vmaf': round(per_sec[worst], 3)},
+            'psnr_y': round(float(np.mean([f['psnr_y'] for f in frames])), 3),
+            'ssim': round(float(np.mean([f['float_ssim'] for f in frames])), 5),
+            'per_second': [round(x, 2) for x in per_sec]}, v
+
+
+def worst_frames(v, num, rate, k=4):
+    """Up to k (frame number, vmaf) of the lowest-VMAF scored frames, at least one second apart."""
+    out = []
+    for i in np.argsort(v):
+        if all(abs(num[i] - j) >= rate for j, _ in out):
+            out.append((int(num[i]), float(v[i])))
+        if len(out) == k:
+            break
+    return sorted(out)
+
+
+def grab(path, ref, idx, scaled, src):
+    """The listed frames of a stream on the reference grid, as an (n, h, w, 3) uint8 array."""
+    sel = '+'.join(f'eq(n\\,{i})' for i in idx)
+    r = subprocess.run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-i', path, '-map', '0:v:0',
+                        '-vf', f"{chain(ref, scaled, src)},select={sel},format=rgb24", '-fps_mode', 'passthrough',
+                        '-f', 'rawvideo', '-'], capture_output=True)
+    if r.returncode:
+        die(f'mv-quality: frame grab failed\n{r.stderr.decode()[-2000:]}')
+    return np.frombuffer(r.stdout, np.uint8).reshape(-1, ref['height'], ref['width'], 3)
+
+
+def sheet(ref_path, enc_path, ref, enc, v, num, path):
+    """One jpg: per worst frame, the REF|ENC crop (1/4 size, shown 2x) around the block that changed most."""
+    worst = worst_frames(v, num, ref['rate'])
+    idx = [i for i, _ in worst]
+    a, b = grab(ref_path, ref, idx, False, ref), grab(enc_path, ref, idx, True, enc)
+    cw, ch, blk = ref['width'] // 4 & ~1, ref['height'] // 4 & ~1, 32
+    rows, labels = [], []
+    for n, (i, vi) in enumerate(worst):
+        d = np.abs(a[n].astype(np.int16) - b[n]).mean(axis=2)
+        hb, wb = d.shape[0] // blk, d.shape[1] // blk
+        by, bx = np.unravel_index(d[:hb * blk, :wb * blk].reshape(hb, blk, wb, blk).mean(axis=(1, 3)).argmax(), (hb, wb))
+        y = int(min(max(by * blk + blk // 2 - ch // 2, 0), ref['height'] - ch))
+        x = int(min(max(bx * blk + blk // 2 - cw // 2, 0), ref['width'] - cw))
+        pair = [np.repeat(np.repeat(s[n, y:y + ch, x:x + cw], 2, 0), 2, 1) for s in (a, b)]
+        gap = np.full((2 * ch, 8, 3), 32, np.uint8)
+        rows += [np.hstack([pair[0], gap, pair[1]]), np.full((8, 4 * cw + 8, 3), 32, np.uint8)]
+        labels.append((n * (2 * ch + 8), f'{i / ref["rate"]:.2f}s frame {i} vmaf {vi:.1f} crop {x},{y}'))
+    img = np.vstack(rows[:-1])
+    txt = ','.join(f"drawtext=text='REF {t}':x=8:y={y0 + 8}:fontsize=24:fontcolor=white:box=1:boxcolor=black@0.6,"
+                   f"drawtext=text='ENC':x={2 * cw + 16}:y={y0 + 8}:fontsize=24:fontcolor=white:box=1:boxcolor=black@0.6"
+                   for y0, t in labels)
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    r = subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24',
+                        '-s', f'{img.shape[1]}x{img.shape[0]}', '-i', '-', '-vf', txt, '-frames:v', '1', '-q:v', '3', path],
+                       input=img.tobytes(), capture_output=True)
+    if r.returncode:
+        die(f'mv-quality: sheet failed\n{r.stderr.decode()[-2000:]}')
+
+
+def score(ref_path, enc_path, sheet_path=None, step=None):
+    """Full report for one REF/ENC pair."""
+    for p in (ref_path, enc_path):
+        if not os.path.isfile(p):
+            die(f'mv-quality: no such file {p}')
+    try:
+        ref, enc = probe(ref_path), probe(enc_path)
+    except MvError as e:
+        die(f'mv-quality: {e}')
+    step = subsample(step, ref)
+    t0 = time.monotonic()
+    frames, model = measure(ref_path, enc_path, ref, enc, step)
+    rep, v = summarise(frames, ref['rate'])
+    rep.update({'subsample': step, 'ref': ref_path, 'enc': enc_path, 'model': model,
+                'secs': round(time.monotonic() - t0, 1)})
+    if sheet_path:
+        sheet(ref_path, enc_path, ref, enc, v, [f['n'] for f in frames], sheet_path)
+        rep['sheet'] = sheet_path
+    return rep
+
+
+def search(ref_path, preset, target):
+    """Integer bisection of the CRF in STEPS encodes; the highest tested CRF whose VMAF meets target."""
+    lo, hi = 10, 63 if preset.startswith(('av1', 'vp9')) else 51
+    ext = '.webm' if preset == 'vp9-alpha' else '.mp4'
+    steps, best = [], None
+    with tempfile.TemporaryDirectory(prefix='mv-quality-search-') as tmp:
+        for _ in range(STEPS):
+            if hi - lo < 2:
+                break
+            c = (lo + hi) // 2
+            out = os.path.join(tmp, f'crf{c}{ext}')
+            t0 = time.monotonic()
+            r = subprocess.run([os.path.join(HERE, 'mv-encode'), ref_path, out, '--preset', preset, '--crf', str(c)],
+                               capture_output=True, text=True)
+            if r.returncode:
+                die(f'mv-quality: mv-encode failed at crf {c}\n{r.stderr[-2000:]}')
+            rep = score(ref_path, out)
+            st = {'crf': c, 'vmaf': rep['vmaf'], 'bytes': os.path.getsize(out), 'secs': round(time.monotonic() - t0, 1)}
+            steps.append(st)
+            print(f"mv-quality: crf {c} vmaf {st['vmaf']:.2f} {st['bytes'] / 1e6:.2f} MB {st['secs']} s", file=sys.stderr)
+            if st['vmaf'] >= target:
+                lo, best = c, st
+            else:
+                hi = c
+            os.remove(out)
+    return {'ref': ref_path, 'preset': preset, 'target': target, 'best': best, 'steps': steps}
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('ref', nargs='?', help='master / reference')
+    ap.add_argument('enc', nargs='?', help='delivery encode')
+    ap.add_argument('--json', action='store_true', help='print the full result as JSON')
+    ap.add_argument('--min-vmaf', type=float, default=93.0, help='exit 1 when mean VMAF is below this (default 93)')
+    ap.add_argument('--sheet', help='write a jpg of REF|ENC crops at the worst frames')
+    ap.add_argument('--subsample', type=int, metavar='N', help='score every Nth frame (default MV_VMAF_SUBSAMPLE or auto)')
+    ap.add_argument('--search', metavar='REF', help='bisect the CRF of --preset on REF for --target')
+    ap.add_argument('--preset', help='mv-encode preset for --search')
+    ap.add_argument('--target', type=float, default=95.0, help='VMAF target for --search (default 95)')
+    a = ap.parse_args()
+    os.nice(10)
+    if not os.access(VMAF, os.X_OK):
+        die(f'mv-quality: no vmaf CLI at {VMAF} (Netflix vmaf release binary; set MV_VMAF)')
+
+    if a.search:
+        if not a.preset:
+            die('mv-quality: --search needs --preset NAME')
+        if not os.path.isfile(a.search):
+            die(f'mv-quality: no such file {a.search}')
+        rep = search(a.search, a.preset, a.target)
+        b = rep['best']
+        if a.json:
+            print(json.dumps(rep, indent=1))
+        elif b:
+            print(f"mv-quality: {a.preset} crf {b['crf']} vmaf {b['vmaf']:.2f} >= {a.target:g}, "
+                  f"{b['bytes']} B ({b['bytes'] / 1e6:.2f} MB), {len(rep['steps'])} encodes")
+        else:
+            print(f"mv-quality: {a.preset} no tested crf reaches vmaf {a.target:g} "
+                  f"(lowest tried {min(s['crf'] for s in rep['steps'])})")
+        sys.exit(0 if b else 1)
+
+    if not (a.ref and a.enc):
+        ap.print_usage(sys.stderr)
+        sys.exit(2)
+    rep = score(a.ref, a.enc, a.sheet, a.subsample)
+    rep['min_vmaf'] = a.min_vmaf
+    if a.json:
+        print(json.dumps(rep, indent=1))
+    else:
+        print(f"vmaf {rep['vmaf']:.2f} | 1% low {rep['vmaf_1pct_low']:.2f} | worst second {rep['min_second']['t']} s "
+              f"{rep['min_second']['vmaf']:.2f} | psnr-y {rep['psnr_y']:.2f} dB | ssim {rep['ssim']:.4f} | "
+              f"{rep['frames']} frames (every {rep['subsample']}) {rep['secs']} s" + (f" | sheet {rep['sheet']}" if a.sheet else ''))
+    sys.exit(1 if rep['vmaf'] < a.min_vmaf else 0)
+
+
+if __name__ == '__main__':
+    main()

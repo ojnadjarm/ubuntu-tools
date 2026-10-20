@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# heavy — run a render, build or suite on idle CPU weight in fleet-heavy.slice so the owner's work wins the CPU (T775).
+set -uo pipefail
+LOG="${HEAVY_LOG:-$(dirname "$(readlink -f "$0")")/../log/heavy.jsonl}"
+
+usage() {
+  cat <<'EOF'
+usage: heavy run [--ticket T<n>] -- <cmd> [args...]
+  Runs <cmd> as a transient scope in fleet-heavy.slice (CPUWeight=idle, IOWeight=10, nice 19) with this
+  cwd and env; exits with <cmd>'s code. Without a user bus: nice -n 19 ionice -c3, said on stderr.
+  Last line (stderr): heavy: <s> wall, <s> cpu (scope|nice), ticket T<n>; one row in log/heavy.jsonl.
+usage: heavy at <OnCalendar> --ticket T<n> [--desc TEXT] [--apply] -- <cmd> [args...]
+       heavy at --list | --cancel T<n>
+  Schedules `heavy run --ticket T<n> -- <cmd>` as heavy-T<n>.{timer,service} in ~/.config/systemd/user
+  (Persistent=true: survives a reboot, a missed run fires on wake); the run removes both units after.
+  Without --apply prints `would: ...`. --list: ticket, next elapse, persistent|transient, cmd.
+EOF
+}
+
+UNITDIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+TRANSDIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/systemd/transient"
+SELF=$(readlink -f "$0")
+
+# sd_quote — one ExecStart argument in double quotes with systemd's escapes.
+sd_quote() { local s=${1//\\/\\\\}; s=${s//\"/\\\"}; s=${s//%/%%}; s=${s//\$/\$\$}; printf '"%s"' "$s"; }
+
+at_list() {
+  local f u kind next cmd
+  for f in "$UNITDIR"/heavy-T*.timer "$TRANSDIR"/heavy-T*.timer; do
+    [ -e "$f" ] || continue
+    u=$(basename "$f" .timer)
+    case $f in "$TRANSDIR"/*) kind=transient;; *) kind=persistent;; esac
+    next=$(systemctl --user show -P NextElapseUSecRealtime --timestamp=unix "$u.timer" 2>/dev/null)
+    if [[ $next == @* ]]; then next=$(date -d "$next" '+%m-%d %H:%M'); else next=-; fi
+    cmd=$(grep '^ExecStart=.' "${f%.timer}.service" 2>/dev/null | tail -1); cmd=${cmd#ExecStart=}
+    [ "$kind" = persistent ] && cmd=${cmd#* -- }
+    printf '%-6s %-11s %-10s %s\n' "${u#heavy-}" "$next" "$kind" "$cmd"
+  done
+}
+
+at_cancel() {
+  local u=heavy-$1
+  [ -e "$UNITDIR/$u.timer" ] || [ -e "$UNITDIR/$u.service" ] || { echo "heavy: no $u units in $UNITDIR" >&2; return 1; }
+  systemctl --user disable --now --no-block "$u.timer" >/dev/null 2>&1
+  rm -f "$UNITDIR/$u.timer" "$UNITDIR/$u.service"
+  systemctl --user daemon-reload
+  echo "heavy: cancelled $u (timer stopped, unit files removed)"
+}
+
+at_main() {
+  local when= ticket= desc= apply=0 cancel= list=0 a u next
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --list) list=1; shift;;
+      --cancel|--ticket|--desc) [ $# -ge 2 ] || { usage >&2; return 2; }
+        case $1 in --cancel) cancel=$2;; --ticket) ticket=$2;; --desc) desc=$2;; esac; shift 2;;
+      --apply) apply=1; shift;;
+      --) shift; break;;
+      -*) usage >&2; return 2;;
+      *) [ -z "$when" ] || { usage >&2; return 2; }; when=$1; shift;;
+    esac
+  done
+  [ "$list" = 1 ] && { at_list; return; }
+  if [ -n "$cancel" ]; then
+    [[ $cancel =~ ^T[0-9]+$ ]] || { usage >&2; return 2; }
+    at_cancel "$cancel"; return
+  fi
+  [[ $ticket =~ ^T[0-9]+$ ]] && [ -n "$when" ] && [ $# -gt 0 ] || { usage >&2; return 2; }
+  systemd-analyze calendar "$when" >/dev/null 2>&1 || { echo "heavy: bad OnCalendar: $when" >&2; return 2; }
+  [[ "$when$desc$*" != *$'\n'* ]] || { echo "heavy: newline in an argument" >&2; return 2; }
+  u=heavy-$ticket
+  if [ "$apply" = 0 ]; then echo "would: $u.timer $when -> $*"; return 0; fi
+  for a in "$UNITDIR/$u" "$TRANSDIR/$u"; do
+    [ ! -e "$a.timer" ] && [ ! -e "$a.service" ] || { echo "heavy: $a.timer exists; cancel or stop it first" >&2; return 1; }
+  done
+  desc=${desc:-heavy $ticket: $*}; desc=${desc//%/%%}
+  local exec="${SELF//%/%%} run --ticket $ticket --"
+  for a in "$@"; do exec+=" $(sd_quote "$a")"; done
+  mkdir -p "$UNITDIR"
+  printf '[Unit]\nDescription=%s\n\n[Service]\nExecStart=%s\nExecStopPost=-%s at --cancel %s\n' \
+    "$desc" "$exec" "${SELF//%/%%}" "$ticket" >"$UNITDIR/$u.service"
+  printf '[Unit]\nDescription=%s\n\n[Timer]\nOnCalendar=%s\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n' \
+    "$desc" "$when" >"$UNITDIR/$u.timer"
+  if ! { systemctl --user daemon-reload && systemctl --user enable --now "$u.timer"; } >/dev/null 2>&1; then
+    rm -f "$UNITDIR/$u.timer" "$UNITDIR/$u.service"; systemctl --user daemon-reload >/dev/null 2>&1
+    echo "heavy: enabling $u.timer failed; unit files removed" >&2; return 1
+  fi
+  next=$(at_list | awk -v t="$ticket" '$1==t && $4=="persistent" {print $2" "$3}')
+  echo "heavy: $u.timer $when (next ${next:--}) -> $*"
+  echo "rollback: heavy at --cancel $ticket"
+}
+
+case "${1:-}" in
+  run) shift;;
+  at) shift; at_main "$@"; exit $?;;
+  -h|--help) usage; exit 0;;
+  *) usage >&2; exit 2;;
+esac
+TICKET=-
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --ticket) [ $# -ge 2 ] || { usage >&2; exit 2; }; TICKET=$2; shift 2;;
+    --) shift; break;;
+    *) usage >&2; exit 2;;
+  esac
+done
+[ $# -gt 0 ] || { usage >&2; exit 2; }
+
+if systemd-run --user --scope -q true >/dev/null 2>&1; then
+  MODE=scope
+  PRE=(systemd-run --user --scope -q --expand-environment=no --slice=fleet-heavy.slice
+       -p CPUWeight=idle -p IOWeight=10 --nice=19 --)
+else
+  MODE="nice"
+  PRE=(nice -n 19 ionice -c3)
+  echo "heavy: no user bus, falling back to nice -n 19 ionice -c3" >&2
+fi
+
+# cpu_s — user+sys seconds of this shell's waited-for children (cutime+cstime in /proc/$$/stat).
+cpu_s() { sed 's/.*) //' "/proc/$$/stat" | LC_ALL=C awk -v hz="$HZ" '{printf "%.2f", ($14+$15)/hz}'; }
+HZ=$(getconf CLK_TCK)
+c0=$(cpu_s); t0=${EPOCHREALTIME/,/.}
+"${PRE[@]}" "$@"; rc=$?
+t1=${EPOCHREALTIME/,/.}; c1=$(cpu_s)
+WALL=$(LC_ALL=C awk -v a="$t0" -v b="$t1" 'BEGIN{printf "%.2f", b-a}')
+CPU=$(LC_ALL=C awk -v a="$c0" -v b="$c1" 'BEGIN{printf "%.2f", b-a}')
+
+mkdir -p "$(dirname "$LOG")"
+jq -nc --arg ts "$(date -Is)" --arg ticket "$TICKET" --arg mode "$MODE" --arg cwd "$PWD" \
+  --argjson rc "$rc" --argjson wall "$WALL" --argjson cpu "$CPU" --args \
+  '{ts:$ts, ticket:$ticket, mode:$mode, cwd:$cwd, cmd:$ARGS.positional, rc:$rc, wall_s:$wall, cpu_s:$cpu}' -- "$@" >>"$LOG"
+echo "heavy: ${WALL}s wall, ${CPU}s cpu (${MODE}), ticket ${TICKET}" >&2
+exit "$rc"

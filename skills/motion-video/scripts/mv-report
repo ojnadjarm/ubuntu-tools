@@ -1,0 +1,356 @@
+#!/usr/bin/env python3
+"""mv-report: one self-contained HTML review page per cut in OUTDIR - checks (FAIL first), loudness, flash and VMAF lanes with cut and cue marks on one timecode axis, sheet thumbnails, build step times and CPU per step."""
+import argparse
+import base64
+import glob
+import html
+import json
+import math
+import os
+import string
+import sys
+
+import mvlib
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+TEMPLATE = os.path.join(HERE, '..', 'templates', 'report.html')
+LOUDNESS = os.path.join(HERE, '..', 'loudness.json')
+SHEET_MARGIN = SHEET_PAD = 4
+LUFS_FLOOR = -60
+FLASH_LIMIT = 3
+ABSORBS = {'composite': ('encode_', 'master_')}
+GREW_RATIO, GREW_S = 1.15, 30
+esc = html.escape
+
+
+def load(path):
+    """Parsed JSON at path, or None when the file is absent or unreadable."""
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def first(*paths):
+    """(path, data) of the first readable JSON file among paths, or (None, None)."""
+    for p in paths:
+        if p and (d := load(p)) is not None:
+            return p, d
+    return None, None
+
+
+def tc(t, d):
+    """Timecode m:ss, with tenths when the cut is under 10 s."""
+    return f'{int(t // 60)}:{t % 60:04.1f}' if d < 10 and t != int(t) else f'{int(t // 60)}:{int(t % 60):02d}'
+
+
+def cue_times(c):
+    """(name, s) marks of a Kokoro cues.json (clips.*.marks) or an mv-sfx cues file (events[].t)."""
+    if isinstance(c.get('clips'), dict):
+        return sorted(((n, float(t)) for clip in c['clips'].values() for n, t in (clip.get('marks') or {}).items()), key=lambda x: x[1])
+    return [(e.get('kind', 'cue'), float(e['t'])) for e in c.get('events', []) if 't' in e]
+
+
+def cut_times(b):
+    """Cut points (s) from build.json: film kind keeps them in cuts.cuts."""
+    c = (b or {}).get('cuts')
+    c = c.get('cuts') if isinstance(c, dict) else c
+    return [float(x) for x in c] if isinstance(c, list) else []
+
+
+def checks(rv, q, b, tag, min_vmaf):
+    """[(verdict, source, check, value)] rows, FAIL first."""
+    rows = []
+    if rv:
+        fails = rv.get('fails', [])
+        hit = lambda *p: next((f for f in fails if f.startswith(p)), None)
+        pse, lv = rv.get('pse'), rv.get('levels', {})
+        add = lambda pre, what, val: rows.append(('FAIL' if (f := hit(*pre)) else 'PASS', 'review', what, f or val))
+        add(('loudness', 'no audio'), 'Loudness', f"{rv.get('lufs')} LUFS, LRA {rv.get('lra')} LU")
+        add(('true peak',), 'True peak', f"{rv.get('true_peak')} dBTP")
+        if pse:
+            add(('flash', 'red flash'), 'Flashes', f"max {pse['general_max']}/s, red {pse['red_max']}/s (limit {FLASH_LIMIT})")
+        add(('levels',), 'Legal levels', f"Y {lv.get('ymin')}-{lv.get('ymax')}, brng {lv.get('brng_max')}")
+        add(('black',), 'Black', f"{len(rv.get('black', []))} stretches")
+        add(('frozen',), 'Frozen', f"{len(rv.get('frozen', []))} stretches")
+        add(('colour',), 'Colour tags', '/'.join(rv.get('color', {}).values()))
+        if h := rv.get('hdr'):
+            add(('hdr',), 'HDR', f"{h['kind'].upper()}, mastering {h['mastering_min']}-{h['mastering_max']} nit, "
+                                 f"MaxCLL {h['maxcll']}, MaxFALL {h['maxfall']}")
+    if q:
+        rows.append(('FAIL' if q['vmaf'] < min_vmaf else 'PASS', 'quality', 'VMAF',
+                     f"mean {q['vmaf']} (floor {min_vmaf}), 1 % low {q.get('vmaf_1pct_low')}, worst second "
+                     f"{q.get('min_second', {}).get('t')} s at {q.get('min_second', {}).get('vmaf')}"))
+        rows.append(('INFO', 'quality', 'PSNR-Y / SSIM', f"{q.get('psnr_y')} dB / {q.get('ssim')}"))
+    if b:
+        why = b.get('fails') if 'fails' in b else (b.get(tag) or {}).get('reasons', [])
+        ok = b.get('review', (b.get(tag) or {}).get('review'))
+        if ok:
+            rows.append((ok, 'build', 'Build review', '; '.join(why) or 'every aspect passed'))
+    order = {'FAIL': 0, 'PASS': 1, 'INFO': 2}
+    return sorted(rows, key=lambda r: order[r[0]])
+
+
+def svg(d, body, marks):
+    """One lane plot: x in seconds over [0, d], y 0-100 top-down; marks drawn over the data."""
+    return (f'<svg viewBox="0 0 {d:g} 100" preserveAspectRatio="none" role="img">{body}{marks}</svg>')
+
+
+def hline(y, cls):
+    """A full-width horizontal line at y (0-100)."""
+    return f'<line class="{cls}" x1="0" x2="100000" y1="{y:.2f}" y2="{y:.2f}" vector-effect="non-scaling-stroke"/>'
+
+
+def ylabels(pairs):
+    """HTML y-axis labels [(y 0-100, text)]."""
+    return ''.join(f'<span class="y" style="top:{y:.2f}%">{esc(t)}</span>' for y, t in pairs)
+
+
+def lane(title, key, plot, labels):
+    """A lane: header with legend, plot box with y labels."""
+    return (f'<div class="lane"><header><strong>{title}</strong><span class="key">{key}</span></header>'
+            f'<div class="plot">{plot}{labels}</div></div>')
+
+
+def loudness_lane(rv, d, marks, target):
+    """Momentary and short-term LUFS polylines, target I dashed."""
+    y = lambda v: min(100.0, max(0.0, v / LUFS_FLOOR * 100))
+    pts = lambda i: ' '.join(f'{p[0]:g},{y(p[i]):.2f}' for p in rv['loudness_curve'])
+    grid = ''.join(hline(y(v), 'grid') for v in range(-12, LUFS_FLOOR, -12))
+    body = (f'{grid}{hline(y(target), "tgt")}<polyline class="m" points="{pts(1)}" vector-effect="non-scaling-stroke"/>'
+            f'<polyline class="s" points="{pts(2)}" vector-effect="non-scaling-stroke"/>')
+    key = ('<span><i style="background:var(--m)"></i>momentary</span><span><i style="background:var(--s)"></i>short-term</span>'
+           f'<span><i style="background:var(--pass)"></i>target {target:g}</span>')
+    return lane('Loudness LUFS', key, svg(d, body, marks), ylabels([(y(v), f'{v}') for v in range(0, LUFS_FLOOR - 1, -12)]))
+
+
+def flash_lane(pse, d, marks):
+    """General flashes per second as bars (red above the limit), saturated-red flashes as a narrow overlay."""
+    g, r = pse.get('general_per_s', []), pse.get('red_per_s', [])
+    top = max([FLASH_LIMIT + 2, *g, *r])
+    y = lambda v: 100 - v / top * 100
+    body = ''.join(f'<rect class="bar{" over" if v > FLASH_LIMIT else ""}" x="{s + .1:g}" width=".8" y="{y(v):.2f}" height="{100 - y(v):.2f}">'
+                   f'<title>{s}-{s + 1} s: {v} flashes</title></rect>' for s, v in enumerate(g) if v)
+    body += ''.join(f'<rect class="rbar" x="{s + .35:g}" width=".3" y="{y(v):.2f}" height="{100 - y(v):.2f}"><title>{s}-{s + 1} s: {v} red flashes</title></rect>'
+                    for s, v in enumerate(r) if v)
+    key = ('<span><i style="background:var(--bar)"></i>general</span><span><i style="background:var(--red)"></i>red / over limit</span>'
+           f'<span><i style="background:var(--fail)"></i>limit {FLASH_LIMIT}/s</span>')
+    return lane('Flashes per second', key, svg(d, hline(y(FLASH_LIMIT), 'lim') + body, marks),
+                ylabels([(y(v), str(v)) for v in (0, FLASH_LIMIT, top)]))
+
+
+def vmaf_lane(q, d, marks, min_vmaf):
+    """VMAF per second as bars from the lane floor, the --min-vmaf floor dashed."""
+    per = q['per_second']
+    lo = min(80, math.floor(min(per, default=80) / 10) * 10)
+    y = lambda v: (100 - v) / (100 - lo) * 100
+    body = ''.join(f'<rect class="bar{" over" if v < min_vmaf else ""}" x="{s + .1:g}" width=".8" y="{y(v):.2f}" height="{100 - y(v):.2f}">'
+                   f'<title>{s}-{s + 1} s: VMAF {v}</title></rect>' for s, v in enumerate(per))
+    key = (f'<span><i style="background:var(--bar)"></i>per second</span><span><i style="background:var(--fail)"></i>floor {min_vmaf:g}</span>'
+           f'<span>worst {q.get("min_second", {}).get("t")} s</span>')
+    return lane('VMAF', key, svg(d, hline(y(min_vmaf), 'lim') + body, marks), ylabels([(y(v), str(v)) for v in (100, (100 + lo) // 2, lo)]))
+
+
+def axis(d):
+    """Timecode ticks under the lanes, at most ~10."""
+    step = next(s for s in (1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800, 3600) if d / s <= 10)
+    ts = [i * step for i in range(int(d // step) + 1)]
+    if d - ts[-1] > step / 3:
+        ts.append(d)
+    return '<div class="axis">' + ''.join(
+        f'<span{" class=\"end\"" if t == d else ""} style="left:{t / d * 100:.3f}%">{tc(t, d)}</span>' for t in ts) + '</div>'
+
+
+def sheet_block(rv, d, outdir, q):
+    """(css values, html) for per-second thumbnails cut from the contact sheet by CSS sprite; each links to its second in the video."""
+    path = rv.get('sheet') if rv else None
+    if not path or not os.path.isfile(path):
+        return {'sheet_uri': 'none', 'bg_size': 'auto', 'tile_ratio': '16 / 9'}, '<p class="notes">No contact sheet: thumbnails omitted.</p>'
+    p = mvlib.probe(path)
+    n, cols = max(1, math.ceil(rv['duration'])), rv.get('sheet_cols', 10)
+    rows = math.ceil(n / cols)
+    tw = (p['width'] - 2 * SHEET_MARGIN - (cols - 1) * SHEET_PAD) / cols
+    th = (p['height'] - 2 * SHEET_MARGIN - (rows - 1) * SHEET_PAD) / rows
+    with open(path, 'rb') as f:
+        uri = 'data:image/jpeg;base64,' + base64.b64encode(f.read()).decode()
+    video = rv.get('video')
+    href = os.path.relpath(video, outdir) if video and os.path.isfile(video) else None
+    g = (rv.get('pse') or {}).get('general_per_s', [])
+    vm = (q or {}).get('per_second', [])
+    items = []
+    for s in range(n):
+        c, r = s % cols, s // cols
+        bx = (SHEET_MARGIN + c * (tw + SHEET_PAD)) / (p['width'] - tw) * 100 if p['width'] > tw else 0
+        by = (SHEET_MARGIN + r * (th + SHEET_PAD)) / (p['height'] - th) * 100 if p['height'] > th else 0
+        bad = s < len(g) and g[s] > FLASH_LIMIT
+        tag = f'a href="{esc(href)}#t={s}"' if href else 'div'
+        info = ' · '.join(x for x in (f'{g[s]} flashes' if s < len(g) else '', f'VMAF {vm[s]}' if s < len(vm) else '') if x)
+        items.append(f'<{tag} class="th{" bad" if bad else ""}" style="background-position:{bx:.4f}% {by:.4f}%" '
+                     f'title="{tc(s, d)}{" · " + info if info else ""}"><span>{tc(s, d)}</span></{tag.split()[0]}>')
+    css = {'sheet_uri': uri, 'bg_size': f'{p["width"] / tw * 100:.4f}% {p["height"] / th * 100:.4f}%', 'tile_ratio': f'{tw:.2f} / {th:.2f}'}
+    return css, f'<section><h2>Sheet, 1 frame per second</h2><div class="sheet">{"".join(items)}</div></section>'
+
+
+def steps_block(b, tag):
+    """Build step seconds as bars, longest first; film builds keep them in steps, the base template per aspect as *_s."""
+    st = (b or {}).get('steps') or {k: v for k, v in ((b or {}).get(tag) or {}).items() if k.endswith('_s') and isinstance(v, (int, float))}
+    if not st:
+        return ''
+    top = max(st.values()) or 1
+    rows = ''.join(f'<div class="step"><span class="n">{esc(k)}</span><span class="b" style="width:{v / top * 100:.1f}%"></span>'
+                   f'<span class="t">{v:g} s</span></div>' for k, v in sorted(st.items(), key=lambda kv: -kv[1]))
+    return f'<section><h2>Build steps, {sum(st.values()):.1f} s total</h2><div class="steps">{rows}</div></section>'
+
+
+def cpu_rows(b, rest_always=False):
+    """{step: CPU s} from steps_cpu, plus the untimed rest of cpu_s when > 2 % (or always); {} without both."""
+    sc, total = (b or {}).get('steps_cpu'), (b or {}).get('cpu_s')
+    if not isinstance(sc, dict) or not sc or not isinstance(total, (int, float)) or total <= 0:
+        return {}
+    rows = {k: v for k, v in sc.items() if isinstance(v, (int, float))}
+    if (rest := total - sum(rows.values())) > total * .02 or rest_always:
+        rows['untimed'] = round(rest, 1)
+    return rows
+
+
+def flags(b):
+    """(draft, chain) of a build.json; a --chain re-run times only the chain steps, so it compares only with another."""
+    return bool((b or {}).get('draft')), bool((b or {}).get('chain'))
+
+
+def history_key(p):
+    """Sort key of a .builds/<UTC>[-<pid>].json name: (UTC stamp, pid as int)."""
+    stamp, _, pid = os.path.basename(p)[:-5].partition('-')
+    return stamp, int(pid) if pid.isdigit() else -1
+
+
+def prev_build(outdir, b):
+    """(name, data) of the newest <project>/.builds/*.json with steps_cpu and b's draft and chain flags other than b itself, or (None, None)."""
+    for p in sorted(glob.glob(os.path.join(outdir, '..', '.builds', '*.json')), key=history_key, reverse=True):
+        if (d := load(p)) and d != b and flags(d) == flags(b) and cpu_rows(d):
+            return os.path.basename(p)[:-5], d
+    return None, None
+
+
+def prev_base(k, p, now, pr):
+    """Previous CPU s a step is judged against: its own, plus the gone steps it absorbs (ABSORBS)."""
+    return p + sum(x for g, x in pr.items() if g not in now and g.startswith(ABSORBS.get(k, ())))
+
+
+def cpu_block(b, prev=None, prev_name=None):
+    """CPU s per step with wall, share and the untimed rest; vs a previous build adds prev and delta (grew > 15 % and > 30 s over prev_base first, new, gone)."""
+    now = cpu_rows(b)
+    if not now:
+        return ''
+    total, wall = b['cpu_s'], b.get('steps') or {}
+    pr = cpu_rows(prev, rest_always=True)
+    rows = []
+    for k, v in now.items():
+        p = pr.get(k) if pr else None
+        base = None if p is None else prev_base(k, p, now, pr)
+        flag = '' if not pr else 'new' if p is None else 'grew' if v > GREW_RATIO * base and v - base > GREW_S else ''
+        rows.append((flag != 'grew', -v, k, v, p, flag))
+    rows.sort()
+    rows += [(1, 0, k, None, p, 'gone') for k, p in sorted(pr.items(), key=lambda kv: -kv[1]) if k not in now and k != 'untimed']
+    top = max(now.values()) or 1
+    trs = ''
+    for _, _, k, v, p, flag in rows:
+        w = None if k == 'untimed' else wall.get(k)
+        cls = 'c' + (' untimed' if k == 'untimed' and w is None else '') + (f' {flag}' if flag else '')
+        cmp = ''
+        if pr:
+            d = '' if v is None or p is None else f'{v - p:+.1f} '
+            tagc = f'<b style="color:var(--fail)">{flag}</b>' if flag == 'grew' else flag
+            cmp = f'<td>{"-" if p is None else f"{p:g}"}</td><td class="d">{d}{tagc}</td>'
+        share = '-' if v is None else f'<span class="b" style="width:{v / top * 100:.1f}%"></span>{v / total * 100:.1f} %'
+        trs += (f'<tr class="{cls}"><th scope="row">{esc(k)}</th><td>{"-" if v is None else f"{v:g}"}</td>{cmp}'
+                f'<td>{"-" if w is None else f"{w:g}"}</td><td class="sh">{share}</td></tr>')
+    head = '<th scope="col">CPU s</th>' + ('<th scope="col">prev</th><th scope="col">Δ</th>' if pr else '')
+    tot = '' if pr else '<p class="notes">no comparable build</p>'
+    if pr:
+        pt = prev['cpu_s']
+        tot = f'<p class="notes">cpu_s {total:g} vs {pt:g} ({(total - pt) / pt * 100:+.1f}%), previous build {esc(prev_name or "")}</p>'
+    return (f'<section><h2>CPU, {total:g} s across the build</h2>{tot}<table class="cpu"><thead><tr><th scope="col">Step</th>'
+            f'{head}<th scope="col">Wall s</th><th scope="col">Share</th></tr></thead><tbody>{trs}</tbody></table></section>')
+
+
+def report(outdir, name, rv, sources, a, targets, prev_name, prev):
+    """Write <name>.report.html in outdir; return (path, verdict)."""
+    tag = name.rsplit('-', 1)[-1]
+    qp, q = first(os.path.join(outdir, f'{name}.quality.json'), os.path.join(outdir, f'quality-{tag}.json'), os.path.join(outdir, 'quality.json'))
+    bp, b = first(os.path.join(outdir, 'build.json'))
+    cp, c = first(os.path.join(outdir, 'cues.json'), os.path.join(outdir, '..', 'vo', 'cues.json'))
+    notes = [] if rv else ['No review.json: loudness and flash lanes, checks and thumbnails omitted.']
+    if not q:
+        notes.append('No quality.json: VMAF lane omitted.')
+    if not b:
+        notes.append('No build.json: cut marks and step times omitted.')
+    if not c:
+        notes.append('No cues.json: cue marks omitted.')
+    cuts, cues = cut_times(b), cue_times(c) if c else []
+    d = (rv or {}).get('duration') or len((q or {}).get('per_second', [])) or (b or {}).get('seconds') or max([1, *cuts, *(t for _, t in cues)])
+    marks = ''.join(f'<line class="cut" x1="{t:g}" x2="{t:g}" y1="0" y2="100" vector-effect="non-scaling-stroke"><title>cut {tc(t, d)}</title></line>' for t in cuts)
+    marks += ''.join(f'<line class="cue" x1="{t:g}" x2="{t:g}" y1="0" y2="100" vector-effect="non-scaling-stroke"><title>cue {esc(n)} {tc(t, d)}</title></line>' for n, t in cues)
+    lanes = []
+    if rv and rv.get('loudness_curve'):
+        lanes.append(loudness_lane(rv, d, marks, targets[a.target]['I']))
+    elif rv:
+        notes.append('review.json has no loudness_curve (older mv-review): loudness lane omitted.')
+    if rv and 'general_per_s' in (rv.get('pse') or {}):
+        lanes.append(flash_lane(rv['pse'], d, marks))
+    elif rv:
+        notes.append('review.json has no per-second flash counts (--no-pse or older mv-review): flash lane omitted.')
+    if q and q.get('per_second'):
+        lanes.append(vmaf_lane(q, d, marks, a.min_vmaf))
+    mk = ([f'cuts {", ".join(tc(t, d) for t in cuts)}'] if cuts else []) + ([f'cues {", ".join(f"{n} {tc(t, d)}" for n, t in cues)}'] if cues else [])
+    lanes_html = ''.join(lanes) + (axis(d) if lanes else '') + (f'<p class="marks">{esc(" | ".join(mk))}</p>' if mk else '')
+    rows = checks(rv, q, b, tag, a.min_vmaf)
+    verdict = 'FAIL' if any(r[0] == 'FAIL' for r in rows) else 'PASS'
+    css, sheet = sheet_block(rv, d, outdir, q)
+    meta = [f'{rv["width"]}x{rv["height"]} {rv["fps"]:g} fps {rv["duration"]:.1f} s' if rv else f'{d:g} s',
+            'sources: ' + ', '.join(os.path.basename(p) for p in (*sources, qp, bp, cp) if p)]
+    with open(TEMPLATE) as f:
+        page = string.Template(f.read()).substitute(
+            title=esc(name), verdict=verdict, meta=esc(' · '.join(meta)), steps=steps_block(b, tag), cpu=cpu_block(b, prev, prev_name), sheet=sheet,
+            notes=f'<ul class="notes">{"".join(f"<li>{esc(n)}</li>" for n in notes)}</ul>' if notes else '',
+            lanes=lanes_html, **css,
+            checks=''.join(f'<div class="row"><b class="{v}">{v}</b><span class="what">{esc(s)} · {esc(w)}</span>'
+                           f'<span class="val">{esc(str(x))}</span></div>' for v, s, w, x in rows) or '<p class="notes">No checks.</p>')
+    out = os.path.join(outdir, f'{name}.report.html')
+    with open(out, 'w') as f:
+        f.write(page)
+    return out, verdict
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('outdir', help='build output dir with <name>.review.json, quality*.json, build.json, cues.json (any may be missing)')
+    ap.add_argument('--min-vmaf', type=float, default=93.0, help='VMAF floor for the check and lane (mv-quality default 93)')
+    ap.add_argument('--target', default='web', help='loudness.json target drawn on the loudness lane')
+    a = ap.parse_args()
+    if not os.path.isdir(a.outdir):
+        sys.exit(f'mv-report: no such directory {a.outdir}')
+    with open(LOUDNESS) as f:
+        targets = {k: v for k, v in json.load(f).items() if "I" in v}
+    if a.target not in targets:
+        ap.error(f"unknown --target {a.target}; known: {' '.join(targets)}")
+    outdir = os.path.abspath(a.outdir)
+    reviews = sorted(glob.glob(os.path.join(outdir, '*.review.json')))
+    cuts = [(os.path.basename(p)[:-len('.review.json')], load(p), [p]) for p in reviews]
+    if not cuts:
+        if not glob.glob(os.path.join(outdir, '*quality*.json')) and not os.path.isfile(os.path.join(outdir, 'build.json')):
+            sys.exit(f'mv-report: nothing to report in {outdir} (no review.json, quality.json or build.json)')
+        cuts = [((load(os.path.join(outdir, 'build.json')) or {}).get('name') or 'cut', None, [])]
+    b = load(os.path.join(outdir, 'build.json'))
+    prev_name, prev = prev_build(outdir, b)
+    if cpu_rows(b):
+        print('mv-report: ' + (f'prev: {prev_name}.json (draft {str(flags(b)[0]).lower()}, chain {str(flags(b)[1]).lower()})'
+                               if prev else 'no comparable build'))
+    for name, rv, src in cuts:
+        path, verdict = report(outdir, name, rv, src, a, targets, prev_name, prev)
+        print(f'mv-report: {verdict} {path}')
+
+
+if __name__ == '__main__':
+    main()

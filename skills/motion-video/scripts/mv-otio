@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# mv-otio: a film build's out/build.json -> editable timeline (.otio, .kdenlive, .fcpxml when the adapter loads) on its kept sources.
+set -euo pipefail
+VENV=${MV_OTIO_VENV:-$HOME/.local/opt/mv-otio}
+[[ -x $VENV/bin/python ]] || {
+  echo "mv-otio: no venv at $VENV; create it with:" >&2
+  echo "  uv venv -p 3.12 $VENV && VIRTUAL_ENV=$VENV uv pip install opentimelineio==0.18.1 otio-kdenlive-adapter==0.0.3 otio-fcpx-xml-adapter==1.0.0" >&2
+  exit 3
+}
+exec "$VENV/bin/python" -I - "$@" <<'PY'
+import argparse, contextlib, io, json, os, subprocess, sys
+import xml.etree.ElementTree as ET
+import opentimelineio as otio
+
+ap = argparse.ArgumentParser(prog="mv-otio", description="Timeline of a film build: V1 shots at their cuts, V2 title overlay, "
+                             "A music, SFX lanes, VO; writes <name>.otio, <name>.kdenlive and <name>.fcpxml next to build.json.")
+ap.add_argument("outdir", help="the build's out/ (holds build.json with .edit, written by the film template's MV_EDIT=1 ./build.sh)")
+a = ap.parse_args()
+out = os.path.abspath(a.outdir)
+b = json.load(open(os.path.join(out, "build.json")))
+e = b.get("edit") or sys.exit("mv-otio: build.json has no .edit (rebuild with MV_EDIT=1 ./build.sh, film template)")
+fps, total = b["fps"], round(b["seconds"] * b["fps"])
+W, H = (int(x) for x in b["size"].split("x"))
+RT = lambda f: otio.opentime.RationalTime(f, fps)
+TR = lambda s, d: otio.opentime.TimeRange(RT(s), RT(d))
+
+
+def frames_of(path):
+    d = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+                       capture_output=True, text=True, check=True).stdout
+    return max(1, round(float(d) * fps))
+
+
+def clip(path, dur, name=None, db=None):
+    os.path.isfile(path) or sys.exit(f"mv-otio: missing source {path}")
+    ref = otio.schema.ExternalReference(target_url=path, available_range=TR(0, frames_of(path)))
+    c = otio.schema.Clip(name=name or os.path.basename(path), media_reference=ref, source_range=TR(0, dur))
+    if db is not None:
+        c.effects.append(otio.schema.Effect(name="gain", effect_name="volume", metadata={"keyframes": {"0": db}}))
+    return c
+
+
+def place(track, items):   # items: (start frame, clip) in time order, gaps between them
+    at = 0
+    for start, c in items:
+        if start > at:
+            track.append(otio.schema.Gap(source_range=TR(0, start - at)))
+            at = start
+        track.append(c)
+        at += c.source_range.duration.to_frames()
+
+
+tl = otio.schema.Timeline(name=b["name"], global_start_time=RT(0))
+tl.metadata["mv"] = {"seconds": b["seconds"], "fps": fps, "size": b["size"], "cuts": b["cuts"]}
+shots = otio.schema.Track(name="V1 shots", kind=otio.schema.TrackKind.Video)
+for i, (p, n) in enumerate(zip(e["plates"], b["cuts"]["frames"])):
+    shots.append(clip(p, n, f"shot{i}"))
+titles = otio.schema.Track(name="V2 titles", kind=otio.schema.TrackKind.Video)
+titles.append(clip(e["title"], total, "title"))
+music = otio.schema.Track(name="A1 music", kind=otio.schema.TrackKind.Audio)
+music.append(clip(e["music"], total, "music"))
+lanes = []   # [(end frame, track)] SFX overlap -> one more lane
+for s in sorted(e["sfx"], key=lambda s: s["at"]):
+    start = round(s["at"] * fps)
+    c = clip(s["file"], min(frames_of(s["file"]), total - start), db=s["db"])
+    lane = next((l for l in lanes if l[0] <= start), None)
+    if lane is None:
+        lane = [0, otio.schema.Track(name=f"A{2 + len(lanes)} sfx", kind=otio.schema.TrackKind.Audio), []]
+        lanes.append(lane)
+    lane[2].append((start, c))
+    lane[0] = start + c.source_range.duration.to_frames()
+for lane in lanes:
+    place(lane[1], lane[2])
+vo = otio.schema.Track(name=f"A{2 + len(lanes)} vo", kind=otio.schema.TrackKind.Audio)
+if e.get("vo"):
+    place(vo, [(round(e["vo"].get("at", 0) * fps), clip(e["vo"]["file"], min(frames_of(e["vo"]["file"]), total)))])
+tl.tracks.extend([shots, titles, music] + [l[1] for l in lanes] + [vo])
+
+base = os.path.join(out, b["name"])
+otio.adapters.write_to_file(tl, base + ".otio")
+with contextlib.redirect_stdout(io.StringIO()):   # the kdenlive adapter prints a deprecation banner
+    kd = otio.adapters.write_to_string(tl, "kdenlive")
+
+# adapter gaps: fixed 1920x1080 profile, unbounded black track, no track compositing/mixing (Kdenlive's internal ones)
+root = ET.fromstring(kd)
+prof = root.find("profile")
+prof.set("width", str(W)); prof.set("height", str(H)); prof.set("description", f"{W}x{H} {fps} fps")
+prof.set("display_aspect_num", str(W)); prof.set("display_aspect_den", str(H))
+black = root.find("producer[@id='black_track']")
+black.set("in", "0"); black.set("out", str(total - 1))
+main = root.find("tractor[@global_feed='1']")
+for k, t in enumerate(tl.tracks, start=1):
+    tr = ET.SubElement(main, "transition")
+    audio = t.kind == otio.schema.TrackKind.Audio
+    for key, val in [("a_track", "0"), ("b_track", str(k)), ("mlt_service", "mix" if audio else "qtblend"),
+                     ("always_active", "1"), ("internal_added", "237")] + ([("sum", "1")] if audio else [("compositing", "0")]):
+        ET.SubElement(tr, "property", name=key).text = val
+with open(base + ".kdenlive", "w") as f:
+    f.write(ET.tostring(root, encoding="unicode"))
+
+wrote = [base + ".otio", base + ".kdenlive"]
+try:
+    with contextlib.redirect_stdout(io.StringIO()):
+        otio.adapters.write_to_file(tl, base + ".fcpxml", adapter_name="fcpx_xml")
+    wrote.append(base + ".fcpxml")
+except Exception as x:
+    print(f"mv-otio: fcpxml skipped, the adapter knows FCP rates only (23.976-60), not {fps} fps ({type(x).__name__})", file=sys.stderr)
+print(f"mv-otio: {len(shots)} shots, {len(tl.tracks)} tracks, {total} frames @ {fps} -> " + " ".join(wrote))
+PY

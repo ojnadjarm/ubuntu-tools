@@ -1,0 +1,11 @@
+#!/bin/sh
+# Recorded `journalctl --user -u localsearch-3.service -o short-unix`, 24 h: 2 SEGVs; CPU 731.783 + 0.732 s,
+# plus a 2-day run that stopped 12 h ago (3723.5 s, a quarter of it inside the window: 930.875 s).
+now=$(date +%s); h='host systemd[1]: localsearch-3.service:'
+cat <<J
+$((now - 50000)).1 $h Main process exited, code=dumped, status=11/SEGV
+$((now - 50000)).2 $h Consumed 12min 11.783s CPU time over 14min 45.710s wall clock time, 226.5M memory peak.
+$((now - 43200)).1 $h Main process exited, code=killed, status=11/SEGV
+$((now - 43200)).2 $h Consumed 1h 2min 3.500s CPU time over 2d wall clock time, 1G memory peak.
+$((now - 600)).1 $h Consumed 732ms CPU time over 1.2s wall clock time, 8M memory peak.
+J

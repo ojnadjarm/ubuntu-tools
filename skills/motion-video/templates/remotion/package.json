@@ -1,0 +1,21 @@
+{
+  "name": "mv-remotion-template",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "render": "remotion render src/index.ts Main out/main.mp4"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.536",
+    "@remotion/google-fonts": "4.0.536",
+    "remotion": "4.0.536",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "@remotion/three": "4.0.536",
+    "@remotion/motion-blur": "4.0.536",
+    "@react-three/fiber": "9.4.0",
+    "three": "0.180.0",
+    "@remotion/lottie": "4.0.536",
+    "lottie-web": "5.13.0"
+  }
+}

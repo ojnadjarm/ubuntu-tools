@@ -1,0 +1,6 @@
+{"modal": null,
+ "elements": [
+  {"name": "OK", "role": "push button", "app": "gnome-text-editor", "click": "500 300"},
+  {"name": "Close", "role": "push button", "app": "firefox", "click": "action"},
+  {"name": "Close", "role": "menu item", "app": "firefox", "click": "700 20"}
+ ]}

@@ -1,0 +1,11 @@
+{
+  "name": "mv-film-template",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@remotion/cli": "4.0.536",
+    "remotion": "4.0.536",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  }
+}

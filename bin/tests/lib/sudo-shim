@@ -1,0 +1,8 @@
+#!/bin/sh
+# Test-run `sudo` (T538): logs argv to $SUDO_SHIM_LOG, answers `sudo [-n] true` by $SUDO_SHIM_MODE (allow → 0, else 1), refuses the rest rc 1.
+[ -n "${SUDO_SHIM_LOG:-}" ] && printf '%s\t%s\n' "${SUDO_SHIM_TEST:--}" "$*" >>"$SUDO_SHIM_LOG"
+args="$*"
+while [ $# -gt 0 ]; do case $1 in --) shift; break ;; -*) shift ;; *) break ;; esac; done
+if [ "$*" = true ]; then [ "${SUDO_SHIM_MODE:-deny}" = allow ]; exit; fi
+echo "sudo-shim: refused in a test run: sudo $args (add a '# live-sudo' header for the real sudo)" >&2
+exit 1

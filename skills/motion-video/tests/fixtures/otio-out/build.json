@@ -1,0 +1,42 @@
+{
+  "name": "demo",
+  "draft": true,
+  "seconds": 3,
+  "fps": 12,
+  "size": "160x90",
+  "cuts": {
+    "grid": "even",
+    "tempo": null,
+    "cuts": [
+      1,
+      2
+    ],
+    "frames": [
+      12,
+      12,
+      12
+    ],
+    "starts": [
+      0,
+      1,
+      2
+    ]
+  },
+  "edit": {
+    "plates": [
+      "@OUT@/edit/shot0.mp4",
+      "@OUT@/edit/shot1.mp4",
+      "@OUT@/edit/shot2.mp4"
+    ],
+    "title": "@OUT@/edit/title-16x9.webm",
+    "music": "@OUT@/edit/music.wav",
+    "vo": null,
+    "sfx": [
+      {
+        "file": "@OUT@/hit.wav",
+        "at": 1,
+        "db": -12
+      }
+    ]
+  }
+}

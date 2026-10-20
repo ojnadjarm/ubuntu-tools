@@ -1,0 +1,2 @@
+#!/bin/sh
+echo "spirv-val $*" >>"${STUB_CALLS:-/dev/null}"

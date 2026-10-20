@@ -1,0 +1,8 @@
+{
+  "resolution": "1280x720",
+  "post": {"col": "post_ms_p50", "ms": 0.6, "ticket": "T674+T688", "why": "T674 post <= 0.6 ms (1080p, no FXAA); FXAA (T688) must fit inside it at the nightly 720p"},
+  "shadow": {"col": "gpu_ms_p50_shadow", "ms": 0.10, "ticket": "T695", "why": "shadow pass <= 0.1 ms at 1280x720 (measured 0.059-0.066)"},
+  "skin": {"col": "gpu_ms_p50_skin", "ms": 0.15, "ticket": "T691", "why": "skinned player 0.14 ms at spawn, 0.077 walking"},
+  "scene": {"col": "gpu_ms_p50_scene", "ms": 0.8, "ticket": "T744", "why": "first quiet nightly row 2026-10-20 0.6018 ms + 33 %"},
+  "frame": {"col": "gpu_ms_p50", "ms": 1.65, "ticket": "T744", "why": "sum of the four pass budgets (first quiet nightly 1.1190 ms)"}
+}

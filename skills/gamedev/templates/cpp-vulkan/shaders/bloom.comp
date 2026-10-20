@@ -1,0 +1,34 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0) uniform sampler2D src;
+layout(set = 0, binding = 1, r11f_g11f_b10f) uniform image2D dst;
+layout(push_constant) uniform Push {
+    uint mode;  // 0: 2x2 box downsample src into dst; 1: dual-filter downsample; 2: upsample src and add it to dst
+} pc;
+
+// Dual filtering (Bjørge, SIGGRAPH 2015): 5 bilinear taps down, 8 up; the full-res input gets one tap (bandwidth).
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(dst);
+    if (p.x >= size.x || p.y >= size.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(size);
+    vec2 h = 0.5 / vec2(textureSize(src, 0));
+    vec3 c;
+    if (pc.mode == 0u) {
+        c = min(texture(src, uv).rgb, vec3(64.0));
+    } else if (pc.mode == 1u) {
+        h *= 2.0;
+        c = texture(src, uv).rgb * 4.0 + texture(src, uv - h).rgb + texture(src, uv + h).rgb +
+            texture(src, uv + vec2(h.x, -h.y)).rgb + texture(src, uv - vec2(h.x, -h.y)).rgb;
+        c = min(c / 8.0, vec3(64.0));
+    } else {
+        c = texture(src, uv + vec2(-2.0 * h.x, 0.0)).rgb + texture(src, uv + vec2(2.0 * h.x, 0.0)).rgb +
+            texture(src, uv + vec2(0.0, -2.0 * h.y)).rgb + texture(src, uv + vec2(0.0, 2.0 * h.y)).rgb +
+            (texture(src, uv + vec2(-h.x, h.y)).rgb + texture(src, uv + h).rgb +
+             texture(src, uv + vec2(h.x, -h.y)).rgb + texture(src, uv - h).rgb) * 2.0;
+        c = c / 12.0 + imageLoad(dst, p).rgb;
+    }
+    imageStore(dst, p, vec4(c, 1.0));
+}

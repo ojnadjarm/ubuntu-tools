@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# mv-assets: fetch and list the CC0 music/SFX/model library named in the skill's assets.tsv (polyhaven:<slug> rows via cc0-fetch.sh).
+set -euo pipefail
+SKILL_DIR=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+LIB=${MV_LIBRARY:-$HOME/.local/share/motion-video}
+USAGE="usage: mv-assets fetch|list   (library: \$MV_LIBRARY, default ~/.local/share/motion-video)"
+
+case ${1:-list} in
+  fetch)
+    grep -v '^#' "$SKILL_DIR/assets.tsv" | while IFS=$'\t' read -r kind name url lic page; do
+      dest=$LIB/$kind/$name
+      [[ -e $dest || -e $dest.${url##*.} ]] && continue
+      mkdir -p "$LIB/$kind"
+      tmp=$(mktemp -d)
+      [[ $url == polyhaven:* ]] || curl -fsSL "$url" -o "$tmp/dl"
+      if [[ $url == polyhaven:* ]]; then
+        bash "${CC0_FETCH:-$HOME/agents/skills/gamedev/scripts/cc0-fetch.sh}" polyhaven "${url#polyhaven:}" "$LIB/$kind" --res 1k >/dev/null
+        ln -s "polyhaven/${url#polyhaven:}" "$dest"
+      elif [[ $url == *.zip ]]; then
+        mkdir -p "$dest" && unzip -q "$tmp/dl" -d "$tmp/x" && chmod -R u+rwX "$tmp/x"
+        find "$tmp/x" -type f \( -name '*.ogg' -o -name '*.wav' -o -name '*.mp3' \) -exec mv -t "$dest" {} +
+      else
+        mv "$tmp/dl" "$dest.${url##*.}"
+        dest=$dest.${url##*.}
+      fi
+      rm -rf "$tmp"
+      printf '%s\t%s\t%s\n' "$lic" "$page" "$(basename "$dest")" >> "$LIB/LICENSES.tsv"
+      echo "mv-assets: $kind/$(basename "$dest") ($lic)"
+    done
+    echo "mv-assets: library $LIB files=$(find "$LIB" -type f -not -name '*.tsv' | wc -l) size=$(du -sh "$LIB" | cut -f1)" ;;
+  list) find "$LIB" -type f -not -name '*.tsv' -not -name '*.csv' | sed "s|$LIB/||" | sort ;;
+  -h|--help) echo "$USAGE" ;;
+  *) echo "$USAGE" >&2; exit 2 ;;
+esac

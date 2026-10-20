@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+"""ticket-id — allocate fleet ticket ids (T<n>) that no brief, history line, evidence or backlog has used, and find double uses.
+
+  ticket-id next [-n N] [--reserve SLUG]   the next N free ids above the highest T-id in use; --reserve writes stub
+                                           briefs/T<n>-SLUG.md under a lock, so parallel planners never get the same id
+  ticket-id check T716                     every use of the id (brief, history, evidence, research, backlog); exit 1 on a double use
+  ticket-id dups                           every double-used id with its owners
+  ticket-id release T121 [T122 ...]        delete unused reserved stubs (first line still the reserved marker)
+
+Sources (AGENT_WORK, else ~/agent-work): briefs/T<n>*, every T<n> in history.md, evidence/T<n>*, research/*/T<n>*,
+`## k. T<n>` / `## T<n>` headings of research/*/T*/BACKLOG.md.
+An owner is a backlog item (heading, brief header `#k (from …/T<p>/BACKLOG.md)`, history `(wave N #k)` tag) or `brief`
+(a brief file mapped to no item); evidence, research, other history lines and reserved stubs carry no owner.
+A double use = 2 or more owners. An id more than GAP above the next lower one (a typo like T7410) is skipped by next.
+Exit 0; check 1 on a double use; release 1 when an id has no unused stub; 2 on usage.
+"""
+import argparse, datetime, fcntl, glob, os, re, sys
+
+AW = os.environ.get('AGENT_WORK') or os.path.expanduser('~/agent-work')
+TID = re.compile(r'\bT(\d+)\b')
+HEAD = re.compile(r'^## (?:(\d+)\. )?T(\d+)\b', re.M)
+BRIEF_HEAD = re.compile(r'# T\d+ — .*?#(\d+) \(from \S*/(T\d+)/BACKLOG\.md\)')
+WAVE_TAG = re.compile(r'\bT(\d+)\**\s*\((?:wave|w)\s*(\d+) #(\d+)\)')
+SUBJECT = re.compile(r'-\s+(?:\d{4}-\d\d-\d\d\s+)?(?:\d\d:\d\d\s+)?\**T(\d+)\b')
+RESERVED = 'reserved by ticket-id'
+GAP = 100
+
+
+def _short(p):
+    return p.replace(os.path.expanduser('~'), '~')
+
+
+def _first_line(path):
+    try:
+        with open(path, errors='replace') as fh:
+            return fh.readline()
+    except OSError:
+        return ''
+
+
+def backlogs():
+    """(planner, path, text) per research/*/T*/BACKLOG.md."""
+    for f in sorted(glob.glob(os.path.join(AW, 'research', '*', 'T*', 'BACKLOG.md'))):
+        with open(f, errors='replace') as fh:
+            yield os.path.basename(os.path.dirname(f)), f, fh.read()
+
+
+def collect():
+    """{id: [(kind, where, owner)]} over every source; owner None = a use that claims no subject."""
+    uses, waves = {}, {}
+    add = lambda n, *u: uses.setdefault(int(n), []).append(u)
+    for planner, f, text in backlogs():
+        w = re.search(r'wave[- ](\d+)', text.split('\n', 1)[0])
+        if w:
+            waves.setdefault(w.group(1), []).append(planner)
+        for k, n in HEAD.findall(text):
+            add(n, 'backlog', _short(f), f'{planner}#{k}' if k else f'{planner}:T{n}')
+    for p in sorted(glob.glob(os.path.join(AW, 'briefs', 'T*'))):
+        m = re.match(r'T(\d+)(?!\d)', os.path.basename(p))
+        if not m:
+            continue
+        line = _first_line(p) if os.path.isfile(p) else ''
+        h = BRIEF_HEAD.match(line)
+        kind, owner = ('reserved', None) if RESERVED in line else ('brief', f'{h.group(2)}#{h.group(1)}' if h else 'brief')
+        add(m.group(1), kind, _short(p), owner)
+    hist = os.path.join(AW, 'history.md')
+    if os.path.isfile(hist):
+        with open(hist, errors='replace') as fh:
+            for i, line in enumerate(fh, 1):
+                s = SUBJECT.match(line)
+                if not s:
+                    continue
+                t = WAVE_TAG.search(line)
+                planners = waves.get(t.group(2), []) if t and t.group(1) == s.group(1) else []
+                owner = f'{planners[0]}#{t.group(3)}' if len(planners) == 1 else None
+                add(s.group(1), 'history', f'{_short(hist)}:{i}', owner)
+    for p in sorted(glob.glob(os.path.join(AW, 'evidence', 'T*'))):
+        m = re.match(r'T(\d+)(?!\d)', os.path.basename(p))
+        if m:
+            add(m.group(1), 'evidence', _short(p), None)
+    for p in sorted(glob.glob(os.path.join(AW, 'research', '*', 'T*'))):
+        m = re.match(r'T(\d+)(?!\d)', os.path.basename(p))
+        if m:
+            add(m.group(1), 'research', _short(p), None)
+    return uses
+
+
+def highest():
+    """Highest T-id in use (collected uses plus every T<n> in history.md), stopping below the first jump > GAP."""
+    ids = set(collect())
+    hist = os.path.join(AW, 'history.md')
+    if os.path.isfile(hist):
+        with open(hist, errors='replace') as fh:
+            ids.update(int(n) for n in TID.findall(fh.read()))
+    top = 0
+    for n in sorted(ids):
+        if n - top > GAP and top:
+            print(f'ticket-id: skipped T{n} and above (jump > {GAP} from T{top}: a typo? see ticket-id check T{n})',
+                  file=sys.stderr)
+            break
+        top = n
+    return top
+
+
+def owners(us):
+    return sorted({o for _, _, o in us if o})
+
+
+def cmd_next(a):
+    if not a.reserve:
+        top = highest()
+        print('\n'.join(f'T{top + i}' for i in range(1, a.n + 1)))
+        print('ticket-id: not reserved; parallel planners use --reserve SLUG', file=sys.stderr)
+        return 0
+    if not re.fullmatch(r'[a-z0-9][a-z0-9-]*', a.reserve):
+        print('ticket-id: --reserve wants a lowercase slug (a-z, 0-9, -)', file=sys.stderr)
+        return 2
+    briefs = os.path.join(AW, 'briefs')
+    os.makedirs(briefs, exist_ok=True)
+    with open(os.path.join(briefs, '.ticket-id.lock'), 'w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        n, out = highest(), []
+        while len(out) < a.n:
+            n += 1
+            try:
+                fd = os.open(os.path.join(briefs, f'T{n}-{a.reserve}.md'), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+            except FileExistsError:
+                continue
+            with os.fdopen(fd, 'w') as fh:
+                fh.write(f'# T{n} — {RESERVED}: {a.reserve} ({datetime.date.today()})\n')
+            out.append(f'T{n}')
+    print('\n'.join(out))
+    return 0
+
+
+def cmd_check(a):
+    m = re.fullmatch(r'T?(\d+)', a.id)
+    if not m:
+        print(f'ticket-id: want T<n>, got {a.id!r}', file=sys.stderr)
+        return 2
+    us = collect().get(int(m.group(1)), [])
+    for kind, where, owner in us:
+        print(f'{kind:9} {owner or "-":12} {where}')
+    own = owners(us)
+    state = 'unused' if not us else f'double use ({len(own)} owners: {", ".join(own)})' if len(own) > 1 \
+        else f'one owner ({own[0] if own else "-"})'
+    print(f'T{m.group(1)}: {len(us)} uses, {state}')
+    return 1 if len(own) > 1 else 0
+
+
+def cmd_release(a):
+    rc = 0
+    for i in a.ids:
+        m = re.fullmatch(r'T?(\d+)', i)
+        stubs = [p for p in glob.glob(os.path.join(AW, 'briefs', f'T{m.group(1)}-*.md'))
+                 if RESERVED in _first_line(p) and os.path.getsize(p) == len(_first_line(p).encode())] if m else []
+        for p in stubs:
+            os.remove(p)
+            print(f'released {_short(p)}')
+        if not stubs:
+            print(f'ticket-id: no unused reserved stub for {i}', file=sys.stderr)
+            rc = 1
+    return rc
+
+
+def cmd_dups(a):
+    for n, us in sorted(collect().items()):
+        own = owners(us)
+        if len(own) > 1:
+            print(f'T{n:<5} {", ".join(own)}')
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser(prog='ticket-id', description=__doc__.split('\n\n', 1)[1],
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest='cmd', required=True)
+    p = sub.add_parser('next', help='the next free ids')
+    p.add_argument('-n', type=int, default=1, choices=range(1, 101), metavar='N', help='how many (1-100, default 1)')
+    p.add_argument('--reserve', metavar='SLUG', help='write stub briefs/T<n>-SLUG.md under a lock')
+    p.set_defaults(fn=cmd_next)
+    p = sub.add_parser('check', help='every use of one id; exit 1 on a double use')
+    p.add_argument('id')
+    p.set_defaults(fn=cmd_check)
+    sub.add_parser('dups', help='every double-used id').set_defaults(fn=cmd_dups)
+    p = sub.add_parser('release', help='delete unused reserved stubs')
+    p.add_argument('ids', nargs='+')
+    p.set_defaults(fn=cmd_release)
+    a = ap.parse_args()
+    sys.exit(a.fn(a))
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,10 @@
+#!/bin/bash
+# Stub wait-for: --until COND, or --file F --match RE [--job PID]; polls every 0.05 s.
+echo "wait-for $*" >>"${STUB_CALLS:-/dev/null}"
+until="" file="" match="" job=""
+while [ $# -gt 0 ]; do case $1 in --until) until=$2 ;; --file) file=$2 ;; --match) match=$2 ;; --job) job=$2 ;; esac; shift; [ $# -gt 0 ] && shift; done
+while :; do
+	if [ -n "$until" ]; then eval "$until" && exit 0
+	else grep -qE "$match" "$file" 2>/dev/null && exit 0; [ -n "$job" ] && ! kill -0 "$job" 2>/dev/null && exit 3; fi
+	sleep 0.05
+done

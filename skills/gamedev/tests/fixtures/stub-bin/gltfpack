@@ -1,0 +1,5 @@
+#!/bin/sh
+# Stub gltfpack: copies -i to -o and prints the output: line.
+echo "gltfpack $*" >>"${STUB_CALLS:-/dev/null}"
+prev=""; for a in "$@"; do case $prev in -i) i=$a ;; -o) o=$a ;; esac; prev=$a; done
+cp "$i" "$o"; echo "output: 1 mesh, 1000 triangles"

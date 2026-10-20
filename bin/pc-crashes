@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# pc crashes [list|archive <name>] [--json] [--apply] — apport crash reports in /var/crash; archive one set so apport-autoreport stops failing.
+set -uo pipefail
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+SELF="$BIN/pc-crashes"
+. "$BIN/pclib.sh"
+
+pc_usage 'usage: pc crashes [list] [--json]
+       pc crashes archive <name> [--apply]
+
+list     every <name>.crash in $PC_CRASH_DIR (default /var/crash): name, exe, signal, cmdline head, age,
+         upload state (uploaded = whoopsie wrote .uploaded, queued = .upload only, none); then one
+         ignored-by-apport row per program in $PC_APPORT_IGNORE (default ~/.apport-ignore.xml) with its
+         kernel trap/segfault count in 24 h (apport writes no .crash for it, the kernel still logs each one)
+archive  move <name>.crash/.upload/.uploaded to $PC_CRASH_BACKUP (default ~/agents/backups/crash)/<stamp>-<name>/
+         and reset-failed apport-autoreport.service, as one ledgered change ("rollback: pc undo <id>" moves
+         the set back). <name> is the list name, with or without .crash. Without --apply prints "would:".' "$@"
+
+PC_SUB='pc crashes'
+pc_opt "$@"; ARGS=(${PC_ARGS[@]+"${PC_ARGS[@]}"})
+: "${PC_APPORT_IGNORE:=$HOME/.apport-ignore.xml}"
+: "${PC_CRASH_DIR:=/var/crash}" "${PC_CRASH_BACKUP:=$HOME/agents/backups/crash}" "${PC_CRASH_UNIT:=apport-autoreport.service}"
+EXTS=(crash upload uploaded)
+
+# key <file> <Key> — the first line of an apport key's value, read only up to its first match.
+key() { grep -a -m1 "^$2: " "$1" 2>/dev/null | cut -d' ' -f2- | tr '\t' ' '; }
+
+rows() {
+  local f n sig sn up now; printf -v now '%(%s)T' -1
+  for f in "$PC_CRASH_DIR"/*.crash; do
+    [ -e "$f" ] || continue
+    n=${f##*/}; n=${n%.crash}
+    sig=$(key "$f" Signal); sn=$(key "$f" SignalName)
+    [ -z "$sn" ] && [ -n "$sig" ] && sn=SIG$(kill -l "$sig" 2>/dev/null)
+    up=none; [ -e "$PC_CRASH_DIR/$n.upload" ] && up=queued; [ -e "$PC_CRASH_DIR/$n.uploaded" ] && up=uploaded
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$n" "$(key "$f" ExecutablePath)" "$sig" "$sn" \
+      "$(key "$f" ProcCmdline | cut -c1-80)" $((now - $(stat -c %Y "$f"))) "$up"
+  done
+}
+
+# ignored — name, exe and 24 h kernel trap count of every program in the user's apport ignore file.
+ignored() {
+  local p c k; [ -r "$PC_APPORT_IGNORE" ] || return 0
+  k=$(pc_cmd journalctl -k --since -24h --no-pager -q 2>/dev/null)
+  grep -o 'program="[^"]*"' "$PC_APPORT_IGNORE" | cut -d'"' -f2 | while read -r p; do
+    c=${p##*/}; c=${c:0:15}
+    printf '%s\t%s\t%s\n' "${p##*/}" "$p" "$(grep -cF " $c[" <<<"$k")"
+  done
+}
+
+json() {
+  jq -n --rawfile c <(rows) --rawfile i <(ignored) '($c | split("\n") | map(select(length > 0) | split("\t")
+    | {name:.[0], exe:.[1], signal:(.[2] | tonumber? // null), signame:.[3], cmdline:.[4], age_s:(.[5] | tonumber), upload:.[6]}))
+    + ($i | split("\n") | map(select(length > 0) | split("\t")
+    | {name:.[0], exe:.[1], upload:"ignored-by-apport", traps_24h:(.[2] | tonumber)}))'
+}
+
+age() { local s=$1; [ "$s" -ge 86400 ] && echo "$((s / 86400))d" || { [ "$s" -ge 3600 ] && echo "$((s / 3600))h" || echo "$((s / 60))m"; }; }
+
+# mvq <src> <dst> — mv, falling back to sudo for a file another user owns in the sticky crash dir.
+mvq() { [ -e "$1" ] || return 0; mv -- "$1" "$2" 2>/dev/null || pc_root mv -- "$1" "$2"; }
+
+reset_unit() {
+  if [ -n "$PC_FIXTURE" ]; then pc_cmd systemctl reset-failed "$PC_CRASH_UNIT"
+  else pc_root systemctl reset-failed "$PC_CRASH_UNIT"; fi
+}
+
+name_of() { local n=${1##*/}; n=${n%.uploaded}; n=${n%.upload}; n=${n%.crash}; printf '%s' "$n"; }
+
+case "${ARGS[0]:-list}" in
+  list)
+    if [ "$JSON" = 1 ]; then json; exit 0; fi
+    { rows | while IFS=$'\t' read -r n exe sig sn cmd a up; do
+        printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$n" "${exe:--}" "${sn:-${sig:--}}" "$(age "$a")" "$up" "${cmd:--}"
+      done
+      ignored | while IFS=$'\t' read -r n exe t; do
+        printf '%s\t%s\t-\t-\tignored-by-apport\t%s kernel traps in 24h\n' "$n" "$exe" "$t"
+      done; } | column -t -s $'\t'
+    ;;
+  state)
+    n=$(name_of "${ARGS[1]:?name}"); dest=${ARGS[2]:?dest}
+    if [ -e "$PC_CRASH_DIR/$n.crash" ]; then echo present
+    elif [ -e "$dest/$n.crash" ]; then echo archived
+    else echo absent; fi
+    ;;
+  move)
+    n=$(name_of "${ARGS[1]:?name}"); dest=${ARGS[2]:?dest}
+    mkdir -p "$dest" || exit 1
+    for e in "${EXTS[@]}"; do mvq "$PC_CRASH_DIR/$n.$e" "$dest/" || exit 1; done
+    reset_unit
+    ;;
+  restore)
+    n=$(name_of "${ARGS[1]:?name}"); dest=${ARGS[2]:?dest}
+    for e in "${EXTS[@]}"; do mvq "$dest/$n.$e" "$PC_CRASH_DIR/" || exit 1; done
+    rmdir "$dest" 2>/dev/null
+    ;;
+  archive)
+    [ -n "${ARGS[1]:-}" ] || { echo "pc crashes archive: need a name (see pc crashes)" >&2; exit 2; }
+    n=$(name_of "${ARGS[1]}")
+    [ -e "$PC_CRASH_DIR/$n.crash" ] || { echo "pc crashes: no $PC_CRASH_DIR/$n.crash" >&2; exit 1; }
+    printf -v stamp '%(%Y%m%d-%H%M%S)T' -1
+    dest="$PC_CRASH_BACKUP/$stamp-$n"
+    env=$(printf 'PC_CRASH_DIR=%q PC_CRASH_BACKUP=%q PC_CRASH_UNIT=%q PC_FIXTURE=%q' \
+      "$PC_CRASH_DIR" "$PC_CRASH_BACKUP" "$PC_CRASH_UNIT" "$PC_FIXTURE")
+    q() { printf '%s %q %s %q %q' "$env" "$SELF" "$1" "$n" "$dest"; }
+    PC_READ_CMD="$(q state)" PC_REDO="$(q move)" \
+      pc_apply "crash:$n" present archived "$(q restore)" "$SELF" move "$n" "$dest"
+    ;;
+  *) printf '%s\n' "$PC_USAGE" >&2; exit 2;;
+esac

@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""mv-estimate: predict a film build's CPU seconds per step from the project's own mv-build history, before it renders.
+
+Per step (plus 'unattributed' = cpu_s minus the steps): cpu = a + b x work (frames x pixels, x samples for plate*), least squares over 2+ builds;
+1 build scales linearly. Exit 0 ok, 1 over --budget, 2 no build history or bad input.
+"""
+import argparse
+import json
+import os
+import sys
+
+LOG = os.environ.get('CREATIVE_CI_LOG', os.path.join(os.environ.get('HARNESS_HOME', os.path.expanduser('~/agents')), 'log', 'creative-ci.jsonl'))
+SAMPLES_FULL, SAMPLES_DRAFT = 16, 4
+
+
+def die(msg):
+    """Print to stderr and exit 2."""
+    print(f'mv-estimate: {msg}', file=sys.stderr)
+    sys.exit(2)
+
+
+def pixels(size):
+    """W x H of a 'WxH' string, or die."""
+    try:
+        w, h = size.lower().split('x')
+        return int(w) * int(h)
+    except ValueError:
+        die(f'bad size {size!r}, want WxH')
+
+
+def work(step, seconds, fps, size, draft):
+    """Frames x megapixels, x EEVEE samples for plate steps."""
+    w = seconds * fps * pixels(size) / 1e6
+    return w * (SAMPLES_DRAFT if draft else SAMPLES_FULL) if step.startswith('plate') else w
+
+
+def builds(name):
+    """Build summaries with steps_cpu logged for project name, oldest first, one per summary file."""
+    seen, out = set(), []
+    try:
+        lines = open(LOG).read().splitlines()
+    except OSError:
+        lines = []
+    for line in lines:
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        p = e.get('summary')
+        if e.get('tool') != 'mv-build' or e.get('project') != name or not p or p in seen:
+            continue
+        seen.add(p)
+        try:
+            s = json.load(open(p))
+        except (OSError, ValueError):
+            continue
+        if s.get('steps_cpu') and all(k in s for k in ('seconds', 'fps', 'size')):
+            if 'cpu_s' in s:
+                s['steps_cpu']['unattributed'] = max(s['cpu_s'] - sum(s['steps_cpu'].values()), 0.0)
+            out.append(s)
+    return out
+
+
+def estimate(pts, x):
+    """(cpu, basis) at work x from (work, cpu) points."""
+    if len(pts) == 1 or len({p[0] for p in pts}) == 1:
+        w, c = min(pts, key=lambda p: abs(p[0] - x))
+        return (c * x / w if w else c), f'{len(pts)} build{"s" * (len(pts) > 1)}, linear'
+    n = len(pts)
+    mx, my = sum(p[0] for p in pts) / n, sum(p[1] for p in pts) / n
+    b = sum((p[0] - mx) * (p[1] - my) for p in pts) / sum((p[0] - mx) ** 2 for p in pts)
+    if b < 0:
+        return my, f'{n} builds, flat'
+    return my + b * (x - mx), f'{n} builds, fit'
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0], usage='mv-estimate PROJECT [--seconds S] [--fps F] [--size WxH] [--draft] [--budget CPU_S] [--json]')
+    ap.add_argument('project', help='project dir or name (the mv-build project field)')
+    ap.add_argument('--seconds', type=float, help='film length (default: the latest build of the same draft kind)')
+    ap.add_argument('--fps', type=float, help='frames per second (default: as --seconds)')
+    ap.add_argument('--size', help='WxH as the build summary records it (default: as --seconds)')
+    ap.add_argument('--draft', action='store_true', help='estimate a --draft build (4 samples per plate frame)')
+    ap.add_argument('--budget', type=float, help='CPU seconds; exit 1 with "over budget: <est> > <budget>" when the total exceeds it')
+    ap.add_argument('--json', action='store_true', help='print the estimate as JSON')
+    a = ap.parse_args()
+    name = os.path.basename(a.project.rstrip('/'))
+    hist = builds(name)
+    if not hist:
+        die(f'no mv-build summaries with steps_cpu for {name} in {LOG}')
+    base = ([b for b in hist if bool(b.get('draft')) == a.draft] or hist)[-1]
+    seconds, fps, size = a.seconds or base['seconds'], a.fps or base['fps'], a.size or base['size']
+    pixels(size)
+    steps = {}
+    for step in sorted({k for b in hist for k in b['steps_cpu']}):
+        pts = [(work(step, b['seconds'], b['fps'], b['size'], b.get('draft')), b['steps_cpu'][step]) for b in hist if step in b['steps_cpu']]
+        cpu, basis = estimate(pts, work(step, seconds, fps, size, a.draft))
+        steps[step] = {'cpu': round(max(cpu, 0.0), 1), 'basis': basis}
+    total = round(sum(s['cpu'] for s in steps.values()), 1)
+    over = a.budget is not None and total > a.budget
+    if a.json:
+        print(json.dumps({'project': name, 'seconds': seconds, 'fps': fps, 'size': size, 'draft': a.draft, 'builds': len(hist),
+                          'steps': steps, 'total': total, 'budget': a.budget, 'over': over}))
+    else:
+        print(f'{name}: {seconds:g} s, {fps:g} fps, {size}{" draft" if a.draft else ""} from {len(hist)} build(s)')
+        for k, s in steps.items():
+            print(f'  {k:<14} {s["cpu"]:>9.1f}  {s["basis"]}')
+        print(f'  {"total":<14} {total:>9.1f}')
+    if over:
+        print(f'over budget: {total:.1f} > {a.budget:g}', file=sys.stderr if a.json else sys.stdout)
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()

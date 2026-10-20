@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+# mv-mix: voice-over + music bed ducked under the voice (sidechain) + SFX at seconds or cue marks -> one 48 kHz WAV at a loudness.json target.
+set -euo pipefail
+
+usage() {
+  cat <<'U'
+usage: mv-mix --out mix.wav --duration SEC [--vo FILE [--vo-at SEC]] [--music FILE [--music-db -14]]
+              [--cues cues.json] [--sfx FILE@SEC[@DB] | --sfx FILE@cue:NAME[+MS][@DB]]... [--duck 8]
+              [--game FILE[@SEC[@DB]]]... [--duck-on vo[,sfx][,game]]
+              [--target web|youtube|broadcast|podcast] [--fit none|bars]
+  music loops to --duration, fades in 1 s / out 2 s and ducks by up to --duck ratio while the VO speaks.
+  --duck-on (default vo): the sidechain key is the sum of the named stems (--game: game audio, default 0 dB at 0 s);
+  attack = fastest, release = longest of those classes in loudness.json "duck"; depth_db (sfx, game) caps the dip
+  at the deepest class's dB via the compressor's dry mix; a class without depth_db (vo) ducks uncapped.
+  --fit bars: mv-beats finds the downbeats; the loop is the longest multiple of 4 bars, joined by a 40 ms
+  equal-power crossfade that ends on a downbeat; the bed ends on the last downbeat with 1.5 s left, then
+  a 1.5 s release fade and silence. Default --fit none: plain loop, 2 s fade out.
+  cue:NAME starts the SFX at that {mark} of --cues (any clip) + --vo-at, shifted by +MS/-MS milliseconds.
+  --target picks I/TP/LRA from loudness.json (default web): pass 1 measures, pass 2 applies one linear gain;
+  (ebur128 measures, BS.1770); dynamic loudnorm only when that gain would push the true peak over TP (printed as mode=dynamic and why).
+  library: mv-assets list (CC0); VO: /kokoro-narration .m4a/.wav
+U
+}
+
+out="" dur="" vo="" vo_at=0 music="" music_db=-14 duck=8 cues="" sfx=() target=web fit=none fitinfo="" game=() duck_on=vo
+LOUDNESS=$(dirname "$(readlink -f "$0")")/../loudness.json
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --out) out=$2; shift 2 ;;
+    --duration) dur=$2; shift 2 ;;
+    --vo) vo=$2; shift 2 ;;
+    --vo-at) vo_at=$2; shift 2 ;;
+    --music) music=$2; shift 2 ;;
+    --music-db) music_db=$2; shift 2 ;;
+    --sfx) sfx+=("$2"); shift 2 ;;
+    --cues) cues=$2; shift 2 ;;
+    --duck) duck=$2; shift 2 ;;
+    --duck-on) duck_on=$2; shift 2 ;;
+    --game) game+=("$2"); shift 2 ;;
+    --target) target=$2; shift 2 ;;
+    --fit) fit=$2; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "mv-mix: unknown option $1" >&2; usage; exit 2 ;;
+  esac
+done
+[[ -n $out && -n $dur && ( -n $vo || -n $music || ${#sfx[@]} -gt 0 || ${#game[@]} -gt 0 ) ]] || { usage; exit 2; }
+[[ $fit == none || $fit == bars ]] || { echo "mv-mix: --fit is none or bars, not '$fit'" >&2; exit 2; }
+[[ ,$duck_on, =~ ^(,(vo|sfx|game))+,$ ]] || { echo "mv-mix: --duck-on is a comma list of vo, sfx, game, not '$duck_on'" >&2; exit 2; }
+jq -e --arg t "$target" '.[$t] | has("I")?' "$LOUDNESS" >/dev/null ||
+  { echo "mv-mix: unknown --target '$target'; known: $(jq -r 'with_entries(select(.value.I)) | keys | join(" ")' "$LOUDNESS")" >&2; exit 2; }
+read -r ti ttp tlra < <(jq -r --arg t "$target" '.[$t] | "\(.I) \(.TP) \(.LRA)"' "$LOUDNESS")
+
+in=() fc="" mixin="" n=0 i=0
+ms() { echo "$1 * 1000 / 1" | bc; }
+cue_at() {
+  local name=$1 off=0 t
+  [[ $1 =~ ^(.+)([+-][0-9]+)$ ]] && name=${BASH_REMATCH[1]} off=${BASH_REMATCH[2]}
+  [[ -n $cues ]] || { echo "mv-mix: cue:$name needs --cues cues.json" >&2; exit 2; }
+  t=$(jq -r --arg n "$name" '[.clips[].marks[$n] // empty][0] // empty' "$cues")
+  [[ -n $t ]] || { echo "mv-mix: unknown cue '$name'; known: $(jq -r '[.clips[].marks | keys[]] | unique | join(" ")' "$cues")" >&2; exit 2; }
+  echo "$t + $vo_at + ${off#+} / 1000" | bc -l
+}
+fit_bars() {
+  local xf=0.04 rel=1.5 plan a b e cnt bars seams g fc2 k
+  "$(dirname "$(readlink -f "$0")")/mv-beats" "$music" --downbeats --out "$tmp/beats.json" 2>/dev/null ||
+    { echo "mv-mix: --fit bars: mv-beats failed on $music" >&2; exit 1; }
+  plan=$(jq -r --argjson dur "$dur" --argjson xf $xf --argjson rel $rel '
+    [.downbeats[].t] as $d | ([range($d | length) | select($d[.] >= $xf)][0]) as $i
+    | if $i == null then empty else
+      ((($d | length) - 1 - $i) / 4 | floor * 4) as $nb | select($nb >= 4)
+      | $d[$i] as $a | $d[$i + $nb] as $b | ($b - $a) as $l
+      | ([range(0; ($dur - $b) / $l | ceil) | $b + . * $l]) as $s
+      | ($d[: $i + $nb + 1] + [$s[] as $x | $d[$i: $i + $nb][] | $x + . - $a]) as $down
+      | ([$down[] | select(. + $rel <= $dur)] | max // ([$down[] | select(. <= $dur)] | max)) as $e
+      | ([$rel, $dur - $e] | min) as $r
+      | [$a, $b, $e, $r] | map(. * 10000 | round / 10000) | . + [ ([$s[] | select(. < $e + $r)] | length), $nb,
+         ([$s[] | select(. < $e + $r) | . * 1000 | round / 1000 | tostring] | join(","))] | map(tostring) | join(" ")
+    end' "$tmp/beats.json")
+  [[ -n $plan ]] || { echo "mv-mix: --fit bars: $music has fewer than 4 whole bars after the first downbeat" >&2; exit 1; }
+  read -r a b e rel cnt bars seams <<<"$plan"
+  fc2="[0:a]aresample=48000,aformat=channel_layouts=stereo,asplit=$((cnt + 1))"
+  for ((k = 0; k <= cnt; k++)); do fc2+="[p$k]"; done
+  fc2+=";[p0]atrim=end=$b,asetpts=PTS-STARTPTS[x0]"
+  for ((k = 1; k <= cnt; k++)); do
+    fc2+=";[p$k]atrim=start=$(echo "$a - $xf" | bc -l):end=$b,asetpts=PTS-STARTPTS[g$k];[x$((k - 1))][g$k]acrossfade=d=$xf:c1=qsin:c2=qsin[x$k]"
+  done
+  fc2+=";[x$cnt]afade=t=in:d=1,afade=t=out:st=$e:d=$rel,apad,atrim=end=$dur[out]"
+  ffmpeg -hide_banner -loglevel error -y -i "$music" -filter_complex "$fc2" -map '[out]' -c:a pcm_f32le "$tmp/bed.wav" ||
+    { echo "mv-mix: --fit bars: ffmpeg failed" >&2; exit 1; }
+  fitinfo=" fit=bars bars=$bars loop=$a-$b seams=${seams:-none} end=$e"
+}
+if [[ -n $vo ]]; then
+  in+=(-i "$vo"); i=$n; n=$((n + 1))
+  fc+="[$i:a]aresample=48000,aformat=channel_layouts=stereo,adelay=$(ms "$vo_at"):all=1,apad,atrim=0:$dur,asplit=2[vo][key];"
+  mixin+="[vo]"
+fi
+if [[ -n $music ]]; then
+  if [[ $fit == bars ]]; then
+    tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+    fit_bars
+    in+=(-i "$tmp/bed.wav"); bedfx="volume=${music_db}dB"
+  else
+    in+=(-stream_loop -1 -i "$music")
+    bedfx="atrim=0:$dur,volume=${music_db}dB,afade=t=in:d=1,afade=t=out:st=$(echo "$dur - 2" | bc):d=2"
+  fi
+  i=$n; n=$((n + 1))
+  fc+="[$i:a]aresample=48000,aformat=channel_layouts=stereo,$bedfx[bed0];"
+  mixin+="[bed]"
+fi
+on() { [[ -n $music && ,$duck_on, == *,$1,* ]]; }
+keys="" classes=""
+if [[ -n $vo ]]; then
+  if on vo; then keys+="[key]" classes+=",vo"; else fc+="[key]anullsink;"; fi
+fi
+k=0
+for s in "${sfx[@]}"; do
+  IFS=@ read -r f at db <<<"$s"
+  [[ $at == cue:* ]] && at=$(cue_at "${at#cue:}")
+  in+=(-i "$f"); i=$n; n=$((n + 1))
+  fc+="[$i:a]aresample=48000,aformat=channel_layouts=stereo,volume=${db:--6}dB,adelay=$(ms "$at"):all=1"
+  if on sfx; then fc+=",asplit=2[s$k][ks$k];"; keys+="[ks$k]"; else fc+="[s$k];"; fi
+  mixin+="[s$k]"; k=$((k + 1))
+done
+[[ ${#sfx[@]} -gt 0 ]] && on sfx && classes+=",sfx"
+k=0
+for s in "${game[@]}"; do
+  IFS=@ read -r f at db <<<"$s"
+  in+=(-i "$f"); i=$n; n=$((n + 1))
+  fc+="[$i:a]aresample=48000,aformat=channel_layouts=stereo,volume=${db:-0}dB,adelay=$(ms "${at:-0}"):all=1"
+  if on game; then fc+=",asplit=2[g$k][kg$k];"; keys+="[kg$k]"; else fc+="[g$k];"; fi
+  mixin+="[g$k]"; k=$((k + 1))
+done
+[[ ${#game[@]} -gt 0 ]] && on game && classes+=",game"
+if [[ -n $music ]]; then
+  if [[ -z $keys ]]; then
+    fc+="[bed0]anull[bed];"
+  else
+    read -r atk rel depth < <(jq -r --arg c "${classes#,}" '.duck as $d | [$c | split(",")[] | $d[.]] |
+      "\(map(.attack) | min) \(map(.release) | max) \(if any(.depth_db == null) then "" else map(.depth_db) | max end)"' "$LOUDNESS")
+    if [[ $keys != "[key]" ]]; then
+      fc+="${keys}amix=inputs=$(grep -o '\[' <<<"$keys" | wc -l):normalize=0:duration=longest,apad,atrim=0:$dur[dk];"; keys="[dk]"
+    fi
+    fc+="[bed0]${keys}sidechaincompress=threshold=0.02:ratio=$duck:attack=$atk:release=$rel:makeup=1${depth:+:mix=$(awk -v d="$depth" 'BEGIN{printf "%.4f", 1 - 10 ^ (-d / 20)}')}[bed];"
+    [[ $duck_on == vo ]] || duckinfo=" duck=${classes#,} attack=${atk}ms release=${rel}ms${depth:+ depth=${depth}dB}"
+  fi
+fi
+m=$(( ${#mixin} > 0 ? $(grep -o '\[' <<<"$mixin" | wc -l) : 0 ))
+fc+="${mixin}amix=inputs=$m:normalize=0:duration=longest,apad,atrim=0:$dur"
+
+ff_log() {
+  local log
+  log=$(ffmpeg -hide_banner -nostats -y "${in[@]}" -filter_complex "$fc,$1[out]" -map '[out]' "${@:2}" 2>&1) ||
+    { echo "mv-mix: ffmpeg failed" >&2; tail -5 <<<"$log" >&2; return 1; }
+  echo "$log"
+}
+m1=$(ff_log ebur128=peak=true:framelog=quiet -f null -)
+read -r mi mth mlra mtp < <(awk '/Summary:/{s=1} s&&/I:/&&!i{i=$2} s&&/Threshold:/&&!t{t=$2} s&&/LRA:/{r=$2} s&&/Peak:/{p=$2} END{print i, t, r, p}' <<<"$m1")
+ln=loudnorm=I=$ti:TP=$ttp:LRA=$tlra:print_format=json why=""
+if awk -v i="$mi" 'BEGIN{exit !(i<=-70)}'; then
+  ln=anull why="silent input"
+else
+  read -r peak lra < <(awk -v i="$ti" -v mi="$mi" -v tp="$mtp" -v l="$tlra" -v ml="$mlra" \
+    'BEGIN{ml=int(ml)+1; printf "%.2f %d\n", tp+i-mi, (ml>l ? (ml>50?50:ml) : l)}')
+  if awk -v p="$peak" -v t="$ttp" 'BEGIN{exit !(p>t)}'; then
+    why="linear gain $(awk -v i="$ti" -v mi="$mi" 'BEGIN{printf "%+.1f", i-mi}') dB would put true peak at $peak > $ttp dBTP"
+  else
+    # LRA is raised to the measured range so ffmpeg keeps linear mode; measured_LRA=0 (steady tone) would read as unset.
+    ln=loudnorm=I=$ti:TP=$ttp:LRA=$lra:measured_I=$mi:measured_TP=$mtp:measured_LRA=$(awk -v l="$mlra" 'BEGIN{print (l>0?l:0.01)}'):measured_thresh=$mth:linear=true:print_format=json
+  fi
+fi
+j=$(ff_log "$ln,aresample=48000" -c:a pcm_s24le "$out" | sed -n '/^{/,/^}/p')
+mode=$(jq -r .normalization_type <<<"$j"); mode=${mode:-none}
+read -r lufs olra < <(ffmpeg -hide_banner -nostats -i "$out" -af ebur128 -f null - 2>&1 | awk '/I:/{v=$2} /LRA:/{r=$2} END{print v, r}')
+echo "mv-mix: $out duration=$dur inputs=$n target=$target integrated_lufs=$lufs lra=$olra mode=$mode${why:+ ($why)}$fitinfo${duckinfo:-}"

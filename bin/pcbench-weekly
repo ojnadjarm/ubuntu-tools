@@ -59,8 +59,8 @@ fi
 say "gate: away${FORCE:+ (force=$FORCE)}"
 
 # --tier is omitted on purpose: every tier runs, so the confirming C02/C04 re-run is included.
-cmd=(pcbench run --arm both -n "$TRIALS" --model "$MODEL" --set night
-     --require-away)
+cmd=(pcbench run --arm both -n "$TRIALS" --model "$MODEL" --set night)
+[ "$FORCE" = 1 ] || cmd+=(--require-away)
 if [ "$DRY" = 1 ]; then say "would run: ${cmd[*]}"; exit 0; fi
 
 say "rebuilding both arms from the live tree"

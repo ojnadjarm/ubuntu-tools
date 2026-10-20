@@ -1,0 +1,388 @@
+#!/usr/bin/env bash
+# One-command CI for a native C++ SDL3/Vulkan project (new-cpp-game template): shaders, configure, build, sanitize, run, perf, profile, tidy, golden; OUT/summary.json.
+#
+# Layout: one stage_<name> function per stage sets $st (pass|fail|skip) and $x (stage JSON); ci-lib.sh's record() writes
+# .stages.<name> in game-ci's schema; needs() lists the stages a stage depends on (skipped when one did not pass).
+# New stage (e.g. profile): add stage_<name>, its needs() line and its name to $stages.
+# The binary runner is cpp-vk-run.sh (headless weston on the iGPU), overridable with CPPCI_RUNNER for tests; cpp-tidy likewise with CPPCI_TIDY, ꟻLIP with CPPCI_FLIP.
+set -uo pipefail
+usage() {
+	cat <<-'EOF'
+	usage: cpp-ci [--out DIR] [--frames N] [--sanitize-frames N] [--perf-frames N] [--perf-max-load L] [--capture-frame N] [--gpu-tol PCT] [--p99-tol PCT] [--vram-mb MB] [--profile-frames N] [--golden-frame N] [--update-golden] [--stages LIST] [--keep] [--target NAME] [--game-args ARGS] [--package-max-mb MB] PROJECT_DIR
+	  stages: shaders configure build sanitize run perf profile tidy golden, opt-in package (--stages "configure build package"; default runs the first nine); summary in OUT/summary.json (default OUT=PROJECT/ci), fps rows in OUT/perf.csv
+	  shaders: static, no GPU: shader-stats on PROJECT/shaders/*.{vert,frag,comp,...} against PROJECT/shaders/stats-baseline.tsv; fails on a metric
+	           grown > 10 % (GROW lines), skips without the baseline, status error (run not failed) when glslang/spirv tools are missing or a shader does not compile;
+	           per-shader counts, delta, grow and errors in summary.json
+	  configure/build: preset "release", warnings as errors (build/ci-release)
+	  ccache + mold: configure, sanitize, profile and package build through ccache and link with mold when both are on PATH (plain otherwise),
+	                 module scanning off (gcc scan flags make ccache refuse the compile); CCACHE_BASEDIR=PROJECT, CCACHE_NOHASHDIR=1 and
+	                 -fdebug-prefix-map=PROJECT=. so copies of the project share cache hits;
+	                 ccache_hit_pct in summary.json (this run's compiles, from OUT/logs/ccache-stats.log; null without ccache)
+	  sanitize: ASan+UBSan debug build with gcc (build/ci-sanitize), --sanitize-frames (60), fails on any sanitizer report
+	  run: Vulkan validation on, --frames (120), fails on validation_errors > 0 or on the exit line VMA live_allocations=N with N > 0 (leak)
+	  perf: validation off, --perf-frames (600), appends avg_fps, gpu_ms_p50/p99 (timestamp queries), cpu_ms_p50 (frame minus
+	        fence/acquire/present waits), bound=gpu|cpu (gpu_ms_p50 > cpu_ms_p50), status, vram_used_mb/vram_budget_mb (device-local heaps, run peak,
+        VK_EXT_memory_budget; used empty without it), draws/culled (last frame); fails when vram_used_mb > --vram-mb (off); skips when load1 >= --perf-max-load (0.5 × nproc) or other GPU clients keep the render engine > 15 % (quiet-gate --gpu);
+	        after 3 pass rows fails when gpu_ms_p50 > --gpu-tol (15) % or gpu_ms_p99 > --p99-tol (25) % over the median of
+	        the last 10 pass rows (skip and fail rows are never a baseline); per-pass gpu_ms_p50_shadow/scene/post/skin (timestamp zones) in the row and summary.json,
+	        and on a fail "perf culprit pass=<pass> delta_ms=..." names the pass that rose most over its own median;
+	        a gate fail re-runs the replay once under renderdoccmd capture with rd-trigger.so at frame --capture-frame (60)
+	        to OUT/perf/frame.rdc ("perf capture <path>", .stages.perf.capture; null without renderdoccmd or a capture)
+	  profile: GAME_TRACY=ON release build (build/ci-profile), --profile-frames (300) under tracy-capture on localhost,
+	           zones in OUT/profile.csv, top 5 by mean_ns in summary.json; OUT/profile.tracy deleted unless --keep
+	  tidy: cpp-tidy (clang-tidy, the project's .clang-tidy) on build/ci-release sources, fails on any finding; skips without .clang-tidy
+	  golden: game --capture N (fixed 1/60 s step) reads back swapchain frame --golden-frame (60) to OUT/golden-frame.png, NVIDIA ꟻLIP
+	          (pip flip-evaluator, version in summary.json) against PROJECT/golden/frame.png; fails when mean ꟻLIP > 0.02 and keeps
+	          OUT/golden-heatmap.png; --update-golden rewrites golden/frame.png; skips without golden/frame.png
+	  crash: the template's handler prints a CRASH line on SIGSEGV/SIGABRT/SIGFPE; run, perf and golden then add
+	         crash: {signal, frames: [{fn, file, line}] (top 8 app frames, addr2line on the -g1 release binary)} and fail
+	  package (opt-in): GAME_PORTABLE=ON release build (build/ci-package), cmake --install --strip (RPATH $ORIGIN/lib), non-system .so from ldd into lib/,
+	           OUT/game-<vcpkg.json version>-linux-x86_64.tar.zst; size_bytes and sha256 in summary.json; fails on a missing lib or over --package-max-mb (60)
+	  --game-args ARGS: extra game arguments for run, perf and golden (e.g. --crash-test)
+	  cost (T995): every stage that ran gains cpu_s (user+sys of the processes it waited for); configure gains vcpkg_s (between the
+	        "-- Running vcpkg install" lines, stamped "(at N ms)" in OUT/logs/configure.log); build gains compile_s/link_s/other_s
+	        (summed job seconds of this build's build/ci-release/.ninja_log entries: objects / binaries and libs / the rest),
+	        top_tu (3 slowest objects) and ccache_hits/ccache_misses (ccache --print-stats delta; null without ccache + mold)
+	  exit 0 when no stage failed (a skip is not a failure)
+	EOF
+	exit "${1:-2}"
+}
+cpu_ticks() { awk '{print $16 + $17}' "/proc/$$/stat"; }  # user+sys clock ticks of this shell's waited-for children
+cpu_since() { awk -v a="$1" -v b="$(cpu_ticks)" -v hz="$(getconf CLK_TCK)" 'BEGIN {printf "%.2f", (b - a) / hz}'; }  # TICKS: children CPU seconds since TICKS
+vcpkg_stamp() {  # stdin to stdout; "-- Running vcpkg install" lines gain " (at N ms)" since the start
+	local t0=${EPOCHREALTIME/./} l
+	while IFS= read -r l || [ -n "$l" ]; do
+		[[ $l == "-- Running vcpkg install"* ]] && l+=" (at $(( (${EPOCHREALTIME/./} - t0) / 1000 )) ms)"
+		printf '%s\n' "$l"
+	done
+}
+vcpkg_s() {  # configure log: seconds from the stamped vcpkg install line to its done/failed line; empty without both
+	sed -n 's/^-- Running vcpkg install.* (at \([0-9]*\) ms)$/\1/p' "$1" | awk 'NR == 1 {a = $1} NR == 2 {printf "%.2f", ($1 - a) / 1000}'
+}
+ninja_cost() {  # BEFORE AFTER: JSON {compile_s, link_s, other_s, top_tu} of the .ninja_log lines in AFTER not in BEFORE (this build), a multi-output command once
+	[ -f "$2" ] || { echo '{"compile_s": null, "link_s": null, "other_s": null, "top_tu": null}'; return; }
+	awk -F'\t' 'FILENAME == ARGV[1] {old[$0]; next}
+		/^#/ || NF < 5 || ($0 in old) || ($1 FS $2 FS $5) in seen {next}
+		{seen[$1 FS $2 FS $5]; d = ($2 - $1) / 1000; o = $4; b = o; sub(/.*\//, "", b)
+		 if (o ~ /\.(o|obj)$/) {c += d; sub(/^CMakeFiles\/[^\/]*\.dir\//, "", o); sub(/\.(o|obj)$/, "", o); print d "\t" o}
+		 else if (b !~ /\./ || b ~ /\.(a|so(\.[0-9]+)*)$/) l += d
+		 else x += d}
+		END {print "sum\t" int(c * 100 + 0.5) / 100 "\t" int(l * 100 + 0.5) / 100 "\t" int(x * 100 + 0.5) / 100}' "${1:-/dev/null}" "$2" \
+		| jq -R -s -c 'split("\n") | map(select(length > 0) | split("\t")) | (map(select(.[0] == "sum"))[0]) as $s
+			| {compile_s: ($s[1] | tonumber), link_s: ($s[2] | tonumber), other_s: ($s[3] | tonumber),
+			   top_tu: (map(select(.[0] != "sum") | {tu: .[1], s: (.[0] | tonumber)}) | sort_by(-.s) | .[:3])}'
+}
+ccache_counts() { ccache --print-stats 2>/dev/null | awk -F'\t' '$1 ~ /^(direct|preprocessed)_cache_hit$/ {h += $2} $1 == "cache_miss" {m += $2} END {if (NR) print h + 0, m + 0}'; }  # "hits misses" of ccache, empty without it
+ccache_delta() {  # "H0 M0" "H1 M1": JSON {ccache_hits, ccache_misses}, nulls when either is empty
+	jq -n -c --arg a "$1" --arg b "$2" '($a | split(" ") | map(tonumber? // empty)) as $x | ($b | split(" ") | map(tonumber? // empty)) as $y
+		| if ($x | length) == 2 and ($y | length) == 2 then {ccache_hits: ($y[0] - $x[0]), ccache_misses: ($y[1] - $x[1])} else {ccache_hits: null, ccache_misses: null} end'
+}
+[[ ${BASH_SOURCE[0]} != "$0" ]] && return 0  # sourced (tests): the cost parsers above only
+S=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+. "$S/ci-lib.sh"
+runner=${CPPCI_RUNNER:-$S/cpp-vk-run.sh}
+rdshim=${CPPCI_RDSHIM:-$HOME/opt/gamedev/rd-trigger.so}
+tidy=${CPPCI_TIDY:-$S/cpp-tidy}
+flip=${CPPCI_FLIP:-$HOME/opt/gamedev/flip-venv/bin/flip}
+stages="shaders configure build sanitize run perf profile tidy golden" out="" frames=120 sanframes=60 perfframes=600 perfload="" capframe=60 gputol=15 p99tol=25 vrammb= profframes=300 gframe=60 update=0 gtol=0.02 keep=0 pkgmax=60 target=game proj="" gargs=()
+while [ $# -gt 0 ]; do
+	case $1 in
+		--out) out=$2; shift 2 ;;
+		--frames) frames=$2; shift 2 ;;
+		--sanitize-frames) sanframes=$2; shift 2 ;;
+		--perf-frames) perfframes=$2; shift 2 ;;
+		--perf-max-load) perfload=$2; shift 2 ;;
+		--capture-frame) capframe=$2; shift 2 ;;
+		--gpu-tol) gputol=$2; shift 2 ;;
+		--p99-tol) p99tol=$2; shift 2 ;;
+		--vram-mb) vrammb=$2; shift 2 ;;
+		--profile-frames) profframes=$2; shift 2 ;;
+		--golden-frame) gframe=$2; shift 2 ;;
+		--update-golden) update=1; shift ;;
+		--stages) stages=$2; shift 2 ;;
+		--keep) keep=1; shift ;;
+		--target) target=$2; shift 2 ;;
+		--package-max-mb) pkgmax=$2; shift 2 ;;
+		--game-args) read -ra gargs <<< "$2"; shift 2 ;;
+		-h|--help) usage 0 ;;
+		*) proj=$1; shift ;;
+	esac
+done
+[ -n "$proj" ] && [ -f "$proj/CMakePresets.json" ] || usage >&2
+proj=$(cd "$proj" && pwd); cd "$proj" || exit 2
+ci_init CPPCI "${out:-$proj/ci}"
+L=$out/logs
+export VCPKG_ROOT=${VCPKG_ROOT:-$HOME/opt/gamedev/vcpkg}
+fast=() pmap=""
+if command -v ccache > /dev/null && command -v "${CPPCI_MOLD:-mold}" > /dev/null; then
+	pmap="-fdebug-prefix-map=$proj=."
+	fast=(-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_LINKER_TYPE=MOLD -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+		-DCMAKE_C_FLAGS="$pmap" -DCMAKE_CXX_FLAGS="$pmap")
+	export CCACHE_BASEDIR=$proj CCACHE_NOHASHDIR=1 CCACHE_STATSLOG=$L/ccache-stats.log; rm -f "$CCACHE_STATSLOG"
+fi
+rel=$proj/build/ci-release san=$proj/build/ci-sanitize prof=$proj/build/ci-profile pkg=$proj/build/ci-package
+
+needs() {
+	case $1 in
+		build|tidy) echo configure ;;
+		run|perf|profile|golden|package) echo build ;;
+	esac
+}
+crash_json() {  # log binary: crash JSON from the log's CRASH line (pcs minus load base through addr2line); rc 1 without one
+	local line sig base pcs
+	line=$(grep -m1 '^CRASH ' "$1") || return 1
+	sig=$(sed -n 's/.*signal=\([A-Z0-9]*\).*/\1/p' <<< "$line")
+	base=$(sed -n 's/.* base=\(0x[0-9a-f]*\).*/\1/p' <<< "$line")
+	pcs=$(sed -n 's/.* frames=\([0-9a-fx,]*\).*/\1/p' <<< "$line")
+	for a in ${pcs//,/ }; do printf '0x%x\n' $((a - base)); done | addr2line -f -C -e "$2" | paste - - \
+		| awk -F'\t' '$1 != "??"' | head -8 | jq -R -s -c --arg s "$sig" \
+		'{signal: $s, frames: (split("\n") | map(select(length > 0) | split("\t") | (.[1] | sub(" \\(discriminator.*"; "")) as $loc
+		  | {fn: .[0], file: ($loc | sub(":[^:]*$"; "")), line: ($loc | sub("^.*:"; "") | tonumber? // null)}))}'
+}
+add_crash() {  # log: merge crash into the stage JSON $x when the log has a CRASH line
+	local c; c=$(crash_json "$1" "$rel/$target") || return 0
+	x=$(jq -c --argjson c "$c" '. + {crash: $c}' <<< "$x")
+}
+ccache_hit_pct() {  # this run's hits / (hits + misses) in % from the ccache stats log; null without one
+	awk '/^(direct|preprocessed)_cache_hit$/ {h++} /^cache_miss$/ {m++} END {print (h + m ? sprintf("%.1f", 100 * h / (h + m)) : "null")}' "${CCACHE_STATSLOG:-/dev/null}" 2>/dev/null || echo null
+}
+done_field() { sed -n "s/^DONE .*$1=\([0-9.]*\).*/\1/p" "$2" | tail -1; }
+
+stage_shaders() {
+	local dir=$proj/shaders j rc
+	if [ ! -f "$dir/stats-baseline.tsv" ]; then
+		st=skip; x='{"reason": "no baseline"}'; return
+	fi
+	local files=() f
+	for f in "$dir"/*; do [[ $f =~ \.(vert|frag|comp|geom|tesc|tese|mesh|task)(\.glsl)?$ ]] && files+=("$f"); done
+	[ ${#files[@]} -gt 0 ] || { st=skip; x='{"reason": "no shaders"}'; return; }
+	j=$("$S/shader-stats" --json --baseline "$dir/stats-baseline.tsv" "${files[@]}" 2> "$L/shaders.err")
+	rc=$?
+	if ! jq -e 'has("shaders")' <<< "$j" > /dev/null 2>&1; then
+		st=error; x=$(jq -n --argjson rc $rc --arg e "$(tail -1 "$L/shaders.err")" '{rc: $rc, error: $e}'); return
+	fi
+	jq -r --arg p "$CI_PREFIX shaders" '(.grow[] | "\($p) GROW \(.shader) \(.metric) \(if .pct == null then "new" else "+\(.pct) %" end) (\(.from) -> \(.to))"),
+		(.errors[] | "\($p) ERROR \(.shader): \(.error)")' <<< "$j"
+	st=$(jq -r 'if (.grow | length) > 0 then "fail" elif (.errors | length) > 0 then "error" else "pass" end' <<< "$j")
+	x=$(jq -c --argjson rc $rc --arg b "$dir/stats-baseline.tsv" '{rc: $rc, baseline: $b, shaders: [.shaders[] | del(.path)], grow, errors}' <<< "$j")
+}
+stage_configure() {
+	cmake --preset release -B "$rel" -DCMAKE_COMPILE_WARNING_AS_ERROR=ON "${fast[@]}" 2>&1 | vcpkg_stamp > "$L/configure.log"
+	local rc=${PIPESTATUS[0]}
+	[ $rc = 0 ] && st=pass
+	x=$(jq -n --argjson rc $rc --arg v "$(vcpkg_s "$L/configure.log")" '{rc: $rc, preset: "release", werror: true, vcpkg_s: ($v | tonumber? // null)}')
+}
+stage_build() {
+	local before=$L/ninja_log.before c0=""
+	cp "$rel/.ninja_log" "$before" 2>/dev/null || : > "$before"
+	[ ${#fast[@]} -gt 0 ] && c0=$(ccache_counts)
+	cmake --build "$rel" > "$L/build.log" 2>&1
+	local rc=$? w; w=$(grep -c 'warning:' "$L/build.log")
+	[ $rc = 0 ] && [ -x "$rel/$target" ] && st=pass
+	x=$(jq -n -c --argjson rc $rc --argjson w "$w" --arg b "$rel/$target" --argjson n "$(ninja_cost "$before" "$rel/.ninja_log")" \
+		--argjson cc "$(ccache_delta "$c0" "$([ -n "$c0" ] && ccache_counts)")" '{rc: $rc, warnings: $w, binary: $b} + $n + $cc')
+	rm -f "$before"
+}
+stage_sanitize() {
+	local f="-fsanitize=address,undefined -fno-omit-frame-pointer" rc reports ndone
+	{ cmake --preset dev -B "$san" -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
+		"${fast[@]}" -DCMAKE_C_FLAGS="$f $pmap" -DCMAKE_CXX_FLAGS="$f $pmap" -DCMAKE_EXE_LINKER_FLAGS="$f" && cmake --build "$san"; } > "$L/sanitize-build.log" 2>&1
+	rc=$?
+	if [ $rc != 0 ]; then
+		x=$(jq -n --argjson rc $rc '{rc: $rc, step: "build"}'); return
+	fi
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 \
+		"$runner" --frames "$sanframes" --no-validate "$san/$target" > "$L/sanitize.log" 2>&1
+	rc=$?
+	reports=$(grep -cE 'ERROR: (Address|Leak)Sanitizer|runtime error:' "$L/sanitize.log")
+	ndone=$(grep -c "^DONE " "$L/sanitize.log")
+	[ $rc = 0 ] && [ "$reports" = 0 ] && [ "$ndone" -gt 0 ] && st=pass
+	x=$(jq -n --argjson rc $rc --argjson r "$reports" --argjson f "$sanframes" '{rc: $rc, reports: $r, frames: $f, compiler: "gcc"}')
+}
+stage_run() {
+	"$runner" --frames "$frames" "$rel/$target" "${gargs[@]}" > "$L/run.log" 2>&1
+	local rc=$? ve vw fps live
+	ve=$(done_field validation_errors "$L/run.log"); vw=$(done_field validation_warnings "$L/run.log"); fps=$(done_field avg_fps "$L/run.log")
+	live=$(sed -n 's/^VMA live_allocations=\([0-9]*\).*/\1/p' "$L/run.log" | tail -1)
+	[ $rc = 0 ] && [ "$ve" = 0 ] && [ "${live:-0}" = 0 ] && st=pass
+	x=$(jq -n --argjson rc $rc --arg ve "$ve" --arg vw "$vw" --arg fps "$fps" --argjson f "$frames" --arg live "$live" \
+		'{rc: $rc, frames: $f, validation_errors: ($ve | tonumber? // null), validation_warnings: ($vw | tonumber? // null), avg_fps: ($fps | tonumber? // null),
+		  vma_live_allocations: ($live | tonumber? // null)}')
+	add_crash "$L/run.log"
+}
+perf_culprit() {  # csv pass:column:ms...: JSON of the pass whose p50 rose most (ms) over its last-10-pass-row median
+	local csv=$1 name col ms base best="" bd=""; shift
+	for spec; do
+		IFS=: read -r name col ms <<< "$spec"
+		[ -n "$ms" ] || continue
+		base=$(awk -F, -v c="$col" '$10 == "pass" && $c != "" {print $c}' "$csv" | tail -n 10 | median)
+		[ -n "$base" ] || continue
+		if [ -z "$bd" ] || awk -v m="$ms" -v b="$base" -v d="$bd" 'BEGIN {exit !(m - b > d)}'; then
+			bd=$(awk -v m="$ms" -v b="$base" 'BEGIN {print m - b}')
+			best=$(jq -nc --arg p "$name" --arg m "$ms" --arg b "$base" \
+				'{pass: $p, ms: ($m | tonumber), baseline_ms: ($b | tonumber), delta_ms: (($m | tonumber) - ($b | tonumber) | . * 10000 | round / 10000)}')
+		fi
+	done
+	[ -n "$best" ] && echo "$best"
+}
+perf_capture() {  # re-runs the perf replay under renderdoccmd, rd-trigger.so capturing frame $capframe; prints OUT/perf/frame.rdc or nothing
+	local dir=$out/perf rdc
+	command -v renderdoccmd > /dev/null || return 0
+	if [ ! -f "$rdshim" ] || [ "$S/rd-trigger.c" -nt "$rdshim" ]; then
+		cc -O2 -shared -fPIC -I "$HOME/opt/gamedev/renderdoc_1.46/include" "$S/rd-trigger.c" -o "$rdshim" > "$L/capture-build.log" 2>&1 || return 0
+	fi
+	mkdir -p "$dir"; rm -f "$dir"/frame*.rdc
+	printf '#!/usr/bin/env bash\nexec env LD_PRELOAD=%q RD_FRAME=%q renderdoccmd capture -w -c %q %q "$@"\n' \
+		"$rdshim" "$capframe" "$dir/frame" "$rel/$target" > "$dir/rdc-run"
+	chmod +x "$dir/rdc-run"
+	"$runner" --frames $((capframe + 30)) --no-validate --x11 --timeout 300 "$dir/rdc-run" "${gargs[@]}" > "$L/capture.log" 2>&1
+	rm -f "$dir/rdc-run"
+	rdc=$(ls "$dir"/frame_*.rdc 2>/dev/null | head -1)
+	[ -n "$rdc" ] && mv "$rdc" "$dir/frame.rdc" && echo "$dir/frame.rdc"
+}
+stage_perf() {
+	local load csv=$out/perf.csv hdr="date,project,frames,avg_fps,load1,gpu_ms_p50,gpu_ms_p99,cpu_ms_p50,bound,status,vram_used_mb,vram_budget_mb,draws,culled,post_ms_p50,gpu_ms_p50_shadow,gpu_ms_p50_scene,gpu_ms_p50_skin"
+	load=$(cut -d' ' -f1 /proc/loadavg)
+	[ -f "$csv" ] && case $hdr in "$(head -1 "$csv")"?*) sed -i "1s/.*/$hdr/" "$csv" ;; esac  # older header: add the new columns in place
+	[ "$(head -1 "$csv" 2>/dev/null)" = "$hdr" ] || { [ -f "$csv" ] && mv "$csv" "$out/perf.old.csv"; echo "$hdr" > "$csv"; }
+	if ! ci_gate 0 --max-per-cpu 0.5 --max-load1 "$perfload" --gpu 15; then
+		st=skip
+		case $ci_busy in
+			load1*) x=$(jq -n --arg l "$load" '{reason: "load", load1: ($l | tonumber)}') ;;
+			*) x=$(jq -n --arg l "$load" --arg g "$(sed -n 's/.*gpu \([0-9]*\)%.*/\1/p' <<< "$ci_busy")" \
+				'{reason: "gpu", load1: ($l | tonumber), gpu_busy_pct: ($g | tonumber? // null)}') ;;
+		esac
+		echo "$(date -Is),$(basename "$proj"),$perfframes,,$load,,,,,skip,,,,,,,," >> "$csv"; return
+	fi
+	"$runner" --frames "$perfframes" --no-validate "$rel/$target" "${gargs[@]}" > "$L/perf.log" 2>&1
+	local rc=$? fps g50 g99 c50 bound="" b50="" b99="" n delta="" verdict=record
+	fps=$(done_field avg_fps "$L/perf.log"); g50=$(done_field gpu_ms_p50 "$L/perf.log")
+	g99=$(done_field gpu_ms_p99 "$L/perf.log"); c50=$(done_field cpu_ms_p50 "$L/perf.log")
+	local vu vb dr cu; vu=$(done_field vram_used_mb "$L/perf.log"); vb=$(done_field vram_budget_mb "$L/perf.log")
+	dr=$(done_field draws "$L/perf.log"); cu=$(done_field culled "$L/perf.log")
+	local p50 sh50 sc50 sk50 culprit=null; p50=$(done_field post_ms_p50 "$L/perf.log")
+	sh50=$(done_field gpu_ms_p50_shadow "$L/perf.log"); sc50=$(done_field gpu_ms_p50_scene "$L/perf.log")
+	sk50=$(done_field gpu_ms_p50_skin "$L/perf.log")
+	[ -n "$g50" ] && [ -n "$c50" ] && bound=$(awk -v g="$g50" -v c="$c50" 'BEGIN {print (g > c ? "gpu" : "cpu")}')
+	n=$(awk -F, '$10 == "pass" && $6 != ""' "$csv" | tail -n 10 | wc -l)
+	if [ -n "$g50" ] && [ "$n" -ge 3 ]; then
+		b50=$(awk -F, '$10 == "pass" && $6 != "" {print $6}' "$csv" | tail -n 10 | median)
+		b99=$(awk -F, '$10 == "pass" && $7 != "" {print $7}' "$csv" | tail -n 10 | median)
+		delta=$(awk -v g="$g50" -v b="$b50" 'BEGIN {printf "%.1f", (g / b - 1) * 100}')
+		verdict=$(awk -v g="$g50" -v b="$b50" -v t="$gputol" -v g9="$g99" -v b9="$b99" -v t9="$p99tol" \
+			'BEGIN {print (g > b * (1 + t / 100) || (g9 != "" && b9 != "" && g9 > b9 * (1 + t9 / 100)) ? "fail" : "pass")}')
+	fi
+	[ "$verdict" = fail ] && culprit=$(perf_culprit "$csv" "skin:18:$sk50" "shadow:16:$sh50" "scene:17:$sc50" "post:15:$p50") \
+		&& echo "$CI_PREFIX perf culprit $(jq -r '"pass=\(.pass) delta_ms=\(.delta_ms) ms=\(.ms) baseline_ms=\(.baseline_ms)"' <<< "$culprit")"
+	[ -n "$vrammb" ] && [ -n "$vu" ] && awk -v u="$vu" -v m="$vrammb" 'BEGIN {exit !(u > m)}' && verdict=fail
+	if [ $rc = 0 ] && [ -n "$fps" ]; then
+		[ "$verdict" = fail ] || st=pass
+		echo "$(date -Is),$(basename "$proj"),$perfframes,$fps,$load,$g50,$g99,$c50,$bound,$st,$vu,$vb,$dr,$cu,$p50,$sh50,$sc50,$sk50" >> "$csv"
+	fi
+	x=$(jq -n --argjson rc $rc --arg fps "$fps" --argjson f "$perfframes" --arg l "$load" --arg csv "$csv" \
+		--arg g50 "$g50" --arg g99 "$g99" --arg c50 "$c50" --arg b "$bound" --arg b50 "$b50" --arg b99 "$b99" --arg d "$delta" --arg v "$verdict" \
+		--arg vu "$vu" --arg vb "$vb" --arg vm "$vrammb" --arg dr "$dr" --arg cu "$cu" --arg p50 "$p50" --arg sh "$sh50" --arg sc "$sc50" --arg sk "$sk50" --argjson cp "${culprit:-null}" \
+		'{rc: $rc, frames: $f, avg_fps: ($fps | tonumber? // null), load1: ($l | tonumber), csv: $csv,
+		  gpu_ms_p50: ($g50 | tonumber? // null), gpu_ms_p99: ($g99 | tonumber? // null), cpu_ms_p50: ($c50 | tonumber? // null),
+		  bound: (if $b == "" then null else $b end), baseline_gpu_ms_p50: ($b50 | tonumber? // null),
+		  baseline_gpu_ms_p99: ($b99 | tonumber? // null), delta_pct: ($d | tonumber? // null), verdict: $v,
+		  vram_used_mb: ($vu | tonumber? // null), vram_budget_mb: ($vb | tonumber? // null), vram_mb_limit: ($vm | tonumber? // null),
+		  draws: ($dr | tonumber? // null), culled: ($cu | tonumber? // null), post_ms_p50: ($p50 | tonumber? // null),
+		  gpu_ms_p50_shadow: ($sh | tonumber? // null), gpu_ms_p50_scene: ($sc | tonumber? // null),
+		  gpu_ms_p50_post: ($p50 | tonumber? // null), gpu_ms_p50_skin: ($sk | tonumber? // null), culprit: $cp}')
+	add_crash "$L/perf.log"
+	local cap=""
+	[ "$verdict" = fail ] && [ $rc = 0 ] && cap=$(perf_capture) && [ -n "$cap" ] && echo "$CI_PREFIX perf capture $cap"
+	x=$(jq -c --arg c "$cap" '. + {capture: (if $c == "" then null else $c end)}' <<< "$x")
+}
+stage_profile() {
+	local port=$((20000 + $$ % 20000)) trace=$out/profile.tracy csv=$out/profile.csv rc cap fc top nz
+	{ cmake --preset release -B "$prof" -DGAME_TRACY=ON "${fast[@]}" && cmake --build "$prof"; } > "$L/profile-build.log" 2>&1
+	rc=$?
+	if [ $rc != 0 ]; then
+		x=$(jq -n --argjson rc $rc '{rc: $rc, step: "build"}'); return
+	fi
+	rm -f "$trace"
+	tracy-capture -a 127.0.0.1 -p $port -o "$trace" -f > "$L/profile-capture.log" 2>&1 &
+	cap=$!
+	TRACY_PORT=$port TRACY_NO_EXIT=1 "$runner" --frames "$profframes" --no-validate "$prof/$target" > "$L/profile.log" 2>&1
+	rc=$?
+	timeout 10 tail --pid=$cap -f /dev/null || kill $cap 2>/dev/null
+	wait $cap 2>/dev/null
+	fc=$(tr '\r' '\n' < "$L/profile-capture.log" | sed -n 's/^Frames: \([0-9]*\).*/\1/p' | tail -1)
+	[ -s "$trace" ] && tracy-csvexport "$trace" > "$csv" 2>> "$L/profile-capture.log" || : > "$csv"
+	nz=$(tail -n +2 "$csv" | grep -c .)
+	top=$(tail -n +2 "$csv" | sort -t, -k7,7nr | head -5 | jq -R -s -c \
+		'split("\n") | map(select(length > 0) | split(",") | {name: .[0], mean_ns: (.[6] | tonumber), counts: (.[5] | tonumber)})')
+	[ $rc = 0 ] && [ "$nz" -gt 0 ] && [ -n "$fc" ] && st=pass
+	[ $keep = 1 ] || rm -f "$trace"
+	x=$(jq -n --argjson rc $rc --argjson f "$profframes" --arg fc "$fc" --argjson nz "$nz" --argjson top "$top" --arg csv "$csv" \
+		--arg tr "$([ -f "$trace" ] && echo "$trace")" \
+		'{rc: $rc, frames: $f, frames_captured: ($fc | tonumber? // null), zones: $nz, top_mean_ns: $top, csv: $csv, trace: (if $tr == "" then null else $tr end)}')
+}
+stage_tidy() {
+	if [ ! -f "$proj/.clang-tidy" ]; then
+		st=skip; x='{"reason": "no .clang-tidy"}'; return
+	fi
+	"$tidy" "$rel" > "$L/tidy.log" 2>&1
+	local rc=$? n; n=$(sed -n 's/^TIDY findings=\([0-9]*\).*/\1/p' "$L/tidy.log" | tail -1)
+	[ $rc = 0 ] && st=pass
+	x=$(jq -n --argjson rc $rc --arg n "$n" --arg log "$L/tidy.log" '{rc: $rc, findings: ($n | tonumber? // null), log: $log}')
+}
+stage_golden() {
+	local golden=$proj/golden/frame.png cap=$out/golden-frame.png heat=$out/golden-heatmap.png rc mean ver
+	rm -f "$cap" "$heat"
+	if [ $update = 0 ] && [ ! -f "$golden" ]; then
+		st=skip; x='{"reason": "no golden/frame.png (--update-golden writes it)"}'; return
+	fi
+	"$runner" --frames $((gframe + 1)) --no-validate "$rel/$target" --capture "$gframe" "$cap" "${gargs[@]}" > "$L/golden.log" 2>&1
+	rc=$?
+	if [ $rc != 0 ] || [ ! -s "$cap" ]; then
+		x=$(jq -n --argjson rc $rc --argjson f "$gframe" '{rc: $rc, frame: $f, step: "capture"}'); add_crash "$L/golden.log"; return
+	fi
+	if [ $update = 1 ]; then
+		mkdir -p "$proj/golden" && cp "$cap" "$golden" && st=pass
+		x=$(jq -n --argjson f "$gframe" --arg g "$golden" '{frame: $f, golden: $g, updated: true}'); return
+	fi
+	ver=$("$flip" --help 2>/dev/null | sed -n 's/^FLIP v\([0-9.]*[0-9]\).*/\1/p' | head -1)
+	"$flip" -r "$golden" -t "$cap" -v 1 -d "$out" -b golden-heatmap > "$L/golden-flip.log" 2>&1
+	rc=$?
+	mean=$(sed -n 's/^ *Mean: *\([0-9.e+-]*\).*/\1/p' "$L/golden-flip.log" | tail -1)
+	[ $rc = 0 ] && [ -n "$mean" ] && awk -v m="$mean" -v t="$gtol" 'BEGIN {exit !(m <= t)}' && st=pass
+	[ "$st" = pass ] && rm -f "$heat"
+	x=$(jq -n --argjson rc $rc --argjson f "$gframe" --arg m "$mean" --argjson t "$gtol" --arg v "$ver" --arg g "$golden" \
+		--arg h "$([ -f "$heat" ] && echo "$heat")" \
+		'{rc: $rc, frame: $f, flip_mean: ($m | tonumber? // null), flip_max_mean: $t, flip_version: $v, golden: $g,
+		  heatmap: (if $h == "" then null else $h end)}')
+}
+stage_package() {
+	local ver name dir tarball rc missing size sha libs
+	ver=$(jq -r '.version // "0.0.0"' "$proj/vcpkg.json" 2>/dev/null || echo 0.0.0)
+	name=$target-$ver-linux-x86_64 dir=$pkg/stage/$name tarball=$out/$name.tar.zst
+	rm -rf "$pkg/stage" "$tarball"
+	{ cmake --preset release -B "$pkg" -DGAME_PORTABLE=ON -DCMAKE_COMPILE_WARNING_AS_ERROR=ON "${fast[@]}" && cmake --build "$pkg" \
+		&& cmake --install "$pkg" --prefix "$dir" --strip; } > "$L/package-build.log" 2>&1
+	rc=$?
+	if [ $rc != 0 ]; then
+		x=$(jq -n --argjson rc $rc '{rc: $rc, step: "build"}'); return
+	fi
+	missing=$(ldd "$dir/$target" | grep -c 'not found')
+	libs=$(ldd "$dir/$target" | awk '$2 == "=>" && $3 ~ /^\// && $3 !~ /^\/(usr\/)?lib(32|64|x32)?\//' | awk '{print $3}')
+	if [ -n "$libs" ]; then mkdir -p "$dir/lib" && cp -L $libs "$dir/lib/"; fi
+	tar -C "$pkg/stage" --zstd -cf "$tarball" "$name"
+	rc=$?
+	size=$(stat -c %s "$tarball" 2>/dev/null || echo 0)
+	sha=$(sha256sum "$tarball" 2>/dev/null | cut -d' ' -f1)
+	[ $rc = 0 ] && [ "$missing" = 0 ] && [ "$size" -le $((pkgmax * 1024 * 1024)) ] && st=pass
+	x=$(jq -n --argjson rc $rc --arg t "$tarball" --argjson sz "$size" --arg sha "$sha" --argjson m "$missing" --argjson max "$pkgmax" \
+		--arg runpath "$(readelf -d "$dir/$target" | sed -n 's/.*RUNPATH.*\[\(.*\)\]/\1/p')" --argjson nl "$(grep -c . <<< "$libs")" \
+		'{rc: $rc, tarball: $t, size_bytes: $sz, max_mb: $max, sha256: $sha, missing_libs: $m, bundled_libs: $nl, runpath: $runpath}')
+}
+
+for s in $stages; do  # every stage's JSON gains cpu_s around its stage_<name>
+	declare -F "stage_$s" > /dev/null || continue
+	eval "plain_$(declare -f "stage_$s")
+	stage_$s() { local c0; c0=\$(cpu_ticks); plain_stage_$s; x=\$(jq -c --argjson c \"\$(cpu_since \$c0)\" '. + {cpu_s: \$c}' <<< \"\$x\"); }"
+done
+ci_run $stages
+ci_finish "$proj" "{\"ccache_hit_pct\": $(ccache_hit_pct)}"

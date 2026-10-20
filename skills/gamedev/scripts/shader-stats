@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""shader-stats: static SPIR-V cost per shader (glslang -V, spirv-opt -O) and its growth against a baseline TSV."""
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+
+METRICS = ("instr", "arith", "tex", "branch", "loop", "barrier")
+GROW_PCT = 10
+ARITH = re.compile(r"Op(?:[FISU][A-Z]\w*|Vector\w+|Matrix\w+|Dot|Shift\w+|Bitwise\w+|Bit[cFCR]\w+|Not|Convert\w+|Select|Logical\w+|Any|All|IsNan|IsInf|Transpose|OuterProduct)$")
+TEX = re.compile(r"OpImage(?:Sparse)?(?:Sample\w*|Fetch|Gather|DrefGather)$")
+INSTR = re.compile(r"^\s*(?:%\S+\s*=\s*)?(Op\w+)(.*)$")
+NOT_BODY = {"OpLabel", "OpFunction", "OpFunctionEnd", "OpFunctionParameter", "OpLine", "OpNoLine"}
+
+
+def compile_spirv(path, work):
+    """Return (disassembly, None) or (None, first error line)."""
+    raw, opt = os.path.join(work, "a.spv"), os.path.join(work, "o.spv")
+    try:
+        p = subprocess.run(["glslang", "-V", "--target-env", "vulkan1.3", path, "-o", raw], capture_output=True, text=True)
+    except OSError as e:
+        return None, f"glslang: {e.strerror}"
+    if p.returncode != 0:
+        if p.stdout.startswith("Usage:"):
+            return None, "glslang: stage not inferable from the extension (use .vert/.frag/.comp/... or .<stage>.glsl)"
+        lines = (p.stdout + p.stderr).splitlines()
+        return None, next((l for l in lines if l.startswith("ERROR")), lines[-1] if lines else "glslang failed")
+    for cmd in (["spirv-opt", "-O", raw, "-o", opt], ["spirv-dis", "--no-header", opt]):
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True)
+        except OSError as e:
+            return None, f"{cmd[0]}: {e.strerror}"
+        if p.returncode != 0:
+            return None, f"{cmd[0]}: {(p.stderr or p.stdout).strip().splitlines()[0]}"
+    return p.stdout, None
+
+
+def count(dis):
+    """Count function-body instructions by class from spirv-dis text."""
+    c = dict.fromkeys(METRICS, 0)
+    glsl_ids, in_body = set(), False
+    for line in dis.splitlines():
+        m = INSTR.match(line)
+        if not m:
+            continue
+        op, rest = m.groups()
+        if op == "OpExtInstImport" and "GLSL.std.450" in rest:
+            glsl_ids.add(line.split("=")[0].strip())
+        if op == "OpFunction":
+            in_body = True
+        elif op == "OpFunctionEnd":
+            in_body = False
+        if not in_body or op in NOT_BODY:
+            continue
+        c["instr"] += 1
+        if ARITH.match(op) or (op == "OpExtInst" and rest.split()[1:2] and rest.split()[1] in glsl_ids):
+            c["arith"] += 1
+        elif TEX.match(op):
+            c["tex"] += 1
+        elif op in ("OpBranchConditional", "OpSwitch"):
+            c["branch"] += 1
+        elif op == "OpLoopMerge":
+            c["loop"] += 1
+        elif op in ("OpControlBarrier", "OpMemoryBarrier"):
+            c["barrier"] += 1
+    return c
+
+
+def read_baseline(path):
+    base = {}
+    with open(path) as f:
+        for line in f:
+            cols = line.rstrip("\n").split("\t")
+            if cols[0] == "shader" or len(cols) != len(METRICS) + 1:
+                continue
+            base[cols[0]] = dict(zip(METRICS, map(int, cols[1:])))
+    return base
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split(": ", 1)[1],
+                                 epilog=f"Shaders are keyed by basename. GROW: a metric up > {GROW_PCT} %% vs --baseline (rc 1). Compile error: rc 2.")
+    ap.add_argument("--baseline", metavar="FILE", help="TSV from --write-baseline; print deltas and GROW lines")
+    ap.add_argument("--write-baseline", metavar="FILE", help="write the counts as a baseline TSV")
+    ap.add_argument("--json", action="store_true", help="print one JSON object instead of text")
+    ap.add_argument("shaders", nargs="+", metavar="SHADER")
+    a = ap.parse_args()
+    try:
+        base = read_baseline(a.baseline) if a.baseline else None
+    except (OSError, ValueError) as e:
+        ap.error(f"--baseline: {e}")
+    rows, grow, errors = [], [], []
+    with tempfile.TemporaryDirectory(prefix="shader-stats.") as work:
+        for path in a.shaders:
+            name = os.path.basename(path)
+            dis, err = compile_spirv(path, work)
+            if err:
+                errors.append({"shader": name, "error": err})
+                continue
+            row = {"shader": name, "path": path, "counts": count(dis)}
+            if base is not None and name in base:
+                b = base[name]
+                row["delta"] = {k: row["counts"][k] - b[k] for k in METRICS}
+                for k in METRICS:
+                    new, old = row["counts"][k], b[k]
+                    if new > old and (old == 0 or (new - old) * 100 > GROW_PCT * old):
+                        grow.append({"shader": name, "metric": k, "pct": None if old == 0 else round((new - old) * 100 / old), "from": old, "to": new})
+            rows.append(row)
+    if a.write_baseline:
+        with open(a.write_baseline, "w") as f:
+            f.write("\t".join(("shader",) + METRICS) + "\n")
+            for r in rows:
+                f.write("\t".join([r["shader"]] + [str(r["counts"][k]) for k in METRICS]) + "\n")
+    if a.json:
+        print(json.dumps({"shaders": rows, "grow": grow, "errors": errors}, indent=1))
+    else:
+        for r in rows:
+            d = r.get("delta")
+            cols = [f"{k} {r['counts'][k]}" + (f" ({d[k]:+d})" if d else "") for k in METRICS]
+            note = "" if base is None or d else "  (not in baseline)"
+            print(f"{r['shader']:<16} " + "  ".join(cols) + note)
+        for g in grow:
+            pct = "new" if g["pct"] is None else f"+{g['pct']} %"
+            print(f"GROW {g['shader']} {g['metric']} {pct} ({g['from']} -> {g['to']})")
+        for e in errors:
+            print(f"ERROR {e['shader']}: {e['error']}")
+    return 2 if errors else 1 if grow else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

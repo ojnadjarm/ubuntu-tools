@@ -1,0 +1,5 @@
+#!/bin/sh
+# Stub ffmpeg: writes a non-empty file at the last argument.
+echo "ffmpeg $*" >>"${STUB_CALLS:-/dev/null}"
+for a in "$@"; do o=$a; done
+echo stub-mp4 >"$o"

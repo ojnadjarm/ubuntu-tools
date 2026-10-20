@@ -1,0 +1,6 @@
+[Unit]
+Description=Fleet heavy work (renders, builds, nightly suites) on idle CPU so the owner's work wins (T775)
+
+[Slice]
+CPUWeight=idle
+IOWeight=10

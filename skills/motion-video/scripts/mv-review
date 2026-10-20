@@ -1,0 +1,230 @@
+#!/usr/bin/env python3
+"""mv-review: QA a video without watching it - contact sheet (1 frame/s), loudness, black and frozen stretches, colour tags, legal levels, scopes, photosensitive flashes."""
+import argparse
+import json
+import math
+import os
+import re
+import subprocess
+import sys
+
+import numpy as np
+
+import mvlib
+
+LOUDNESS = os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'loudness.json')
+
+def video_info(path):
+    """Duration, size, fps, colour tags and whether the file has audio; exit 1 on a file without video."""
+    try:
+        p = mvlib.probe(path)
+    except mvlib.MvError as e:
+        print(f'mv-review: {e}', file=sys.stderr)
+        sys.exit(1)
+    return {'duration': p['duration'], 'width': p['width'], 'height': p['height'], 'fps': round(p['rate'], 3),
+            'audio': p['audio'], 'color': p['color']}
+
+
+def colour_fail(c):
+    """Why the colour tags fail delivery (untagged or mixed), or None."""
+    tags = [c['color_space'], c['color_transfer'], c['color_primaries']]
+    if any(t in ('unknown', 'reserved') for t in tags):
+        return 'colour untagged ' + '/'.join(tags)
+    if len({mvlib.family(t) for t in tags}) > 1:
+        return 'colour mixed ' + '/'.join(tags)
+    return None
+
+
+def hdr_meta(path, transfer):
+    """HDR kind (pq/hlg) and the first frame's mastering-display peak and MaxCLL/MaxFALL (nit), or None for SDR."""
+    kind = {'smpte2084': 'pq', 'arib-std-b67': 'hlg'}.get(transfer)
+    if not kind:
+        return None
+    r = subprocess.run(['ffprobe', '-v', 'error', '-read_intervals', '%+#1', '-select_streams', 'v:0', '-show_frames',
+                        '-show_entries', 'frame=side_data_list', '-of', 'json', path], capture_output=True, text=True)
+    side = [d for f in json.loads(r.stdout or '{}').get('frames', [])[:1] for d in f.get('side_data_list', [])]
+    md = next((d for d in side if d.get('side_data_type') == 'Mastering display metadata' and 'max_luminance' in d), None)
+    cl = next((d for d in side if d.get('side_data_type') == 'Content light level metadata'), None)
+    ratio = lambda v: round(int(v.split('/')[0]) / int(v.split('/')[1]), 4)
+    return {'kind': kind, 'mastering_max': ratio(md['max_luminance']) if md else None,
+            'mastering_min': ratio(md['min_luminance']) if md else None,
+            'maxcll': cl['max_content'] if cl else None, 'maxfall': cl['max_average'] if cl else None}
+
+
+def swings(x, thr, dark=None):
+    """Per frame, the fraction of pixels completing an opposing swing of >= thr since their last turn (darker side < dark)."""
+    hi, lo, way, frac = x[0].copy(), x[0].copy(), np.zeros(x.shape[1:], np.int8), np.zeros(len(x))
+    for i in range(1, len(x)):
+        v = x[i]
+        np.maximum(hi, v, out=hi)
+        np.minimum(lo, v, out=lo)
+        down = (hi - v >= thr) & (way >= 0)
+        up = (v - lo >= thr) & (way <= 0)
+        if dark is not None:
+            down &= v < dark
+            up &= lo < dark
+        hit = down | up
+        frac[i] = np.count_nonzero(hit) / hit.size
+        way[down], way[up] = -1, 1
+        np.copyto(hi, v, where=hit)
+        np.copyto(lo, v, where=hit)
+    return frac
+
+
+def flash_windows(frac, rate, area=0.25, limit=3):
+    """Most flashes (opposing transition pairs over >= area) in any 1 s, and the merged [start, end] s windows above limit."""
+    t = np.flatnonzero(frac >= area) / rate
+    worst, bad = 0, []
+    for s in t:
+        win = t[(t >= s) & (t < s + 1)]
+        n = len(win) // 2
+        worst = max(worst, n)
+        if n > limit:
+            span = [round(float(s), 2), round(float(win[-1]), 2)]
+            if bad and s <= bad[-1][1]:
+                bad[-1][1] = span[1]
+            else:
+                bad.append(span)
+    return worst, bad
+
+
+def per_second(frac, rate, area=0.25):
+    """Flashes (opposing transition pairs over >= area) in each whole second."""
+    t = np.flatnonzero(frac >= area) / rate
+    return [int(np.count_nonzero((t >= s) & (t < s + 1)) // 2) for s in range(math.ceil(len(frac) / rate))]
+
+
+def pse(raw, w, h, rate):
+    """General (relative luminance) and saturated-red flash counts per ITU-R BT.1702 / WCAG 2.3.1 on an RGB24 frame grid."""
+    c = np.arange(256) / 255
+    lut = np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4).astype(np.float32)
+    lin = lut[np.frombuffer(raw, np.uint8)[:len(raw) // (w * h * 3) * w * h * 3].reshape(-1, h * w, 3)]
+    lum = lin @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+    r, g, b = lin[..., 0], lin[..., 1], lin[..., 2]
+    red = np.where(r >= 0.8 * (r + g + b) + 1e-9, np.maximum(0, (r - g - b) * 320), 0)
+    if len(lin) < 2:
+        return {'general_max': 0, 'general': [], 'red_max': 0, 'red': [], 'general_per_s': [], 'red_per_s': []}
+    gf, rf = swings(lum, 0.1, dark=0.8), swings(red, 20)
+    (gm, gw), (rm, rw) = flash_windows(gf, rate), flash_windows(rf, rate)
+    return {'general_max': gm, 'general': gw, 'red_max': rm, 'red': rw,
+            'general_per_s': per_second(gf, rate), 'red_per_s': per_second(rf, rate)}
+
+
+def review(path, info, out, cols, black_s, freeze_s, scopes, flashes=True):
+    """One decode pass on a 480 px proxy: blackdetect, freezedetect, illegal-Y mask, Y min/max at 1 frame/s, sheet, scopes, 1/4-scale RGB grid for flashes, ebur128."""
+    land = info['width'] >= info['height']
+    pw, ph = (480, round(480 * info['height'] / info['width'] / 2) * 2) if land else (round(480 * info['width'] / info['height'] / 2) * 2, 480)
+    n = max(1, math.ceil(info['duration']))
+    gw, gh = max(1, pw // 4), max(1, ph // 4)
+    tail = (f"split={4 if flashes else 3}[d][m][s]{'[p]' if flashes else ''};[d]blackdetect=d={black_s}:pix_th=0.03,freezedetect=n=0.002:d={freeze_s}[dv];"
+            # 0/255 mask of Y outside 16-235, kept where >= 3 of 4 px are out (drops 1 px ringing); mse vs black = 255^2 x fraction
+            "[m]lutyuv=y='if(between(val,16,235),0,255)':u=128:v=128,scale=iw/2:ih/2:flags=area,"
+            "lutyuv=y='if(gt(val,191),255,0)':u=128:v=128,split[o][z];[z]lutyuv=y=0[zz];"
+            "[o][zz]psnr,metadata=print:key=lavfi.psnr.mse.y[lv];"
+            f"[s]fps=1,split={3 if scopes else 2}[s][q]{'[c]' if scopes else ''};[q]median=radius=1,signalstats,"
+            f"metadata=print:key=lavfi.signalstats.YMIN,metadata=print:key=lavfi.signalstats.YMAX,nullsink;[s]scale={320 if land else 180}:-2,drawtext=text='%{{pts\\:hms}}':x=6:y=6:fontsize=16:fontcolor=white:box=1:boxcolor=black@0.6,"
+            f"tile={cols}x{math.ceil(n / cols)}:padding=4:margin=4:color=0x202020[sv]")
+    if flashes:
+        tail += f";[p]scale={gw}:{gh}:flags=area:in_color_matrix=bt709,format=rgb24[pv]"
+    if scopes:
+        tail += (f";[c]scale=96:-2:flags=area,tile={n}x1,split[w][v];"
+                 "[w]waveform=intensity=0.2:graticule=green:flags=numbers+dots,format=gbrp[wf];"
+                 "[v]format=yuv444p,vectorscope=mode=color3:graticule=green:flags=name,format=gbrp[vs];[wf][vs]hstack[cv]")
+    hw = (['-hwaccel', 'vaapi', '-hwaccel_device', '/dev/dri/renderD128', '-hwaccel_output_format', 'vaapi'],
+          f'scale_vaapi=w={pw}:h={ph}:format=nv12,hwdownload,format=nv12,format=yuv420p,')
+    sw = ([], f'scale={pw}:{ph}:flags=area,format=yuv420p,')
+    for pre, head in ([hw, sw] if os.path.exists('/dev/dri/renderD128') else [sw]):
+        fc = f'[0:v:0]{head}{tail}' + (';[0:a:0]ebur128=peak=true[aa]' if info['audio'] else '')
+        cmd = ['ffmpeg', '-hide_banner', '-nostats', '-y', *pre, '-i', path, '-filter_complex', fc,
+               '-map', '[dv]', '-map', '[lv]', *(['-map', '[aa]'] if info['audio'] else []), '-f', 'null', '-',
+               '-map', '[sv]', '-frames:v', '1', '-q:v', '3', out,
+               *(['-map', '[cv]', '-frames:v', '1', scopes] if scopes else []),
+               *(['-map', '[pv]', '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'] if flashes else [])]
+        r = subprocess.run(cmd, capture_output=True)
+        if r.returncode == 0:
+            break
+    if r.returncode:
+        sys.exit(f"mv-review: ffmpeg failed\n{r.stderr.decode(errors='replace')[-2000:]}")
+    log = r.stderr.decode(errors='replace')
+    black = [(float(a), float(b)) for a, b in re.findall(r'black_start:([\d.]+) black_end:([\d.]+)', log)]
+    fs = [float(x) for x in re.findall(r'freeze_start: ([\d.]+)', log)]
+    fe = [float(x) for x in re.findall(r'freeze_end: ([\d.]+)', log)]
+    frozen = [(s, fe[i] if i < len(fe) else None) for i, s in enumerate(fs)]
+    loud = {}
+    summary = log.split('Summary:')[-1] if 'Summary:' in log else ''
+    for key, pat in (('lufs', r'I:\s+(-?[\d.]+) LUFS'), ('lra', r'LRA:\s+(-?[\d.]+) LU'), ('true_peak', r'Peak:\s+(-?[\d.]+|-inf) dBFS')):
+        m = re.search(pat, summary)
+        if m:
+            loud[key] = float(m.group(1))
+    curve = [[round(float(t), 2), max(float(m), -120.0), max(float(st), -120.0)] for t, m, st in
+             re.findall(r'ebur128.*?t:\s*([\d.]+)\s+TARGET:\S+ LUFS\s+M:\s*(-?[\d.]+|-inf)\s+S:\s*(-?[\d.]+|-inf)', log)]
+    loud['curve'] = curve
+    ys = lambda k: [int(x) for x in re.findall(rf'signalstats\.{k}=(\d+)', log)]
+    levels = {'ymin': min(ys('YMIN'), default=None), 'ymax': max(ys('YMAX'), default=None),
+              'bits': 8, 'brng_max': round(max((float(x) for x in re.findall(r'psnr\.mse\.y=([\d.e+-]+)', log)), default=0.0) / 65025, 6)}
+    return black, frozen, loud, levels, pse(r.stdout, gw, gh, info['fps']) if flashes else None
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('video')
+    ap.add_argument('--out', help='directory for <name>.sheet.jpg and <name>.review.json (default: beside the video)')
+    ap.add_argument('--cols', type=int, default=10)
+    ap.add_argument('--target', default='web', help='loudness.json target (web|youtube|broadcast|podcast): fail outside its I +- tolerance or above TP + 0.5')
+    ap.add_argument('--black', type=float, default=1.0, help='fail on a black stretch this long (s)')
+    ap.add_argument('--freeze', type=float, default=2.0, help='fail on a frozen stretch this long (s)')
+    ap.add_argument('--brng', type=float, default=0.001, help='fail when a frame has more than this fraction of Y outside 16-235 (1 px ringing ignored)')
+    ap.add_argument('--scopes', action='store_true', help='also write <name>.scopes.png: waveform strip (1 column/s) + vectorscope')
+    ap.add_argument('--pse', action=argparse.BooleanOptionalAction, default=True,
+                    help='photosensitive check (default on): fail any 1 s with > 3 general (>= 10 %% luminance, darker < 0.8) or saturated-red flashes over >= 25 %% of the screen')
+    a = ap.parse_args()
+    with open(LOUDNESS) as f:
+        targets = {k: v for k, v in json.load(f).items() if "I" in v}
+    if a.target not in targets:
+        ap.error(f"unknown --target {a.target}; known: {' '.join(targets)}")
+    t = targets[a.target]
+
+    info = video_info(a.video)
+    outdir = a.out or os.path.dirname(os.path.abspath(a.video))
+    os.makedirs(outdir, exist_ok=True)
+    base = os.path.join(outdir, os.path.splitext(os.path.basename(a.video))[0])
+    scopes = base + '.scopes.png' if a.scopes else None
+    black, frozen, loud, levels, flash = review(a.video, info, base + '.sheet.jpg', a.cols, a.black, a.freeze, scopes, a.pse)
+
+    fails = []
+    if black:
+        fails.append(f'black {len(black)}x')
+    if frozen:
+        fails.append(f'frozen {len(frozen)}x')
+    if cf := colour_fail(info['color']):
+        fails.append(cf)
+    hdr = hdr_meta(a.video, info['color']['color_transfer'])
+    if hdr and hdr['kind'] == 'pq' and hdr['mastering_max'] is None:
+        fails.append('hdr pq without mastering metadata')
+    if levels['brng_max'] > a.brng:
+        fails.append(f"levels Y {levels['ymin']}-{levels['ymax']} brng {levels['brng_max']:.4f}")
+    span = lambda w: ' '.join(f'{s:.1f}-{e:.1f}s' for s, e in w)
+    if flash and flash['general']:
+        fails.append(f"flash {flash['general_max']}/s at {span(flash['general'])}")
+    if flash and flash['red']:
+        fails.append(f"red flash {flash['red_max']}/s at {span(flash['red'])}")
+    if not info['audio']:
+        fails.append('no audio')
+    elif 'lufs' not in loud or abs(loud['lufs'] - t['I']) > t['tolerance']:
+        fails.append(f"loudness {loud.get('lufs')} LUFS vs {a.target} {t['I']}")
+    elif loud.get('true_peak', -99) > t['TP'] + 0.5:
+        fails.append(f"true peak {loud['true_peak']} dBTP")
+    curve = loud.pop('curve')
+    rep = {'video': os.path.abspath(a.video), **info, **loud, 'black': black, 'frozen': frozen, 'levels': levels, 'sheet': base + '.sheet.jpg',
+           'sheet_cols': a.cols, 'loudness_curve': curve,
+           **({'scopes': scopes} if scopes else {}), **({'hdr': hdr} if hdr else {}), **({'pse': flash} if flash else {}), 'pass': not fails, 'fails': fails}
+    with open(base + '.review.json', 'w') as f:
+        json.dump(rep, f, indent=1)
+    print(f"mv-review: {a.video} {'PASS' if not fails else 'FAIL ' + ', '.join(fails)} | {info['width']}x{info['height']} "
+          f"{info['fps']}fps {info['duration']:.1f}s | target={a.target} lufs={loud.get('lufs')} tp={loud.get('true_peak')} lra={loud.get('lra')} | "
+          f"black={len(black)} frozen={len(frozen)} | {f'flash={flash['general_max']}/s red={flash['red_max']}/s | ' if flash else ''}Y={levels['ymin']}-{levels['ymax']} brng={levels['brng_max']:.4f} | colour={'/'.join(info['color'].values())} | {f"hdr={hdr['kind']} mastering={hdr['mastering_max']} maxcll={hdr['maxcll']} maxfall={hdr['maxfall']} | " if hdr else ''}sheet {base}.sheet.jpg")
+    sys.exit(0 if not fails else 1)
+
+
+if __name__ == '__main__':
+    main()

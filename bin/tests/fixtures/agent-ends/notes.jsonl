@@ -1,0 +1,6 @@
+{"type":"assistant","timestamp":"2026-10-19T09:59:00Z","message":{"role":"assistant","content":"starting four agents"}}
+{"type":"user","timestamp":"2026-10-19T10:00:00Z","message":{"role":"user","content":"<task-notification>\n<task-id>a1</task-id>\n<tool-use-id>toolu_x</tool-use-id>\n<status>completed</status>\n<summary>Agent \"a1\" finished</summary>\n</task-notification>"}}
+{"type":"user","timestamp":"2026-10-19T10:01:00Z","message":{"role":"user","content":"<task-notification>\n<task-id>a2</task-id>\n<tool-use-id>toolu_x</tool-use-id>\n<status>failed</status>\n<summary>Agent \"a2\" finished</summary>\n</task-notification>"}}
+{"type":"user","timestamp":"2026-10-19T10:04:00Z","message":{"role":"user","content":"<task-notification>\n<task-id>a5</task-id>\n<tool-use-id>toolu_x</tool-use-id>\n<status>completed</status>\n<summary>
+{"type":"user","timestamp":"2026-10-19T10:02:00Z","message":{"role":"user","content":"<task-notification>\n<task-id>a3</task-id>\n<tool-use-id>toolu_x</tool-use-id>\n<status>killed</status>\n<summary>Agent \"a3\" finished</summary>\n</task-notification>"}}
+{"type":"user","timestamp":"2026-10-19T10:03:00Z","message":{"role":"user","content":"<task-notification>\n<task-id>a4</task-id>\n<tool-use-id>toolu_x</tool-use-id>\n<status>stopped</status>\n<summary>Agent \"a4\" finished</summary>\n</task-notification>"}}

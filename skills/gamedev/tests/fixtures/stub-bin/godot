@@ -1,0 +1,40 @@
+#!/bin/sh
+# Stub godot: import, GUT, export (writes a fake game), Movie Maker capture, inspect.gd; env STUB_* picks the outcome.
+echo "godot $*" >>"${STUB_CALLS:-/dev/null}"
+path="" junit="" movie="" out="" script="" gut=0
+while [ $# -gt 0 ]; do
+	case $1 in
+		--version) echo "4.7.2.stub"; exit 0 ;;
+		--path) path=$2; shift ;;
+		--write-movie) movie=$2; shift ;;
+		--script) script=$2; shift ;;
+		--export-release) out=$3; shift 2 ;;
+		addons/gut/gut_cmdln.gd) gut=1 ;;
+		-gjunit_xml_file=*) junit=${1#*=} ;;
+	esac
+	shift
+done
+if [ "$gut" = 1 ]; then
+	f=0; [ -n "${STUB_GUT_FAIL:-}" ] && f=1
+	printf '<testsuites tests="3" failures="%s"></testsuites>\n' "$f" >"$junit"
+	[ "$f" = 1 ] && { echo "FAILED test_score"; exit 1; }
+	echo "---- All tests passed! ----"; exit 0
+fi
+if [ -n "$out" ]; then
+	cat >"$out" <<'GAME'
+#!/bin/sh
+echo "SMOKE renderer=vulkan adapter=Stub GPU"
+echo "SMOKE fps=120 t=2.0"
+echo "SMOKE done frames=600 avg_fps=${STUB_AVG:-120.0} p50_ms=8.00 p95_ms=9.00 p99_ms=${STUB_P99:-10.00} low1_fps=100.0"
+GAME
+	chmod +x "$out"; exit 0
+fi
+if [ -n "$movie" ]; then
+	echo stub-avi >"$movie"; echo "SMOKE done frames=30 coins=3"; exit 0
+fi
+if [ "$script" = res://inspect.gd ]; then
+	for g in "$path"/*.glb; do echo "ASSET import OK $(basename "$g") tris=${STUB_TRIS:-1000} texture=512x512"; done
+	exit 0
+fi
+[ -n "${STUB_IMPORT_ERR:-}" ] && echo "ERROR: stub import error"
+exit 0

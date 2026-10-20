@@ -1,0 +1,1 @@
+{"compilerOptions":{"target":"ES2022","module":"ESNext","moduleResolution":"bundler","jsx":"react-jsx","jsxImportSource":"@motion-canvas/2d/lib","strict":true,"resolveJsonModule":true,"skipLibCheck":true,"paths":{"@motion-canvas/core/*":["./node_modules/@motion-canvas/core/*"]}},"include":["src"]}

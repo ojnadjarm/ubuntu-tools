@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# clang-tidy over a CMake build's compile_commands.json, project sources only; config from the project's .clang-tidy.
+#
+# Layout: source dir from BUILD_DIR/CMakeCache.txt; a filtered database in a temp dir keeps TUs under the source dir
+# but outside BUILD_DIR and vcpkg_installed, and drops C++20 module "@*.modmap" args (written only at build time, so
+# tidy needs configure, not build); run-clang-tidy runs it; findings are unique "file:line:col: warning|error" lines.
+# Cache: BUILD_DIR/.tidy-cache/<sha256 of the TU, its command, .clang-tidy files, clang-tidy --version and the project
+# headers it includes> holds that TU's findings; only misses go to run-clang-tidy; CPP_TIDY_NOCACHE=1 runs every TU.
+set -uo pipefail
+usage() {
+	cat <<-'EOF2'
+	usage: cpp-tidy [-j N] BUILD_DIR
+	  runs run-clang-tidy over BUILD_DIR/compile_commands.json (CMAKE_EXPORT_COMPILE_COMMANDS=ON), project sources only
+	  prints each finding, then "TIDY findings=N files=M seconds=S cached=C"; CPP_TIDY_NOCACHE=1 ignores BUILD_DIR/.tidy-cache; exit 0 clean, 1 findings, 2 usage, no sources or a tidy failure
+	EOF2
+	exit "${1:-2}"
+}
+jobs=$(nproc) build=""
+while [ $# -gt 0 ]; do
+	case $1 in
+		-j) jobs=$2; shift 2 ;;
+		-h|--help) usage 0 ;;
+		*) build=$1; shift ;;
+	esac
+done
+[ -n "$build" ] && [ -f "$build/compile_commands.json" ] && [ -f "$build/CMakeCache.txt" ] || usage >&2
+build=$(cd "$build" && pwd)
+src=$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$build/CMakeCache.txt")
+[ -d "$src" ] || { echo "cpp-tidy: no CMAKE_HOME_DIRECTORY in $build/CMakeCache.txt" >&2; exit 2; }
+db=$(mktemp -d); trap 'rm -rf "$db"' EXIT
+jq --arg s "$src/" --arg b "$build/" '[.[] | select((.file | startswith($s)) and (.file | startswith($b) | not) and (.file | contains("/vcpkg_installed/") | not))
+	| if .command then .command |= gsub(" @[^ ]*\\.modmap"; "") else .arguments |= map(select(test("^@.*\\.modmap$") | not)) end]' \
+	"$build/compile_commands.json" > "$db/compile_commands.json"
+files=$(jq length "$db/compile_commands.json")
+[ "$files" -gt 0 ] || { echo "cpp-tidy: no sources under $src in $build/compile_commands.json" >&2; exit 2; }
+hf="^$(printf '%s' "$src" | sed 's/[][\.*^$+?(){}|]/\\&/g')/"
+t0=$(date +%s)
+cache=$build/.tidy-cache; mkdir -p "$cache" "$db/miss" "$db/new"
+python3 - "$db/compile_commands.json" "$src" "$hf" "$(clang-tidy --version 2>&1)" > "$db/keys" <<'PY' || exit 2
+import hashlib, json, os, re, shlex, sys
+dbf, src, hf, ver = sys.argv[1:5]
+src = os.path.realpath(src)
+INC = re.compile(rb'^[ \t]*#[ \t]*(?:include|include_next|import)[ \t]*([<"])([^>"\n]+)[>"]', re.M)
+memo = {}
+def read(p):
+    try:
+        with open(p, 'rb') as f: return f.read()
+    except OSError: return b''
+def sha(b): return hashlib.sha256(b).hexdigest()
+def project(p):
+    r = os.path.realpath(p)
+    return r.startswith(src + '/') and '/vcpkg_installed/' not in r
+def incdirs(e):
+    a = e['arguments'] if 'arguments' in e else shlex.split(e['command'])
+    out, i = [], 0
+    while i < len(a):
+        for flag in ('-iquote', '-isystem', '-idirafter', '-I'):
+            if a[i] == flag and i + 1 < len(a): out.append(a[i + 1]); i += 1; break
+            if a[i].startswith(flag) and len(a[i]) > len(flag): out.append(a[i][len(flag):]); break
+        i += 1
+    return [os.path.normpath(os.path.join(e['directory'], d)) for d in out]
+def deps(tu, dirs):
+    seen, stack = {}, [tu]
+    while stack:
+        cur = stack.pop()
+        if cur not in memo: memo[cur] = [(q == b'"', n.decode(errors='replace').strip()) for q, n in INC.findall(read(cur))]
+        for quoted, name in memo[cur]:
+            for d in ([os.path.dirname(cur)] if quoted else []) + dirs:
+                c = os.path.normpath(os.path.join(d, name))
+                if os.path.isfile(c):
+                    if project(c) and c not in seen: seen[c] = sha(read(c)); stack.append(c)
+                    break
+    return sorted(seen.items())
+def configs(f):
+    d, out = os.path.dirname(f), []
+    while True:
+        out.append(sha(read(os.path.join(d, '.clang-tidy'))))
+        if d == '/': return out
+        d = os.path.dirname(d)
+for i, e in enumerate(json.load(open(dbf))):
+    f = os.path.normpath(os.path.join(e['directory'], e['file']))
+    parts = (ver, hf, json.dumps(e, sort_keys=True), sha(read(f)), json.dumps(configs(f)), json.dumps(deps(f, incdirs(e))))
+    print(f"{sha(chr(0).join(parts).encode())}\t{i}\t{f}")
+PY
+: > "$db/misses"
+while IFS=$'\t' read -r key i f; do
+	if [ "${CPP_TIDY_NOCACHE:-0}" != 1 ] && [ -f "$cache/$key" ]; then cat "$cache/$key"; else printf '%s\t%s\t%s\n' "$key" "$i" "$f" >> "$db/misses"; fi
+done < "$db/keys" > "$db/all"
+misses=$(grep -c . "$db/misses") rc=0
+if [ "$misses" -gt 0 ]; then
+	jq --argjson i "[$(cut -f2 "$db/misses" | paste -sd,)]" '. as $a | [$i[] | $a[.]]' "$db/compile_commands.json" > "$db/miss/compile_commands.json"
+	run-clang-tidy -clang-tidy-binary clang-tidy -quiet -j "$jobs" -p "$db/miss" -header-filter "$hf" > "$db/tidy.log" 2>&1
+	rc=$?
+	# per-TU blocks start "[i/N][Ts] <invocation> FILE"; a block reporting a tool error or crash is not cached
+	awk -F'\t' -v out="$db/new" 'NR == FNR { k[$3] = k[$3] " " $1; next }
+		/^\[ *[0-9]+\/[0-9]+\]\[[0-9.]+s\] / { n = split(k[$NF], cur, " "); for (j = 1; j <= n; j++) printf "" > (out "/" cur[j]); next }
+		/^\/[^ ]+:[0-9]+:[0-9]+: (warning|error): / { for (j = 1; j <= n; j++) print >> (out "/" cur[j]); next }
+		/terminated by signal|^Error|^LLVM ERROR/ { for (j = 1; j <= n; j++) print > (out "/" cur[j] ".bad") }' \
+		"$db/misses" FS=' ' "$db/tidy.log"
+	for f in "$db/new"/*; do
+		[ -e "$f" ] || continue
+		case $f in *.bad) continue ;; esac
+		key=${f##*/}
+		[ -e "$f.bad" ] && { cat "$f"; continue; }
+		sort -u "$f" > "$cache/.$key.$$" && mv "$cache/.$key.$$" "$cache/$key" && cat "$cache/$key"
+	done >> "$db/all"
+fi
+sort -u "$db/all" > "$db/findings"
+n=$(grep -c . "$db/findings")
+[ $rc != 0 ] && [ "$n" = 0 ] && { tail -20 "$db/tidy.log" >&2; echo "cpp-tidy: run-clang-tidy rc $rc without findings" >&2; exit 2; }
+cat "$db/findings"
+echo "TIDY findings=$n files=$files seconds=$(( $(date +%s) - t0 )) cached=$((files - misses))"
+[ "$n" = 0 ]

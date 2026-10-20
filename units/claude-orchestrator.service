@@ -1,0 +1,23 @@
+[Unit]
+Description=Claude orchestrator session in tmux (Remote Control)
+After=graphical-session.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=forking
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=%h
+# Remote Control registers at launch; under linger the unit starts before Wi-Fi associates.
+ExecStartPre=/usr/bin/nm-online -q -t 60
+# Session name and Remote Control name come from config.env via env.sh (ORCHESTRATOR_TMUX_SESSION, HARNESS_BRAND).
+ExecStart=/bin/bash -c '. %h/agents/bin/env.sh; s=$$ORCHESTRATOR_TMUX_SESSION; b=$${HARNESS_BRAND:-$$HARNESS_HOST}; a="--mcp-config %h/agents/eye-relay/mcp-main.json --dangerously-load-development-channels server:eye-main --append-system-prompt-file %h/agents/ORCHESTRATOR.md"; tmux has-session -t "$$s" 2>/dev/null || exec tmux new-session -d -s "$$s" -c %h "%h/.local/bin/claude --continue --remote-control \\\"$$b\\\" $$a || %h/.local/bin/claude --remote-control \\\"$$b\\\" $$a"'
+ExecStartPost=/bin/bash -c '. %h/agents/bin/env.sh; exec %h/.local/bin/eye-channel-accept "$$ORCHESTRATOR_TMUX_SESSION"'
+# The session may already be gone (claude exited); that is a clean stop, not a failure.
+ExecStop=-/bin/bash -c '. %h/agents/bin/env.sh; exec tmux kill-session -t "$$ORCHESTRATOR_TMUX_SESSION"'
+TimeoutStartSec=180
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

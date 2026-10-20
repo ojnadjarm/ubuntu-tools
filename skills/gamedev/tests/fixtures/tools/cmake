@@ -1,0 +1,4 @@
+#!/bin/sh
+# Tripwire cmake: records the call and fails (new-cpp-game without --build must never configure).
+echo "cmake $*" >>"${STUB_CALLS:-/dev/null}"
+exit 1

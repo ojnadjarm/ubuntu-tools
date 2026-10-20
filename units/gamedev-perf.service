@@ -1,0 +1,9 @@
+[Unit]
+Description=Nightly Godot slice perf row (gamedev-perf --collect); failed = fps regression past tolerance (T520)
+
+[Service]
+Type=oneshot
+TimeoutStartSec=1800
+Slice=fleet-heavy.slice
+Nice=10
+ExecStart=/bin/bash -lc 'exec %h/agents/bin/gamedev-perf --collect'

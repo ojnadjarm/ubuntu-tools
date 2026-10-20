@@ -1,0 +1,11 @@
+[Unit]
+Description=Moodle dev site cron in container %i
+After=docker.service
+
+[Service]
+Type=oneshot
+# Quiet when the run is clean: output reaches the journal only on a failure, a failure line or a pending-upgrade skip.
+LogLevelMax=notice
+SyslogLevel=warning
+ExecStart=%h/agents/bin/moodle-cron %i
+TimeoutStartSec=300

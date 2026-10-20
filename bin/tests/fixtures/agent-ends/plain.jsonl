@@ -1,0 +1,2 @@
+{"type":"assistant","timestamp":"2026-10-19T10:00:00Z","message":{"role":"assistant","content":"no agents here"}}
+{"type":"assistant","timestamp":"2026-10-19T10:01:00Z","message":{"role":"assistant","content":"<task-id>x</task-id> without a status"}}

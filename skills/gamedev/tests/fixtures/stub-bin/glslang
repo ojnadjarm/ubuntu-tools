@@ -1,0 +1,6 @@
+#!/bin/sh
+# Stub glslang: fails on a source containing BROKEN, else writes the -o file.
+echo "glslang $*" >>"${STUB_CALLS:-/dev/null}"
+prev=""; for a in "$@"; do [ "$prev" = -o ] && o=$a; case $a in -*) ;; *) [ "$prev" = -o ] || src=$a ;; esac; prev=$a; done
+grep -q BROKEN "$src" && { echo "ERROR: $src:1: stub syntax error"; exit 1; }
+echo spv >"$o"

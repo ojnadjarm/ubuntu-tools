@@ -1,0 +1,5 @@
+#!/bin/sh
+# Stub wine: --version, or a Windows game run that prints SMOKE done.
+echo "wine $*" >>"${STUB_CALLS:-/dev/null}"
+[ "$1" = --version ] && { echo wine-stub; exit 0; }
+printf 'SMOKE done frames=90\r\n'

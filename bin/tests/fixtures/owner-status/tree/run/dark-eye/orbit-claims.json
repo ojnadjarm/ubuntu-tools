@@ -1,0 +1,1 @@
+{"abc": {"tx": "@RUN@/sub/agent-abc.jsonl", "at": "@AT@"}, "bad": {"tx": "@RUN@/sub/agent-missing.jsonl"}}

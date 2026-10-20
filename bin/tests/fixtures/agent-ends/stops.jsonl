@@ -1,0 +1,4 @@
+{"type":"user","timestamp":"2026-10-19T10:00:00Z","toolUseResult":{"status":"async_launched","taskId":"wcq1","taskType":"local_workflow","workflowName":"cleanup","runId":"wf_57ef"}}
+{"type":"assistant","timestamp":"2026-10-19T10:02:00Z","message":{"content":[{"type":"tool_use","id":"toolu_s","name":"TaskStop","input":{"task_id":"c1"}}]}}
+{"type":"user","timestamp":"2026-10-19T10:03:00Z","message":{"role":"user","content":"<task-notification>\n<task-id>c2</task-id>\n<tool-use-id>toolu_x</tool-use-id>\n<status>completed</status>\n<summary>Agent \"c2\" finished</summary>\n</task-notification>"}}
+{"type":"assistant","timestamp":"2026-10-19T10:04:00Z","message":{"content":[{"type":"tool_use","id":"toolu_s","name":"TaskStop","input":{"task_id":"c2"}}]}}

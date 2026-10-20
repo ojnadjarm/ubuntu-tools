@@ -1,0 +1,332 @@
+#!/usr/bin/env python3
+"""showcase-page — rebuild one responsive HTML page showing the newest motion film and the newest C++ game showcase."""
+import argparse, csv, filecmp, glob, html, json, os, re, subprocess, sys, time
+from datetime import datetime
+from html.parser import HTMLParser
+from urllib.parse import unquote, urlsplit
+
+HOME = os.path.expanduser("~")
+SCRATCH = re.compile(r"^(demo|scratch|test|tmp)", re.I)
+CPP_REPORT = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "skills", "gamedev", "scripts", "cpp-report")
+
+
+def age(ts, now):
+    s = max(0, now - ts)
+    if s < 3600:
+        return f"{int(s // 60)} min"
+    if s < 172800:
+        return f"{int(s // 3600)} h"
+    return f"{int(s // 86400)} d"
+
+
+def tilde(p):
+    return "~" + p[len(HOME):] if p.startswith(HOME + "/") else p
+
+
+def iso_ts(s):
+    try:
+        return datetime.fromisoformat(s).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def drop_index(drop, out):
+    """Size -> files directly inside ~/drop/<dir>/, skipping the page's own folder."""
+    idx = {}
+    for d in sorted(glob.glob(os.path.join(drop, "*/"))):
+        if os.path.realpath(d) == os.path.realpath(out):
+            continue
+        for f in glob.glob(os.path.join(d, "*")):
+            if os.path.isfile(f):
+                idx.setdefault(os.path.getsize(f), []).append(f)
+    return idx
+
+
+def in_drop(src, idx):
+    if not os.path.isfile(src):
+        return None
+    hits = [f for f in idx.get(os.path.getsize(src), []) if filecmp.cmp(src, f, shallow=False)]
+    return max(hits, key=os.path.getmtime) if hits else None
+
+
+def is_film(build_json):
+    sh = os.path.join(os.path.dirname(os.path.dirname(build_json)), "build.sh")
+    try:
+        with open(sh) as f:
+            return "(film)" in f.read(400)
+    except OSError:
+        return False
+
+
+def motion(root, idx):
+    best = None
+    for bj in glob.glob(os.path.join(root, "*", "out", "build.json")):
+        proj = os.path.basename(os.path.dirname(os.path.dirname(bj)))
+        if SCRATCH.match(proj) or not is_film(bj):
+            continue
+        try:
+            j = json.load(open(bj))
+        except (OSError, ValueError):
+            continue
+        if j.get("draft"):
+            continue
+        if best is None or os.path.getmtime(bj) > os.path.getmtime(best[0]):
+            best = (bj, j)
+    if not best:
+        return None
+    bj, j = best
+    out = os.path.dirname(bj)
+    base = os.path.join(out, f"{j['name']}-16x9")
+    files = {k: in_drop(base + ext, idx) for k, ext in
+             (("video", ".mp4"), ("sheet", ".sheet.jpg"), ("report", ".report.html"))}
+    rv = base + ".review.json"
+    return {"json": bj, "j": j, "files": files, "review_ts": os.path.getmtime(rv) if os.path.isfile(rv) else None}
+
+
+def gamedev(drop, games, perf, out):
+    drops = [d for d in glob.glob(os.path.join(drop, "*/")) if os.path.isfile(os.path.join(d, "play.mp4"))
+             and os.path.realpath(d) != os.path.realpath(out)]
+    d = max(drops, key=lambda p: os.path.getmtime(os.path.join(p, "play.mp4"))) if drops else None
+    sums = glob.glob(os.path.join(games, "*", "ci", "summary.json"))
+    s = max(sums, key=os.path.getmtime) if sums else None
+    row = None
+    if os.path.isfile(perf):
+        with open(perf, newline="") as f:
+            rows = list(csv.DictReader(f))
+        row = rows[-1] if rows else None
+    return {"dir": d.rstrip("/") if d else None, "summary": s,
+            "sj": json.load(open(s)) if s else None, "perf": perf, "row": row}
+
+
+def followups(path, pattern):
+    if not path or not os.path.isfile(path):
+        return []
+    rx = re.compile(pattern)
+    lines = [l.rstrip("\n")[2:] for l in open(path) if l.startswith("- ")]
+    return [l for l in lines if "~~" not in l and "(done" not in l and rx.search(l)]
+
+
+def rel(target, out):
+    return html.escape(os.path.relpath(target, out))
+
+
+def table(rows):
+    body = "".join(f"<tr><th>{html.escape(k)}</th><td>{html.escape(str(v))}</td><td class=age>{a}</td></tr>"
+                   for k, v, a in rows)
+    return f"<table><thead><tr><th>Metric</th><th>Value</th><th class=age>Age</th></tr></thead><tbody>{body}</tbody></table>"
+
+
+def media(video, sheet, out, alt):
+    v = f'<video controls muted playsinline preload="metadata" src="{rel(video, out)}"></video>' if video \
+        else "<p class=miss>video not found in ~/drop</p>"
+    s = f'<a href="{rel(sheet, out)}"><img src="{rel(sheet, out)}" alt="{alt} contact sheet" loading="lazy"></a>' if sheet \
+        else "<p class=miss>contact sheet not found in ~/drop</p>"
+    return v + s
+
+
+def fu_block(lines, path, now):
+    if not lines:
+        return "<h3>Open follow-ups</h3><p class=miss>none open</p>"
+    a = age(os.path.getmtime(path), now)
+    items = "".join(f"<li>{html.escape(l)}</li>" for l in lines)
+    return f"<h3>Open follow-ups <span class=age>({html.escape(tilde(path))}, {a})</span></h3><ul class=fu>{items}</ul>"
+
+
+def motion_html(m, out, fpath, now):
+    if not m:
+        return "<section><h2>Motion video</h2><p class=miss>no non-scratch film build.json found</p></section>", 0
+    j, f = m["j"], m["files"]
+    a = age(os.path.getmtime(m["json"]), now)
+    ra = age(m["review_ts"], now) if m["review_ts"] else a
+    steps = sorted((j.get("steps_cpu") or {}).items(), key=lambda kv: -kv[1])[:3]
+    cpu = j.get("cpu_s") or 0
+    rows = [("cpu_s", f"{cpu:,.1f}", a)]
+    rows += [(f"steps_cpu #{i} {k}", f"{v:,.1f} ({v / cpu * 100:.0f} %)" if cpu else f"{v:,.1f}", a)
+             for i, (k, v) in enumerate(steps, 1)]
+    rows.append(("review", j.get("review", "?"), ra))
+    for asp, d in (j.get("aspects") or {}).items():
+        rows.append((f"{asp} VMAF / size", f"{d.get('vmaf', '?')} / {d.get('mb', '?')} MB · {d.get('review', '?')}", ra))
+    rows.append(("length", f"{j.get('seconds')} s @ {j.get('fps')} fps, {j.get('size')}", a))
+    tk = os.path.basename(os.path.dirname(f["video"])) if f["video"] else None
+    pat = "|".join([re.escape(j["name"]).replace(r"\-", "[- ]")] + ([rf"\b{tk}\b"] if tk else []))
+    fu = followups(fpath, pat)
+    rep = f'<a href="{rel(f["report"], out)}">review report</a>' if f["report"] else "report not in ~/drop"
+    head = f"<h2>Motion video · {html.escape(j['name'])}{' · ' + html.escape(tk) if tk else ''}</h2>"
+    src = f"<p class=src>{html.escape(tilde(m['json']))} · {rep}</p>"
+    return f"<section>{head}{media(f['video'], f['sheet'], out, j['name'])}{src}{table(rows)}{fu_block(fu, fpath, now)}</section>", len(fu)
+
+
+def cpp_report(summary, sheet, out):
+    """Writes out/cpp-report.html for the cpp-ci run; its link, or why not."""
+    if not summary:
+        return "no cpp-report (no cpp-ci summary)"
+    cmd = [CPP_REPORT, os.path.dirname(summary), "--out", os.path.join(out, "cpp-report.html")] + (["--sheet", sheet] if sheet else [])
+    try:
+        rc = subprocess.run(cmd, capture_output=True, timeout=60).returncode
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return f"cpp-report failed ({html.escape(type(e).__name__)})"
+    return '<a href="cpp-report.html">cpp-ci review report</a>' if rc == 0 else f"cpp-report failed rc {rc}"
+
+
+def game_html(g, out, fpath, now):
+    d, sj, row = g["dir"], g["sj"], g["row"]
+    tk = os.path.basename(d) if d else None
+    proj = os.path.basename(os.path.dirname(os.path.dirname(g["summary"]))) if g["summary"] else None
+    rows = []
+    if sj:
+        sa = age(iso_ts(sj.get("date")) or os.path.getmtime(g["summary"]), now)
+        st = sj.get("stages") or {}
+        npass = sum(1 for v in st.values() if v.get("status") == "pass")
+        rows.append(("cpp-ci", f"{npass}/{len(st)} pass, {sj.get('seconds')} s", sa))
+        rows += [(f"stage {k}", f"{v.get('status')} · {v.get('seconds')} s"
+                  + (f" · gpu p50 {v['gpu_ms_p50']} ms" if v.get("gpu_ms_p50") else ""), sa) for k, v in st.items()]
+    if row:
+        pa = age(iso_ts(row.get("date")) or os.path.getmtime(g["perf"]), now)
+        for k in ("gpu_ms_p50", "gpu_ms_p99", "cpu_ms_p50"):
+            if row.get(k):
+                rows.append((f"nightly perf-cpp {k}", f"{row[k]} ms", pa))
+        for k, v in row.items():
+            if v and (k.startswith("gpu_ms_p50_") or k == "post_ms_p50"):
+                rows.append((f"nightly pass {k.replace('gpu_ms_p50_', '').replace('_ms_p50', '')} p50", f"{v} ms", pa))
+    pat = "|".join(p for p in (rf"\b{tk}\b" if tk else "", re.escape(proj).replace(r"\-", "[- ]") if proj else "",
+                               re.escape(os.path.basename(g["perf"]))) if p)
+    fu = followups(fpath, pat)
+    head = f"<h2>Game dev · {html.escape(proj or 'no cpp-ci project')}{' · ' + html.escape(tk) if tk else ''}</h2>"
+    vid = os.path.join(d, "play.mp4") if d else None
+    sh = os.path.join(d, "contact-sheet.jpg") if d and os.path.isfile(os.path.join(d, "contact-sheet.jpg")) else None
+    srcs = " · ".join([html.escape(tilde(p)) for p in (g["summary"], g["perf"] if row else None) if p] + [cpp_report(g["summary"], sh, out)])
+    tbl = table(rows) if rows else "<p class=miss>no cpp-ci summary or perf row</p>"
+    return f"<section>{head}{media(vid, sh, out, proj or 'game')}<p class=src>{srcs}</p>{tbl}{fu_block(fu, fpath, now)}</section>", len(fu)
+
+
+class Links(HTMLParser):
+    """Collects local src/href targets of a page, in order, once each."""
+    def __init__(self):
+        super().__init__()
+        self.links = []
+
+    def handle_starttag(self, tag, attrs):
+        for k, v in attrs:
+            u = urlsplit(v or "") if k in ("src", "href") else None
+            if u and not u.scheme and not u.netloc and u.path and unquote(u.path) not in self.links:
+                self.links.append(unquote(u.path))
+
+
+def duration(s):
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)([smhd])", s)
+    if not m:
+        raise argparse.ArgumentTypeError(f"bad duration {s!r} (e.g. 90m, 24h, 2d)")
+    return float(m[1]) * {"s": 1, "m": 60, "h": 3600, "d": 86400}[m[2]]
+
+
+def check(drop, max_age, now):
+    """(ok, what) per check of an already built page in drop: index, linked media, one preview per stack, cpp-report, layout."""
+    page = os.path.join(drop, "index.html")
+    if not os.path.isfile(page):
+        return [(False, f"{tilde(page)} missing")]
+    p = Links()
+    p.feed(open(page, encoding="utf-8", errors="replace").read())
+    res = [(True, tilde(page))]
+    for l in p.links:
+        f = os.path.normpath(os.path.join(drop, l))
+        if not os.path.isfile(f):
+            res.append((False, f"{l} missing"))
+        elif os.path.getsize(f) == 0:
+            res.append((False, f"{l} empty"))
+        elif now - os.path.getmtime(f) > max_age:
+            res.append((False, f"{l} stale ({age(os.path.getmtime(f), now)} old)"))
+        else:
+            res.append((True, f"{l} ({os.path.getsize(f) / 1e6:.1f} MB, {age(os.path.getmtime(f), now)} old)"))
+    base = lambda l: os.path.basename(l)
+    fv = [l for l in p.links if l.endswith(".mp4") and base(l) != "play.mp4"]
+    fs = [l for l in p.links if l.endswith(".sheet.jpg")]
+    gv = [l for l in p.links if base(l) == "play.mp4"]
+    gs = [l for l in p.links if base(l) == "contact-sheet.jpg"]
+    for name, v, s, vn, sn in (("film", fv, fs, "mp4", "sheet"), ("game", gv, gs, "play.mp4", "contact sheet")):
+        miss = [n for n, x in ((vn, v), (sn, s)) if not x]
+        res.append((not miss, f"{name} preview: " + (f"{v[0]} + {s[0]}" if not miss else f"no {' or '.join(miss)} linked")))
+    rep = [l for l in p.links if base(l) == "cpp-report.html"]
+    res.append((bool(rep), f"game report: {rep[0]}" if rep else "game report: no cpp-report.html linked"))
+    if fv:
+        lay = os.path.join(os.path.dirname(os.path.normpath(os.path.join(drop, fv[0]))), "layout.txt")
+        rl = os.path.relpath(lay, drop)
+        if not os.path.isfile(lay):
+            res.append((False, f"film layout: {rl} missing"))
+        else:
+            n = sum(1 for x in open(lay) if x.startswith("FAIL"))
+            res.append((n == 0, f"film layout: {rl} FAIL {n}"))
+    else:
+        res.append((False, "film layout: no film to find layout.txt"))
+    return res
+
+
+CSS = """:root{color-scheme:dark;--bg:#0e1014;--card:#171a21;--fg:#e9e6df;--mut:#9aa0a8;--ac:#e2b35a;--line:#2a2f3a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:clamp(15px,0.4vw + 13px,18px)/1.5 system-ui,sans-serif}
+main{width:min(100% - 2 * clamp(12px,4vw,56px),2000px);margin:0 auto;padding:clamp(16px,3vw,48px) 0}
+h1{margin:0 0 .2em;font-size:clamp(1.5rem,2.5vw,2.4rem);color:var(--ac)}
+h2{margin:0 0 .6em;font-size:clamp(1.15rem,1.4vw,1.6rem)}
+h3{margin:1.2em 0 .4em;font-size:1rem}
+.lede,.src,.age,.miss{color:var(--mut)}
+.src{font-size:.85em;overflow-wrap:anywhere}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,600px),1fr));gap:clamp(16px,2vw,36px);margin-top:clamp(16px,2vw,32px)}
+section{background:var(--card);border-radius:14px;padding:clamp(12px,2vw,28px);min-width:0}
+video,img{display:block;width:100%;height:auto;border-radius:8px;background:#000;margin-bottom:12px}
+a{color:var(--ac)}
+table{width:100%;border-collapse:collapse;table-layout:fixed;font-variant-numeric:tabular-nums}
+th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);overflow-wrap:anywhere;vertical-align:top}
+thead th{color:var(--mut);font-weight:500}
+th.age,td.age{width:5.5em;text-align:right}
+tbody th{font-weight:500;width:42%}
+ul.fu{padding-left:1.2em;margin:0}
+ul.fu li{overflow-wrap:anywhere;margin:.3em 0}"""
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("— ", 1)[1],
+                                 epilog="exit 0 written / all ok · 1 a --check line failed · 2 usage. Links are relative to --out; media stay where they are.")
+    ap.add_argument("--out", help="folder for index.html (inside --drop so links resolve)")
+    ap.add_argument("--check", action="store_true",
+                    help="no rebuild: check --drop/index.html, its linked media (exist, non-empty, newer than --max-age), "
+                         "a film and a game preview, the game's cpp-report.html, and 0 FAIL in the film's layout.txt; one ok|FAIL line each")
+    ap.add_argument("--max-age", type=duration, default=86400, help="--check: oldest media allowed (default 24h)")
+    ap.add_argument("--json", action="store_true", help="--check: the same result as JSON")
+    ap.add_argument("--drop", default=os.path.join(HOME, "drop"))
+    ap.add_argument("--motion", default=os.path.join(HOME, "agent-work/motion"), help="film projects: <dir>/*/out/build.json")
+    ap.add_argument("--games", default=os.path.join(HOME, "agent-work/games"), help="game projects: <dir>/*/ci/summary.json")
+    ap.add_argument("--perf", default=os.path.join(HOME, "agents/state/gamedev-perf/perf-cpp.csv"))
+    ap.add_argument("--followups", help="FOLLOWUPS.md (default: newest under ~/agent-work/research)")
+    ap.add_argument("--now", type=float, help="epoch seconds for ages (tests)")
+    a = ap.parse_args()
+    now = a.now or time.time()
+    if a.check:
+        res = check(os.path.abspath(os.path.expanduser(a.drop)), a.max_age, now)
+        n = sum(1 for ok, _ in res if ok)
+        if a.json:
+            print(json.dumps({"checks": [{"ok": ok, "what": w} for ok, w in res], "ok": n, "total": len(res)}))
+        else:
+            print("\n".join(f"{'ok' if ok else 'FAIL'} {w}" for ok, w in res) + f"\nshowcase: {n}/{len(res)} ok")
+        return 0 if n == len(res) else 1
+    if not a.out:
+        ap.error("--out is required unless --check")
+    out = os.path.abspath(os.path.expanduser(a.out))
+    fp = a.followups
+    if not fp:
+        c = glob.glob(os.path.join(HOME, "agent-work/research/*/*/FOLLOWUPS.md"))
+        fp = max(c, key=os.path.getmtime) if c else None
+    os.makedirs(out, exist_ok=True)
+    idx = drop_index(a.drop, out)
+    ms, mn = motion_html(motion(a.motion, idx), out, fp, now)
+    gs, gn = game_html(gamedev(a.drop, a.games, a.perf, out), out, fp, now)
+    stamp = datetime.fromtimestamp(now).strftime("%Y-%m-%d %H:%M")
+    page = (f'<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">'
+            f"<title>Creative stacks showcase</title><style>{CSS}</style></head><body><main>"
+            f"<h1>Creative stacks showcase</h1><p class=lede>Newest film and C++ game proof, rebuilt {stamp} by "
+            f"<code>showcase-page</code>. Every number carries its age.</p><div class=grid>{ms}{gs}</div></main></body></html>\n")
+    with open(os.path.join(out, "index.html"), "w") as f:
+        f.write(page)
+    print(f"showcase-page: {tilde(os.path.join(out, 'index.html'))} (follow-ups: motion {mn}, gamedev {gn})")
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,36 @@
+# Test files that need this box's desktop or hardware; run.sh --portable (or FLEET_FRESH=1) prints `SKIP host-only <file>` for them.
+bin/tests/pc-dbus.test.sh
+bin/tests/pc-mutter.test.sh
+bin/tests/pc-journal.test.sh
+bin/tests/pc-hw.test.sh
+bin/tests/pc-power.test.sh
+bin/tests/pc-lid.test.sh
+bin/tests/pc-doctor.test.sh
+bin/tests/pc-idle.test.sh
+bin/tests/pc-trace.test.sh
+bin/tests/pc-units.test.sh
+bin/tests/pc-status.test.sh
+bin/tests/pc-status-facts.test.sh
+skills/gamedev/tests/asset-budget.test.sh  # Blender + upstream gltfpack (~/opt/gamedev)
+skills/gamedev/tests/asset-quality.test.sh  # Blender + upstream gltfpack/ktx (~/opt/gamedev)
+skills/gamedev/tests/asset-validate.test.sh  # Blender + glTF-Validator/ktx (~/opt/gamedev)
+skills/gamedev/tests/cpp-golden.test.sh  # real Vulkan build: vcpkg + Iris Xe GPU under weston
+skills/motion-video/tests/mv-camera.test.sh  # Blender EEVEE renders (GPU)
+skills/motion-video/tests/mv-logo.test.sh  # Blender EEVEE renders (GPU)
+skills/motion-video/tests/mv-render-blender.test.sh  # Blender EEVEE renders (GPU)
+skills/motion-video/tests/mv-beats.test.sh  # essentia venv at ~/.local/opt/mv-beats (pip, not apt)
+skills/gamedev/tests/cpp-pbr.test.sh  # real Vulkan build: vcpkg + Iris Xe GPU under weston
+skills/motion-video/tests/mv-look.test.sh  # Blender EEVEE renders (GPU)
+skills/gamedev/tests/cpp-vram.test.sh  # real leak fixture: vcpkg build + Iris Xe GPU (VMA budgets)
+skills/motion-video/tests/mv-film.test.sh  # Blender EEVEE renders (GPU) for the whole film chain
+skills/motion-video/tests/mv-render-speed.test.sh  # Blender EEVEE + Cycles renders (GPU)
+skills/gamedev/tests/cpp-hdr.test.sh  # real Vulkan build: vcpkg + Iris Xe GPU under weston
+skills/gamedev/tests/cpp-scene.test.sh  # real Vulkan build: vcpkg + Iris Xe GPU under weston
+skills/gamedev/tests/cpp-skin.test.sh  # real Vulkan build + golden frames: vcpkg + Iris Xe GPU under weston
+skills/gamedev/tests/cpp-package.test.sh  # real vcpkg release build + docker runtime image
+skills/motion-video/tests/mv-model.test.sh  # Blender glTF import + EEVEE draft frames (GPU)
+skills/motion-video/tests/mv-model-anim.test.sh  # Blender NLA + EEVEE draft render (GPU)
+skills/motion-video/tests/mv-title3d.test.sh  # Blender 3D text + EEVEE draft frames (GPU)
+skills/motion-video/tests/mv-draft-speed.test.sh  # Blender EEVEE draft vs final knobs (GPU)
+skills/motion-video/tests/mv-otio.test.sh  # Blender film draft build + otio venv at ~/.local/opt/mv-otio (pip, not apt)
+skills/motion-video/tests/mv-trailer.test.sh  # vcpkg Vulkan game build + Blender EEVEE trailer (GPU)

@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+"""glb-info — print a .glb/.gltf model's meshes, triangles, materials and texture codecs, skins, clips and bounding box (T994)."""
+import argparse, json, os, sys
+from collections import Counter
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
+import glb  # noqa: E402
+
+
+def summary(path):
+    """The model as one JSON-ready dict."""
+    gltf, bin_ = glb.load(path)
+    meshes = [{"name": m.get("name") or f"mesh{i}", "primitives": len(m["primitives"]),
+               "triangles": sum(glb.tri_count(gltf, p) for p in m["primitives"])} for i, m in enumerate(gltf.get("meshes", []))]
+    clips = []
+    for c in glb.clips(gltf, bin_):
+        clips.append({"name": c["name"], "length": round(c["length"], 4), "channels": len(c["channels"]),
+                      "keys": sum(len(ch["times"]) for ch in c["channels"]), "paths": dict(Counter(ch["path"] for ch in c["channels"]))})
+    box = glb.bounds(gltf, bin_)
+    return {"file": path, "bytes": os.path.getsize(path), "generator": gltf.get("asset", {}).get("generator", ""),
+            "meshes": meshes, "triangles": sum(m["triangles"] for m in meshes),
+            "materials": [{"name": m.get("name") or f"material{i}", "textures": glb.material_textures(gltf, m)} for i, m in enumerate(gltf.get("materials", []))],
+            "images": glb.images(gltf, bin_, os.path.dirname(path)),
+            "skins": [{"name": s["name"], "joints": len(s["joints"])} for s in glb.skins(gltf)],
+            "clips": clips,
+            "bbox": {"min": box[0], "max": box[1], "size": [box[1][k] - box[0][k] for k in range(3)]} if box else None}
+
+
+def text(s):
+    """Human-readable lines of a summary."""
+    def img(i):
+        m = s["images"][i] if i is not None and i < len(s["images"]) else None
+        return f"image {i} ({m['codec']} {m['width']}x{m['height']})" if m else f"image {i}"
+    v = lambda xs: "[" + ", ".join(f"{x:.3g}" for x in xs) + "]"
+    out = [f"{s['file']}: {s['bytes']} B, generator {s['generator'] or 'n/a'}",
+           f"meshes {len(s['meshes'])}, primitives {sum(m['primitives'] for m in s['meshes'])}, triangles {s['triangles']}"]
+    out += [f"  mesh {m['name']}: {m['primitives']} primitives, {m['triangles']} triangles" for m in s["meshes"]]
+    out.append(f"materials {len(s['materials'])}")
+    out += [f"  material {m['name']}: " + (", ".join(f"{k.removesuffix('Texture')} {img(i)}" for k, i in m["textures"].items()) or "no textures") for m in s["materials"]]
+    out.append(f"images {len(s['images'])}")
+    out += [f"  image {m['index']} {m['name'] or '-'}: {m['codec']} {m['width']}x{m['height']}, {m['bytes']} B" for m in s["images"]]
+    out.append(f"skins {len(s['skins'])}")
+    out += [f"  skin {k['name']}: {k['joints']} joints" for k in s["skins"]]
+    out.append(f"clips {len(s['clips'])}")
+    out += [f"  clip {c['name']}: {c['length']:.2f} s, {c['channels']} channels ("
+            + ", ".join(f"{p} {n}" for p, n in sorted(c["paths"].items())) + f"), {c['keys']} keys" for c in s["clips"]]
+    b = s["bbox"]
+    out.append(f"bbox min {v(b['min'])} max {v(b['max'])} size {v(b['size'])}" if b else "bbox n/a (no mesh nodes)")
+    return "\n".join(out)
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="glb-info", description=__doc__.split(" — ", 1)[1])
+    ap.add_argument("file", help="a .glb or .gltf")
+    ap.add_argument("--json", action="store_true", help="one JSON object instead of text")
+    a = ap.parse_args()
+    try:
+        s = summary(a.file)
+    except (OSError, ValueError, KeyError, IndexError, TypeError) as e:
+        print(f"glb-info: {a.file}: {e}", file=sys.stderr)
+        return 2
+    print(json.dumps(s, indent=1) if a.json else text(s))
+    return 0
+
+
+sys.exit(main())

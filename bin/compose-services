@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# compose-services <project> — the services `docker compose up -d` starts for a project, one per line (profile-aware).
+# The compose files come from the project's config_files container label, else the `name: <project>`
+# match under ~/moodle-envs. Read-only: `docker ps` and `docker compose config` only. Exit 1 when unknown.
+case "${1:-}" in -h|--help|'') awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; [ -n "${1:-}" ]; exit $? ;; esac
+set -uo pipefail
+p=$1; args=()
+cf=$(docker ps -a --filter "label=com.docker.compose.project=$p" \
+  --format '{{.Label "com.docker.compose.project.config_files"}}' 2>/dev/null | head -1)
+[ -n "$cf" ] || cf=$(grep -l "^name: $p\$" "$HOME"/moodle-envs/*/docker-compose.yml 2>/dev/null | head -1)
+IFS=, read -ra files <<<"$cf"
+for f in "${files[@]}"; do args+=(-f "$f"); done
+[ ${#args[@]} -gt 0 ] || exit 1
+out=$(docker compose -p "$p" "${args[@]}" config --services 2>/dev/null | sort -u)
+[ -n "$out" ] || exit 1
+printf '%s\n' "$out"

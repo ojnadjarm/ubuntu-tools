@@ -1,0 +1,4 @@
+{
+  "lod0": { "tris": 8000, "texture_px": 1024, "bytes": 1048576 },
+  "lod1": { "tris": 2500, "texture_px": 1024, "bytes": 786432 }
+}

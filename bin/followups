@@ -1,0 +1,239 @@
+#!/usr/bin/env python3
+"""followups [--open] [--json] [--checks] [--run [--line N] [--apply]] [FILE] — the state of each planner seed line in FOLLOWUPS.md, so a planner re-verifies only what moved.
+
+Each `- ` line gets: T-id (first T<n> in it), date (first YYYY-MM-DD in it), kind (guide line, nightly wait, seed) and status:
+  struck    every claim is ~~struck~~ (the text left outside ~~…~~ is only parenthesised notes)
+  shipped?  history.md, after the seed's origin (its T-id's first history line, else its date), has a line led by the
+            same T-id, or led by a later ticket that names it (a hint: confirm, then strike)
+  due       a named date (`10-21`, `21 Oct`) is today or past, or it waits on the next/first nightly and a fleet-ci log
+            dated after its origin exists
+  open      anything else
+Last line: `N open, M due, K shipped?` (struck lines not counted). --open hides struck lines. --json: {lines, open, due, shipped?, struck}.
+FILE defaults to $AGENT_WORK/research/2026-10-19/T566/FOLLOWUPS.md. Roots: AGENT_WORK (else ~/agent-work), HARNESS_HOME
+(else ~/agents; fleet-ci logs in log/fleet-ci/<date>.txt). Exit 0; 2 when FILE is missing.
+
+A line may end with `check: `<command>``: a bash check that reads existing logs only (rc 0 pass, 1 fail, else error).
+--checks lists the unstruck lines that have one. --run runs the checks of due lines (--line N: that line, due or not),
+each as `nice -n 19 timeout 30 bash -c` (FOLLOWUPS_TIMEOUT overrides 30), one row `L<n> T<id> pass|fail|error <s> <last
+output line>` each, then `N pass, M fail, K error`; rc 1 when any is not pass. --apply rewrites passing lines as
+`- ~~<text>~~ (passed <date> by followups --run)`; without it nothing is written. Checks get NIGHTLY (the newest
+fleet-ci log), NIGHTLY_ROWS (its main pass's test-timings-history rows: date, file, wall, rc, load1, cpu_s) and helpers:
+cpu RE / wall RE (summed cpu_s / wall of NIGHTLY_ROWS files matching RE, nothing when none), le V MAX / ge V MIN (print
+the comparison; rc 1 when false, exit 2 when V is no number), newer FILE YYYY-MM-DD and after YYYY-MM-DDTHH:MM
+(exit 2 `not yet` unless FILE was written after that day / now is past that time).
+"""
+import argparse, datetime, glob, json, os, re, subprocess, sys, tempfile, time
+
+AG = os.environ.get('HARNESS_HOME') or os.path.expanduser('~/agents')
+AW = os.environ.get('AGENT_WORK') or os.path.expanduser('~/agent-work')
+DEFAULT = os.path.join(AW, 'research', '2026-10-19', 'T566', 'FOLLOWUPS.md')
+MONTHS = {m: i + 1 for i, m in enumerate('jan feb mar apr may jun jul aug sep oct nov dec'.split())}
+LEAD = re.compile(r'(?:[-*]\s+|(?=\d{4}-\d\d-\d\d\s))(?:(\d{4}-\d\d-\d\d)\s+)?(?:\d\d:\d\d\s+)?\**(T\d+)')
+STRUCK = re.compile(r'~~.*?~~\s*(?:\((?:done|shipped)[^)]*\))?')
+NOTE = re.compile(r'\([^()]*\)')
+MMDD = re.compile(r'(?<![\w.:/-])(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])(?![\w./%-]|:\d)(?!\s*(?:%|(?:dB|s|ms|mins?)\b))')
+DMON = re.compile(r'\b([12]?\d|3[01]) (jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?'
+                  r'|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b', re.I)
+NIGHTLY = re.compile(r'\b(?:next|first)\b[^.;]{0,40}?\bnightly\b|\bnext night\b', re.I)
+CODE = re.compile(r'--[a-z][\w-]+|\b[A-Za-z][\w]*(?:[-_./][\w]+)+')
+CHECK = re.compile(r'\s*check:\s*`([^`]+)`\s*$')
+TIMEOUT = os.environ.get('FOLLOWUPS_TIMEOUT', '30')
+HELPERS = r'''
+cpu() { awk -F'\t' -v re="$1" '$2 ~ re {s += $6; n++} END {if (n) printf "%.1f\n", s}' "$NIGHTLY_ROWS"; }
+wall() { awk -F'\t' -v re="$1" '$2 ~ re {s += $3; n++} END {if (n) printf "%.1f\n", s}' "$NIGHTLY_ROWS"; }
+cmp_() { [[ $# -eq 3 && $2 =~ ^-?[0-9]+(\.[0-9]+)?$ ]] || { echo "$1: no number (${*:2})"; exit 2; }
+  awk -v o="$1" -v a="$2" -v b="$3" 'BEGIN {ok = o == "le" ? a + 0 <= b + 0 : a + 0 >= b + 0
+    print a " " (ok ? (o == "le" ? "<=" : ">=") : (o == "le" ? ">" : "<")) " " b; exit !ok}'; }
+le() { cmp_ le "$@"; }
+ge() { cmp_ ge "$@"; }
+newer() { [[ -e $1 && $(date -r "$1" +%F) > $2 ]] || { echo "not yet: $1 not written after $2"; exit 2; }; }
+after() { [[ $(date +%FT%R) > $1 ]] || { echo "not yet: before $1"; exit 2; }; }
+'''
+GUIDE = re.compile(r'^(?:~~)?guide\b|\b(?:guide|SKILL\.md|doc) lines?\b', re.I)
+
+
+def history():
+    """[(date, lead T-id, text)] of history.md in file order; `brief written` lines skipped."""
+    try:
+        with open(os.path.join(AW, 'history.md'), errors='replace') as fh:
+            rows = fh.read().splitlines()
+    except OSError:
+        return []
+    out, last = [], None
+    for r in rows:
+        m = LEAD.match(r)
+        d = re.search(r'\b(\d{4}-\d\d-\d\d)\b', r[:40])
+        last = d.group(1) if d else last
+        if m and 'brief written' not in r:
+            out.append((last, m.group(2), r))
+    return out
+
+
+def nightlies():
+    return sorted(os.path.basename(f)[:10] for f in glob.glob(os.path.join(AG, 'log', 'fleet-ci', '????-??-??.txt')))
+
+
+def named_dates(text, year):
+    """Valid dates named in TEXT as MM-DD or `D Mon`; an impossible one (02-30) is skipped."""
+    found = [(int(m.group(1)), int(m.group(2))) for m in MMDD.finditer(text)]
+    found += [(MONTHS[m.group(2)[:3].lower()], int(m.group(1))) for m in DMON.finditer(text)]
+    for month, day in found:
+        try:
+            yield datetime.date(year, month, day)
+        except ValueError:
+            pass
+
+
+def unnoted(text):
+    """TEXT without its (parenthesised notes), nested ones included."""
+    while (bare := NOTE.sub('', text)) != text:
+        text = bare
+    return text
+
+
+def tokens(text):
+    """Code-ish words (paths, flags, CLI and env names) of TEXT."""
+    return {w for w in (w.strip('.`,:;()').lower() for w in CODE.findall(text)) if w and not re.search(r'\bt\d+', w)}
+
+
+def shipped_by(tid, origin, seed, hist):
+    """The ticket whose history line after index ORIGIN re-touches TID or, as a later non-planner ticket, names it, sharing a code word with SEED."""
+    n, rx, want = int(tid[1:]), re.compile(rf'\b{tid}\b'), tokens(seed)
+    for _, lead, text in hist[origin + 1:]:
+        if (lead == tid or (int(lead[1:]) > n and rx.search(text) and 'planner' not in text.lower())) and want & tokens(text):
+            return lead
+    return None
+
+
+def classify(no, line, hist, logs, today):
+    body, check = line[2:].strip(), None
+    if m := CHECK.search(body):
+        body, check = body[:m.start()], m.group(1)
+    rest = STRUCK.sub('', body)
+    tid = (re.search(r'\bT\d+\b', body) or [None])[0]
+    date = (re.search(r'\b\d{4}-\d\d-\d\d\b', body) or [None])[0]
+    own = next((i for i, h in enumerate(hist) if h[1] == tid), None) if tid else None
+    origin_date = date or (hist[own][0] if own is not None else None)
+    if own is not None:
+        origin = own
+    else:
+        origin = next((i - 1 for i, h in enumerate(hist) if (h[0] or '') >= date), len(hist)) if date else -1
+    year = int((origin_date or today.isoformat())[:4])
+    dates = sorted(d for d in named_dates(rest, year) if not origin_date or d.isoformat() > origin_date)
+    nightly = bool(NIGHTLY.search(rest))
+    kind = 'guide line' if GUIDE.search(rest if re.search(r'\w', rest) else body) else 'nightly wait' if nightly or dates else 'seed'
+    rec = {'line': no, 'tid': tid, 'date': date, 'kind': kind, 'status': 'open', 'text': body}
+    if not re.search(r'\w', rest) or ('~~' in body and not re.search(r'\w', unnoted(rest))):
+        rec['status'] = 'struck'
+        return rec
+    late = [d for d in logs if d > origin_date] if nightly and origin_date else []
+    due = dates[0].isoformat() if dates and dates[0] <= today else f'nightly {late[0]}' if late else None
+    if check:
+        rec.update(check=check, runnable=bool(due))
+    if tid and (by := shipped_by(tid, origin, rest, hist)):
+        rec.update(status='shipped?', by=by)
+    elif due:
+        rec.update(status='due', due=due)
+    return rec
+
+
+def nightly_rows(log, out):
+    """Write to OUT the history rows of LOG's main pass: the first row per `ok|FAIL <file>` file at or after LOG's start."""
+    with open(log, errors='replace') as fh:
+        rows = fh.read().splitlines()
+    start = (re.match(r'fleet-ci-daily (\S{19})', rows[0] if rows else '') or [None, '9'])[1]
+    ran = {m.group(2) for m in (re.match(r'(ok|FAIL) (\S+)', r) for r in rows) if m}
+    try:
+        with open(os.path.join(AG, 'state', 'test-timings-history.tsv'), errors='replace') as fh:
+            hist = fh.read().splitlines()
+    except OSError:
+        hist = []
+    for r in hist:
+        f = r.split('\t')
+        if len(f) > 1 and f[0][:19] >= start and f[1] in ran:
+            ran.discard(f[1])
+            out.write(r + '\n')
+    out.flush()
+
+
+def run_checks(recs, logs):
+    """[(rec, verdict, seconds, last output line)] of each rec's check, run with NIGHTLY/NIGHTLY_ROWS and HELPERS."""
+    log = os.path.join(AG, 'log', 'fleet-ci', f'{logs[-1]}.txt') if logs else ''
+    res = []
+    with tempfile.NamedTemporaryFile('w', prefix='followups-rows.', suffix='.tsv') as rows:
+        if log:
+            nightly_rows(log, rows)
+        env = {**os.environ, 'NIGHTLY': log, 'NIGHTLY_ROWS': rows.name}
+        for r in recs:
+            t = time.monotonic()
+            p = subprocess.run(['nice', '-n', '19', 'timeout', TIMEOUT, 'bash', '-c', HELPERS + r['check']],
+                               env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, errors='replace')
+            out = (p.stdout + p.stderr).strip().splitlines()
+            last = f'timeout {TIMEOUT} s' if p.returncode == 124 else out[-1] if out else f'rc {p.returncode}'
+            res.append((r, {0: 'pass', 1: 'fail'}.get(p.returncode, 'error'), time.monotonic() - t, last))
+    return res
+
+
+def strike(path, lines, nos, today):
+    """Rewrite PATH with lines NOS struck whole: `- ~~<text>~~ (passed TODAY by followups --run)`."""
+    for n in nos:
+        lines[n - 1] = f"- ~~{lines[n - 1][2:].strip().replace('~~', '')}~~ (passed {today} by followups --run)"
+    tmp = f'{path}.followups.tmp'
+    with open(tmp, 'w') as fh:
+        fh.write('\n'.join(lines) + '\n')
+    os.replace(tmp, path)
+
+
+def main():
+    ap = argparse.ArgumentParser(prog='followups', description=__doc__.split('\n\n', 1)[1],
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('file', nargs='?', default=DEFAULT, help='FOLLOWUPS.md (default: the T566 seed file)')
+    ap.add_argument('--open', action='store_true', help='hide struck lines')
+    ap.add_argument('--json', action='store_true', help='one object {lines, open, due, shipped?, struck}')
+    ap.add_argument('--checks', action='store_true', help='list the unstruck lines that end with a check')
+    ap.add_argument('--run', action='store_true', help='run the checks of due lines')
+    ap.add_argument('--line', type=int, metavar='N', help='with --run: only line N, due or not')
+    ap.add_argument('--apply', action='store_true', help='with --run: strike the passing lines')
+    a = ap.parse_args()
+    if (a.line or a.apply) and not a.run:
+        ap.error('--line and --apply need --run')
+    try:
+        with open(a.file, errors='replace') as fh:
+            lines = fh.read().splitlines()
+    except OSError as e:
+        print(f'followups: {e}', file=sys.stderr)
+        sys.exit(2)
+    hist, logs, today = history(), nightlies(), datetime.date.today()
+    recs = [classify(i, l, hist, logs, today) for i, l in enumerate(lines, 1) if l.startswith('- ')]
+    count = {s: sum(r['status'] == s for r in recs) for s in ('open', 'due', 'shipped?', 'struck')}
+    shown = [r for r in recs if not (a.open and r['status'] == 'struck')]
+    if a.checks:
+        for r in recs:
+            if 'check' in r and r['status'] != 'struck':
+                print(f"L{r['line']:<3} {r['tid'] or '-':<6} {r['status'] + (' ' + r['due'] if 'due' in r else ''):<20} {r['check']}")
+        return
+    if a.run:
+        todo = [r for r in recs if 'check' in r and r['status'] != 'struck' and (r['line'] == a.line if a.line else r['runnable'])]
+        if a.line and not todo:
+            print(f'followups: line {a.line} has no check', file=sys.stderr)
+            sys.exit(2)
+        res = run_checks(todo, logs)
+        for r, v, sec, last in res:
+            print(f"L{r['line']:<3} {r['tid'] or '-':<6} {v:<5} {sec:5.1f} {last[:120]}")
+        n = {v: sum(x[1] == v for x in res) for v in ('pass', 'fail', 'error')}
+        print(f"{n['pass']} pass, {n['fail']} fail, {n['error']} error")
+        if a.apply and n['pass']:
+            strike(a.file, lines, [r['line'] for r, v, _, _ in res if v == 'pass'], today.isoformat())
+        sys.exit(1 if n['fail'] or n['error'] else 0)
+    if a.json:
+        json.dump({'lines': shown, **count}, sys.stdout, indent=1)
+        print()
+        return
+    for r in shown:
+        note = f" by {r['by']}" if 'by' in r else f" {r['due']}" if 'due' in r else ''
+        print(f"L{r['line']:<3} {r['tid'] or '-':<6} {r['date'] or '-':<10} {r['kind']:<12} {r['status'] + note:<20} {r['text'][:100]}")
+    print(f"{count['open']} open, {count['due']} due, {count['shipped?']} shipped?")
+
+
+if __name__ == '__main__':
+    main()

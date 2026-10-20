@@ -1,0 +1,141 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0) uniform sampler2D env;  // equirectangular radiance with its full mip chain
+layout(set = 0, binding = 1, rgba16f) uniform writeonly image2DArray dst;
+layout(set = 0, binding = 2) buffer Sh { vec4 coeffs[9]; } sh;
+layout(push_constant) uniform Push {
+    uint mode;  // 0: GGX-prefilter env into one cube mip of dst; 1: split-sum BRDF LUT into dst; 2: SH9 irradiance into sh
+    float roughness;
+} pc;
+
+const float PI = 3.14159265;
+const uint kSamples = 128u;
+const int kShSide = 64;  // SH9 projects the 64x32 mip of env
+
+vec2 hammersley(uint i, uint n) {
+    return vec2(float(i) / float(n), float(bitfieldReverse(i)) * 2.3283064365386963e-10);
+}
+
+/** GGX half vector around n for alpha = roughness^2. */
+vec3 importance_ggx(vec2 xi, vec3 n, float a) {
+    float phi = 2.0 * PI * xi.x;
+    float cos_t = sqrt((1.0 - xi.y) / (1.0 + (a * a - 1.0) * xi.y));
+    float sin_t = sqrt(1.0 - cos_t * cos_t);
+    vec3 up = abs(n.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    vec3 t = normalize(cross(up, n));
+    return normalize(t * (sin_t * cos(phi)) + cross(n, t) * (sin_t * sin(phi)) + n * cos_t);
+}
+
+vec2 equirect_uv(vec3 d) {
+    return vec2(atan(d.z, d.x) / (2.0 * PI) + 0.5, acos(clamp(d.y, -1.0, 1.0)) / PI);
+}
+
+/** Direction through texel p of cube face f (Vulkan face order +X -X +Y -Y +Z -Z). */
+vec3 cube_dir(ivec2 p, int size, int f) {
+    vec2 uv = (vec2(p) + 0.5) / float(size) * 2.0 - 1.0;
+    vec3 d[6] = vec3[](vec3(1.0, -uv.y, -uv.x), vec3(-1.0, -uv.y, uv.x), vec3(uv.x, 1.0, uv.y),
+                       vec3(uv.x, -1.0, -uv.y), vec3(uv.x, -uv.y, 1.0), vec3(-uv.x, -uv.y, -1.0));
+    return normalize(d[f]);
+}
+
+/** Filtered importance sampling (Křivánek & Colbert 2008): each sample reads the env mip matching its solid angle. */
+vec3 prefilter(vec3 n, float roughness) {
+    if (roughness == 0.0) return textureLod(env, equirect_uv(n), 0.0).rgb;
+    float a = roughness * roughness;
+    vec2 size = vec2(textureSize(env, 0));
+    float texel_sa = 4.0 * PI / (size.x * size.y);
+    vec3 sum = vec3(0.0);
+    float weight = 0.0;
+    for (uint i = 0u; i < kSamples; i++) {
+        vec3 h = importance_ggx(hammersley(i, kSamples), n, a);
+        vec3 l = 2.0 * dot(n, h) * h - n;
+        float n_l = dot(n, l);
+        if (n_l <= 0.0) continue;
+        float n_h = max(dot(n, h), 0.0);
+        float d = (n_h * n_h * (a * a - 1.0) + 1.0);
+        float pdf = a * a / (PI * d * d) * 0.25;
+        float lod = 0.5 * log2(1.0 / (float(kSamples) * pdf * texel_sa)) + 1.0;
+        sum += textureLod(env, equirect_uv(l), max(lod, 0.0)).rgb * n_l;
+        weight += n_l;
+    }
+    return sum / max(weight, 1e-4);
+}
+
+/** Karis 2013 split-sum scale and bias of F0 for (n.v, roughness). */
+vec2 integrate_brdf(float n_v, float roughness) {
+    float a = roughness * roughness;
+    vec3 v = vec3(sqrt(1.0 - n_v * n_v), 0.0, n_v);
+    float k = a * a / 2.0;
+    vec2 ab = vec2(0.0);
+    for (uint i = 0u; i < kSamples; i++) {
+        vec3 h = importance_ggx(hammersley(i, kSamples), vec3(0.0, 0.0, 1.0), a);
+        vec3 l = 2.0 * dot(v, h) * h - v;
+        float n_l = max(l.z, 0.0), n_h = max(h.z, 0.0), v_h = max(dot(v, h), 0.0);
+        if (n_l <= 0.0) continue;
+        float g = (n_v / (n_v * (1.0 - k) + k)) * (n_l / (n_l * (1.0 - k) + k));
+        float g_vis = g * v_h / (n_h * n_v);
+        float fc = pow(1.0 - v_h, 5.0);
+        ab += vec2(1.0 - fc, fc) * g_vis;
+    }
+    return ab / float(kSamples);
+}
+
+void sh_basis(vec3 d, out float y[9]) {
+    y[0] = 0.282095;
+    y[1] = 0.488603 * d.y;
+    y[2] = 0.488603 * d.z;
+    y[3] = 0.488603 * d.x;
+    y[4] = 1.092548 * d.x * d.y;
+    y[5] = 1.092548 * d.y * d.z;
+    y[6] = 0.315392 * (3.0 * d.z * d.z - 1.0);
+    y[7] = 1.092548 * d.x * d.z;
+    y[8] = 0.546274 * (d.x * d.x - d.y * d.y);
+}
+
+shared vec3 partial[64][9];
+
+/** Projects env onto SH9, convolved with the clamped cosine and divided by pi: mesh.frag reads diffuse radiance per albedo. */
+void project_sh() {
+    uint t = gl_LocalInvocationIndex;
+    int lod = findMSB(textureSize(env, 0).x / kShSide);
+    vec3 acc[9];
+    for (int k = 0; k < 9; k++) acc[k] = vec3(0.0);
+    for (uint i = t; i < uint(kShSide * kShSide / 2); i += 64u) {
+        ivec2 p = ivec2(i % uint(kShSide), i / uint(kShSide));
+        float theta = (float(p.y) + 0.5) / float(kShSide / 2) * PI;
+        float phi = ((float(p.x) + 0.5) / float(kShSide) - 0.5) * 2.0 * PI;
+        vec3 d = vec3(sin(theta) * cos(phi), cos(theta), sin(theta) * sin(phi));
+        float sa = (2.0 * PI / float(kShSide)) * (PI / float(kShSide / 2)) * sin(theta);
+        vec3 c = texelFetch(env, p, lod).rgb * sa;
+        float y[9];
+        sh_basis(d, y);
+        for (int k = 0; k < 9; k++) acc[k] += c * y[k];
+    }
+    for (int k = 0; k < 9; k++) partial[t][k] = acc[k];
+    barrier();
+    if (t != 0u) return;
+    const float band[9] = float[](1.0, 2.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0, 0.25, 0.25, 0.25, 0.25, 0.25);
+    for (int k = 0; k < 9; k++) {
+        vec3 s = vec3(0.0);
+        for (int j = 0; j < 64; j++) s += partial[j][k];
+        sh.coeffs[k] = vec4(s * band[k], 0.0);
+    }
+}
+
+void main() {
+    if (pc.mode == 2u) {
+        project_sh();
+        return;
+    }
+    ivec3 p = ivec3(gl_GlobalInvocationID);
+    ivec2 size = imageSize(dst).xy;
+    if (p.x >= size.x || p.y >= size.y) return;
+    if (pc.mode == 0u) {
+        imageStore(dst, p, vec4(prefilter(cube_dir(p.xy, size.x, p.z), pc.roughness), 1.0));
+    } else {
+        vec2 uv = (vec2(p.xy) + 0.5) / vec2(size);
+        imageStore(dst, p, vec4(integrate_brdf(uv.x, uv.y), 0.0, 1.0));
+    }
+}

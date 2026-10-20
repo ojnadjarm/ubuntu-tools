@@ -1,0 +1,4 @@
+#!/bin/sh
+# Stub gltf_validator: reports every asset valid with no issues.
+echo "gltf_validator $*" >>"${STUB_CALLS:-/dev/null}"
+echo '{"issues":{"numErrors":0,"numWarnings":0,"messages":[]}}'

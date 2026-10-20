@@ -1,0 +1,3 @@
+#!/bin/sh
+echo "spirv-cross $*" >>"${STUB_CALLS:-/dev/null}"
+echo '{}'

@@ -1,0 +1,15 @@
+{
+ "list": [
+  {"id": 101, "wm_class": "org.gnome.Nautilus", "title": "Files", "focus": false, "workspace": 0, "in_current_workspace": true},
+  {"id": 202, "wm_class": "org.gnome.Ptyxis", "title": "Terminal", "focus": true, "workspace": 0, "in_current_workspace": true},
+  {"id": 303, "wm_class": "", "title": "", "focus": false, "workspace": 0, "in_current_workspace": true},
+  {"id": 404, "wm_class": "firefox", "title": "Stuck dialog", "focus": false, "workspace": 1, "in_current_workspace": false}
+ ],
+ "details": {
+  "101": {"x": 300, "y": 200, "width": 800, "height": 600, "minimized": false},
+  "202": {"x": 1000, "y": 50, "width": 980, "height": 900, "minimized": false},
+  "303": {"x": 10, "y": 10, "width": 120, "height": 30, "minimized": false},
+  "404": {"x": 0, "y": 0, "width": 400, "height": 300, "minimized": false}
+ },
+ "stuck": [404]
+}

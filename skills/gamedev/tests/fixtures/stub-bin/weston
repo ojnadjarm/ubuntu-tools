@@ -1,0 +1,5 @@
+#!/bin/sh
+# Stub weston: binds the --socket= unix socket under XDG_RUNTIME_DIR and idles until killed.
+echo "weston $*" >>"${STUB_CALLS:-/dev/null}"
+for a in "$@"; do case $a in --socket=*) s=${a#*=} ;; esac; done
+exec python3 -c 'import socket, sys, time; k = socket.socket(socket.AF_UNIX); k.bind(sys.argv[1]); time.sleep(300)' "$XDG_RUNTIME_DIR/$s"

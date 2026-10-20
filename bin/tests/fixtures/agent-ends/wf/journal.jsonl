@@ -1,0 +1,6 @@
+{"type":"started","label":"lane A","agentId":"e1"}
+{"type":"started","label":"lane B","agentId":"e2"}
+{"type": "result", "agentId": "e1"
+{"type":"result","agentId":"e1"}
+{"type":"failed","agentId":"e2"}
+{"type":"started","label":"lane A","agentId":"e3"}

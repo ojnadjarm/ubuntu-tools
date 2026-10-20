@@ -1,0 +1,8 @@
+{
+  "web": {"I": -16, "TP": -1.5, "LRA": 11, "tolerance": 1.5, "for": "web/social, narrated explainers (default)"},
+  "youtube": {"I": -14, "TP": -1, "LRA": 11, "tolerance": 1, "for": "YouTube reference level"},
+  "broadcast": {"I": -23, "TP": -1, "LRA": 20, "tolerance": 0.5, "for": "EBU R128 broadcast"},
+  "podcast": {"I": -16, "TP": -1, "LRA": 11, "tolerance": 1, "for": "Apple/Spotify podcast"},
+  "duck": {"vo": {"attack": 30, "release": 450}, "sfx": {"attack": 5, "release": 250, "depth_db": 8}, "game": {"attack": 10, "release": 350, "depth_db": 6},
+           "for": "mv-mix --duck-on: sidechain attack/release ms and max dip depth_db per stem class (not a target)"}
+}

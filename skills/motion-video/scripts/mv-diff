@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+"""mv-diff: review only what changed between two cuts - SSIM + audio level per 0.1 s on a 480 px proxy, changed ranges, A|B sheet.
+
+Exit 0 identical, 1 changed, 2 error. The sheet (<B>.diff.jpg) holds only the changed ranges, A left, B right.
+"""
+import argparse
+import json
+import math
+import os
+import re
+import subprocess
+import sys
+import tempfile
+
+import numpy as np
+
+from mvlib import MvError, probe
+
+STEP = 0.1
+AUDIO_RATE = 8000
+DEV = os.environ.get('MV_VAAPI_DEVICE', '/dev/dri/renderD128')
+
+
+def die(msg):
+    """Print to stderr and exit 2 (diff(1) error code)."""
+    print(msg, file=sys.stderr)
+    sys.exit(2)
+
+
+def proxy_heads(info):
+    """(input args, filter head) pairs for the 480 px proxy: VA-API first when present, then software."""
+    land = info['width'] >= info['height']
+    pw, ph = (480, round(480 * info['height'] / info['width'] / 2) * 2) if land else (round(480 * info['width'] / info['height'] / 2) * 2, 480)
+    hw = (['-hwaccel', 'vaapi', '-hwaccel_device', DEV, '-hwaccel_output_format', 'vaapi'],
+          f'fps={1 / STEP:g},scale_vaapi=w={pw}:h={ph}:format=nv12,hwdownload,format=nv12,format=yuv420p')
+    sw = ([], f'fps={1 / STEP:g},scale={pw}:{ph},format=yuv420p')
+    return [hw, sw] if os.path.exists(DEV) else [sw]
+
+
+def ffmpeg(heads, a, b, graph, outputs):
+    """Run one ffmpeg over both inputs, trying each proxy head until one works."""
+    for pre, head in heads:
+        cmd = ['ffmpeg', '-hide_banner', '-nostats', '-loglevel', 'error', '-y', *pre, '-i', a, *pre, '-i', b,
+               '-filter_complex', graph(head), *outputs]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode == 0:
+            return
+    die(f'mv-diff: ffmpeg failed\n{r.stderr[-2000:]}')
+
+
+def levels(raw, n):
+    """RMS level in dBFS per STEP window of a mono s16 file, padded with silence to n windows."""
+    x = np.fromfile(raw, dtype='<i2').astype(np.float64) / 32768 if raw and os.path.exists(raw) else np.zeros(0)
+    w = int(AUDIO_RATE * STEP)
+    x = np.pad(x[:n * w], (0, max(0, n * w - len(x))))
+    rms = np.sqrt((x.reshape(n, w) ** 2).mean(axis=1))
+    return 20 * np.log10(np.maximum(rms, 1e-5))
+
+
+def measure(a, b, ia, ib, tmp):
+    """Pass 1: per-STEP SSIM of the two proxies, per-STEP audio level of each side, thumbnail streams for the sheet."""
+    stats = os.path.join(tmp, 'ssim.log')
+    raws = [os.path.join(tmp, 'a.raw'), os.path.join(tmp, 'b.raw')]
+    tw = 320 if ia['width'] >= ia['height'] else 180
+    graph = lambda head: (f'[0:v:0]{head},split[a][ta];[1:v:0]{head},split[b][tb];[ta]scale={tw}:-2[pa];[tb]scale={tw}:-2[pb];'
+                          f'[a][b]ssim=shortest=1:stats_file={stats}[o]')
+    outputs = ['-map', '[o]', '-f', 'null', '-']
+    for lab in 'ab':
+        outputs += ['-map', f'[p{lab}]', '-c:v', 'rawvideo', '-f', 'nut', os.path.join(tmp, f'{lab}.nut')]
+    for i, (info, raw) in enumerate(((ia, raws[0]), (ib, raws[1]))):
+        if info['audio']:
+            outputs += ['-map', f'{i}:a:0', '-ac', '1', '-ar', str(AUDIO_RATE), '-f', 's16le', raw]
+    heads = proxy_heads(ia)
+    ffmpeg(heads, a, b, graph, outputs)
+    with open(stats) as f:
+        ssim = [float(m.group(1)) for m in re.finditer(r'All:([\d.]+|inf)', f.read())]
+    n = math.ceil(max(ia['duration'], ib['duration']) / STEP - 1e-6)
+    la, lb = (levels(r if info['audio'] else None, n) for r, info in zip(raws, (ia, ib)))
+    return np.array(ssim[:n]), la, lb
+
+
+def ranges(ssim, la, lb, ia, ib, min_ssim, audio_db, floor_db, gap):
+    """Merge changed STEP samples into ranges with their worst SSIM and audio delta."""
+    n = len(la)
+    delta = np.where(np.maximum(la, lb) > floor_db, la - lb, 0.0)
+    full = np.full(n, np.nan)
+    full[:len(ssim)] = ssim
+    short = min(ia['duration'], ib['duration'])
+    flags = []
+    for i in range(n):
+        t = i * STEP
+        why = set()
+        if t >= short - STEP / 2 and abs(ia['duration'] - ib['duration']) > STEP:
+            why.add('length')
+        elif not np.isnan(full[i]) and full[i] < min_ssim:
+            why.add('video')
+        if abs(delta[i]) > audio_db:
+            why.add('audio')
+        flags.append(why)
+    out, cur = [], None
+    for i, why in enumerate(flags):
+        if not why:
+            continue
+        if cur and i - cur['_last'] <= round(gap / STEP):
+            cur['_last'] = i
+            cur['why'] |= why
+        else:
+            cur = {'_first': i, '_last': i, 'why': set(why)}
+            out.append(cur)
+    res = []
+    for r in out:
+        sl = slice(r['_first'], r['_last'] + 1)
+        s = full[sl][~np.isnan(full[sl])]
+        d = delta[sl]
+        res.append({'start': round(r['_first'] * STEP, 1), 'end': round(min((r['_last'] + 1) * STEP, max(ia['duration'], ib['duration'])), 1),
+                    'ssim': round(float(s.min()), 3) if len(s) else None,
+                    'audio_db': round(float(d[np.argmax(np.abs(d))]), 1), 'why': sorted(r['why'])})
+    return res, delta
+
+
+def per_second(ssim, delta):
+    """Worst SSIM and largest audio delta for each whole second."""
+    k = round(1 / STEP)
+    out = []
+    for i in range(math.ceil(len(delta) / k)):
+        s = ssim[i * k:(i + 1) * k]
+        d = delta[i * k:(i + 1) * k]
+        out.append({'t': i, 'ssim': round(float(s.min()), 4) if len(s) else None,
+                    'audio_db': round(float(d[np.argmax(np.abs(d))]), 2) if len(d) else 0.0})
+    return out
+
+
+def sheet(tmp, res, ia, ib, path, per_range, cols):
+    """One jpg of A|B pairs sampled inside each changed range, cut from the pass-1 thumbnail streams."""
+    idx = []
+    for r in res:
+        lo, hi = r['start'], min(r['end'], ia['duration'], ib['duration'])
+        if hi - lo < STEP / 2:
+            lo = max(0.0, min(ia['duration'], ib['duration']) - STEP)
+            hi = lo + STEP
+        k = max(1, min(per_range, math.ceil(hi - lo)))
+        idx += [int((lo + (j + 0.5) * (hi - lo) / k) / STEP) for j in range(k)]
+    idx = sorted(set(idx))
+    sel = '+'.join(f'eq(n\\,{i})' for i in idx)
+    rows = math.ceil(len(idx) / cols)
+
+    side = lambda s, lab: (f'[{s}:v:0]select={sel},'
+                           f"drawtext=text='{lab} %{{pts\\:hms}}':x=6:y=6:fontsize=16:fontcolor=white:box=1:boxcolor=black@0.6")
+    graph = (f'{side(0, "A")},pad=iw+6:ih:0:0:color=0x202020[a];{side(1, "B")}[b];'
+             f'[a][b]hstack,tile={cols}x{rows}:padding=8:margin=4:color=0x202020[s]')
+    ffmpeg([([], '')], os.path.join(tmp, 'a.nut'), os.path.join(tmp, 'b.nut'), lambda _: graph,
+           ['-map', '[s]', '-frames:v', '1', '-q:v', '3', path])
+
+
+def clock(t):
+    """mm:ss.s"""
+    return f'{int(t // 60):02d}:{t % 60:04.1f}'
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('a', help='old cut')
+    ap.add_argument('b', help='new cut')
+    ap.add_argument('--json', action='store_true', help='print the full result as JSON')
+    ap.add_argument('--out', help='directory for <B>.diff.jpg (default: beside B)')
+    ap.add_argument('--ssim', type=float, default=0.98, help='a 0.1 s sample changed when SSIM is below this (default 0.98)')
+    ap.add_argument('--audio-db', type=float, default=3.0, help='or when the RMS levels differ by more than this (default 3 dB)')
+    ap.add_argument('--floor', type=float, default=-50.0, help='ignore audio deltas where both sides are below this dBFS')
+    ap.add_argument('--gap', type=float, default=0.3, help='merge changed samples closer than this (s)')
+    ap.add_argument('--per-range', type=int, default=4, help='sheet pairs per changed range, max (default 4)')
+    ap.add_argument('--cols', type=int, default=2, help='sheet pairs per row (default 2)')
+    a = ap.parse_args()
+
+    try:
+        ia, ib = probe(a.a), probe(a.b)
+    except MvError as e:
+        die(f'mv-diff: {e}')
+    with tempfile.TemporaryDirectory(prefix='mv-diff-') as tmp:
+        ssim, la, lb = measure(a.a, a.b, ia, ib, tmp)
+        res, delta = ranges(ssim, la, lb, ia, ib, a.ssim, a.audio_db, a.floor, a.gap)
+        outdir = a.out or os.path.dirname(os.path.abspath(a.b))
+        path = os.path.join(outdir, os.path.splitext(os.path.basename(a.b))[0] + '.diff.jpg')
+        if res:
+            os.makedirs(outdir, exist_ok=True)
+            sheet(tmp, res, ia, ib, path, a.per_range, a.cols)
+    rep = {'a': a.a, 'b': a.b, 'duration_a': ia['duration'], 'duration_b': ib['duration'],
+           'ssim_threshold': a.ssim, 'audio_db_threshold': a.audio_db, 'ranges': res,
+           'sheet': path if res else None, 'per_second': per_second(ssim, delta)}
+    if a.json:
+        print(json.dumps(rep, indent=1))
+    else:
+        for r in res:
+            s = f" ssim {r['ssim']:.2f}" if r['ssim'] is not None else ''
+            au = f" audio {r['audio_db']:+.1f} dB" if 'audio' in r['why'] else ''
+            ln = ' length' if 'length' in r['why'] else ''
+            print(f"{clock(r['start'])}–{clock(r['end'])}{s}{au}{ln}")
+        print(f"mv-diff: {len(res)} changed range(s), {sum(r['end'] - r['start'] for r in res):.1f} s of "
+              f"{max(ia['duration'], ib['duration']):.1f} s" + (f' | sheet {path}' if res else ''))
+    sys.exit(1 if res else 0)
+
+
+if __name__ == '__main__':
+    main()

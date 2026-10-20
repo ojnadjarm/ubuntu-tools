@@ -1,0 +1,8 @@
+GAME device="Intel(R) Iris(R) Xe Graphics (ADL GT2)" video=wayland present_mode=1 extent=160x90 validate=0
+GAME pickup n=1 tick=54
+GAME pickup n=2 tick=267
+GAME pickup n=3 tick=364
+GAME pickup n=4 tick=799
+GAME pickup n=5 tick=1037
+GAME win t=19.050 tick=1143
+GAME pose x=3.231398 y=0.800000 z=13.993395 yaw=2.935310 pitch=-0.150000 ticks=1934 pickups=5 win_tick=1143

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# new-cpp-game: copy the C++ SDL3 + Vulkan template into DIR, optionally configure and build it.
+set -euo pipefail
+usage() { echo "usage: new-cpp-game [--build] DIR   (VCPKG_ROOT defaults to ~/opt/gamedev/vcpkg)"; }
+build=0
+case "${1:-}" in --build) build=1; shift ;; -h|--help) usage; exit 0 ;; esac
+[ $# -eq 1 ] || { usage >&2; exit 2; }
+dir=$1
+[ -e "$dir" ] && { echo "new-cpp-game: $dir exists" >&2; exit 1; }
+tpl="$(cd "$(dirname "$0")/../templates/cpp-vulkan" && pwd)"
+name=$(basename "$dir" | tr -c 'A-Za-z0-9_\n' '_')
+cp -r "$tpl" "$dir"
+rm -rf "$dir/build" "$dir/vcpkg_installed"
+sed -i "s/cpp_vulkan_game/$name/" "$dir/CMakeLists.txt"
+echo "new-cpp-game: $dir (project $name)"
+export VCPKG_ROOT=${VCPKG_ROOT:-$HOME/opt/gamedev/vcpkg}
+if [ $build = 1 ]; then
+	(cd "$dir" && cmake --preset dev && cmake --build --preset dev)
+	echo "new-cpp-game: built $dir/build/dev/game"
+else
+	echo "next: cd $dir && VCPKG_ROOT=$VCPKG_ROOT cmake --preset dev && cmake --build --preset dev"
+fi

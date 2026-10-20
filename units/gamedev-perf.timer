@@ -1,0 +1,8 @@
+[Unit]
+Description=Nightly Godot perf row (05:15, quiet machine, outside the CI window)
+
+[Timer]
+OnCalendar=*-*-* 05:15
+
+[Install]
+WantedBy=timers.target

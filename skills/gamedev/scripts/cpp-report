@@ -1,0 +1,375 @@
+#!/usr/bin/env python3
+"""cpp-report: one self-contained responsive HTML review page per cpp-ci run - stages, GPU passes vs budget and the previous run, frame stats, VRAM, sanitizer/tidy counts, golden frame + FLIP, capture contact sheet."""
+import argparse
+import base64
+import csv
+import datetime
+import glob
+import html
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+TEMPLATE_BUDGETS = os.path.join(HERE, '..', 'templates', 'cpp-vulkan', 'perf-budgets.json')
+esc = html.escape
+MIME = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp'}
+
+
+def na(why):
+    return f'<span class=na>n/a ({esc(why)})</span>'
+
+
+def num(v, p=2, unit=''):
+    """v formatted with p decimals (ints as is) plus unit, or None."""
+    if isinstance(v, bool) or v is None or v == '':
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return esc(str(v))
+    s = f'{int(f):,}' if f.is_integer() and p == 0 else f'{f:,.{p}f}'
+    return s + (f' {unit}' if unit else '')
+
+
+def resolve(target):
+    """The ci dir holding summary.json for a project or ci dir, or None."""
+    for d in (target, os.path.join(target, 'ci')):
+        if os.path.isfile(os.path.join(d, 'summary.json')):
+            return os.path.abspath(d)
+    return None
+
+
+def data_uri(path):
+    with open(path, 'rb') as f:
+        b = base64.b64encode(f.read()).decode()
+    return f'data:{MIME.get(os.path.splitext(path)[1].lower(), "application/octet-stream")};base64,{b}'
+
+
+def find_sheet(ci, proj):
+    for d in (ci, proj):
+        for pat in ('contact-sheet.jpg', 'contact-sheet.png', '*sheet*.jpg', '*sheet*.png'):
+            hits = sorted(glob.glob(os.path.join(d, pat)))
+            if hits:
+                return hits[0]
+    return None
+
+
+def run_window(sj):
+    """(start, end) of this cpp-ci run from summary.json's date and seconds, or None."""
+    try:
+        end = datetime.datetime.fromisoformat(str(sj.get('date')))
+        return end - datetime.timedelta(seconds=float(sj.get('seconds') or 0)), end
+    except (TypeError, ValueError):
+        return None
+
+
+def in_run(date, window):
+    """True when a perf.csv date falls inside the run window."""
+    try:
+        t = datetime.datetime.fromisoformat(date)
+        return window is not None and window[0] <= t <= window[1]
+    except (TypeError, ValueError):
+        return False
+
+
+def prev_row(csv_path, window):
+    """(header, previous pass row of OUT/perf.csv) or (None, why); the last row is dropped when this run wrote it."""
+    if not os.path.isfile(csv_path):
+        return None, 'no perf.csv'
+    with open(csv_path, newline='') as f:
+        rows = list(csv.reader(f))
+    if not rows:
+        return None, 'empty perf.csv'
+    head, body = rows[0], [r for r in rows[1:] if r and r[0] != 'date']
+    if body and in_run(body[-1][0], window):
+        body = body[:-1]
+    st = head.index('status') if 'status' in head else None
+    body = [r for r in body if st is None or (len(r) > st and r[st] == 'pass')]
+    return (head, body[-1]) if body else (None, 'no earlier pass row in perf.csv')
+
+
+def compare(ci, proj, perf, window):
+    """gamedev-perf --compare --json of the previous pass row vs this run: (result, prev date or None, budgets) or (None, why, budgets)."""
+    budgets = os.path.join(proj, 'perf-budgets.json')
+    budgets = budgets if os.path.isfile(budgets) else os.path.realpath(TEMPLATE_BUDGETS)
+    gp = os.environ.get('CPP_REPORT_GAMEDEV_PERF')
+    if not gp:
+        gp = os.path.join(HERE, '..', '..', '..', 'bin', 'gamedev-perf')
+        gp = gp if os.access(gp, os.X_OK) else shutil.which('gamedev-perf')
+    if not gp:
+        return None, 'gamedev-perf not found', budgets
+    if perf.get('status') not in ('pass', 'fail') or perf.get('gpu_ms_p50') is None:
+        return None, f'perf stage {perf.get("status", "did not run")}', budgets
+    head, row = prev_row(os.path.join(ci, 'perf.csv'), window)
+    with tempfile.TemporaryDirectory() as t:
+        if head:
+            with open(os.path.join(t, 'perf-cpp.csv'), 'w', newline='') as f:
+                csv.writer(f).writerows([head, row])
+        a = '-1' if head else ci
+        env = dict(os.environ, GAMEDEV_PERF_DIR=t, GAMEDEV_PERF_BUDGETS=budgets)
+        try:
+            p = subprocess.run([gp, '--compare', a, ci, '--json'], capture_output=True, text=True, env=env, timeout=30)
+        except (OSError, subprocess.TimeoutExpired):
+            return None, 'gamedev-perf --compare gave no JSON', budgets
+        try:
+            res = json.loads(p.stdout)
+        except ValueError:
+            if p.returncode == 0:
+                return None, 'gamedev-perf --compare gave no JSON', budgets
+            last = (p.stderr.strip().splitlines() or ['no stderr'])[-1]
+            return None, f'compare failed rc {p.returncode}: {last}', budgets
+    return res, row[0] if head else None, budgets
+
+
+def table(head, rows, cls=''):
+    th = ''.join(f'<th>{h}</th>' for h in head)
+    body = ''.join('<tr>' + ''.join(f'<td>{c}</td>' for c in r) + '</tr>' for r in rows)
+    return f'<table class="{cls}"><thead><tr>{th}</tr></thead><tbody>{body}</tbody></table>'
+
+
+def grow_txt(g):
+    pct = 'new' if g.get('pct') is None else f'+{g["pct"]} %'
+    return f'GROW {g.get("shader")} {g.get("metric")} {pct} ({g.get("from")} -> {g.get("to")})'
+
+
+def stage_detail(name, s):
+    v = lambda k, p=0, u='': num(s.get(k), p, u)
+    parts = {
+        'configure': [f'preset {esc(str(s.get("preset")))}' if s.get('preset') else None, 'werror' if s.get('werror') else None],
+        'build': [f'{v("warnings")} warnings' if v('warnings') else None],
+        'sanitize': [f'{v("reports")} reports' if v('reports') else None, f'{v("frames")} frames' if v('frames') else None],
+        'run': [f'{v("validation_errors")} validation errors, {v("validation_warnings")} warnings' if v('validation_errors') else None,
+                f'{v("avg_fps", 1)} fps' if v('avg_fps', 1) else None],
+        'perf': [esc(str(s['verdict'])) if s.get('verdict') else None, f'{v("avg_fps", 1)} fps' if v('avg_fps', 1) else None,
+                 f'{esc(str(s["bound"]))}-bound' if s.get('bound') else None],
+        'profile': [f'{v("zones")} zones' if v('zones') else None],
+        'tidy': [f'{v("findings")} findings' if v('findings') else None],
+        'shaders': [f'{len(s["shaders"])} shaders' if isinstance(s.get('shaders'), list) else esc(str(s.get('reason') or s.get('error') or ''))]
+                   + [f'<b class=bad>{esc(grow_txt(g))}</b>' for g in s.get('grow') or [] if isinstance(g, dict)]
+                   + [f'<b class=bad>{esc(str(e.get("shader")))}: {esc(str(e.get("error")))}</b>' for e in s.get('errors') or [] if isinstance(e, dict)],
+    }.get(name, [])
+    c = s.get('crash')
+    if isinstance(c, dict):
+        fr = (c.get('frames') or [{}])[0]
+        parts.append(f'<b class=bad>crash {esc(str(c.get("signal")))}</b> {esc(str(fr.get("fn", "")))} {esc(str(fr.get("file", "")))}:{esc(str(fr.get("line", "")))}')
+    return ' · '.join(p for p in parts if p) or ''
+
+
+def badge(status):
+    st = str(status or 'n/a')
+    return f'<span class="b {esc(st)}">{esc(st)}</span>'
+
+
+def cost_row(st):
+    """'build cost' stages row: CPU s per stage, vcpkg/compile/link split, ccache delta and slowest TUs (T995)."""
+    cpu = {k: s['cpu_s'] for k, s in st.items() if isinstance(s, dict) and isinstance(s.get('cpu_s'), (int, float))}
+    if not cpu:
+        return ['build cost', '', '', na('no cpu_s in summary.json, cpp-ci before T995')]
+    c, b = st.get('configure') or {}, st.get('build') or {}
+    split = {'configure': [f'vcpkg {num(c.get("vcpkg_s"), 1)}' if c.get('vcpkg_s') is not None else None],
+             'build': [f'{k} {num(b.get(k + "_s"), 1)}' if b.get(k + '_s') is not None else None for k in ('compile', 'link', 'other')]
+             + [f'ccache {num(b["ccache_hits"], 0)} hit / {num(b.get("ccache_misses"), 0)} miss' if b.get('ccache_hits') is not None else None]}
+    parts = []
+    for k, v in cpu.items():
+        sub = ', '.join(p for p in split.get(k, []) if p)
+        parts.append(f'{esc(k)} {num(v, 1)}' + (f' ({sub})' if sub else ''))
+    top = ', '.join(f'{esc(str(t.get("tu")))} {num(t.get("s"), 1)}' for t in b.get('top_tu') or [] if isinstance(t, dict))
+    detail = ' · '.join(parts) + (f' · top TU: {top}' if top else '')
+    return ['build cost', '', num(sum(cpu.values()), 0, 'cpu s'), detail]
+
+
+def sec_stages(sj):
+    st = sj.get('stages') or {}
+    if not st:
+        return f'<section><h2>Stages</h2><p>{na("summary.json has no stages")}</p></section>'
+    rows = [[esc(k), badge(s.get('status')), num(s.get('seconds'), 0, 's') or na('no time'), stage_detail(k, s)]
+            for k, s in st.items() if isinstance(s, dict)] + [cost_row(st)]
+    return f'<section><h2>Stages</h2>{table(["stage", "status", "time", "detail"], rows, "stages")}</section>'
+
+
+def sec_shaders(sh):
+    """Per-shader static SPIR-V counts and their delta vs stats-baseline.tsv (T1001); nothing when the stage did not count."""
+    rows_in = [r for r in (sh or {}).get('shaders') or [] if isinstance(r, dict)]
+    if not rows_in:
+        return ''
+    keys = ('instr', 'arith', 'tex', 'branch', 'loop', 'barrier')
+    grown = {(g.get('shader'), g.get('metric')) for g in sh.get('grow') or [] if isinstance(g, dict)}
+    def cell(r, k):
+        c, d = (r.get('counts') or {}).get(k), (r.get('delta') or {}).get(k)
+        t = esc(str(c)) + (f' ({d:+d})' if isinstance(d, int) and d else '')
+        return f'<b class=bad>{t}</b>' if (r.get('shader'), k) in grown else t
+    rows = [[esc(str(r.get('shader')))] + [cell(r, k) for k in keys] for r in rows_in]
+    return f'<section><h2>Shaders (SPIR-V ops vs baseline)</h2>{table(["shader", *keys], rows)}</section>'
+
+
+def sec_passes(cmp_res, prev, budgets, perf):
+    if cmp_res is None:
+        return f'<section><h2>GPU passes</h2><p>{na(prev)}</p></section>'
+    rows = []
+    first = prev is None
+    for r in cmp_res.get('rows', []):
+        ms = r['pass'] != 'draws'
+        p, u = (4, '') if ms else (0, '')
+        b, lim = r.get('b_ms'), r.get('budget_ms')
+        vs = na('no budget') if lim is None else (
+            f'<b class={"bad" if b is not None and b > lim else "good"}>{b / lim * 100:.0f} %</b> of {num(lim, 2)}' if b is not None else na('no value'))
+        if first:
+            pv, d = na('no earlier pass run'), ''
+        else:
+            pv = num(r.get('a_ms'), p) or na('not in that run')
+            d = '' if r.get('delta_ms') is None else f'{r["delta_ms"]:+.{p}f}' + ('' if r.get('delta_pct') is None else f' ({r["delta_pct"]:+.1f} %)')
+        mark = esc(r.get('mark') or '') if not first else esc(','.join(m for m in (r.get('mark') or '').split(',') if m == 'over'))
+        rows.append([esc(r['pass']), num(b, p, u) or na('no value'), vs if ms else '', pv, d, mark])
+    warn = ''.join(f'<p class=warn>{esc(w)}</p>' for w in cmp_res.get('warn', []))
+    src = f'previous: {esc(str(prev)) if not first else "none"} · budgets: {esc(os.path.basename(os.path.dirname(budgets)))}/perf-budgets.json'
+    return (f'<section><h2>GPU passes (ms, p50)</h2>{warn}'
+            f'{table(["pass", "now", "vs budget", "prev", "Δ", "mark"], rows, "passes")}<p class=src>{src}</p></section>')
+
+
+def sec_frame(perf):
+    if not perf or perf.get('gpu_ms_p50') is None:
+        why = f'perf stage {perf.get("status")}' if perf else 'no perf stage'
+        return f'<section><h2>Frame</h2><p>{na(why)}</p></section>'
+    used, bud, lim = perf.get('vram_used_mb'), perf.get('vram_budget_mb'), perf.get('vram_mb_limit')
+    vram = na('no VK_EXT_memory_budget') if used is None else (
+        f'{num(used, 0, "MB")} of {num(bud, 0, "MB")} device budget' + (f' ({used / bud * 100:.1f} %)' if bud else ''))
+    rows = [
+        ('GPU p50 / p99', f'{num(perf.get("gpu_ms_p50"), 4)} / {num(perf.get("gpu_ms_p99"), 4) or "n/a"} ms'),
+        ('CPU p50', num(perf.get('cpu_ms_p50'), 4, 'ms') or na('not measured')),
+        ('avg fps', f'{num(perf.get("avg_fps"), 1) or "fps n/a"} over {num(perf.get("frames"), 0) or "n/a"} frames, {esc(str(perf.get("bound", "?")))}-bound'),
+        ('draws / culled', na('no draw counters') if perf.get('draws') is None else f'{num(perf["draws"], 0)} / {num(perf.get("culled"), 0) or "n/a"}'),
+        ('VRAM', vram),
+        ('VRAM limit', num(lim, 0, 'MB') or na('--vram-mb off')),
+        ('load1 at run', num(perf.get('load1'), 2) or na('not recorded')),
+    ]
+    return f'<section><h2>Frame</h2>{table(["metric", "value"], [[esc(k), v] for k, v in rows], "kv")}</section>'
+
+
+def sec_checks(st):
+    def cnt(stage, key, label):
+        s = st.get(stage)
+        if not isinstance(s, dict):
+            return [esc(label), na(f'{stage} stage did not run')]
+        if s.get(key) is None:
+            return [esc(label), na(f'{stage} {s.get("status", "?")}')]
+        n = s[key]
+        return [esc(label), f'<b class={"bad" if n else "good"}>{num(n, 0)}</b>']
+    rows = [cnt('sanitize', 'reports', 'sanitizer reports (ASan+UBSan)'), cnt('tidy', 'findings', 'clang-tidy findings'),
+            cnt('run', 'validation_errors', 'Vulkan validation errors'), cnt('build', 'warnings', 'build warnings')]
+    return f'<section><h2>Checks</h2>{table(["check", "count"], rows, "kv")}</section>'
+
+
+def figure(path, alt, cap, why):
+    if path and os.path.isfile(path) and os.path.getsize(path):
+        return f'<figure><img src="{data_uri(path)}" alt="{esc(alt)}"><figcaption>{cap}</figcaption></figure>'
+    return f'<figure><p>{na(why)}</p><figcaption>{cap}</figcaption></figure>'
+
+
+def sec_golden(ci, g):
+    if not isinstance(g, dict):
+        g = {}
+    flip = num(g.get('flip_mean'), 4)
+    cap = (f'golden frame {num(g.get("frame"), 0) or "?"} · mean FLIP {flip} (fails &gt; {num(g.get("flip_max_mean"), 2) or "?"})'
+           if flip else f'golden frame · FLIP {na("golden stage " + str(g.get("status", "did not run")))}')
+    out = figure(os.path.join(ci, 'golden-frame.png'), 'golden frame', cap, 'no golden-frame.png in the ci dir')
+    if g.get('heatmap'):
+        out += figure(g['heatmap'], 'FLIP heatmap', 'FLIP heatmap', 'heatmap file missing')
+    return f'<section><h2>Golden frame</h2>{out}</section>'
+
+
+def sec_sheet(sheet):
+    if not sheet:
+        return f'<section><h2>Capture contact sheet</h2><p>{na("no contact sheet in the ci or project dir")}</p></section>'
+    return f'<section><h2>Capture contact sheet</h2>{figure(sheet, "capture contact sheet", esc(os.path.basename(sheet)), "unreadable")}</section>'
+
+
+CSS = """:root{color-scheme:dark;--bg:#0e1014;--card:#171a21;--fg:#e9e6df;--mut:#9aa0a8;--ac:#e2b35a;--line:#2a2f3a;--ok:#7bc47f;--bad:#ef6b5b}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:clamp(14px,0.35vw + 12.5px,18px)/1.5 system-ui,sans-serif}
+main{width:min(100% - 2 * clamp(10px,3vw,56px),2200px);margin:0 auto;padding:clamp(14px,3vw,48px) 0}
+h1{margin:0 0 .2em;font-size:clamp(1.4rem,2.4vw,2.4rem);color:var(--ac);overflow-wrap:anywhere}
+h2{margin:0 0 .6em;font-size:clamp(1.05rem,1.3vw,1.5rem)}
+.lede,.src,.na{color:var(--mut)}
+.src{font-size:.85em;overflow-wrap:anywhere;margin:.6em 0 0}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));gap:clamp(8px,1vw,16px);margin:clamp(12px,2vw,24px) 0}
+.stat{background:var(--card);border-radius:10px;padding:10px 14px;min-width:0}
+.stat b{display:block;font-size:1.35em;font-variant-numeric:tabular-nums}
+.stat span{color:var(--mut);font-size:.85em}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,560px),1fr));gap:clamp(12px,2vw,32px)}
+section{background:var(--card);border-radius:14px;padding:clamp(10px,2vw,28px);min-width:0}
+table{width:100%;border-collapse:collapse;table-layout:fixed;font-variant-numeric:tabular-nums}
+th,td{text-align:left;padding:5px clamp(3px,.6vw,8px);border-bottom:1px solid var(--line);overflow-wrap:anywhere;vertical-align:top}
+thead th{color:var(--mut);font-weight:500}
+table.kv td:first-child{width:42%}
+table.stages th:nth-child(1){width:22%}table.stages th:nth-child(2){width:18%}table.stages th:nth-child(3){width:14%}
+table.passes{font-size:clamp(12px,.3vw + 11px,17px)}
+.b{display:inline-block;padding:0 .5em;border-radius:6px;background:var(--line);font-size:.9em}
+.b.pass,.good{color:var(--ok)}.b.fail,.bad{color:var(--bad)}.b.skip{color:var(--mut)}.b.error{color:var(--ac)}
+.warn{color:var(--ac)}
+figure{margin:0 0 12px}
+img{display:block;width:100%;height:auto;border-radius:8px;background:#000}
+figcaption{color:var(--mut);font-size:.85em;margin-top:6px}"""
+
+
+def stats(sj):
+    st = sj.get('stages') or {}
+    np_ = sum(1 for s in st.values() if isinstance(s, dict) and s.get('status') == 'pass')
+    ok = sj.get('ok')
+    cc = sj.get('ccache_hit_pct')
+    cells = [(f'<span class={"good" if ok else "bad"}>{"ok" if ok else "failed"}</span>' if ok is not None else na('no ok flag'), 'run'),
+             (f'{np_}/{len(st)}', 'stages pass'), (num(sj.get('seconds'), 0, 's') or na('no time'), 'wall'),
+             (num(cc, 1, '%') if cc is not None else na('no ccache'), 'ccache hit (this run)'),
+             (esc(str(sj.get('load'))) if sj.get('load') else na('not recorded'), 'load 1/5/15')]
+    return '<div class=stats>' + ''.join(f'<div class=stat><b>{v}</b><span>{k}</span></div>' for v, k in cells) + '</div>'
+
+
+def render(ci, sj, sheet):
+    proj = sj.get('project') or os.path.dirname(ci)
+    st = sj.get('stages') or {}
+    perf = st.get('perf') if isinstance(st.get('perf'), dict) else {}
+    cmp_res, prev, budgets = compare(ci, proj, perf, run_window(sj))
+    name = os.path.basename(proj.rstrip('/'))
+    body = (f'<h1>cpp-ci · {esc(name)}</h1><p class=lede>{esc(str(sj.get("date", "no date")))} · {esc(ci)} · '
+            f'<code>cpp-report</code></p>{stats(sj)}<div class=grid>{sec_stages(sj)}{sec_shaders(st.get("shaders"))}{sec_passes(cmp_res, prev, budgets, perf)}'
+            f'{sec_frame(perf)}{sec_checks(st)}{sec_golden(ci, st.get("golden"))}{sec_sheet(sheet)}</div>')
+    return (f'<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">'
+            f'<title>cpp-ci {esc(name)}</title><style>{CSS}</style></head><body><main>{body}</main></body></html>\n')
+
+
+def main():
+    ap = argparse.ArgumentParser(prog='cpp-report', description=__doc__.split(': ', 1)[1],
+                                 epilog='exit 0 written · 2 bad input (no summary.json, unreadable JSON)')
+    ap.add_argument('dir', help='cpp-ci project dir (reads DIR/ci) or OUT dir holding summary.json')
+    ap.add_argument('--out', help='HTML file to write (default: <ci dir>/cpp-report.html)')
+    ap.add_argument('--sheet', help='capture contact sheet image (default: contact-sheet.jpg or *sheet*.jpg|png in the ci, then project dir)')
+    a = ap.parse_args()
+    ci = resolve(os.path.expanduser(a.dir))
+    if not ci:
+        print(f'cpp-report: no summary.json in {a.dir} or {a.dir}/ci', file=sys.stderr)
+        return 2
+    try:
+        with open(os.path.join(ci, 'summary.json')) as f:
+            sj = json.load(f)
+        if not isinstance(sj, dict):
+            raise ValueError('not an object')
+    except (OSError, ValueError) as e:
+        print(f'cpp-report: {ci}/summary.json unreadable: {e}', file=sys.stderr)
+        return 2
+    if a.sheet and not os.path.isfile(a.sheet):
+        print(f'cpp-report: --sheet {a.sheet} not found', file=sys.stderr)
+        return 2
+    sheet = a.sheet or find_sheet(ci, sj.get('project') or os.path.dirname(ci))
+    out = os.path.abspath(os.path.expanduser(a.out or os.path.join(ci, 'cpp-report.html')))
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    with open(out, 'w') as f:
+        f.write(render(ci, sj, sheet))
+    print(f'cpp-report: {out}')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

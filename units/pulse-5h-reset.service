@@ -1,0 +1,8 @@
+[Unit]
+Description=Orchestrator pulse right after each 5-hour plan window reset
+
+[Service]
+Type=oneshot
+TimeoutStartSec=90
+Environment=PATH=%h/agents/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/bash -c '. %h/agents/bin/env.sh; exec %h/agents/bin/pulse-5h-reset'

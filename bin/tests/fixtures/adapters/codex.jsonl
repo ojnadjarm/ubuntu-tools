@@ -1,0 +1,7 @@
+{"type":"session_start","session_id":"codex-sess-0001"}
+{"type":"function_call","name":"Bash","arguments":"{\"command\":\"git status --short\"}","cwd":"/work/repo","session_id":"codex-sess-0001"}
+{"type":"tool_call","tool":"Read","input":{"file_path":"/work/repo/README.md"}}
+{"type":"function_call","name":"Bash","arguments":"not json at all"}
+{"type":"function_call", "name": broken
+plain text progress line
+{"type":"message","content":"done"}

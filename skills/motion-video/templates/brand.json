@@ -1,0 +1,13 @@
+{
+  "name": "House",
+  "logo": "",
+  "fonts": {"display": "Inter", "body": "Inter", "mono": "JetBrains Mono"},
+  "palette": {
+    "ink": "#0b0d12",
+    "panel": "#141823",
+    "paper": "#f4f1ea",
+    "muted": "#5b6378",
+    "accent": ["#ff5a36", "#ffc233", "#2f6bff"],
+    "good": "#3ecf8e"
+  }
+}

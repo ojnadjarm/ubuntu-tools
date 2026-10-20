@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+# mv-render: scaffold and headlessly render Remotion, Motion Canvas or Blender projects; prints render fps.
+set -euo pipefail
+SKILL_DIR=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+
+usage() {
+  cat <<'U'
+usage:
+  mv-render new remotion|mc <dir>                  copy the template into <dir> (new dir only)
+  mv-render remotion <dir> [comp] [out.mp4] [-- remotion flags]
+  mv-render bundle <dir> <out-dir>                 remotion bundle of <dir>/src/index.ts into <out-dir> (render it with
+                                                   npx remotion render <out-dir> <comp>); skipped while the sha256 of
+                                                   src/ + public/ + package-lock.json (else package.json) is unchanged
+  mv-render variants <dir> <comp> <out-dir> [-- remotion flags]
+                                                   one comp -> <comp>-16x9/9x16/1x1.mp4 via --width/--height
+  mv-render bench <dir> [comp] [concurrency...]    render time per --concurrency (default 4 8 12 16)
+  mv-render mc <dir> [out.mp4]                     Vite + headless Chrome clicks Render; PNG sequence -> x264 crf 10
+                                                   env MV_SIZE=1080x1920 overrides project.meta size for this run
+  mv-render blender <scene.py> <out-dir> [--draft] [--resume] [-- script args]
+                                                   PNG frames + <out-dir>/render.json (per-frame s, p95, mean render_s/composite_s/write_s, bit depth);
+                                                   env MV_ENGINE=EEVEE|CYCLES MV_FPS MV_SECONDS MV_DEPTH=16|8
+                                                   MV_LOOK=none|soft|filmic MV_VIGNETTE=0.15
+                                                   MV_SIZE=1920x1080 MV_SAMPLES=auto|N MV_RAYTRACE=1
+                                                   (auto: EEVEE 16 spp, Cycles 32)
+                                                   --draft: 50 % size, 4 spp, raytracing off, look off, 8-bit, small shadow pool (MV_DRAFT=1)
+                                                   --resume: keep frames on disk, render the rest (MV_RESUME=1)
+  mv-render clean [--all] <dir>                    delete node_modules and render caches; --all also out/
+U
+}
+
+frames_of() { ffprobe -v error -count_packets -select_streams v:0 -show_entries stream=nb_read_packets -of csv=p=0 "$1"; }
+report() { # out secs
+  local n; n=$(frames_of "$1")
+  printf 'mv-render: %s frames=%s render_s=%.1f render_fps=%.2f size_kb=%d\n' "$1" "$n" "$2" "$(echo "$n / $2" | bc -l)" $(( $(stat -c %s "$1") / 1024 ))
+}
+deps() { [[ -d $1/node_modules ]] || (cd "$1" && npm install --no-audit --no-fund --loglevel=error); }
+now() { date +%s.%N; }
+
+cmd=${1:-}; shift || true
+case $cmd in
+  new)
+    kind=$1 dir=$2
+    [[ -e $dir ]] && { echo "mv-render: $dir exists" >&2; exit 2; }
+    case $kind in remotion) src=remotion ;; mc) src=motion-canvas ;; *) usage; exit 2 ;; esac
+    cp -r "$SKILL_DIR/templates/$src" "$dir"
+    echo "mv-render: new $kind project at $dir" ;;
+  remotion)
+    dir=$1 comp=${2:-Main} out=${3:-out/$comp.mp4}; shift $(( $# < 3 ? $# : 3 ))
+    [[ ${1:-} == -- ]] && shift
+    deps "$dir"; [[ $out = /* ]] || out=$dir/$out
+    t=$(now)
+    (cd "$dir" && npx remotion render src/index.ts "$comp" "$out" --log=error "$@")
+    report "$out" "$(echo "$(now) - $t" | bc)" ;;
+  bundle)
+    dir=$(readlink -f "$1") out=$(readlink -m "$2")
+    lock=package-lock.json; [[ -f $dir/$lock ]] || lock=package.json
+    hash=$(cd "$dir" && { find src $([[ -d public ]] && echo public) -type f -print0 | sort -z | xargs -0 sha256sum; sha256sum "$lock"; } | sha256sum | cut -c1-16)
+    if [[ -f $out/index.html && $(cat "$out/.mv-hash" 2>/dev/null) == "$hash" ]]; then
+      echo "mv-render: bundle $out cached ($hash)"; exit 0
+    fi
+    deps "$dir"; mkdir -p "$(dirname "$out")"
+    tmp=$(mktemp -d "$out.XXXX"); t=$(now)
+    (cd "$dir" && npx remotion bundle src/index.ts --out-dir "$tmp" --log=error >/dev/null) || { rm -rf "$tmp"; exit 1; }
+    echo "$hash" >"$tmp/.mv-hash"; rm -rf "$out"; mv "$tmp" "$out"
+    printf 'mv-render: bundle %s (%s) bundle_s=%.1f\n' "$out" "$hash" "$(echo "$(now) - $t" | bc)" ;;
+  variants)
+    dir=$1 comp=$2 od=$3; shift 3
+    [[ ${1:-} == -- ]] && shift
+    mkdir -p "$od"
+    for v in 16x9:1920:1080 9x16:1080:1920 1x1:1080:1080; do
+      IFS=: read -r tag w h <<<"$v"
+      "$0" remotion "$dir" "$comp" "$(readlink -f "$od")/$comp-$tag.mp4" -- --width="$w" --height="$h" "$@"
+    done ;;
+  bench)
+    dir=$1 comp=${2:-Main}; shift $(( $# < 2 ? $# : 2 ))
+    for c in "${@:-4 8 12 16}"; do
+      for cc in $c; do
+        printf 'concurrency=%s load=%s ' "$cc" "$(cut -d' ' -f1 /proc/loadavg)"
+        "$0" remotion "$dir" "$comp" "/tmp/mv-bench-$$.mp4" -- --concurrency="$cc" | sed 's/^mv-render: [^ ]* //'
+      done
+    done
+    rm -f "/tmp/mv-bench-$$.mp4" ;;
+  mc)
+    dir=$1 out=${2:-$1/output/main.mp4}
+    deps "$dir"; rm -rf "$dir/output"
+    meta=$dir/src/project.meta
+    cp "$meta" "$meta.bak"; trap 'mv -f "$meta.bak" "$meta"' EXIT
+    fps=$(MV_SIZE=${MV_SIZE:-} node -e '
+      const fs = require("fs"), f = process.argv[1], m = JSON.parse(fs.readFileSync(f));
+      const sz = process.env.MV_SIZE; if (sz) { const [x, y] = sz.split("x").map(Number); m.shared.size = {x, y}; }
+      m.rendering.exporter = {name: "@motion-canvas/core/image-sequence", options: {fileType: "image/png", quality: 100, groupByScene: false}};
+      fs.writeFileSync(f, JSON.stringify(m, null, 2)); console.log(m.rendering.fps);' "$meta")
+    t=$(now)
+    (cd "$dir" && node render.mjs)
+    first=$(find "$dir/output" -name '*.png' | sort | head -1)
+    mkdir -p "$(dirname "$out")"
+    ffmpeg -hide_banner -loglevel error -y -framerate "$fps" -i "$(dirname "$first")/%06d.png" \
+      -c:v libx264 -preset medium -crf 10 -pix_fmt yuv420p "$out"
+    rm -rf "$dir/output"
+    report "$out" "$(echo "$(now) - $t" | bc)" ;;
+  blender)
+    scene=$1 outdir=$2; shift 2
+    draft=0 resume=0
+    while [[ ${1:-} == --draft || ${1:-} == --resume ]]; do
+      [[ $1 == --draft ]] && draft=1 || resume=1; shift
+    done
+    [[ ${1:-} == -- ]] && shift
+    mkdir -p "$outdir"
+    [[ $resume == 1 ]] && find "$outdir" -maxdepth 1 -name 'frame_*.png' -empty -delete
+    hook='import re, time, bpy
+from bpy.app.handlers import persistent
+t = [0.0, 0.0, 0.0]
+@persistent
+def pre(*_): t[:] = [time.perf_counter(), 0.0, 0.0]
+@persistent
+def stats(s, *_):
+    if s.startswith("Compositing"): t[1] = time.perf_counter() - t[0]
+    m = re.search(r"Saving: (\d+):([\d.]+)", s)
+    if m: t[2] = 60 * int(m[1]) + float(m[2])
+@persistent
+def post(scene, *_):
+    total = time.perf_counter() - t[0]
+    render = t[1] or total - t[2]
+    print(f"mv-frame {scene.frame_current} {total:.3f} {render:.3f} {total - t[2] - render:.3f} {t[2]:.3f}", flush=True)
+bpy.app.handlers.render_pre.append(pre)
+bpy.app.handlers.render_stats.append(stats)
+bpy.app.handlers.render_post.append(post)'
+    log=$(mktemp)
+    t=$(now)
+    MV_DRAFT=$draft MV_RESUME=$resume blender -b --factory-startup --python-expr "$hook" -P "$scene" \
+      -- "$outdir/frame_" "$@" >"$log" 2>&1 || { tail -5 "$log" >&2; rm -f "$log"; exit 1; }
+    secs=$(echo "$(now) - $t" | bc)
+    grep -E 'Error' "$log" | tail -1 || true
+    n=$(find "$outdir" -maxdepth 1 -name 'frame_*.png' | wc -l)
+    first=$(find "$outdir" -maxdepth 1 -name 'frame_*.png' -size +0 | sort | head -1)
+    bits=8; [[ -n $first && $(ffprobe -v error -show_entries stream=pix_fmt -of csv=p=0 "$first") =~ (48|64) ]] && bits=16
+    p95=$(python3 -I - "$log" "$outdir/render.json" "$secs" "$n" "$draft" "$resume" "$bits" <<'PY'
+import json, math, sys
+log, out, secs, n, draft, resume, bits = sys.argv[1:]
+rows = {int(r[1]): [float(x) for x in r[2:]] for r in (l.split() for l in open(log) if l.startswith("mv-frame "))}
+per = {f: r[0] for f, r in rows.items()}
+stage = lambda i: round(sum(r[i] for r in rows.values()) / len(rows), 3) if rows else 0.0
+v = sorted(per.values())
+p95 = v[math.ceil(0.95 * len(v)) - 1] if v else 0.0
+json.dump({"frames_on_disk": int(n), "rendered": len(v), "skipped": int(n) - len(v), "total_s": round(float(secs), 2),
+           "draft": draft == "1", "resume": resume == "1", "mean_s": round(sum(v) / len(v), 3) if v else 0.0,
+           "p95_s": p95, "render_s": stage(1), "composite_s": stage(2), "write_s": stage(3), "bit_depth": int(bits), "per_frame_s": per}, open(out, "w"), indent=1)
+print(p95)
+PY
+)
+    rm -f "$log"
+    printf 'mv-render: %s frames=%s render_s=%.1f render_fps=%.3f p95_frame_s=%s bits=%s (render.json; encode with: mv-encode %s/frame_%%04d.png out.mp4 --fps N)\n' \
+      "$outdir" "$n" "$secs" "$(echo "$n / $secs" | bc -l)" "$p95" "$bits" "$outdir" ;;
+  clean)
+    if [[ ${1:-} == --all ]]; then shift; rm -rf "$1/out"; fi
+    rm -rf "$1/node_modules" "$1/output" "$1/.remotion"
+    echo "mv-render: cleaned $1" ;;
+  *) usage; [[ $cmd == -h || $cmd == --help ]] || exit 2 ;;
+esac

@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Context-Rot Curve</title>
+<link rel="icon" href="data:,">
+<style>
+:root{color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;--grid:#e1e0d9;--base:#c3c2b7;--ring:rgba(11,11,11,.10);--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s4:#eda100;--mark:#52514e}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--page:#0d0d0d;--surface:#1a1a19;--ink:#fff;--ink2:#c3c2b7;--grid:#2c2c2a;--base:#383835;--ring:rgba(255,255,255,.10);--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--mark:#c3c2b7}}
+:root[data-theme="dark"]{color-scheme:dark;--page:#0d0d0d;--surface:#1a1a19;--ink:#fff;--ink2:#c3c2b7;--grid:#2c2c2a;--base:#383835;--ring:rgba(255,255,255,.10);--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--mark:#c3c2b7}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--page);color:var(--ink);font:clamp(15px,.9rem + .25vw,19px)/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;overflow-x:hidden}
+main{width:min(100% - 32px,max(70rem,62vw));margin-inline:auto;padding-block:clamp(24px,5vw,64px)}
+h1{font-size:clamp(1.6rem,1.1rem + 2.2vw,2.8rem);line-height:1.15;margin:0 0 .4em}
+h2{font-size:clamp(1.1rem,1rem + .6vw,1.45rem);margin:2em 0 .7em}
+p{max-width:90ch}
+.lead{font-size:1.1em;color:var(--ink2)}.lead b{color:var(--ink)}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,14rem),1fr));gap:clamp(10px,1.5vw,18px);margin:1.4em 0}
+.card{background:var(--surface);border:1px solid var(--ring);border-radius:10px;padding:1em 1.1em}
+.card .n{font-size:clamp(1.5rem,1.1rem + 1.4vw,2.2rem);font-weight:650;line-height:1.1}
+.card p{margin:.35em 0 0;color:var(--ink2);font-size:.92em}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,30rem),1fr));gap:clamp(12px,2vw,28px)}
+figure{margin:0;background:var(--surface);border:1px solid var(--ring);border-radius:10px;padding:clamp(10px,1.6vw,20px);position:relative}
+figcaption{font-weight:600;margin-bottom:.2em}
+.sub{color:var(--ink2);font-size:.88em;margin:0 0 .6em}
+.legend{display:flex;flex-wrap:wrap;gap:.4em 1.2em;font-size:.85em;color:var(--ink2);margin-bottom:.4em}
+.legend i{display:inline-block;width:18px;height:2px;vertical-align:middle;margin-right:.4em;border-radius:1px}
+svg{display:block;width:100%;height:auto;overflow:visible}
+svg text{font:13px system-ui,-apple-system,"Segoe UI",sans-serif;fill:var(--muted)}
+svg .lab{fill:var(--ink2);font-weight:600}
+.tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--ring);border-radius:8px;padding:.45em .7em;font-size:.82em;box-shadow:0 4px 14px rgba(0,0,0,.12);opacity:0;transition:opacity .1s;white-space:nowrap}
+.tip b{font-size:1.1em;color:var(--ink)}.tip span{color:var(--ink2)}
+.tip .k{display:inline-block;width:12px;height:2px;vertical-align:middle;margin-right:.4em}
+table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--ring);border-radius:10px;overflow:hidden;font-variant-numeric:tabular-nums}
+th,td{padding:.5em .7em;text-align:right;border-bottom:1px solid var(--grid)}
+th:first-child,td:first-child{text-align:left}
+thead th{font-size:.85em;color:var(--ink2);font-weight:600}
+@media (max-width:700px){
+ table,thead,tbody,tr,td{display:block;width:100%}
+ thead{position:absolute;left:-9999px}
+ table{border:0;background:none}
+ tr{background:var(--surface);border:1px solid var(--ring);border-radius:10px;margin-bottom:10px;padding:.4em .2em}
+ td{display:flex;justify-content:space-between;gap:1em;border:0;padding:.25em .8em}
+ td::before{content:attr(data-l);color:var(--ink2)}
+ td:first-child{font-weight:700;display:block}td:first-child::before{content:none}
+}
+ul li{margin-bottom:.4em}
+footer{margin-top:3em;font-size:.85em;color:var(--ink2)}
+code{font-size:.9em}
+</style>
+</head>
+<body>
+<main>
+<h1>Context rot, measured on Opus 5.5</h1>
+<p class="lead" id="lead"><!-- ctxrot:lead --></p>
+<div class="cards" id="cards"></div>
+
+<div class="grid2">
+<figure id="f-score">
+ <figcaption>Score: 8 planted facts plus a 2-fact join</figcaption>
+ <p class="sub">Correct answers out of 9, mean of the trials; dots are single trials. Vertical lines: current compaction, proposed limit.</p>
+ <div class="legend"></div>
+ <svg id="c-score" role="img" aria-label="Score by context length"></svg>
+ <div class="tip"></div>
+</figure>
+<figure id="f-lat">
+ <figcaption>Latency per call</figcaption>
+ <p class="sub">Wall time of one headless call (prefill + answer); dots are single trials.</p>
+ <div class="legend"></div>
+ <svg id="c-lat" role="img" aria-label="Latency by context length"></svg>
+ <div class="tip"></div>
+</figure>
+</div>
+
+<h2>Per length</h2>
+<table><thead><tr><th>Length</th><th>Input tokens</th><th>Facts recalled</th><th>Worst trial</th><th>Join</th><th>Score</th><th>Latency</th><th>Minutes</th></tr></thead><tbody id="t-len"></tbody></table>
+
+<h2>Facts recalled by depth in the session</h2>
+<table><thead><tr><th>Length</th><th>0–25 %</th><th>25–50 %</th><th>50–75 %</th><th>75–100 %</th></tr></thead><tbody id="t-depth"></tbody></table>
+
+<h2>How it was measured</h2>
+<ul id="method"><!-- ctxrot:method --></ul>
+<footer id="foot"></footer>
+</main>
+<script>
+const CUR = 300000, PROPOSED = Number(document.body.dataset.proposed || 0);
+const k = n => Math.round(n / 1000) + "k";
+const el = (tag, attrs, parent) => { const e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const a in attrs) e.setAttribute(a, attrs[a]); parent && parent.appendChild(e); return e; };
+
+function chart(svg, fig, xs, series, yMax, yFmt, labelsTop) {
+  svg.replaceChildren();
+  const W = Math.max(260, Math.round(svg.getBoundingClientRect().width)), H = Math.round(Math.min(380, Math.max(240, W * .58)));
+  const m = {l: 46, r: 14, t: 14, b: 44};
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H);
+  const xMax = Math.max(CUR, ...xs) * 1.04;
+  const x = v => m.l + v / xMax * (W - m.l - m.r), y = v => H - m.b - v / yMax * (H - m.t - m.b);
+  for (let i = 0; i <= 4; i++) { const v = yMax * i / 4;
+    el("line", {x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), stroke: i ? "var(--grid)" : "var(--base)"}, svg);
+    el("text", {x: m.l - 8, y: y(v) + 4, "text-anchor": "end"}, svg).textContent = yFmt(v); }
+  xs.forEach((v, i) => { if (i && x(v) - x(xs[i - 1]) < 34) return;
+    el("text", {x: x(v), y: H - m.b + 18, "text-anchor": "middle"}, svg).textContent = k(v); });
+  el("text", {x: (W + m.l) / 2, y: H - 4, "text-anchor": "middle"}, svg).textContent = "context length (tokens)";
+  [[CUR, "compacts now"], [PROPOSED, "proposed"]].forEach(([v, t], i) => { if (!v) return;
+    el("line", {x1: x(v), x2: x(v), y1: m.t, y2: H - m.b, stroke: "var(--mark)", "stroke-dasharray": i ? "4 3" : ""}, svg);
+    const lb = el("text", {x: x(v) + (i ? 5 : -5), y: labelsTop ? m.t + 12 : H - m.b - 8, "text-anchor": i ? "start" : "end", class: "lab"}, svg);
+    lb.textContent = t + " " + k(v); if (!i && lb.getBBox().x < m.l) lb.textContent = "now " + k(v); });
+  series.forEach((s, si) => {
+    s.points.forEach(p => p.trials.forEach((v, i, a) => el("circle", {cx: x(p.length) + (i - (a.length - 1) / 2) * 4 + (si - 1) * 2, cy: y(v), r: 3, fill: s.color, opacity: .35}, svg)));
+    el("polyline", {points: s.points.map(p => `${x(p.length)},${y(p.mean)}`).join(" "), fill: "none", stroke: s.color, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round"}, svg);
+    s.points.forEach(p => el("circle", {cx: x(p.length), cy: y(p.mean), r: 5, fill: s.color, stroke: "var(--surface)", "stroke-width": 2}, svg));
+  });
+  const tip = fig.querySelector(".tip"), hair = el("line", {y1: m.t, y2: H - m.b, stroke: "var(--base)", opacity: 0}, svg);
+  const hit = el("rect", {x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: "transparent", tabindex: 0}, svg);
+  const hide = () => { tip.style.opacity = 0; hair.setAttribute("opacity", 0); };
+  const show = L => { hair.setAttribute("x1", x(L)); hair.setAttribute("x2", x(L)); hair.setAttribute("opacity", 1);
+    tip.replaceChildren(); const h = document.createElement("div"); h.textContent = k(L) + " tokens"; h.style.color = "var(--ink2)"; tip.appendChild(h);
+    series.forEach(s => { const p = s.points.find(q => q.length === L); if (!p) return;
+      const d = document.createElement("div"), kk = document.createElement("i"), b = document.createElement("b"), sp = document.createElement("span");
+      kk.className = "k"; kk.style.background = s.color; b.textContent = yFmt(p.mean); sp.textContent = " " + s.name + " (" + p.trials.map(yFmt).join(", ") + ")"; d.append(kk, b, sp); tip.appendChild(d); });
+    const bb = svg.getBoundingClientRect(), fb = fig.getBoundingClientRect(), px = bb.left - fb.left + x(L) / W * bb.width;
+    tip.style.left = Math.min(Math.max(px - tip.offsetWidth / 2, 4), fb.width - tip.offsetWidth - 4) + "px";
+    tip.style.top = (bb.top - fb.top + 8) + "px"; tip.style.opacity = 1; };
+  const nearest = ev => { const bb = svg.getBoundingClientRect(), vx = (ev.clientX - bb.left) / bb.width * W;
+    return xs.reduce((a, v) => Math.abs(x(v) - vx) < Math.abs(x(a) - vx) ? v : a); };
+  hit.addEventListener("pointermove", ev => show(nearest(ev)));
+  hit.addEventListener("pointerleave", hide);
+  let fi = xs.length - 1; hit.addEventListener("focus", () => show(xs[fi]));
+  hit.addEventListener("keydown", ev => { if (ev.key === "ArrowRight") fi = Math.min(xs.length - 1, fi + 1); else if (ev.key === "ArrowLeft") fi = Math.max(0, fi - 1); else return; show(xs[fi]); ev.preventDefault(); });
+  hit.addEventListener("blur", hide);
+}
+
+function cell(tr, label, text) { const td = document.createElement("td"); td.dataset.l = label; td.textContent = text; tr.appendChild(td); }
+
+fetch("data.json").then(r => r.json()).then(d => {
+  const R = d.lengths, xs = [...new Set(R.map(r => r.length))].sort((a, b) => a - b), pct = v => Math.round(v) + " %";
+  const names = {plain: "Plain", hard: "Hard", "stress6-prefix": "Stress (6 updates), old prefix bury"}, colors = ["var(--s1)", "var(--s2)", "var(--s3)", "var(--s4)"];
+  const modes = [...new Set(R.map(r => r.mode))].slice(0, 4).map((m, i) => [m, names[m] || m.replace(/^stress(\d+)$/, "Stress ($1 updates)"), colors[i]]);
+  document.querySelectorAll(".legend").forEach(lg => modes.forEach(([, name, color]) => {
+    const sp = document.createElement("span"), i = document.createElement("i"); i.style.background = color; sp.append(i, name + " test"); lg.appendChild(sp); }));
+  const pts = (mode, mean, trials) => R.filter(r => r.mode === mode).map(r => ({length: r.length, mean: mean(r), trials: r.trials.map(trials)}));
+  const latTop = Math.max(...R.flatMap(r => r.trials.map(t => t.latency_s))), step = [1, 2, 5, 10, 20, 50, 100].find(q => q * 4 >= latTop);
+  const draw = () => {
+    chart(document.getElementById("c-score"), document.getElementById("f-score"), xs,
+      modes.map(([m, name, color]) => ({name, color, points: pts(m, r => r.score, t => 100 * (t.facts_ok + t.join_ok) / 9)})), 100, pct);
+    chart(document.getElementById("c-lat"), document.getElementById("f-lat"), xs,
+      modes.map(([m, name, color]) => ({name, color, points: pts(m, r => r.latency_s, t => t.latency_s)})), step * 4, v => Math.round(v * 10) / 10 + " s", true); };
+  draw(); let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(draw, 120); });
+  const tb = document.getElementById("t-len");
+  R.forEach(r => { const tr = document.createElement("tr"); cell(tr, "Length", r.mode + " · " + k(r.length)); cell(tr, "Input tokens", r.input_tokens.toLocaleString());
+    cell(tr, "Facts recalled", r.recall + " %"); cell(tr, "Worst trial", r.recall_min + " %"); cell(tr, "Join", r.join + " %");
+    cell(tr, "Score", r.score + " %"); cell(tr, "Latency", r.latency_s + " s"); cell(tr, "Minutes", r.minutes); tb.appendChild(tr); });
+  const td = document.getElementById("t-depth");
+  d.depth.forEach(r => { const tr = document.createElement("tr"); cell(tr, "Length", r.mode + " · " + k(r.length));
+    ["0–25 %", "25–50 %", "50–75 %", "75–100 %"].forEach((h, i) => cell(tr, h, r.quartiles[i] == null ? "–" : r.quartiles[i] + " %")); td.appendChild(tr); });
+  const cards = document.getElementById("cards");
+  modes.forEach(([m, name]) => [...new Set([CUR, Math.max(...R.filter(q => q.mode === m).map(q => q.length))])].forEach(L => { const r = R.find(q => q.mode === m && q.length === L); if (!r) return;
+    const c = document.createElement("div"), n = document.createElement("div"), p = document.createElement("p");
+    c.className = "card"; n.className = "n"; n.textContent = r.score + " %"; p.textContent = `${name} test at ${k(L)}: ${r.recall} % facts, ${r.join} % join, ${r.latency_s} s per call`; c.append(n, p); cards.appendChild(c); }));
+  document.getElementById("foot").textContent = `Model ${d.model}, effort ${d.effort}. Raw data: data.json. Rerun: ctxrot run <dir> [--hard], then ctxrot report <dir>.`;
+});
+</script>
+</body>
+</html>

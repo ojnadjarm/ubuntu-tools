@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# resp-check — load a page headless at 400/768/1366/1920/2560 and print one text row per width: h-scroll, content margins, PASS|FAIL.
+set -uo pipefail
+
+usage() {
+  cat <<'EOF'
+usage: resp-check <url|file> [--sheet out.jpg] [--widths 400,768,1366,1920,2560] [--tol px]
+One row per width: vw, scrollW, h-scroll yes|no, left/right content margin px, PASS|FAIL.
+FAIL = scrollW > vw, or |left - right| > tol (default 2 px). --sheet writes one 5-column JPEG contact sheet (<= 200 KB).
+Browser: playwright-core of the global @playwright/mcp install + its chromium-headless-shell, headless, --mute-audio.
+env: RESP_CHECK_PW (playwright-core dir), RESP_CHECK_BROWSER (chromium executable)
+exit 0 every width passes · 1 a width fails · 2 usage or the page does not load
+EOF
+}
+
+url='' sheet='' widths='400,768,1366,1920,2560' tol=2
+while (($#)); do
+  case $1 in
+    -h|--help) usage; exit 0 ;;
+    --sheet) sheet=${2:-}; [ -n "$sheet" ] || { usage >&2; exit 2; }; shift 2 ;;
+    --widths) widths=${2:-}; shift 2 ;;
+    --tol) tol=${2:-}; shift 2 ;;
+    -*) usage >&2; exit 2 ;;
+    *) [ -z "$url" ] || { usage >&2; exit 2; }; url=$1; shift ;;
+  esac
+done
+[ -n "$url" ] && [[ $widths =~ ^[0-9]+(,[0-9]+)*$ ]] && [[ $tol =~ ^[0-9]+$ ]] || { usage >&2; exit 2; }
+[[ $url =~ ^[a-z]+: ]] || { [ -e "$url" ] && url="file://$(readlink -f "$url")"; } || { echo "resp-check: no such file: $url" >&2; exit 2; }
+[ -z "$sheet" ] || sheet=$(readlink -m "$sheet")
+
+exec node --input-type=module - "$url" "$widths" "$tol" "$sheet" <<'JS'
+import { createRequire } from 'node:module';
+import { existsSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+
+const [url, widthArg, tolArg, sheet] = process.argv.slice(2);
+const widths = widthArg.split(',').map(Number), tol = Number(tolArg);
+const HEIGHTS = { 400: 860, 768: 1024, 1366: 768, 1920: 1080, 2560: 1440 };
+const MAX_SHEET = 200 * 1024;
+
+function loadPlaywright() {
+  const lib = path.join(path.dirname(process.execPath), '..', 'lib', 'node_modules');
+  const dirs = [process.env.RESP_CHECK_PW, path.join(lib, '@playwright/mcp/node_modules/playwright-core'),
+    path.join(lib, 'playwright-core'), path.join(lib, 'playwright')].filter(Boolean);
+  const dir = dirs.find(d => existsSync(path.join(d, 'package.json')));
+  if (!dir) { console.error(`resp-check: playwright-core not found (tried ${dirs.join(', ')}); set RESP_CHECK_PW`); process.exit(2); }
+  return createRequire(path.join(dir, 'package.json'))(dir);
+}
+
+// Runs in the page: scroll width plus the left/right margins of the content (blocks holding text, media, painted boxes).
+function measure() {
+  const de = document.documentElement, vw = de.clientWidth;
+  const scrollW = Math.max(de.scrollWidth, document.body ? document.body.scrollWidth : 0);
+  const MEDIA = new Set(['IMG', 'SVG', 'VIDEO', 'CANVAS', 'IFRAME', 'INPUT', 'BUTTON', 'SELECT', 'TEXTAREA', 'PICTURE', 'OBJECT', 'EMBED']);
+  let L = Infinity, R = -Infinity;
+  const add = el => {
+    const r = el.getBoundingClientRect();
+    if (r.width < 1 || r.height < 1 || r.right <= 0 || r.left >= scrollW) return;
+    const cs = getComputedStyle(el);
+    if (cs.visibility === 'hidden' || cs.opacity === '0') return;
+    L = Math.min(L, Math.max(0, r.left)); R = Math.max(R, r.right);
+  };
+  const block = n => { let e = n.parentElement; while (e && e !== document.body && getComputedStyle(e).display.startsWith('inline')) e = e.parentElement; return e; };
+  const seen = new Set();
+  const tw = document.createTreeWalker(document.body || de, NodeFilter.SHOW_TEXT);
+  for (let t; (t = tw.nextNode());) {
+    if (!t.data.trim()) continue;
+    const b = block(t);
+    if (b && !seen.has(b)) { seen.add(b); add(b); }
+  }
+  for (const el of (document.body || de).querySelectorAll('*')) {
+    if (seen.has(el)) continue;
+    const cs = getComputedStyle(el);
+    const painted = cs.backgroundImage !== 'none' || !/rgba\(0, 0, 0, 0\)|transparent/.test(cs.backgroundColor) ||
+      ['Top', 'Right', 'Bottom', 'Left'].some(s => parseFloat(cs[`border${s}Width`]) > 0 && cs[`border${s}Style`] !== 'none');
+    if (painted || MEDIA.has(el.tagName.toUpperCase())) add(el);
+  }
+  if (L === Infinity) { L = 0; R = vw; }
+  return { vw, scrollW, left: Math.round(L), right: Math.round(vw - R) };
+}
+
+async function contactSheet(browser, shots, out) {
+  const page = await browser.newPage({ deviceScaleFactor: 1 });
+  for (let col = 300; col >= 120; col -= 60) {
+    const cells = shots.map(s => `<figure><figcaption>${s.w} ${s.result}</figcaption><img src="data:image/jpeg;base64,${s.jpg.toString('base64')}"></figure>`).join('');
+    await page.setViewportSize({ width: shots.length * (col + 8) + 8, height: 200 });
+    await page.setContent(`<style>body{margin:0;padding:4px;display:flex;gap:8px;align-items:flex-start;background:#222;font:600 14px sans-serif;color:#eee}
+      figure{margin:0;width:${col}px}img{width:100%;display:block}figcaption{padding:2px 0 4px}</style>${cells}`, { waitUntil: 'load' });
+    for (let q = 80; q >= 30; q -= 10) {
+      const buf = await page.screenshot({ type: 'jpeg', quality: q, fullPage: true });
+      if (buf.length <= MAX_SHEET) { writeFileSync(out, buf); return buf.length; }
+    }
+  }
+  throw new Error(`contact sheet stays above ${MAX_SHEET} bytes`);
+}
+
+const { chromium } = loadPlaywright();
+const browser = await chromium.launch({ headless: true, args: ['--mute-audio'],
+  ...(process.env.RESP_CHECK_BROWSER ? { executablePath: process.env.RESP_CHECK_BROWSER } : {}) });
+let fails = 0;
+const shots = [];
+try {
+  console.log(`resp-check ${url}`);
+  console.log('width  vw     scrollW  h-scroll  left   right  result');
+  for (const w of widths) {
+    const page = await browser.newPage({ viewport: { width: w, height: HEIGHTS[w] ?? Math.max(720, Math.round(w * 9 / 16)) }, deviceScaleFactor: 1 });
+    try {
+      await page.goto(url, { waitUntil: 'load', timeout: 30000 });
+    } catch (e) { console.error(`resp-check: page did not load at ${w}: ${e.message.split('\n')[0]}`); process.exitCode = 2; break; }
+    await page.evaluate(() => document.fonts && document.fonts.ready);
+    await page.waitForTimeout(200);
+    const m = await page.evaluate(measure);
+    const why = [m.scrollW > m.vw && 'h-scroll', Math.abs(m.left - m.right) > tol && 'margins'].filter(Boolean);
+    const result = why.length ? 'FAIL' : 'PASS';
+    if (why.length) fails++;
+    console.log([w, m.vw, m.scrollW, m.scrollW > m.vw ? 'yes' : 'no', m.left, m.right].map((v, i) => String(v).padEnd(i ? [7, 9, 10, 7, 7][i - 1] : 7)).join('') +
+      result + (why.length ? ` ${why.join(',')}` : ''));
+    if (sheet) shots.push({ w, result, jpg: await page.screenshot({ type: 'jpeg', quality: 70 }) });
+    await page.close();
+  }
+  if (process.exitCode !== 2) {
+    console.log(`${fails ? 'FAIL' : 'PASS'} ${widths.length - fails}/${widths.length} widths`);
+    if (sheet) console.log(`sheet ${sheet} ${await contactSheet(browser, shots, sheet)} bytes`);
+    process.exitCode = fails ? 1 : 0;
+  }
+} finally { await browser.close(); }
+JS

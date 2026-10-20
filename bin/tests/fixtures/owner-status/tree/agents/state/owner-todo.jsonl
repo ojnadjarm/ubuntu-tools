@@ -1,0 +1,6 @@
+{"id": "1", "op": "add", "text": "run the sudo step", "ts": "2026-10-18T22:00:00+02:00"}
+{not json
+{"op": "add", "text": "no id"}
+{"id": "2", "op": "add", "text": "pick a price", "ts": "2026-10-18T22:01:00+02:00"}
+{"id": "3", "op": "add", "text": "already done", "ts": "2026-10-18T22:02:00+02:00"}
+{"id": "3", "op": "done", "ts": "2026-10-18T22:03:00+02:00"}

@@ -1,0 +1,328 @@
+#!/usr/bin/env bash
+# Nightly perf rows: one locked run of godot-perfgate.sh (perf.csv) and cpp-ci perf (perf-cpp.csv) on per-run copies of the Godot slice and C++ template, rows kept only if load, CPU pressure and other GPU clients stayed under the limits; rc 1 on a regression (cpp: culprit pass named) or a failed C++ build, rc 0 + `skip`/`busy` otherwise.
+# usage: gamedev-perf [--collect | --budget [CSV] | --skips [7d|Nh] | --compare A B [--json] | --trend [N] [--json]]   (no argument prints the last perf.csv and perf-cpp.csv rows; --budget checks CSV's last row, default perf-cpp.csv)
+# T786: --skips counts the timing gates' skips.tsv rows (ci_timing_skip) per test:metric in the window: ran r, skipped s (busy b, gpu-clock g), a WARN line when s > r; rc 0.
+# T857: --compare A B [--json]: A and B are perf-cpp.csv rows (date prefix, -1 last, -2 the one before) or a cpp-ci summary.json/OUT dir; one row per pass + total + p99 + draws: A ms, B ms, delta ms/%, budget, `over` (B > budget) or `noise` (|delta| < max(0.02 ms, 3 %)); WARN on a load1 (> 1 and > 1.5x) or GPU clock (> 10 %, from the run or skips.tsv within 30 min) mismatch; rc 1 when B is over a budget.
+# T902: --trend [N] [--json]: the last N (14) perf-cpp.csv rows per pass (post shadow skin scene frame p99 draws): sparkline, last, median of the earlier rows, % change, budget headroom; WARN + rc 1 when last > 1.15x median and > +0.02 ms; < 3 rows: `no trend yet`. Both modes: a row with extra fields -> rc 2, missing budgets -> WARN, NaN -> null.
+# T1001: a perf-budgets.json pass with ms <= 0 is refused by every mode that reads budgets (rc 2 naming the key).
+# T744: each cpp row is checked against the template's perf-budgets.json (the one place for pass budgets): `budget=ok|over:<pass>=<ms>/<budget>` on the line and in perf-cpp.csv's trailing budget column, a red creative-ci row when over; rc unchanged.
+set -uo pipefail
+S=$HOME/.claude/skills/gamedev
+gate=${GAMEDEV_PERFGATE:-$S/scripts/godot-perfgate.sh}
+slice=${GAMEDEV_SLICE:-$S/templates/godot-slice}
+cppci=${GAMEDEV_CPPCI:-$S/scripts/cpp-ci}
+tpl=${GAMEDEV_CPP_TEMPLATE:-$S/templates/cpp-vulkan}
+dir=${GAMEDEV_PERF_DIR:-$HOME/agents/state/gamedev-perf}
+loadavg=${GAMEDEV_LOADAVG:-/proc/loadavg} every=${GAMEDEV_LOAD_EVERY:-2}
+# CPU PSI some avg10 at which budget.sh doubles a budget, the weight of this run's 0.5 load per CPU cap
+psi=${GAMEDEV_PSI:-/proc/pressure/cpu} maxpsi=20
+budgets=${GAMEDEV_PERF_BUDGETS:-$tpl/perf-budgets.json}
+csv=$dir/perf.csv ccsv=$dir/perf-cpp.csv cache=$dir/cache base=$dir/runs/$$
+run=$base/work cpp=$base/cpp cout=$base/cpp-ci
+
+budget() {  # CSV: ok, or over:<pass>=<ms>/<budget>[+...] for its last row, columns found by header name (a missing or empty column is not checked)
+	jq -r --arg h "$(head -n 1 "$1")" --arg r "$(tail -n 1 "$1")" '($h | split(",")) as $H | ($r | split(",")) as $R
+		| [to_entries[] | select(.value | type == "object") | .key as $k | .value as $b | ($H | index($b.col)) as $i
+		   | select($i != null) | ($R[$i] // "") as $v | select($v != "" and ($v | tonumber) > $b.ms) | "\($k)=\($v)/\($b.ms)"]
+		| if length == 0 then "ok" else "over:" + join("+") end' "$budgets"
+}
+
+budgets_valid() {  # rc 2 naming each pass whose ms is <= 0 in perf-budgets.json; rc 0 otherwise (a missing or unreadable file is left to its readers)
+	local bad; bad=$(jq -r '[to_entries[] | select((.value | type) == "object" and (.value.ms | type) == "number" and .value.ms <= 0) | "\(.key).ms=\(.value.ms)"] | join(" ")' "$budgets" 2>/dev/null)
+	[ -z "$bad" ] || { echo "gamedev-perf: budget $bad must be > 0 ($budgets)" >&2; return 2; }
+}
+
+skips() {  # WINDOW (Nd or Nh): one `timing gates:` line per test:metric from skips.tsv rows newer than WINDOW, WARN when skipped > ran
+	local f=$dir/skips.tsv u
+	case $1 in *d) u=days ;; *h) u=hours ;; *) echo "gamedev-perf: --skips wants Nd or Nh, got $1" >&2; return 2 ;; esac
+	[[ ${1%?} =~ ^[0-9]+$ ]] || { echo "gamedev-perf: --skips wants Nd or Nh, got $1" >&2; return 2; }
+	[ -s "$f" ] || { echo "timing gates: no rows in $1 ($f)"; return 0; }
+	awk -F'\t' -v since="$(date -Is -d "-${1%?} $u")" -v w="$1" -v f="$f" '$1 >= since {k = $2 ":" $3; if (!(k in s)) o[++n] = k; s[k] += 0
+			if ($4 == "ran") r[k]++; else {s[k]++; if ($4 ~ /^busy/) b[k]++; else if ($4 ~ /^gpu-clock/) g[k]++}}
+		END {if (!n) print "timing gates: no rows in " w " (" f ")"
+			for (i = 1; i <= n; i++) {k = o[i]; printf "timing gates: %s ran %d, skipped %d (busy %d, gpu-clock %d)\n", k, r[k], s[k], b[k], g[k]
+				if (s[k] > r[k]) printf "WARN %s skipped %d > ran %d in %s\n", k, s[k], r[k], w}}' "$f"
+}
+
+perfpy() {  # compare A B [--json] (T857) | trend [N] [--json] (T902): perf-cpp.csv rows per pass
+	python3 - "$ccsv" "$budgets" "$dir/skips.tsv" "$@" <<'PY'
+import csv, datetime as dt, json, math, os, statistics, sys
+ccsv, budgets, skips, mode, *args = sys.argv[1:]
+js = "--json" in args
+args = [a for a in args if a != "--json"]
+DEFAULT = {"post": "post_ms_p50", "shadow": "gpu_ms_p50_shadow", "skin": "gpu_ms_p50_skin", "scene": "gpu_ms_p50_scene", "frame": "gpu_ms_p50"}
+
+def num(v):  # a finite float, else None (so NaN is JSON null)
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+def when(s):
+    try:
+        t = dt.datetime.fromisoformat(s)
+        return t if t.tzinfo else t.astimezone()
+    except (TypeError, ValueError):
+        return None
+
+def rows():  # perf-cpp.csv data rows as dicts; rc 2 on a row longer than the header
+    with open(ccsv, newline="") as fh:
+        rd = csv.reader(fh)
+        head = next(rd, [])
+        out = []
+        for r in rd:
+            if len(r) > len(head):
+                sys.exit(print(f"gamedev-perf: bad row {rd.line_num}: {len(r) - len(head)} extra fields ({ccsv})", file=sys.stderr) or 2)
+            d = dict(zip(head, r))
+            if d.get("date") and d["date"] != "date":
+                out.append(d)
+    return out
+
+warn = []
+def passes():  # [(name, col, budget ms)] from perf-budgets.json, else the default columns with a WARN
+    try:
+        raw = json.load(open(budgets))
+    except (OSError, ValueError):
+        raw = {}
+    if not isinstance(raw, dict):
+        warn.append(f"WARN budgets: not an object ({budgets})")
+        return [(k, c, None) for k, c in DEFAULT.items()]
+    bud = {k: v for k, v in raw.items() if isinstance(v, dict) and "col" in v}
+    if not bud:
+        warn.append(f"WARN no perf-budgets.json ({budgets})")
+        return [(k, c, None) for k, c in DEFAULT.items()]
+    return [(k, v["col"], v.get("ms")) for k, v in bud.items()]
+
+def clock(d, t):  # (MHz, source): the run's GPU clock, else the skips.tsv row nearest to t within 30 min
+    c = num(d.get("gpu_mhz"))
+    if c is not None:
+        return c, "run"
+    if t is None or not os.path.isfile(skips):
+        return None, None
+    best = None
+    for line in open(skips):
+        f = line.rstrip("\n").split("\t")
+        ts, mhz = (when(f[0]), num(f[5])) if len(f) >= 6 else (None, None)
+        if ts and mhz is not None and abs((ts - t).total_seconds()) <= 1800 and (best is None or abs((ts - t).total_seconds()) < best[0]):
+            best = (abs((ts - t).total_seconds()), mhz)
+    return (best[1], "skips.tsv") if best else (None, None)
+
+def compare():
+    if len(args) != 2:
+        sys.exit(print("gamedev-perf: --compare wants A B [--json]", file=sys.stderr) or 2)
+
+    def load(sel):  # selector -> (label, {col: value}, time or None)
+        p = sel
+        if os.path.isdir(p):
+            p = next((c for c in (os.path.join(p, "summary.json"), os.path.join(p, "..", "summary.json")) if os.path.isfile(c)), p)
+        if os.path.isfile(p):
+            try:
+                d = json.load(open(p))
+            except ValueError:
+                raise SystemExit(f"gamedev-perf: {sel} is not a summary.json")
+            d = d.get("stages", {}).get("perf", d) if isinstance(d, dict) else {}
+            return sel, d, dt.datetime.fromtimestamp(os.path.getmtime(p)).astimezone()
+        if not os.path.isfile(ccsv):
+            raise SystemExit(f"gamedev-perf: no {ccsv} for row {sel}")
+        rs = rows()
+        if sel.startswith("-") and sel[1:].isdigit():
+            n = int(sel[1:])
+            hit = rs[-n] if 0 < n <= len(rs) else None
+        else:
+            hit = ([r for r in rs if r["date"].startswith(sel)] or [None])[-1]
+        if hit is None:
+            raise SystemExit(f"gamedev-perf: no perf-cpp.csv row {sel} ({len(rs)} rows)")
+        return hit["date"], hit, when(hit["date"])
+
+    try:
+        (la, a, ta), (lb, b, tb) = load(args[0]), load(args[1])
+    except SystemExit as e:
+        if isinstance(e.code, int):
+            raise
+        print(e, file=sys.stderr); sys.exit(2)
+    ps = passes()
+    spec = [p for p in ps if p[1] != "gpu_ms_p50"]
+    names = {k for k, _, _ in spec}
+    spec += [(c[11:], c, None) for c in sorted(set(a) | set(b)) if c.startswith("gpu_ms_p50_") and c[11:] not in names]
+    tot = next((m for _, c, m in ps if c == "gpu_ms_p50"), None)
+    spec += [("total", "gpu_ms_p50", tot), ("p99", "gpu_ms_p99", None), ("draws", "draws", None)]
+
+    out, over = [], 0
+    for name, col, lim in spec:
+        va, vb = num(a.get(col)), num(b.get(col))
+        d = vb - va if va is not None and vb is not None else None
+        pct = d / va * 100 if d is not None and va else None
+        marks = []
+        if lim is not None and vb is not None and vb > lim:
+            marks.append("over"); over += 1
+        if d is not None and name != "draws" and abs(d) < max(0.02, 0.03 * abs(va)):
+            marks.append("noise")
+        out.append({"pass": name, "a_ms": va, "b_ms": vb, "delta_ms": d, "delta_pct": pct, "budget_ms": lim, "mark": ",".join(marks)})
+
+    l1, l2 = num(a.get("load1")), num(b.get("load1"))
+    if l1 is not None and l2 is not None and abs(l1 - l2) > 1 and max(l1, l2) > 1.5 * min(l1, l2):
+        warn.append(f"WARN load1 mismatch: A {l1:g} vs B {l2:g}, the delta may be load")
+    (c1, s1), (c2, s2) = clock(a, ta), clock(b, tb)
+    if c1 and c2 and abs(c1 - c2) > 0.1 * max(c1, c2):
+        src = s1 if s1 == s2 else f"A {s1}, B {s2}"
+        warn.append(f"WARN GPU clock mismatch: A {c1:g} MHz vs B {c2:g} MHz ({src}), the delta may be clock")
+
+    if js:
+        print(json.dumps({"a": la, "b": lb, "rows": out, "warn": warn, "over": over}))
+    else:
+        f = lambda v, p: "n/a" if v is None else f"{v:.{p}f}"
+        print(f"A {la}\nB {lb}")
+        print(f"{'pass':<8} {'A ms':>8} {'B ms':>8} {'Δ ms':>8} {'Δ %':>7} {'budget':>7}  mark")
+        for r in out:
+            p = 0 if r["pass"] == "draws" else 4
+            d = "n/a" if r["delta_ms"] is None else f"{r['delta_ms']:+.{p}f}"
+            q = "n/a" if r["delta_pct"] is None else f"{r['delta_pct']:+.1f}"
+            lim = "-" if r["budget_ms"] is None else f"{r['budget_ms']:g}"
+            print(f"{r['pass']:<8} {f(r['a_ms'], p):>8} {f(r['b_ms'], p):>8} {d:>8} {q:>7} {lim:>7}  {r['mark']}")
+        print("\n".join(warn)) if warn else None
+    sys.exit(1 if over else 0)
+
+def spark(vs):
+    xs = [v for v in vs if v is not None]
+    lo, hi = (min(xs), max(xs)) if xs else (0, 0)
+    bars = "▁▂▃▄▅▆▇█"
+    return "".join("·" if v is None else bars[3] if hi == lo else bars[round((v - lo) / (hi - lo) * 7)] for v in vs)
+
+def trend():  # last N rows per pass: sparkline, last, median of the earlier rows, % change; WARN when last > 1.15 x median and > +0.02
+    if len(args) > 1 or (args and not (args[0].isdigit() and int(args[0]) > 0)):
+        sys.exit(print("gamedev-perf: --trend wants [N] [--json], N > 0", file=sys.stderr) or 2)
+    rs = rows()[-int(args[0] if args else 14):] if os.path.isfile(ccsv) else []
+    ps = passes()
+    head = f"trend: {len(rs)} rows ({rs[0]['date']} .. {rs[-1]['date']})" if rs else f"trend: 0 rows ({ccsv})"
+    if len(rs) < 3:
+        if js:
+            print(json.dumps({"rows": len(rs), "first": rs[0]["date"] if rs else None, "last": rs[-1]["date"] if rs else None, "passes": [], "warn": warn, "trend": False}))
+        else:
+            print("\n".join([head, f"no trend yet ({len(rs)} rows, needs 3)"] + warn))
+        return 0
+    order = ["post", "shadow", "skin", "scene", "frame"]
+    spec = sorted(ps, key=lambda p: order.index(p[0]) if p[0] in order else len(order))
+    spec += [("p99", "gpu_ms_p99", None), ("draws", "draws", None)]
+    out, regress = [], 0
+    for name, col, lim in spec:
+        vs = [num(r.get(col)) for r in rs]
+        last, early = vs[-1], [v for v in vs[:-1] if v is not None]
+        med = statistics.median(early) if early else None
+        pct = (last - med) / med * 100 if last is not None and med else None
+        room = (lim - last) / lim * 100 if lim and last is not None else None
+        bad = name != "draws" and last is not None and med is not None and last > 1.15 * med and last - med > 0.02
+        if bad:
+            regress += 1
+            warn.append(f"WARN {name} {last:.4f} ms > 1.15 x median {med:.4f} ({pct:+.1f} %) over {len(rs)} rows")
+        out.append({"pass": name, "col": col, "values": vs, "last": last, "median": med, "pct": pct, "budget_ms": lim, "headroom_pct": room, "warn": bad})
+    if js:
+        print(json.dumps({"rows": len(rs), "first": rs[0]["date"], "last": rs[-1]["date"], "passes": out, "warn": warn, "trend": True}))
+    else:
+        print(head)
+        for r in out:
+            p = 0 if r["pass"] == "draws" else 4
+            f = lambda v: "n/a" if v is None else f"{v:.{p}f}"
+            q = "n/a" if r["pct"] is None else f"{r['pct']:+.1f} %"
+            b = "" if r["budget_ms"] is None else f"  budget {r['budget_ms']:g} ({'n/a' if r['headroom_pct'] is None else f'{r['headroom_pct']:.0f} %'})"
+            print(f"{r['pass']:<7} {spark(r['values'])}  last {f(r['last'])}  median {f(r['median'])}  {q}{b}")
+        print("\n".join(warn)) if warn else None
+    return 1 if regress else 0
+
+sys.exit(compare() if mode == "compare" else trend())
+PY
+}
+
+case ${1:-} in
+	"") tail -n 5 "$csv" 2>/dev/null; tail -n 3 "$ccsv" 2>/dev/null; exit 0 ;;
+	--collect) ;;
+	--budget) f=${2:-$ccsv}; [ -f "$f" ] && [ -f "$budgets" ] || { echo "gamedev-perf: no $f or $budgets" >&2; exit 2; }; budgets_valid || exit 2; budget "$f"; exit ;;
+	--skips) skips "${2:-7d}"; exit ;;
+	--compare) shift; budgets_valid || exit 2; perfpy compare "$@"; exit ;;
+	--trend) shift; budgets_valid || exit 2; perfpy trend "$@"; exit ;;
+	-h|--help) sed -n '2,8p' "$0" | sed 's/^# //'; exit 0 ;;
+	*) echo "gamedev-perf: unknown argument $1 (usage: gamedev-perf [--collect | --budget [CSV] | --skips [7d|Nh] | --compare A B [--json] | --trend [N] [--json]])" >&2; exit 2 ;;
+esac
+
+budgets_valid || exit 2
+mkdir -p "$cache"
+exec 9>>"$dir/lock"
+flock -n 9 || { echo "busy: another run (pid $(cat "$dir/lock" 2>/dev/null))"; exit 0; }
+echo $$ >"$dir/lock"
+# shellcheck source=/dev/null
+. "$(dirname "$(readlink -f "$0")")/quiet-gate"
+q=$(QUIET_LOADAVG=$loadavg quiet-gate --max-per-cpu 0.5 --max-load1 "${GAMEDEV_MAX_LOAD:-}" --gpu 15 --json)
+maxload=$(jq -r .max <<<"$q") gpu=$(jq -r .gpu_busy_pct <<<"$q")
+gpu_over() { awk -v p="$1" 'BEGIN {exit !(p > 15)}'; }
+gpu_over "$gpu" && { echo "skip gpu busy at $gpu% > 15% (another GPU client), no row"; exit 0; }
+mkdir -p "$run"
+sampler="" gsampler=""
+keep_csv() {  # BUDGET: cpp-ci's csv back to perf-cpp.csv with a trailing budget column; rows already there keep theirs (old rows: empty), new rows get BUDGET
+	awk -F, -v b="$1" 'FILENAME == ARGV[1] {if (FNR == 1) h = /,budget$/; else {v = ""; if (h) {v = $NF; sub(/,[^,]*$/, "")}; old[$0] = v}; next}
+		FNR == 1 {print $0 ",budget"; next} {print $0 "," ($0 in old ? old[$0] : b)}' <(cat "$ccsv" 2>/dev/null) "$cout/perf.csv" >"$ccsv.new" && mv "$ccsv.new" "$ccsv"
+}
+finish() {
+	[ -n "$sampler" ] && kill "$sampler" 2>/dev/null
+	[ -n "$gsampler" ] && kill "$gsampler" 2>/dev/null
+	rm -rf "$dir/last" "$dir/last-cpp-ci" "$cpp"; mv "$run" "$dir/last" 2>/dev/null; mv "$cout" "$dir/last-cpp-ci" 2>/dev/null; rmdir "$base" 2>/dev/null
+}
+trap finish EXIT
+
+rsync -a --exclude assets --exclude .godot --exclude .assets-raw "$slice/" "$run/" || exit 1
+if [ ! -d "$cache/assets" ]; then
+	"$run/assets.sh" "$dir/assets-raw" || exit 1
+	rm -rf "$dir/assets-raw"; mv "$run/assets" "$cache/assets"
+fi
+cp -a "$cache/assets" "$run/assets"
+[ -d "$cache/.godot" ] && cp -a "$cache/.godot" "$run/.godot"
+cp "$csv" "$run/perf.csv" 2>/dev/null
+# C++ configure + build stay outside the sampled window; the perf call below rebuilds as a no-op
+mkdir -p "$cout"; [ -f "$ccsv" ] && awk 'FNR == 1 {b = /,budget$/} b {sub(/,[^,]*$/, "")} 1' "$ccsv" >"$cout/perf.csv"  # cpp-ci's own columns
+cfail=0
+if ! rsync -a --exclude build --exclude ci "$tpl/" "$cpp/" || ! "$cppci" --out "$cout" --stages "configure build" "$cpp" >"$cout/build.out" 2>&1 9>&-; then
+	echo "cpp build failed, no cpp row ($cout/build.out)"; cfail=1
+fi
+QUIET_LOADAVG=$loadavg quiet-gate --max-per-cpu 0.5 --max-load1 "${GAMEDEV_MAX_LOAD:-}" --wait "${GAMEDEV_SETTLE_S:-300}" >/dev/null
+
+sample() {
+	cut -d' ' -f1 "$loadavg" >>"$run/.load"
+	[ -r "$psi" ] && awk '$1=="some"{sub("avg10=","",$2); print $2}' "$psi" >>"$run/.psi"
+	true
+}
+(while sample; do sleep "$every"; done) 9>&- &
+sampler=$!
+(while qg_gpu_pct $$ >>"$run/.gpu"; do sleep "${GAMEDEV_GPU_EVERY:-4}"; done) 9>&- &
+gsampler=$!
+"$gate" --max-load "$maxload" --csv "$run/perf.csv" "$run" 9>&-
+rc=$?
+[ "$rc" != 3 ] && [ "$cfail" = 0 ] && "$cppci" --out "$cout" --stages "configure build perf" --perf-max-load "$maxload" "$cpp" >"$cout/perf.out" 2>&1 9>&-
+kill "$sampler" "$gsampler" 2>/dev/null; sampler="" gsampler=""; sample; qg_gpu_pct $$ >>"$run/.gpu"
+[ -d "$run/.godot" ] && rsync -a --delete "$run/.godot/" "$cache/.godot/"
+[ "$rc" = 3 ] && { echo "skip machine busy, no row (load1 $(cut -d' ' -f1 "$loadavg"))"; exit 0; }
+peak=$(sort -g "$run/.load" | tail -n 1)
+if awk -v l="$peak" -v m="$maxload" 'BEGIN {exit !(l >= m)}'; then
+	echo "skip load1 peaked at $peak >= $maxload mid-run, rows discarded"; exit 0
+fi
+ppeak=$(sort -g "$run/.psi" 2>/dev/null | tail -n 1)
+if [ -n "$ppeak" ] && awk -v p="$ppeak" -v m="$maxpsi" 'BEGIN {exit !(p >= m)}'; then
+	echo "skip cpu pressure peaked at $ppeak >= $maxpsi mid-run, rows discarded"; exit 0
+fi
+gpeak=$(sort -g "$run/.gpu" | tail -n 1)
+gpu_over "$gpeak" && { echo "skip gpu busy, peaked at $gpeak% > 15% mid-run (another GPU client), rows discarded"; exit 0; }
+mv "$run/perf.csv" "$csv"
+if [ "$cfail" = 0 ]; then
+	p=$(jq -c '.stages.perf // {status: "missing"}' "$cout/summary.json" 2>/dev/null || echo '{"status":"missing"}')
+	b=""; [ -f "$budgets" ] && [ -n "$(jq -r '.avg_fps // empty' <<<"$p")" ] && b=$(budget "$cout/perf.csv")
+	case $(jq -r .status <<<"$p") in
+		pass) keep_csv "$b"; jq -r --arg b "$b" '"cpp perf pass gpu_ms_p50=\(.gpu_ms_p50) vram_used_mb=\(.vram_used_mb) budget=\($b)"' <<<"$p" ;;
+		skip) jq -r '"skip cpp perf \(.reason // "busy"), no cpp row"' <<<"$p" ;;
+		*) [ -n "$(jq -r '.avg_fps // empty' <<<"$p")" ] && keep_csv "$b"; cfail=1
+			jq -r --arg b "$b" '"cpp perf fail gpu_ms_p50=\(.gpu_ms_p50) baseline=\(.baseline_gpu_ms_p50) delta_pct=\(.delta_pct)" + (if .culprit then " culprit pass=\(.culprit.pass) delta_ms=\(.culprit.delta_ms)" else "" end) + (if $b != "" then " budget=\($b)" else "" end)' <<<"$p" ;;
+	esac
+	if [[ $b == over:* ]]; then
+		# shellcheck source=/dev/null
+		. "$S/scripts/ci-lib.sh"
+		ci_log gamedev-perf "$tpl" false "$(jq -cn --arg b "${b#over:}" '$b | split("+") | map(split("=")[0])')" "budget=$b ($budgets)"
+	fi
+fi
+[ "$rc" = 0 ] && [ "$cfail" = 0 ] && exit 0 || exit 1

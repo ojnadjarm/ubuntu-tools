@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# moodle-cron <container> — one Moodle cron run; quiet when clean, one skip line and rc 0 while an upgrade is pending or running.
+set -uo pipefail
+case "${1:-}" in
+  -h|--help) echo "usage: moodle-cron <container>"; exit 0 ;;
+  ''|-*) echo "usage: moodle-cron <container>" >&2; exit 2 ;;
+esac
+c=$1
+mark="${MOODLE_CRON_STATE:-${HARNESS_HOME:-$HOME/agents}/state}/moodle-cron-$c.pending"
+
+out=$(docker exec "$c" php /var/www/html/admin/cli/cron.php --keep-alive=0 2>&1); rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^Moodle upgrade pending, cron execution suspended\.$' <<<"$out"; then
+  [ -e "$mark" ] || { mkdir -p "${mark%/*}"; touch "$mark"; }
+  echo "skipped: upgrade pending since $(date -r "$mark" +%H:%M)"
+  exit 0
+fi
+if [ "$rc" -ne 0 ] && grep -q '^Error code: upgraderunning$' <<<"$out"; then
+  echo "skipped: upgrade running"
+  exit 0
+fi
+rm -f "$mark"
+if [ "$rc" -ne 0 ] || grep -qiE 'task failed|exception|fatal|PHP (warning|error|notice)' <<<"$out"; then
+  printf '%s\n' "$out"
+fi
+exit "$rc"

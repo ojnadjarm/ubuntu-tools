@@ -1,0 +1,2 @@
+# Plants a GPU-heavy loop at the template's draw-call marker in src/renderer.cpp: 64 clears of an inset rect (no fast clear); cpp-ci perf must report bound=gpu.
+s|^    // Draw calls go here\.$|    for (int i = 0; i < 64; i++) {\n        VkClearAttachment clear{VK_IMAGE_ASPECT_COLOR_BIT, 0, {.color = color}};\n        VkClearRect rect{{{1, 1}, {gpu_.extent().width - 2, gpu_.extent().height - 2}}, 0, 1};\n        vkCmdClearAttachments(cmd, 1, \&clear, 1, \&rect);\n    }|

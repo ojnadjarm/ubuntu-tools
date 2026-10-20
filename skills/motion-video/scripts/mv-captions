@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+"""mv-captions: Kokoro cues.json word timings -> <base>.srt (sidecar) and <base>.ass (burn-in, active word highlighted)."""
+import argparse
+import json
+
+
+def chunks(words, max_words):
+    """Group words into caption lines: break at max_words, sentence ends and pauses over 0.35 s."""
+    cur = []
+    for w in words:
+        if cur and (len(cur) >= max_words or w['s'] - cur[-1]['e'] > 0.35):
+            yield cur
+            cur = []
+        cur.append(w)
+        if w['w'][-1:] in '.!?':
+            yield cur
+            cur = []
+    if cur:
+        yield cur
+
+
+def ts(t, sep):
+    h, m, s = int(t // 3600), int(t % 3600 // 60), t % 60
+    return f'{h:02d}:{m:02d}:{s:06.3f}'.replace('.', sep) if sep == ',' else f'{h}:{m:02d}:{s:05.2f}'
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('cues')
+    ap.add_argument('clip')
+    ap.add_argument('base', help='output path without extension')
+    ap.add_argument('--offset', type=float, default=0.0, help='seconds the clip starts at in the video')
+    ap.add_argument('--size', default='1920x1080')
+    ap.add_argument('--words', type=int, default=5, help='max words per line')
+    ap.add_argument('--accent', default='33C2FF', help='active word colour, ASS BGR hex')
+    a = ap.parse_args()
+    words = json.load(open(a.cues))['clips'][a.clip]['words']
+    for w in words:
+        w['s'] += a.offset
+        w['e'] += a.offset
+    lines = list(chunks(words, a.words))
+    w, h = (int(x) for x in a.size.split('x'))
+    fs, margin = round(min(w, h) * 0.065), round(h * (0.14 if h > w else 0.08))
+
+    with open(a.base + '.srt', 'w') as f:
+        for i, ln in enumerate(lines, 1):
+            end = min(ln[-1]['e'] + 0.2, lines[i][0]['s']) if i < len(lines) else ln[-1]['e'] + 0.2
+            f.write(f"{i}\n{ts(ln[0]['s'], ',')} --> {ts(end, ',')}\n{' '.join(x['w'] for x in ln)}\n\n")
+
+    with open(a.base + '.ass', 'w') as f:
+        f.write(f"""[Script Info]
+ScriptType: v4.00+
+PlayResX: {w}
+PlayResY: {h}
+WrapStyle: 0
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Cap,Inter,{fs},&H00F4F1EA,&H00F4F1EA,&H00120D0B,&H80000000,-1,0,0,0,100,100,0,0,1,{max(2, fs // 14)},{max(1, fs // 28)},2,{w // 12},{w // 12},{margin},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+""")
+        for ln in lines:
+            for i, cur in enumerate(ln):
+                end = ln[i + 1]['s'] if i + 1 < len(ln) else cur['e'] + 0.2
+                text = ' '.join(
+                    f"{{\\c&H{a.accent}&\\fscx108\\fscy108}}{x['w']}{{\\r}}" if j == i else x['w'] for j, x in enumerate(ln))
+                f.write(f"Dialogue: 0,{ts(cur['s'], '.')},{ts(end, '.')},Cap,,0,0,0,,{text}\n")
+    print(f'mv-captions: {a.base}.srt {a.base}.ass lines={len(lines)} words={len(words)}')
+
+
+main()

@@ -1,0 +1,23 @@
+#!/bin/sh
+# Stub curl: canned Poly Haven / ambientCG / Kenney answers by URL, -o writes a fake file (a .zip copies $STUB_ZIP); never touches the network.
+out="" url=""
+while [ $# -gt 0 ]; do
+	case $1 in
+		-o) out=$2; shift ;;
+		-A) shift ;;
+		-*) ;;
+		*) url=$1 ;;
+	esac
+	shift
+done
+echo "curl ${out:+-o }$url" >>"${STUB_CALLS:-/dev/null}"
+case $url in
+	https://api.polyhaven.com/info/*) body='{"name":"Rock Wall","authors":{"Rob Tuytel":"All"},"type":1}' ;;
+	https://api.polyhaven.com/files/*) body='{"Diffuse":{"1k":{"jpg":{"url":"https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rock_wall/rock_wall_diff_1k.jpg"}}},"nor_gl":{"1k":{"jpg":{"url":"https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rock_wall/rock_wall_nor_gl_1k.jpg"}}},"Bump":{"1k":{"jpg":{"url":"https://dl.polyhaven.org/bump.jpg"}}}}' ;;
+	https://ambientcg.com/api/v2/full_json*) body='{"foundAssets":[{"downloadFolders":{"default":{"downloadFiletypeCategories":{"zip":{"downloads":[{"attribute":"2K-JPG","downloadLink":"https://ambientcg.com/get?file=Rock030_2K-JPG.zip"},{"attribute":"1K-JPG","downloadLink":"https://ambientcg.com/get?file=Rock030_1K-JPG.zip"}]}}}}}]}' ;;
+	https://kenney.nl/assets/*) body="<a href=\"https://kenney.nl/media/pages/assets/${url##*/}/1a2b3c-1/kenney_${url##*/}.zip\">Download</a>" ;;
+	https://dl.polyhaven.org/*|https://ambientcg.com/get*|https://kenney.nl/media/*) body="stub asset $url" ;;
+	*) exit 22 ;;
+esac
+if [ -z "$out" ]; then printf '%s\n' "$body"
+else case $url in *.zip) cp "$STUB_ZIP" "$out" ;; *) printf '%s\n' "$body" >"$out" ;; esac; fi

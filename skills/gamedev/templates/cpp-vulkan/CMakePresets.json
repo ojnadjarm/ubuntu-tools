@@ -1,0 +1,39 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "dev",
+      "displayName": "clang + mold + ccache, Debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/dev",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_C_COMPILER_LAUNCHER": "ccache",
+        "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
+        "CMAKE_LINKER_TYPE": "MOLD",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_CXX_SCAN_FOR_MODULES": "OFF",
+        "CMAKE_C_FLAGS": "-fdebug-prefix-map=${sourceDir}=.",
+        "CMAKE_CXX_FLAGS": "-fdebug-prefix-map=${sourceDir}=."
+      },
+      "environment": {
+        "CCACHE_BASEDIR": "${sourceDir}",
+        "CCACHE_NOHASHDIR": "1"
+      }
+    },
+    {
+      "name": "release",
+      "inherits": "dev",
+      "displayName": "clang + mold + ccache, Release",
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev", "configurePreset": "dev" },
+    { "name": "release", "configurePreset": "release" }
+  ]
+}

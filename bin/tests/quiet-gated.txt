@@ -1,0 +1,7 @@
+# Test files that wait on quiet-gate or gate wall/CPU budgets on it; run.sh runs them one at a time after the pool drains (T776).
+skills/motion-video/tests/mv-fog.test.sh  # quiet-gate --gpu --wait 120 before its fog plate timing
+skills/motion-video/tests/mv-draft-speed.test.sh  # quiet-gate --gpu --wait 300 before its draft wall budget
+skills/motion-video/tests/mv-film.test.sh  # draft build wall/CPU limits checked only when quiet-gate reads quiet
+skills/motion-video/tests/mv.test.sh  # build.sh x3 skipped unless quiet-gate --max-per-cpu 1
+skills/gamedev/tests/cpp-hdr.test.sh  # post_ms_p50 budget skipped unless quiet-gate --gpu
+skills/gamedev/tests/cpp-shadow.test.sh  # gpu_ms_p50_shadow budget skipped unless quiet-gate --gpu

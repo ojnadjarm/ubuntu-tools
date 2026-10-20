@@ -1,0 +1,2 @@
+{"type":"user","timestamp":"2026-10-19T10:00:00Z","message":{"role":"user","content":"<task-notification>\n<task-id>d1</task-id>\n<tool-use-id>toolu_x</tool-use-id>\n<status>completed</status>\n<summary>Agent \"d1\" finished</summary>\n</task-notification>"}}
+{"type":"user","timestamp":"2026-10-19T10:01:00Z","message":{"role":"user","content":"<task-notification>\n<task-id>d2</task-id>\n<tool-use-id>toolu_x</tool-use-id>\n<status>failed</status>\n<summary>Agent \"d2\" finished</summary>\n</task-notification>"}}

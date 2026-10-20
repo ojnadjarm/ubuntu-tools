@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+# mv-sfx: procedural whoosh/riser/hit/sub-drop (ffmpeg, 48 kHz, -1 dBTP, seeded) and SFX cue marks from a --dump-camera path.
+set -euo pipefail
+
+usage() {
+  cat <<'U'
+usage: mv-sfx whoosh|riser|hit|sub-drop --out x.wav [--dur SEC] [--seed N] [--pan P] [--pitch PCT] [--room none|small|hall]
+       mv-sfx cues camera.json --out cues.json [--fps 60] [--clip camera]
+  synth: 48 kHz mono 24-bit WAV peaked at -1 dBTP; same --seed -> same bytes. Default --dur: whoosh 1.2,
+    riser 3, hit 1.5, sub-drop 2.5; --seed 1. whoosh = noise band sweeping up then down (loudest and brightest
+    at the centre); riser = noise band + tone sweeping up to a hard stop; hit = noise crack + pitched thump;
+    sub-drop = 90 -> 28 Hz sine glide. --pitch -3..3 % (Doppler: + approaching); --pan -1..1 (clamped to
+    +/-0.8, equal-power, stereo out); --room small|hall adds a seeded synthetic stereo IR (afir) at a -18 dB
+    send plus its tail (stereo out). Without --pan and --room the output is the plain mono WAV.
+  cues: reads mv-render blender ... -- --dump-camera camera.json (frames = camera positions, one per frame at
+    --fps, default 60 = shot.py MV_FPS) and writes cues.json (shape mv-mix --cues reads): per move, whooshN at
+    the fastest frame and hitN where the camera stops (speed < 2 % of its peak, or the last frame). Each whoosh
+    gets pan = lateral velocity / speed in the camera's view (right +, clamped +/-0.8) and pitch = 3 % x
+    approach velocity / speed. Prints the mv-sfx line to synthesise it and the mv-mix --sfx line that centres it.
+U
+}
+
+die() { echo "mv-sfx: $1" >&2; exit "${2:-2}"; }
+SR=48000
+
+graph() {
+  local d=$1 s=$2 n
+  n=$(printf '%.0f' "$(echo "$d * $SR" | bc -l)")
+  case $kind in
+    whoosh)
+      local fc="(250*pow(24,sin(PI*min(pts/$SR,$d)/$d)))" g
+      g="exp(-pow(log((b+1)*sr/1024/$fc),2)/0.5)"
+      echo "anoisesrc=r=$SR:c=white:s=$s:d=$d:nb_samples=1024,afftfilt=win_size=1024:real='re*$g':imag='im*$g',aeval='val(0)*pow(sin(PI*t/$d),2)':c=mono,atrim=end_sample=$n" ;;
+    riser)
+      local fc="(300*pow(25,pow(min(pts/$SR,$d)/$d,1.5)))" g k=8
+      g="exp(-pow(log((b+1)*sr/1024/$fc),2)/0.4)"
+      echo "anoisesrc=r=$SR:c=white:s=$s:d=$d:nb_samples=1024,afftfilt=win_size=1024:real='re*$g':imag='im*$g',aeval='(0.7*val(0)+0.3*sin(2*PI*200*$d*(pow($k,t/$d)-1)/log($k)))*pow(t/$d,2)*min(1,($d-t)/0.02)':c=mono,atrim=end_sample=$n" ;;
+    hit)
+      echo "anoisesrc=r=$SR:c=white:s=$s:d=$d,highpass=f=1800,aeval='0.5*val(0)*exp(-40*t)+sin(2*PI*(50*t+120*(1-exp(-25*t))/25))*exp(-5*t/$d)*min(1,t/0.002)':c=mono,atrim=end_sample=$n" ;;
+    sub-drop)
+      local ph="(28*t+62*$d/4*(1-exp(-4*t/$d)))"
+      echo "anoisesrc=r=$SR:c=brown:s=$s:d=$d,lowpass=f=120,aeval='(sin(2*PI*$ph)+0.25*sin(4*PI*$ph)+0.1*val(0))*(1-exp(-300*t))*pow(max(0,1-t/$d),1.5)':c=mono,atrim=end_sample=$n" ;;
+  esac
+}
+
+place() {
+  local d=$1 s=$2 pan=$3 pitch=$4 room=$5 n r fc gl gr ir t60 tail pd
+  n=$(printf '%.0f' "$(echo "$d * $SR" | bc -l)")
+  if [[ $pitch == 0 ]]; then
+    fc=$(graph "$d" "$s")
+  else
+    r=$(echo "1 + $pitch / 100" | bc -l)
+    fc="$(graph "$(echo "$d * $r" | bc -l)" "$s"),asetrate=$(echo "$SR * $r" | bc -l),aresample=$SR,apad=whole_len=$n,atrim=end_sample=$n"
+  fi
+  [[ -z $pan && $room == none ]] && { echo "$fc"; return; }
+  read -r gl gr < <(awk -v p="${pan:-0}" 'BEGIN{p = p > 0.8 ? 0.8 : p < -0.8 ? -0.8 : p; a = (p + 1) * atan2(1, 1); printf "%.6f %.6f\n", cos(a), sin(a)}')
+  [[ $room == none ]] && { echo "$fc,pan=stereo|c0=$gl*c0|c1=$gr*c0"; return; }
+  read -r t60 tail pd <<<"$([[ $room == small ]] && echo "0.4 0.6 0.008" || echo "2.2 2.8 0.025")"
+  ir() { echo "anoisesrc=r=$SR:c=white:s=$1:d=$tail,aeval='val(0)*exp(-6.9*t/$t60)*gte(t,$pd)':c=mono"; }
+  echo "$fc,apad=pad_dur=$tail,asplit[a][b];[a]pan=stereo|c0=$gl*c0|c1=$gr*c0[dry];$(ir $((s + 101)))[il];$(ir $((s + 202)))[ir];[il][ir]amerge=inputs=2,lowpass=f=7000[irs];[b]pan=stereo|c0=c0|c1=c0[bs];[bs][irs]afir=irnorm=2,volume=-18dB[wet];[dry][wet]amix=inputs=2:normalize=0[out0]"
+}
+
+synth() {
+  local out="" dur="" seed=1 pan="" pitch=0 room=none fc tp gain
+  declare -A defdur=([whoosh]=1.2 [riser]=3 [hit]=1.5 [sub-drop]=2.5)
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --out) out=$2; shift 2 ;;
+      --dur) dur=$2; shift 2 ;;
+      --seed) seed=$2; shift 2 ;;
+      --pan) pan=$2; shift 2 ;;
+      --pitch) pitch=$2; shift 2 ;;
+      --room) room=$2; shift 2 ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "unknown option $1" ;;
+    esac
+  done
+  [[ -n $out ]] || { usage >&2; exit 2; }
+  [[ -z $pan || ($pan =~ ^-?[0-9]*\.?[0-9]+$ && $(echo "$pan >= -1 && $pan <= 1" | bc) == 1) ]] || die "--pan is -1..1, not '$pan'"
+  [[ $pitch =~ ^-?[0-9]*\.?[0-9]+$ && $(echo "$pitch >= -3 && $pitch <= 3" | bc) == 1 ]] || die "--pitch is -3..3 %, not '$pitch'"
+  [[ $room =~ ^(none|small|hall)$ ]] || die "--room is none|small|hall, not '$room'"
+  dur=${dur:-${defdur[$kind]}}
+  [[ $dur =~ ^[0-9]*\.?[0-9]+$ ]] && (($(echo "$dur >= 0.05 && $dur <= 60" | bc))) || die "--dur is 0.05..60 s, not '$dur'"
+  [[ $seed =~ ^[0-9]+$ ]] || die "--seed is a non-negative integer, not '$seed'"
+  fc=$(place "$dur" "$seed" "$pan" "$pitch" "$room")
+  tp=$(ffmpeg -hide_banner -nostats -f lavfi -i "$fc" -af ebur128=peak=true:framelog=quiet -f null - 2>&1 |
+    awk '/True peak:/{s=1} s&&/Peak:/{print $2; exit}')
+  [[ $tp =~ ^-?[0-9.]+$ ]] || die "ffmpeg could not measure the $kind graph" 1
+  gain=$(echo "-1 - ($tp)" | bc -l)
+  ffmpeg -hide_banner -loglevel error -y -f lavfi -i "$fc" -af "volume=${gain}dB" -ar $SR -c:a pcm_s24le \
+    -fflags +bitexact -flags:a +bitexact -map_metadata -1 "$out" || die "ffmpeg failed writing $out" 1
+  tp=$(ffmpeg -hide_banner -nostats -i "$out" -af ebur128=peak=true:framelog=quiet -f null - 2>&1 |
+    awk '/True peak:/{s=1} s&&/Peak:/{print $2; exit}')
+  echo "mv-sfx: $out kind=$kind dur=$dur seed=$seed pan=${pan:-none} pitch=$pitch room=$room true_peak=${tp}dBTP"
+}
+
+cues() {
+  local cam=${1:-} out="" fps=60 clip=camera
+  [[ -n $cam && $cam != -* ]] || { usage >&2; exit 2; }
+  shift
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --out) out=$2; shift 2 ;;
+      --fps) fps=$2; shift 2 ;;
+      --clip) clip=$2; shift 2 ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "unknown option $1" ;;
+    esac
+  done
+  [[ -n $out ]] || { usage >&2; exit 2; }
+  [[ -f $cam ]] || die "no camera dump $cam"
+  [[ $fps =~ ^[0-9]+(\.[0-9]+)?$ ]] || die "--fps is a number, not '$fps'"
+  python3 -I - "$cam" "$out" "$fps" "$clip" <<'PY'
+import json, math, sys
+cam, out, fps, clip = sys.argv[1], sys.argv[2], float(sys.argv[3]), sys.argv[4]
+try:
+    p = json.load(open(cam))["frames"]
+except (ValueError, KeyError, TypeError):
+    sys.exit(f"mv-sfx: {cam} is not a --dump-camera file (needs a 'frames' list)")
+if len(p) < 3:
+    sys.exit(f"mv-sfx: {cam} has {len(p)} frames; need 3")
+n = len(p)
+tgt = json.load(open(cam)).get("target") or [0, 0, 0]
+def placing(i):
+    a, b = min(i + 1, n - 1), max(i - 1, 0)
+    vel = [(x - y) for x, y in zip(p[a], p[b])]
+    sp = math.hypot(*vel) or 1
+    f = [t - c for t, c in zip(tgt, p[i])]
+    fl = math.hypot(*f) or 1
+    f = [c / fl for c in f]
+    r = [f[1], -f[0], 0.0]
+    rl = math.hypot(*r) or 1
+    lat = sum(x * y for x, y in zip(vel, r)) / rl / sp
+    app = sum(x * y for x, y in zip(vel, f)) / sp
+    return round(max(-0.8, min(0.8, lat)), 3), round(3 * app, 2)
+v = [math.dist(p[min(i + 1, n - 1)], p[max(i - 1, 0)]) / (min(i + 1, n - 1) - max(i - 1, 0)) * fps for i in range(n)]
+top = max(v)
+marks, events = {}, []
+if top > 0:
+    still = 0.02 * top
+    i = 0
+    while i < n:
+        if v[i] < still:
+            i += 1
+            continue
+        j = i
+        while j < n and v[j] >= still:
+            j += 1
+        seg = range(i, j)
+        peak = max(v[k] for k in seg)
+        flat = [k for k in seg if v[k] >= 0.99 * peak]
+        fast = [k for k in seg if v[k] >= 0.5 * peak]
+        w, h = flat[len(flat) // 2], min(j, n - 1)
+        m = len(events) // 2 + 1
+        for kind, f, extra in (("whoosh", w, {"speed": round(v[w], 4), "dur": round(max(0.3, len(fast) / fps), 3), **dict(zip(("pan", "pitch"), placing(w)))}), ("hit", h, {})):
+            name = f"{kind}{m}"
+            marks[name] = round(f / fps, 4)
+            events.append({"name": name, "kind": kind, "frame": f, "t": marks[name], **extra})
+        i = j
+json.dump({"source": cam, "fps": fps, "frames": n, "clips": {clip: {"marks": marks}}, "events": events}, open(out, "w"), indent=1)
+for e in events:
+    if e["kind"] == "whoosh":
+        print(f"{e['name']} t={e['t']} frame={e['frame']}  mv-sfx whoosh --dur {e['dur']} --pan {e['pan']} --pitch {e['pitch']} --out w.wav; mv-mix --sfx w.wav@cue:{e['name']}-{round(e['dur'] * 500)}")
+    else:
+        print(f"{e['name']} t={e['t']} frame={e['frame']}  mv-mix --sfx hit.wav@cue:{e['name']}")
+print(f"mv-sfx: {out} moves={len(events) // 2} frames={n} fps={fps:g}")
+PY
+}
+
+kind=${1:-}
+[[ $# -gt 0 ]] && shift
+case $kind in
+  whoosh|riser|hit|sub-drop) synth "$@" ;;
+  cues) cues "$@" ;;
+  -h|--help) usage ;;
+  *) usage >&2; exit 2 ;;
+esac

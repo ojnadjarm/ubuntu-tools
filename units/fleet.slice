@@ -1,0 +1,5 @@
+[Unit]
+Description=Fleet work, idle CPU weight against app.slice and session.slice; parent of fleet-heavy.slice (T775)
+
+[Slice]
+CPUWeight=idle

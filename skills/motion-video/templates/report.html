@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$title</title>
+<style>
+:root { --bg: #111418; --panel: #191d23; --line: #2a3039; --ink: #e6e8eb; --dim: #8b93a0; --pass: #4cc38a; --fail: #ff5d5d;
+  --m: #6cb6ff; --s: #f2b84b; --cut: #e6e8eb; --cue: #b58cff; --bar: #6cb6ff; --red: #ff5d5d; }
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-variant-numeric: tabular-nums; }
+main { max-width: 1600px; margin: 0 auto; padding: clamp(14px, 3vw, 40px); }
+h1 { margin: 0; font-size: clamp(20px, 2.4vw, 30px); font-weight: 650; overflow-wrap: anywhere; }
+h2 { margin: 0 0 10px; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); font-weight: 600; }
+.head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 4px; }
+.meta { color: var(--dim); overflow-wrap: anywhere; margin: 0 0 20px; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 4px; font-weight: 700; font-size: 14px; }
+.PASS { color: var(--pass); } .FAIL { color: var(--fail); } .INFO { color: var(--dim); }
+.badge.PASS { background: color-mix(in srgb, var(--pass) 18%, transparent); }
+.badge.FAIL { background: color-mix(in srgb, var(--fail) 18%, transparent); }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: clamp(12px, 2vw, 20px); margin: 0 0 16px; }
+.checks { display: grid; gap: 0; }
+.row { display: grid; grid-template-columns: 4.5em minmax(7em, 14em) 1fr; gap: 4px 14px; padding: 7px 0; border-top: 1px solid var(--line); }
+.row:first-child { border-top: 0; }
+.row b { font-weight: 700; } .row .what { color: var(--dim); } .row .val { overflow-wrap: anywhere; }
+.notes { margin: 0 0 12px; padding: 0; list-style: none; color: var(--dim); font-size: 14px; }
+.notes li::before { content: "- "; }
+.lane + .lane { margin-top: 18px; }
+.lane header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 14px; font-size: 14px; margin-bottom: 6px; }
+.lane header strong { font-weight: 600; }
+.key { color: var(--dim); display: flex; flex-wrap: wrap; gap: 2px 12px; }
+.key i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 5px; }
+.plot { position: relative; height: clamp(90px, 12vw, 160px); margin-left: 3.2em; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden; }
+.plot .y { position: absolute; left: -3.2em; width: 2.9em; text-align: right; transform: translateY(-50%); font-size: 11px; color: var(--dim); }
+.axis { position: relative; height: 18px; margin-left: 3.2em; font-size: 11px; color: var(--dim); }
+.axis span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.axis span:first-child { transform: none; } .axis span.end { transform: translateX(-100%); }
+svg .grid { stroke: var(--line); stroke-width: 1; }
+svg .cut { stroke: var(--cut); stroke-width: 1.5; opacity: .75; }
+svg .cue { stroke: var(--cue); stroke-width: 1.5; stroke-dasharray: 4 3; }
+svg .lim { stroke: var(--fail); stroke-width: 1; stroke-dasharray: 5 4; }
+svg .tgt { stroke: var(--pass); stroke-width: 1; stroke-dasharray: 5 4; }
+svg .m { fill: none; stroke: var(--m); stroke-width: 1.2; opacity: .7; }
+svg .s { fill: none; stroke: var(--s); stroke-width: 2; }
+svg .bar { fill: var(--bar); } svg .bar.over { fill: var(--fail); } svg .rbar { fill: var(--red); opacity: .6; }
+.marks { margin: 10px 0 0; color: var(--dim); font-size: 13px; overflow-wrap: anywhere; }
+.sheet { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(150px, 100%), 1fr)); gap: 8px; }
+.th { position: relative; display: block; aspect-ratio: $tile_ratio; background-image: url($sheet_uri); background-size: $bg_size;
+  background-repeat: no-repeat; border-radius: 4px; outline: 1px solid var(--line); }
+.th.bad { outline: 2px solid var(--fail); }
+.th:hover, .th:focus-visible { outline: 2px solid var(--m); }
+.th span { position: absolute; left: 4px; bottom: 4px; padding: 0 5px; border-radius: 3px; background: #000a; color: #fff; font-size: 12px; }
+.steps { display: grid; gap: 6px; }
+.step { display: grid; grid-template-columns: minmax(6em, 12em) 1fr 4.5em; gap: 10px; align-items: center; font-size: 14px; }
+.step .n { overflow-wrap: anywhere; color: var(--dim); } .step .t { text-align: right; }
+.step .b { height: 10px; background: var(--bar); border-radius: 2px; min-width: 2px; }
+.cpu { width: 100%; border-collapse: collapse; font-size: 14px; }
+.cpu th, .cpu td { padding: 5px 8px; border-top: 1px solid var(--line); text-align: right; white-space: nowrap; }
+.cpu th:first-child { text-align: left; color: var(--dim); font-weight: 400; white-space: normal; overflow-wrap: anywhere; }
+.cpu thead th { border-top: 0; color: var(--dim); font-weight: 600; }
+.cpu .sh { width: 40%; position: relative; }
+.cpu .sh .b { position: absolute; left: 8px; top: 50%; height: 6px; margin-top: -3px; background: var(--bar); border-radius: 2px; opacity: .35; max-width: calc(100% - 16px); }
+.cpu .untimed th, .cpu .untimed td { color: var(--s); }
+@media (max-width: 560px) {
+  .row { grid-template-columns: 4em 1fr; } .row .val { grid-column: 1 / -1; }
+  .step { grid-template-columns: 1fr 4em; } .step .b { grid-column: 1 / -1; grid-row: 2; }
+}
+</style>
+</head>
+<body>
+<main>
+<div class="head"><h1>$title</h1><span class="badge $verdict">$verdict</span></div>
+<p class="meta">$meta</p>
+<section><h2>Checks</h2><div class="checks">$checks</div></section>
+<section><h2>Timeline</h2>$notes$lanes</section>
+$sheet
+$steps
+$cpu
+</main>
+</body>
+</html>

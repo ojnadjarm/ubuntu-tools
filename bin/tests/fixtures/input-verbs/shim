@@ -1,0 +1,9 @@
+#!/bin/bash
+# Recording stand-in for ydotool, gdbus, xrandr and pc-win: one "<name> <args>" line per call in $SHIM_LOG.
+n="${0##*/}"
+echo "$n $*" >>"${SHIM_LOG:?SHIM_LOG unset}"
+case "$n" in
+  xrandr) echo "Screen 0: minimum 16 x 16, current 1366 x 768, maximum 32767 x 32767" ;;
+  pc-win) [ "${FAKE_FOCUS_RC:-0}" = 0 ] || { echo "no focused window" >&2; exit 1; } ;;
+esac
+exit 0

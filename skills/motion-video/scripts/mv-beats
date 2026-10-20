@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# mv-beats: beat grid, downbeats and onsets of a music bed as cues.json marks (essentia RhythmExtractor2013 + fine phase).
+set -euo pipefail
+VENV=${MV_BEATS_VENV:-$HOME/.local/opt/mv-beats}
+[[ -x $VENV/bin/python ]] || {
+  echo "mv-beats: no venv at $VENV; create it with:" >&2
+  echo "  uv venv -p 3.14 $VENV && VIRTUAL_ENV=$VENV uv pip install essentia==2.1b6.dev1438 numpy==2.5.4" >&2
+  exit 3
+}
+exec "$VENV/bin/python" -I - "$@" <<'PY'
+import argparse, json, os, sys
+
+USAGE = """usage: mv-beats MUSIC|beats.json [--out beats.json] [--every N] [--downbeats [--meter 4]] [--snap T[,T...]]
+  writes {tempo, beats:[{name:"beat12",t}], downbeats:[{name:"down3",t}], onsets:[{name:"onset7",t}],
+  clips:{beats:{src,duration,marks:{beat12:t,...}}}} to --out (or stdout without --snap); the clips block is the
+  cues.json shape: mv-mix --cues beats.json --sfx hit.wav@cue:beat12, Remotion/Motion Canvas read marks as-is.
+  beat names are 1-based grid indices and stay stable under --every N (keep every Nth beat).
+  --downbeats: first beat of each --meter bar, phase = the beat with the most low end (heuristic: check by ear).
+  --snap: one line per cut time 'T beatK t delta_ms' (nearest beat); MUSIC may be an earlier beats.json."""
+
+
+def load(path):
+    import essentia._essentia as E
+    E.keys = lambda: ["MonoLoader", "RhythmExtractor2013", "OnsetRate", "FrameCutter"]  # skip wrapping ~300 algorithms (2 s import)
+    import essentia.standard as es
+    return es, es.MonoLoader(filename=path, sampleRate=44100)()
+
+
+def novelty(y, sr, hop):
+    """Positive log-energy flux per hop-sample frame."""
+    import numpy as np
+    n = len(y) // hop
+    e = np.log1p(1e4 * (y[: n * hop].reshape(n, hop) ** 2).mean(1))
+    return np.maximum(0, np.diff(e, prepend=e[0]))
+
+
+def analyse(path, meter, want_down):
+    import numpy as np
+    es, y = load(path)
+    sr, hop = 44100, 44
+    bpm, beats, *_ = es.RhythmExtractor2013(method="degara")(y)
+    beats = np.asarray(beats, float)
+    nov = novelty(y, sr, hop)
+    idx = np.arange(len(beats))
+    if len(beats) > 3:
+        b, a = np.polyfit(idx, beats, 1)
+        if np.abs(beats - (a + b * idx)).max() < 0.025:
+            beats, bpm = a + b * idx, 60 / b
+    shifts = np.arange(-30, 31) / 1000
+    score = [nov[np.clip(((beats + s) * sr / hop).astype(int), 0, len(nov) - 1)].sum() for s in shifts]
+    beats = beats + shifts[int(np.argmax(score))]
+    beats = beats[(beats >= 0) & (beats < len(y) / sr)]
+    onsets = []
+    for t in es.OnsetRate()(y)[0]:
+        lo, hi = int((t - 0.025) * sr / hop), int((t + 0.025) * sr / hop)
+        lo = max(lo, 0)
+        if hi > lo:
+            onsets.append((lo + int(np.argmax(nov[lo:hi]))) * hop / sr)
+    down = []
+    if want_down and len(beats) >= meter:
+        low = np.convolve(y, np.ones(200) / 200, "same") ** 2
+        w = int(0.05 * sr)
+        energy = np.array([low[int(t * sr): int(t * sr) + w].sum() for t in beats])
+        phase = int(np.argmax([energy[p::meter].mean() for p in range(meter)]))
+        down = list(range(phase, len(beats), meter))
+    return dict(tempo=round(float(bpm), 3), beats=beats, down=down, onsets=onsets, duration=len(y) / sr)
+
+
+def build(path, r, every):
+    pts = lambda pre, ts: [{"name": f"{pre}{i + 1}", "t": round(float(t), 4)} for i, t in ts]
+    beats = pts("beat", [(i, t) for i, t in enumerate(r["beats"]) if i % every == 0])
+    downs = pts("down", list(enumerate(r["beats"][i] for i in r["down"])))
+    onsets = pts("onset", list(enumerate(r["onsets"])))
+    marks = {m["name"]: m["t"] for m in beats + downs + onsets}
+    return {"tempo": r["tempo"], "beats": beats, "downbeats": downs, "onsets": onsets,
+            "clips": {"beats": {"src": os.path.abspath(path), "duration": round(r["duration"], 4), "marks": marks}}}
+
+
+def main():
+    p = argparse.ArgumentParser(add_help=False)
+    p.add_argument("src", nargs="?")
+    p.add_argument("--out")
+    p.add_argument("--every", type=int, default=1)
+    p.add_argument("--downbeats", action="store_true")
+    p.add_argument("--meter", type=int, default=4)
+    p.add_argument("--snap")
+    p.add_argument("-h", "--help", action="store_true")
+    a, rest = p.parse_known_args()
+    if a.help:
+        print(USAGE); return 0
+    if rest or not a.src or a.every < 1 or a.meter < 1 or not os.path.isfile(a.src):
+        print(f"mv-beats: bad arguments {' '.join(rest)}".rstrip(), file=sys.stderr); print(USAGE, file=sys.stderr); return 2
+    if a.src.endswith(".json"):
+        doc = json.load(open(a.src))
+    else:
+        doc = build(a.src, analyse(a.src, a.meter, a.downbeats), a.every)
+    if a.out:
+        with open(a.out, "w") as f:
+            json.dump(doc, f, indent=1)
+        print(f"mv-beats: {a.out} tempo={doc['tempo']} beats={len(doc['beats'])} downbeats={len(doc['downbeats'])} onsets={len(doc['onsets'])}", file=sys.stderr)
+    if a.snap:
+        if not doc["beats"]:
+            print("mv-beats: no beats to snap to", file=sys.stderr); return 1
+        for c in (float(x) for x in a.snap.replace(",", " ").split()):
+            b = min(doc["beats"], key=lambda m: abs(m["t"] - c))
+            print(f"{c:g} {b['name']} {b['t']:.4f} {round((b['t'] - c) * 1000):+d}")
+    elif not a.out:
+        json.dump(doc, sys.stdout, indent=1); print()
+    return 0
+
+
+sys.exit(main())
+PY

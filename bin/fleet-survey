@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""fleet-survey [--since 24h] [--json] [--creative] [--shipped [all]] [--measure] — the numbers a planner gathers before writing a backlog, in one read-only run.
+
+Sections (measurements.txt shape, `### <name>` then the rows): failures, clusters (top 20), tokens by ticket,
+doctor (--quick, non-OK rows), fleet-ci (last log: score, reds), untested (bin/, lib/, hooks/ + skill scripts no test names),
+stale guides (>= 14 d), red check.json (in the window: still-red, then `window, heals <time>` journal-window
+CHECKs with no failing event since the fix; agent-verify's `verdict` when present), slow tests (top 5 by p50 of the last 5 runs, n < 3 tagged noisy below, plus outliers and a top CPU block by p50 cpu_s),
+flaky (red<->green flips with every input older than the runs; edited between = dev, edited since = unsure), perf cv,
+fresh suite (newest evidence/*/fresh-suite*.txt), claims, followups (when bin/followups exists: its counts line, then due rows).
+--creative adds one section per creative stack (motion-video, gamedev): scripts/tests counts, MV_* knobs (mv-knobs-doc's scope), newest 3 ~/drop
+previews, newest motion/*/out/build.json cpu_s + top 3 steps_cpu, last perf-cpp.csv row (gpu_ms_p50 + per pass), cpp-ci
+stages and the newest non-scratch cpp-ci row of log/creative-ci.jsonl with its stages; every data row ends with its age.
+--shipped adds one count line per wave backlog (research/*/*/BACKLOG.md) and its open/unticketed items; --shipped-all
+(or --shipped all) lists every item with its T-number (a brief header, else its `## k. T<n>` or `## T<n> ·`
+heading, else a history `(wave N #k)` tag; `T716*` = double use per `ticket-id dups`) and shipped/open (history.md).
+--measure adds what planners timed by hand (budget <= 90 s): ci reds alone (each FAIL file of the last fleet-ci log re-run
+alone with run.sh --only after quiet-gate --wait, rc + seconds), tmp residue (count/MB by kind in $FLEET_SURVEY_TMP, else /tmp),
+dup defs (names defined in >= 3 files of bin/lib/hooks/skill scripts), then serially after the rest: hooks p50 (the per-call
+settings.json hooks x5 on a fixture event, HARNESS_HOME/HOME/XDG_RUNTIME_DIR in a mktemp dir) and cli p50 (9 read-only CLIs x3).
+Env: FLEET_SURVEY_QUIET_WAIT (s, default 10), FLEET_SURVEY_CI_BUDGET (s for the quiet wait plus re-runs, default 50).
+Each section runs in parallel (doctor alone after them: its timing rows) and fails soft: one `n/a: <why>` row, never a traceback. Budget <= 30 s.
+Roots: HARNESS_HOME (else ~/agents) and AGENT_WORK (else ~/agent-work); CLIs run from $HARNESS_HOME/bin.
+Exit 0 always (2 on usage).
+"""
+import argparse, json, os, sys, time
+from concurrent.futures import ThreadPoolExecutor
+
+sys.path[:0] = [os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib')]
+from fleet_survey import (ci_reds, claims, cli_p50, clusters, doctor, dup_defs, failures, flaky, fleet_ci,  # noqa: E402
+                          followups, fresh, gamedev, hooks_p50, motion_video, perf, red_checks, shipped, slow_tests,
+                          stale, tmp_residue, tokens, untested)
+from fleet_survey.common import AG, NA, seconds  # noqa: E402
+
+SECTIONS = [
+    ('failures', failures), ('clusters', clusters), ('tokens by ticket', tokens), ('doctor', doctor),
+    ('fleet-ci', fleet_ci), ('untested', untested), ('stale guides', stale), ('red check.json', red_checks),
+    ('slow tests', slow_tests), ('flaky', flaky), ('perf cv', perf), ('fresh suite', fresh), ('claims', claims),
+] + ([('followups', followups)] if os.access(os.path.join(AG, 'bin', 'followups'), os.X_OK) else [])
+EXTRA = {'creative': [('creative motion-video', motion_video), ('creative gamedev', gamedev)], 'shipped': [('shipped', shipped)],
+         'measure': [('ci reds alone', ci_reds), ('tmp residue', tmp_residue), ('dup defs', dup_defs)]}
+SERIAL = {'measure': [('hooks p50', hooks_p50), ('cli p50', cli_p50)]}
+ALONE = {'doctor'}  # its usage rows time CLIs: run after the pool, never beside it
+
+
+def section(mod, ctx):
+    t0 = time.time()
+    try:
+        rows, ok = mod.rows(ctx), True
+    except NA as e:
+        rows, ok = [f'n/a: {e}'], False
+    except Exception as e:  # noqa: BLE001 — every section fails soft
+        rows, ok = [f'n/a: {type(e).__name__}: {e}'[:200]], False
+    return {'ok': ok, 'ms': int(1000 * (time.time() - t0)), 'rows': rows}
+
+
+def main():
+    ap = argparse.ArgumentParser(prog='fleet-survey', description=__doc__.split('\n\n', 1)[1],
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('--since', help='window for failures, clusters, tokens, red check.json (default 24h) and flaky (default 7d); 30m, 24h, 2d')
+    ap.add_argument('--json', action='store_true', help='one object {section: {ok, ms, rows}}')
+    ap.add_argument('--creative', action='store_true', help='add per-stack sections for motion-video and gamedev')
+    ap.add_argument('--shipped', nargs='?', const='open', choices=['open', 'all'],
+                    help='add per-wave counts and the open/unticketed backlog items (`all`: every item with its T-number and state)')
+    ap.add_argument('--shipped-all', dest='shipped', action='store_const', const='all', help='same as --shipped all')
+    ap.add_argument('--measure', action='store_true', help='add ci reds alone, hooks p50, cli p50, tmp residue, dup defs (<= 90 s)')
+    a = ap.parse_args()
+    a.flaky_since, a.since = a.since or '7d', a.since or '24h'
+    try:
+        seconds(a.since)
+    except ValueError:
+        ap.error(f'--since: want <n>m|h|d, got {a.since!r}')
+    t0 = a.t0 = time.time()
+    sections = SECTIONS + [x for k, v in EXTRA.items() if getattr(a, k) for x in v]
+    with ThreadPoolExecutor(len(sections)) as ex:
+        futs = {name: ex.submit(section, mod, a) for name, mod in sections if name not in ALONE}
+        res = {name: f.result() for name, f in futs.items()}
+    res.update({name: section(mod, a) for name, mod in sections if name in ALONE})
+    out = {name: res[name] for name, _ in sections}
+    for name, mod in [x for k, v in SERIAL.items() if getattr(a, k) for x in v]:
+        out[name] = section(mod, a)
+    if a.json:
+        json.dump(out, sys.stdout, indent=1)
+        print()
+        return
+    for name, s in out.items():
+        print(f'### {name}')
+        print('\n'.join(s['rows']))
+    print(f'--- {sum(s["ok"] for s in out.values())}/{len(out)} sections in {time.time() - t0:.1f} s (since {a.since})')
+
+
+if __name__ == '__main__':
+    main()

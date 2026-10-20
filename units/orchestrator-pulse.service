@@ -1,0 +1,9 @@
+[Unit]
+Description=Orchestrator pulse: one prompt into tmux claude when it sits idle (T170)
+
+[Service]
+Type=oneshot
+TimeoutStartSec=60
+Environment=PATH=%h/agents/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# The tmux session name comes from config.env via env.sh (ORCHESTRATOR_TMUX_SESSION).
+ExecStart=/bin/bash -c '. %h/agents/bin/env.sh; exec %h/agents/bin/orchestrator-pulse'

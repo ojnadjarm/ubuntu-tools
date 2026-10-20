@@ -1,0 +1,6 @@
+#!/bin/sh
+# Stub glslang: fails on a source named broken*, else writes the -o file.
+echo "glslang $*" >>"${STUB_CALLS:-/dev/null}"
+prev=""; for a in "$@"; do [ "$prev" = -o ] && o=$a; case $a in -*) ;; *) [ "$prev" = -o ] || src=$a ;; esac; prev=$a; done
+case ${src##*/} in broken*) echo "ERROR: $src:4: 'assign' : cannot convert from 'const highp 3-component vector of float' to 'layout( location=0) out highp 4-component vector of float'"; exit 1 ;; esac
+echo spv >"$o"
