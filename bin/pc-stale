@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# pc stale [--apply] — services still running on replaced libraries (needrestart): restart the safe ones, hold network/access/fleet units for the reboot.
+set -uo pipefail
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+
+pc_usage 'usage: pc stale [--apply]
+
+Reads `sudo -n needrestart -b -r l` (list only) and prints one line per NEEDRESTART-SVC unit:
+  restart <unit>                                 safe to restart now
+  held <unit> (<reason>: next reboot <date>)     network, access, session, fleet, not ours, or
+                                                 bluetooth with a connected device
+  nothing: no service on stale libraries
+Next reboot = agent@maintenance.timer next elapse. --apply runs
+`pc units restart <unit> --system --apply` per safe unit (each ledgered, rollback is restart),
+then re-reads needrestart and prints `after: N stale`. Exit 1 when needrestart is unreadable,
+a restart fails or a restarted unit is still stale.' "$@"
+
+PC_SUB='pc stale'
+pc_opt "$@"
+
+# needrestart_svc — the NEEDRESTART-SVC units, one per line; exit 1 when needrestart gave no batch output.
+needrestart_svc() {
+  local out
+  if [ -n "$PC_FIXTURE" ] && [ -x "$PC_FIXTURE/bin/needrestart" ]; then out=$(pc_cmd needrestart -b -r l)
+  else out=$(PC_ROOT_TIMEOUT=50 pc_root nice -n 19 needrestart -b -r l 2>/dev/null); fi
+  grep -q '^NEEDRESTART-VER:' <<<"$out" || return 1
+  sed -n 's/^NEEDRESTART-SVC: *//p' <<<"$out"
+}
+
+# hold_why <unit> — why the unit waits for the reboot, empty when it is safe to restart now.
+hold_why() {
+  local b=${1%.service}
+  [ -n "${PC_NOT_OURS:-}" ] && [[ $b =~ $PC_NOT_OURS ]] && { echo 'not ours'; return; }
+  case $b in
+    NetworkManager*|wpa_supplicant*|systemd-networkd*|systemd-resolved*) echo network;;
+    ssh*|tailscaled*|polkit*|systemd-logind|dbus*|user@*) echo access;;
+    gdm*|gnome-*) echo session;;
+    docker*|containerd*|dark-eye*|sentinel*|agent@*|"$ORCHESTRATOR_UNIT_BASE") echo fleet;;
+    bluetooth) [ -n "$(pc_cmd bluetoothctl devices Connected 2>/dev/null | grep '^Device ')" ] && echo 'bluetooth device connected';;
+  esac
+}
+
+SVC=$(needrestart_svc) || { echo 'pc stale: needrestart unreadable (sudo -n needrestart -b -r l)' >&2; exit 1; }
+if [ -z "$SVC" ]; then echo 'nothing: no service on stale libraries'; exit 0; fi
+
+next=$(pc_cmd systemctl --user show agent@maintenance.timer -p NextElapseUSecRealtime --value 2>/dev/null)
+next=$(date -d "$next" +%F 2>/dev/null) || next=unknown
+SAFE=()
+while IFS= read -r u; do
+  why=$(hold_why "$u")
+  if [ -n "$why" ]; then echo "held $u ($why: next reboot $next)"; else echo "restart $u"; SAFE+=("$u"); fi
+done <<<"$SVC"
+
+[ "${#SAFE[@]}" -eq 0 ] && exit 0
+if [ "$APPLY" != 1 ]; then echo "would: restart ${#SAFE[@]} units (--apply)"; exit 0; fi
+rc=0
+for u in "${SAFE[@]}"; do pc_cmd pc units restart "$u" --system --apply || { echo "pc stale: restart failed: $u" >&2; rc=1; }; done
+left=$(needrestart_svc) || { echo 'pc stale: needrestart unreadable after restarts' >&2; exit 1; }
+n=0; [ -n "$left" ] && n=$(wc -l <<<"$left")
+echo "after: $n stale${left:+: $(paste -sd' ' <<<"$left")}"
+for u in "${SAFE[@]}"; do grep -qxF -- "$u" <<<"$left" && { echo "pc stale: still stale after restart: $u" >&2; rc=1; }; done
+exit $rc

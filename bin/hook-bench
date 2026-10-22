@@ -1,0 +1,163 @@
+#!/usr/bin/python3 -I
+"""hook-bench: replay recent tool calls through each configured tool-call hook in a sandbox and print p50/p95 (T1073)."""
+import argparse, gzip, json, os, re, shutil, subprocess, sys, tempfile, threading, time
+
+TOOL_EVENTS = ('PreToolUse', 'PostToolUse', 'PostToolUseFailure')
+PATH_TOOLS = ('Read', 'Write', 'Edit', 'NotebookEdit')
+SESSION = 'hookbench'
+HOME = os.path.expanduser('~')
+
+
+def parse():
+    """Command-line options."""
+    p = argparse.ArgumentParser(prog='hook-bench', description=(
+        'Runs every PreToolUse/PostToolUse/PostToolUseFailure hook of settings.json (read only) on -n payloads '
+        'built from the newest actions.jsonl rows its matcher accepts, with HOME, HARNESS_HOME and XDG_RUNTIME_DIR '
+        'in a mktemp dir (audit rows never reach the real log). Prints `<hook> <event> n N p50 X ms p95 Y ms`. '
+        'Other events (SessionStart, Stop, Subagent*, PostCompact) are listed as skipped. Exit 1 with --max-p95 '
+        'when a hook is above it, 2 on usage.'))
+    p.add_argument('-n', type=int, default=50, help='payloads per hook (default 50)')
+    p.add_argument('--max-p95', type=float, help='exit 1 when any hook p95 is above this many ms')
+    p.add_argument('--settings', default=HOME + '/.claude/settings.json')
+    p.add_argument('--log', default=os.environ.get('HARNESS_HOME', HOME + '/agents') + '/log/actions.jsonl',
+                   help='recorded tool calls (falls back to <log>.1.gz when empty)')
+    a = p.parse_args()
+    if a.n < 1:
+        p.error('-n must be >= 1')
+    return a
+
+
+def hooks(settings):
+    """(event, matcher, command, timeout s, async) per tool-call hook, first event per command; and skipped names."""
+    cfg = json.load(open(settings)).get('hooks') or {}
+    out, seen, skipped = [], set(), []
+    for event, groups in cfg.items():
+        for g in groups:
+            for h in g.get('hooks', []):
+                cmd = h.get('command', '')
+                if h.get('type') != 'command' or not cmd:
+                    continue
+                if event not in TOOL_EVENTS:
+                    skipped.append(f'{name(cmd)}({event})')
+                elif cmd not in seen:
+                    seen.add(cmd)
+                    out.append((event, g.get('matcher', '*'), cmd, h.get('timeout', 60), bool(h.get('async'))))
+    return out, skipped
+
+
+def name(cmd):
+    """Short hook name: the script basename without its extension."""
+    return os.path.splitext(os.path.basename(cmd.split()[0]))[0]
+
+
+def rows(log):
+    """Recorded tool-call rows, newest first."""
+    out = []
+    for path, op in ((log, open), (log + '.1.gz', gzip.open)):
+        try:
+            with op(path, 'rt', errors='replace') as f:
+                out = [json.loads(line) for line in f if line.startswith('{')]
+        except (OSError, ValueError):
+            continue
+        if out:
+            break
+    return [r for r in reversed(out) if r.get('tool') and r['tool'] != 'TaskStop']
+
+
+def matches(matcher, tool):
+    """Claude Code matcher semantics: empty or * = all, else a regex over the tool name."""
+    return matcher in ('', '*') or re.fullmatch(matcher, tool) is not None
+
+
+def payload(row, event):
+    """A hook stdin event rebuilt from one audit row (the summary stands in for the main input field)."""
+    tool, s = row['tool'], row.get('summary', '')
+    ti = {'command': s} if tool == 'Bash' else {'file_path': s} if tool in PATH_TOOLS else {'description': s}
+    d = {'session_id': SESSION, 'transcript_path': '', 'cwd': row.get('cwd', HOME), 'hook_event_name': event,
+         'tool_name': tool, 'tool_input': ti}
+    if event == 'PostToolUse':
+        d['tool_response'] = {}
+    if event == 'PostToolUseFailure':
+        d['error'] = 'hook-bench'
+    return json.dumps(d)
+
+
+def payloads(all_rows, event, matcher, n):
+    """n payloads from the newest matching rows, cycled when fewer exist."""
+    pick = [r for r in all_rows if matches(matcher, r['tool'])][:n]
+    if not pick:
+        pick = [{'tool': matcher if re.fullmatch(r'\w+', matcher or '') else 'Bash', 'summary': 'true'}]
+    return [payload(pick[i % len(pick)], event) for i in range(n)]
+
+
+def sandbox_env(root):
+    """The environment hooks run in: every write seam points inside root."""
+    env = {k: v for k, v in os.environ.items() if k not in ('PCBENCH_RUN', 'CLAUDE_PROJECT_DIR')}
+    env.update(HOME=root, HARNESS_HOME=root + '/agents', XDG_RUNTIME_DIR=root + '/run', AGENT_NAME='hook-bench')
+    os.makedirs(root + '/agents/log')
+    os.makedirs(root + '/run', mode=0o700)
+    return env
+
+
+def expand(cmd):
+    """The command with $HOME/~ resolved to the real home, as Claude Code's shell would before the sandbox swap."""
+    cmd = cmd.replace('${HOME}', HOME).replace('$HOME', HOME)
+    return HOME + cmd[1:] if cmd.startswith('~/') else cmd
+
+
+def run_ms(cmd, stdin, env, cwd, timeout):
+    """Wall ms of one hook run; a Timer kill, since subprocess's own timeout polls in up to 50 ms sleeps."""
+    t = time.perf_counter_ns()
+    p = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, env=env, cwd=cwd,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    k = threading.Timer(timeout, p.kill)
+    k.start()
+    p.communicate(stdin.encode())
+    k.cancel()
+    return (time.perf_counter_ns() - t) / 1e6
+
+
+def pct(xs, p):
+    """Nearest-rank percentile."""
+    s = sorted(xs)
+    return s[max(0, min(len(s) - 1, -(-p * len(s) // 100) - 1))]
+
+
+def main():
+    a = parse()
+    try:
+        hs, skipped = hooks(a.settings)
+    except (OSError, ValueError) as e:
+        print(f'hook-bench: cannot read {a.settings}: {e}', file=sys.stderr)
+        return 2
+    recorded = rows(a.log)
+    root = tempfile.mkdtemp(prefix='hook-bench.')
+    over = 0
+    try:
+        env = sandbox_env(root)
+        for event, matcher, cmd, timeout, is_async in hs:
+            ps = payloads(recorded, event, matcher, a.n)
+            c = expand(cmd)
+            run_ms(c, ps[0], env, root, timeout)
+            ms = [run_ms(c, p, env, root, timeout) for p in ps]
+            p50, p95 = pct(ms, 50), pct(ms, 95)
+            over += a.max_p95 is not None and p95 > a.max_p95
+            print(f'{name(cmd)} {event} n {len(ms)} p50 {p50:.1f} ms p95 {p95:.1f} ms'
+                  + (' async' if is_async else ''))
+        try:
+            n_audit = sum(1 for _ in open(root + '/agents/log/actions.jsonl'))
+        except OSError:
+            n_audit = 0
+        if skipped:
+            print('skipped (not tool-call events): ' + ' '.join(skipped))
+        print(f'sandbox: {n_audit} audit rows, {len(recorded)} recorded calls read')
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    if over:
+        print(f'hook-bench: {over} hook(s) above --max-p95 {a.max_p95:g} ms', file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

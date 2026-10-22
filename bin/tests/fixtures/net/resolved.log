@@ -1,0 +1,8 @@
+Positive Trust Anchors:
+Using system hostname 'example-host'.
+Flushed all caches.
+Using degraded feature set UDP instead of UDP+EDNS0 for DNS server 192.0.2.1.
+Grace period over, resuming full feature set (UDP+EDNS0) for DNS server 192.0.2.1.
+Using degraded feature set UDP instead of UDP+EDNS0 for DNS server 192.0.2.1.
+Flushed all caches.
+Using degraded feature set UDP instead of UDP+EDNS0 for DNS server 192.0.2.53.

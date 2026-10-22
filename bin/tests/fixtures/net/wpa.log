@@ -1,0 +1,12 @@
+1792000000.100000 example-host wpa_supplicant[100]: wlo1: SME: Trying to authenticate with 02:00:00:00:00:0a (SSID='HomeNet' freq=5260 MHz)
+1792000001.100000 example-host wpa_supplicant[100]: wlo1: CTRL-EVENT-REGDOM-CHANGE init=COUNTRY_IE type=COUNTRY alpha2=ES
+1792000001.200000 example-host wpa_supplicant[100]: wlo1: CTRL-EVENT-CONNECTED - Connection to 02:00:00:00:00:0a completed [id=0 id_str=]
+1792000299.000000 example-host wpa_supplicant[100]: wlo1: WNM: Disassociation Imminent - Disassociation Timer 255
+1792000300.100000 example-host wpa_supplicant[100]: wlo1: Trying to associate with 02:00:00:00:00:0b (SSID='HomeNet' freq=2437 MHz)
+1792000300.200000 example-host wpa_supplicant[100]: wlo1: CTRL-EVENT-REGDOM-CHANGE init=CORE type=WORLD
+1792000301.000000 example-host wpa_supplicant[100]: wlo1: CTRL-EVENT-CONNECTED - Connection to 02:00:00:00:00:0b completed [id=0 id_str=]
+1792000600.200000 example-host wpa_supplicant[100]: wlo1: CTRL-EVENT-REGDOM-CHANGE init=CORE type=WORLD
+1792000601.000000 example-host wpa_supplicant[100]: wlo1: CTRL-EVENT-CONNECTED - Connection to 02:00:00:00:00:0a completed [id=0 id_str=]
+1792002000.000000 example-host wpa_supplicant[100]: wlo1: CTRL-EVENT-CONNECTED - Connection to 02:00:00:00:00:0c completed [id=0 id_str=]
+1792004000.000000 example-host wpa_supplicant[100]: wlo1: CTRL-EVENT-DISCONNECTED bssid=02:00:00:00:00:0c reason=8
+1792005000.000000 example-host wpa_supplicant[100]: wlo1: CTRL-EVENT-CONNECTED - Connection to 02:00:00:00:00:0a completed [id=0 id_str=]

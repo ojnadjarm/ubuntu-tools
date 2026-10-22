@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""char3d build|render|qa SPEC: every Blender run under `heavy`, renders under the render lock."""
+import argparse
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+
+from c3d import spec as specmod  # noqa: E402
+
+TICKET = os.environ.get('CHAR3D_TICKET', 'T1032')
+LOCK = Path(os.path.expanduser(os.environ.get('CHAR3D_LOCK', '~/agent-work/research/2026-10-20/T1032/render.lock')))
+RES = Path(os.path.expanduser(os.environ.get('CHAR3D_BLENDER_RES', '~/.local/share/char3d/blender-res')))
+BLENDER = os.environ.get('CHAR3D_BLENDER', 'blender')
+STAGES = ['body', 'face', 'hair', 'garments', 'props', 'materials', 'detail', 'retopo', 'uv', 'bake', 'texture', 'haircards',
+          'rig', 'facerig', 'motion', 'lookdev', 'secondary', 'export', 'lod']
+
+
+def heavy(argv, log, lock=False):
+    pre = ['heavy', 'run', '--ticket', TICKET, '--'] + (['flock', str(LOCK)] if lock else [])
+    env = dict(os.environ, BLENDER_USER_RESOURCES=str(RES))
+    with open(log, 'w') as f:
+        rc = subprocess.run(pre + argv, stdout=f, stderr=subprocess.STDOUT, env=env).returncode
+    if rc:
+        print(''.join(open(log).readlines()[-25:]), file=sys.stderr)
+        sys.exit(f'char3d: step failed (exit {rc}), log {log}')
+
+
+def blender(cmd, a, out, blend=None, lock=False):
+    argv = [BLENDER, '-b', '--factory-startup', '-noaudio'] + ([str(blend)] if blend else [])
+    argv += ['--python-exit-code', '1', '--python', str(HERE / 'c3d' / 'pipeline.py'), '--', cmd, str(a.spec), str(out)]
+    argv += ['--draft'] if a.draft else []
+    argv += ['--until', a.until] if getattr(a, 'until', None) else []
+    argv += ['--shots', a.shots] if getattr(a, 'shots', None) else []
+    argv += ['--max-frames', str(a.max_frames)] if getattr(a, 'max_frames', None) else []
+    heavy(argv, out / 'logs' / f'{cmd}.log', lock)
+
+
+def main():
+    ap = argparse.ArgumentParser(prog='char3d', description=__doc__)
+    ap.add_argument('cmd', choices=['build', 'render', 'qa'])
+    ap.add_argument('spec', type=Path)
+    ap.add_argument('--out', type=Path, help='default ~/agent-work/char3d/<id>')
+    ap.add_argument('--draft', action='store_true', help='look.size/samples "draft" tier (960x540, 16 spp)')
+    ap.add_argument('--until', choices=STAGES, help='build: stop after this stage')
+    ap.add_argument('--shots', help='render: comma list of spec render ids')
+    ap.add_argument('--max-frames', type=int, help='render: cap frames per shot (iteration, lane checks)')
+    ap.add_argument('--keep-frames', action='store_true', help='render: keep the PNG sequences')
+    a = ap.parse_args()
+    a.spec = a.spec.resolve()
+    try:
+        spec = specmod.load(a.spec)
+    except ValueError as e:
+        sys.exit(f'char3d: {e}')
+    out = (a.out or Path('~/agent-work/char3d').expanduser() / spec['id']).resolve()
+    (out / 'logs').mkdir(parents=True, exist_ok=True)
+    RES.mkdir(parents=True, exist_ok=True)
+    blend = out / f'{spec["id"]}.blend'
+    if a.cmd != 'build' and not blend.exists():
+        sys.exit(f'char3d: {blend} missing, run `char3d build` first')
+    t = time.perf_counter()
+    if a.cmd == 'build':
+        blender('build', a, out)
+        print(f'char3d build: {time.perf_counter() - t:.1f} s -> {blend}')
+    elif a.cmd == 'render':
+        blender('render', a, out, blend, lock=True)
+        heavy([sys.executable, str(HERE / 'c3d' / 'encode.py'), str(out)] + (['--keep-frames'] if a.keep_frames else []),
+              out / 'logs' / 'encode.log')
+        print(open(out / 'logs' / 'encode.log').read().strip())
+        print(f'char3d render: {time.perf_counter() - t:.1f} s -> {out / "renders"}')
+    else:
+        blender('qa', a, out, blend)
+        rc = subprocess.run([sys.executable, str(HERE / 'c3d' / 'qa_metrics.py'), str(out)]).returncode
+        print(f'char3d qa: {time.perf_counter() - t:.1f} s -> {out / "qa.json"}')
+        sys.exit(rc)
+
+
+if __name__ == '__main__':
+    main()

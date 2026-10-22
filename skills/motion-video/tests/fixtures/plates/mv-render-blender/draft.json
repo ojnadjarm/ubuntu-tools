@@ -1,0 +1,19 @@
+{
+ "frames_on_disk": 3,
+ "rendered": 3,
+ "skipped": 0,
+ "total_s": 0.72,
+ "draft": true,
+ "resume": false,
+ "mean_s": 0.088,
+ "p95_s": 0.118,
+ "render_s": 0.064,
+ "composite_s": 0.0,
+ "write_s": 0.023,
+ "bit_depth": 8,
+ "per_frame_s": {
+  "1": 0.118,
+  "2": 0.072,
+  "3": 0.073
+ }
+}

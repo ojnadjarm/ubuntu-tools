@@ -1,0 +1,9 @@
+[Unit]
+Description=Hourly idle check of the shared Selenium container (pc docker idle-stop selenium --after 2h)
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

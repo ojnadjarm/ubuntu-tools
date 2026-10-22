@@ -1,0 +1,357 @@
+{
+  "schema": "char3d/2",
+  "id": "darksaddler",
+  "name": "DarkSaddler",
+  "notes": "AAA game-character mage (Diablo IV / Baldur's Gate 3 / Elden Ring / WoW tier): realistic elder anatomy at 7.75 heads, layered robe with sleeves, embroidery and gold trim wear, creased drooping hat with gold band, carved staff head holding a violet crystal, belt, pouches, boots. Game-ready: LOD0 30-80k tris, LOD1/2, 2-4K baked PBR sets, game skeleton, glTF + FBX. T702 gives identity only (elder wizard, palette, items), never its proportions, shapes or poses.",
+  "reference": {
+    "identity": "~/agent-work/research/2026-10-19/T702/darksaddler.py",
+    "palette": "~/agent-work/research/2026-10-19/T702/rig.py",
+    "sprites": "~/projects/personal/ai-avatars/godot/agent-world/assets/characters/darksaddler*.png",
+    "bar": "~/agent-work/briefs/T1032-char3d-darksaddler.md (section Bar)"
+  },
+  "materials": {
+    "skin": {"kind": "skin", "color": "#d89a74", "roughness": 0.55},
+    "robe": {"kind": "cloth", "color": "#5c3889", "roughness": 0.8, "sheen": 0.5},
+    "hat": {"kind": "cloth", "color": "#41286b", "roughness": 0.8, "sheen": 0.4},
+    "inner": {"kind": "cloth", "color": "#253265", "roughness": 0.85, "sheen": 0.3},
+    "gold": {"kind": "metal", "color": "#f2c45a", "roughness": 0.3},
+    "silver": {"kind": "metal", "color": "#c8dbf0", "roughness": 0.25},
+    "beard": {"kind": "hair", "color": "#dcdfe6", "roughness": 0.45},
+    "wood": {"kind": "wood", "color": "#6a4232", "roughness": 0.6},
+    "boot": {"kind": "leather", "color": "#3a2428", "roughness": 0.5},
+    "crystal": {"kind": "emissive", "color": "#be8cff", "emission": {"base": 3.0, "amp": 2.0, "period_s": 2.0}},
+    "eye": {"kind": "eye", "color": "#5a76ac"},
+    "leather": {"kind": "leather", "color": "#4a2e22", "roughness": 0.55},
+    "embroidery": {"kind": "metal", "color": "#d9ae52", "roughness": 0.4}
+  },
+  "body": {
+    "base": "mpfb",
+    "height_m": 1.78,
+    "macros": {"gender": 1.0, "age": 0.95, "height": 0.7, "muscle": 0.35, "weight": 0.5},
+    "targets": {"nose_long": 0.6, "brow_heavy": 0.5, "lower_face_narrow": 0.3, "elder_sag": 0.4},
+    "skin": "skin",
+    "hide_under": ["robe", "boots"],
+    "heads_tall": 7.75
+  },
+  "face": {
+    "eyes": {"iris": "#5c6f80", "iris_outer": "#2f3a48", "sclera": "#ddd6cc", "pupil": 0.35, "cornea": "fresnel_gloss"},
+    "lids": "bones",
+    "brows": {"material": "beard", "style": "bushy"},
+    "shape_packs": ["faceunits01", "visemes02"],
+    "expressions": {
+      "neutral": {},
+      "smile": {"mouthSmileLeft": 1.0, "mouthSmileRight": 1.0, "cheekSquintLeft": 0.7, "cheekSquintRight": 0.7, "eyeSquintLeft": 0.45, "eyeSquintRight": 0.45, "browInnerUp": 0.15},
+      "stern": {"browDownLeft": 0.9, "browDownRight": 0.9, "mouthPressLeft": 0.6, "mouthPressRight": 0.6, "eyeSquintLeft": 0.4, "eyeSquintRight": 0.4, "mouthFrownLeft": 0.3, "mouthFrownRight": 0.3},
+      "surprise": {"browInnerUp": 1.0, "browOuterUpLeft": 1.0, "browOuterUpRight": 1.0, "eyeWideLeft": 0.9, "eyeWideRight": 0.9, "jawOpen": 0.5},
+      "anger": {"browDownLeft": 1.0, "browDownRight": 1.0, "noseSneerLeft": 0.8, "noseSneerRight": 0.8, "mouthUpperUpLeft": 0.6, "mouthUpperUpRight": 0.6, "eyeSquintLeft": 0.5, "eyeSquintRight": 0.5, "mouthStretchLeft": 0.4, "mouthStretchRight": 0.4, "jawForward": 0.3},
+      "sly": {"mouthSmileLeft": 0.9, "browOuterUpLeft": 0.8, "browDownRight": 0.6, "eyeSquintRight": 0.6, "eyeLookOutLeft": 0.4, "eyeLookInRight": 0.4},
+      "thinking": {"browInnerUp": 0.5, "browDownRight": 0.5, "mouthPucker": 0.5, "mouthRollLower": 0.5, "mouthLeft": 0.3, "eyeLookUpLeft": 0.5, "eyeLookUpRight": 0.5},
+      "sad": {"browInnerUp": 1.0, "mouthFrownLeft": 1.0, "mouthFrownRight": 1.0, "mouthShrugLower": 0.4, "eyeLookDownLeft": 0.35, "eyeLookDownRight": 0.35, "eyeBlinkLeft": 0.2, "eyeBlinkRight": 0.2}
+    },
+    "visemes": {
+      "sil": {},
+      "PP": {"mouthClose": 0.6, "mouthPressLeft": 0.4, "mouthPressRight": 0.4},
+      "FF": {"mouthRollLower": 0.6, "mouthUpperUpLeft": 0.2, "mouthUpperUpRight": 0.2, "jawOpen": 0.1},
+      "TH": {"jawOpen": 0.15, "tongueOut": 0.4},
+      "DD": {"jawOpen": 0.2, "mouthStretchLeft": 0.2, "mouthStretchRight": 0.2},
+      "kk": {"jawOpen": 0.25, "mouthStretchLeft": 0.15, "mouthStretchRight": 0.15},
+      "CH": {"jawOpen": 0.15, "mouthFunnel": 0.5, "mouthShrugUpper": 0.2},
+      "SS": {"jawOpen": 0.1, "mouthStretchLeft": 0.35, "mouthStretchRight": 0.35},
+      "nn": {"jawOpen": 0.15, "mouthClose": 0.2},
+      "RR": {"jawOpen": 0.15, "mouthFunnel": 0.3, "mouthPucker": 0.2},
+      "aa": {"jawOpen": 0.55, "mouthLowerDownLeft": 0.3, "mouthLowerDownRight": 0.3},
+      "E": {"jawOpen": 0.3, "mouthStretchLeft": 0.4, "mouthStretchRight": 0.4},
+      "ih": {"jawOpen": 0.2, "mouthSmileLeft": 0.2, "mouthSmileRight": 0.2},
+      "oh": {"jawOpen": 0.4, "mouthFunnel": 0.6},
+      "ou": {"jawOpen": 0.15, "mouthPucker": 0.8}
+    },
+    "gaze": {"saccades_per_s": 2.0, "blinks_per_s": 0.4, "convergence_offset_deg": 1.0, "lid_follow": 0.5}
+  },
+  "hair": [
+    {
+      "id": "beard",
+      "kind": "beard",
+      "material": "beard",
+      "attach": "jaw",
+      "length_m": 0.42,
+      "width_m": 0.14,
+      "render": "curves",
+      "strands": 4000
+    },
+    {
+      "id": "moustache",
+      "kind": "moustache",
+      "material": "beard",
+      "attach": "head",
+      "length_m": 0.09,
+      "width_m": 0.1,
+      "render": "curves",
+      "strands": 800
+    },
+    {"id": "scalp", "kind": "scalp", "material": "beard", "attach": "head", "length_m": 0.12, "render": "cards"}
+  ],
+  "garments": [
+    {
+      "id": "inner_robe",
+      "kind": "robe",
+      "material": "inner",
+      "layer": 0,
+      "attach": "hips",
+      "profile": [[0.15, 1.46], [0.19, 1.3], [0.2, 1.0], [0.215, 0.4], [0.225, 0.04]]
+    },
+    {
+      "id": "robe",
+      "kind": "robe",
+      "material": "robe",
+      "layer": 1,
+      "attach": "hips",
+      "profile": [[0.17, 1.48], [0.22, 1.32], [0.23, 1.0], [0.27, 0.55], [0.32, 0.2], [0.35, 0.03]],
+      "params": {
+        "front_opening_m": 0.07,
+        "folds": 8,
+        "fold_depth_m": 0.032,
+        "gathers": 14,
+        "gather_depth_m": 0.01,
+        "cinch": 0.12,
+        "blouse_m": 0.018,
+        "sleeve_bell_m": 0.11,
+        "sleeves": true,
+        "sleeve_length_m": 0.62,
+        "drape": "sim_once"
+      },
+      "trim": {"material": "gold", "width_m": 0.035, "edges": ["hem", "cuffs", "front", "collar"]},
+      "decals": [
+        {"kind": "scroll", "material": "embroidery", "region": "front_border", "wave_m": 0.12, "thread_m": 0.007},
+        {"kind": "scroll", "material": "embroidery", "region": "hem_band", "wave_m": 0.12, "thread_m": 0.007}
+      ]
+    },
+    {
+      "id": "mantle",
+      "kind": "mantle",
+      "material": "hat",
+      "layer": 2,
+      "attach": "chest",
+      "trim": {"material": "gold", "width_m": 0.025, "edges": ["hem"]}
+    },
+    {
+      "id": "belt",
+      "kind": "belt",
+      "material": "leather",
+      "layer": 2,
+      "attach": "hips",
+      "params": {"buckle_material": "gold", "width_m": 0.05}
+    },
+    {
+      "id": "pouch_l",
+      "kind": "pouch",
+      "material": "leather",
+      "layer": 3,
+      "attach": "hips",
+      "params": {"side": "L", "size_m": [0.12, 0.05, 0.14]}
+    },
+    {
+      "id": "pouch_r",
+      "kind": "pouch",
+      "material": "leather",
+      "layer": 3,
+      "attach": "hips",
+      "params": {"side": "R", "size_m": [0.09, 0.04, 0.11]}
+    },
+    {
+      "id": "hat",
+      "kind": "hat",
+      "material": "hat",
+      "attach": "head",
+      "params": {
+        "height_m": 0.55,
+        "brim_radius_m": 0.27,
+        "brim_tilt_deg": 9,
+        "tip_bend_deg": 20,
+        "base_radius_m": 0.14,
+        "crease_deg": 18,
+        "droop": 0.75,
+        "crease_at": 0.5
+      },
+      "trim": {"material": "gold", "width_m": 0.04, "edges": ["band"]}
+    },
+    {"id": "boots", "kind": "boots", "material": "boot", "attach": "foot.L", "params": {"pair": true, "cuff_m": 0.12}}
+  ],
+  "props": [
+    {
+      "id": "staff",
+      "kind": "staff",
+      "attach": "hand.L",
+      "length_m": 1.75,
+      "grip": 0.58,
+      "parts": [
+        {"id": "shaft", "kind": "shaft", "material": "wood", "size_m": 0.026},
+        {"id": "ferrule", "kind": "ferrule", "material": "silver", "size_m": 0.03},
+        {"id": "binding", "kind": "binding", "material": "leather", "size_m": 0.03},
+        {"id": "knob", "kind": "knob", "material": "wood", "size_m": 0.032},
+        {"id": "claws", "kind": "claw", "material": "silver", "count": 3, "size_m": 0.11},
+        {"id": "crystal", "kind": "crystal", "material": "crystal", "size_m": 0.1}
+      ]
+    }
+  ],
+  "detail": {
+    "subdiv": {"draft": 1, "final": 4},
+    "layers": [
+      {"kind": "folds", "parts": ["inner_robe", "robe", "mantle"], "depth_m": 0.012},
+      {"kind": "weave", "parts": ["inner_robe", "robe", "mantle", "hat"], "depth_m": 0.0004},
+      {"kind": "embroidery", "parts": ["robe", "hat"], "material": "embroidery", "depth_m": 0.0015},
+      {"kind": "seams", "parts": ["inner_robe", "robe", "mantle", "hat", "belt", "boots"], "depth_m": 0.001},
+      {"kind": "stitches", "parts": ["belt", "boots"], "depth_m": 0.0005},
+      {"kind": "wear", "parts": ["robe", "hat", "boots", "belt"], "depth_m": 0.0005},
+      {"kind": "pores", "parts": ["body"], "depth_m": 0.0002},
+      {"kind": "wrinkles", "parts": ["body"], "depth_m": 0.0015},
+      {"kind": "carve", "parts": ["staff.knob", "staff.claws"], "depth_m": 0.002},
+      {"kind": "grain", "parts": ["staff.shaft", "staff.knob"], "depth_m": 0.0005},
+      {"kind": "facets", "parts": ["staff.crystal"], "depth_m": 0.0}
+    ]
+  },
+  "retopo": {"default": "construction"},
+  "uv": {
+    "default_set": "face",
+    "margin_px": 8,
+    "sets": [
+      {"id": "body", "size": 4096, "parts": ["body"], "texel_px_cm": 10.24},
+      {"id": "robe", "size": 4096, "parts": ["inner_robe", "robe", "mantle"], "texel_px_cm": 5.12},
+      {"id": "hat", "size": 2048, "parts": ["hat"], "texel_px_cm": 5.12},
+      {"id": "gear", "size": 2048, "parts": ["belt", "pouch_l", "pouch_r", "boots"], "texel_px_cm": 5.12},
+      {"id": "staff", "size": 2048, "parts": ["staff"], "texel_px_cm": 5.12},
+      {"id": "hair", "size": 2048, "parts": ["beard", "moustache", "scalp", "beard.cards", "moustache.cards"]},
+      {"id": "face", "size": 2048, "parts": [], "texel_px_cm": 10.24}
+    ]
+  },
+  "bake": {
+    "mode": "cycles",
+    "maps": ["normal", "ao", "curvature", "albedo", "roughness", "metallic", "emissive"],
+    "size": {"draft": 256},
+    "samples": {"ao": 16},
+    "cage_m": 0.01
+  },
+  "textures": {
+    "use_baked": true,
+    "paint": "none",
+    "detail_normals": [
+      {"kind": "weave", "material": "robe", "scale": 400, "strength": 0.3},
+      {"kind": "weave", "material": "inner", "scale": 400, "strength": 0.3},
+      {"kind": "weave", "material": "hat", "scale": 350, "strength": 0.3},
+      {"kind": "pores", "material": "skin", "scale": 900, "strength": 0.2},
+      {"kind": "leather", "material": "leather", "scale": 120, "strength": 0.4},
+      {"kind": "leather", "material": "boot", "scale": 120, "strength": 0.4},
+      {"kind": "wood", "material": "wood", "scale": 60, "strength": 0.4},
+      {"kind": "scratches", "material": "gold", "scale": 80, "strength": 0.2}
+    ]
+  },
+  "rig": {"generator": "rigify", "metarig": "human", "ik_stretch": 0.0, "weights": "capsule"},
+  "motion": {
+    "fps": 30,
+    "clips": [
+      {"id": "idle", "type": "idle", "seconds": 4.0, "loop": true},
+      {
+        "id": "walk",
+        "type": "walk",
+        "seconds": 2.4,
+        "loop": true,
+        "gait": {
+          "cycle_s": 1.2,
+          "step_m": 0.3,
+          "stance": 0.64,
+          "heel_roll": 0.35,
+          "lean_deg": 6,
+          "sway_m": 0.025,
+          "bob_m": 0.018,
+          "hip_yaw_deg": 6,
+          "shoulder_yaw_deg": 7,
+          "arm_swing": 0.32,
+          "staff_contact": "far_foot"
+        }
+      },
+      {
+        "id": "talk",
+        "type": "talk",
+        "seconds": 4.0,
+        "loop": false,
+        "line": "Patience, traveller. The stars have not finished speaking.",
+        "expression": "sly"
+      },
+      {
+        "id": "cast",
+        "type": "beats",
+        "seconds": 2.4,
+        "loop": false,
+        "beats": [
+          {"name": "anticipation", "frames": 9, "crouch_m": 0.05, "staff": "back"},
+          {"name": "raise", "frames": 12, "staff": "high", "glow": 0.7},
+          {"name": "slam", "frames": 4, "staff": "ground", "glow": 1.0, "burst": 1.0},
+          {"name": "hold", "frames": 12, "glow": 0.85},
+          {"name": "settle", "frames": 15, "glow": 0.4}
+        ]
+      }
+    ]
+  },
+  "secondary": {
+    "cloth": [
+      {"garment": "robe", "quality": 5, "collision_quality": 2, "self_collision": false, "air_damping": 10, "cage_verts": 2500}
+    ],
+    "springs": [
+      {"target": "hat", "bones": 5, "k": 120, "c": 15, "preroll_periods": 3},
+      {"target": "beard", "bones": 4, "k": 200, "c": 20, "preroll_periods": 3},
+      {"target": "moustache", "bones": 2, "k": 260, "c": 24, "preroll_periods": 3}
+    ],
+    "pulses": [{"material": "crystal", "light_w": 200}]
+  },
+  "look": {
+    "name": "cinematic",
+    "engine": "BLENDER_EEVEE",
+    "view": "AgX",
+    "raytrace": false,
+    "samples": {"draft": 16, "final": 32, "closeup": 64},
+    "size": {"draft": [960, 540], "final": [1920, 1080]}
+  },
+  "renders": [
+    {"id": "turntable", "kind": "turntable", "seconds": 6, "target": "chest"},
+    {"id": "closeup_talk", "kind": "closeup", "clip": "talk", "lens_mm": 85, "fstop": 2.8, "target": "head"},
+    {"id": "walk", "kind": "clip", "clip": "walk", "seconds": 4.8},
+    {"id": "idle", "kind": "clip", "clip": "idle"},
+    {"id": "cast", "kind": "clip", "clip": "cast"},
+    {"id": "expressions", "kind": "still", "lens_mm": 85, "target": "head"}
+  ],
+  "asset": {"lods": [0.5, 0.25], "skeleton": "game", "max_influences": 4},
+  "export": {"gltf": true, "morphs": true, "actions": true, "hair": "cards", "fbx": true},
+  "qa": {
+    "thresholds": {
+      "plant_drift_cm": 1.0,
+      "penetration_cm": 0.5,
+      "float_cm": 0.5,
+      "jitter_mm": 3.0,
+      "loop_seam_mm": 3.0,
+      "loop_pop_ratio": 1.5,
+      "self_x_pairs": 0,
+      "layer_poke_mm": 0.0,
+      "garment_depth_mm": 5.0,
+      "lid_visible_pct": 0.0,
+      "noise_sigma": 1.0,
+      "luma_min": 0.25,
+      "luma_max": 0.75,
+      "framing_ndc": 0.05,
+      "mp4_mb": 20,
+      "gltf_errors": 0,
+      "lod0_tris_min": 30000,
+      "lod0_tris_max": 80000,
+      "max_influences": 4,
+      "lod1_ratio": 0.55,
+      "lod2_ratio": 0.3,
+      "quads_pct_min": 95,
+      "uv_outside": 0,
+      "uv_overlap_faces": 0,
+      "texel_px_cm_hero": 10.24,
+      "texel_px_cm_min": 5.12,
+      "albedo_out_pct": 1.0,
+      "normal_bias": 0.02,
+      "heads_tall_min": 7.5,
+      "heads_tall_max": 8.0
+    }
+  }
+}

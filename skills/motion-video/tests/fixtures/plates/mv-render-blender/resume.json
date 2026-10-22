@@ -1,0 +1,15 @@
+{
+ "frames_on_disk": 3,
+ "rendered": 0,
+ "skipped": 3,
+ "total_s": 0.45,
+ "draft": false,
+ "resume": true,
+ "mean_s": 0.0,
+ "p95_s": 0.0,
+ "render_s": 0.0,
+ "composite_s": 0.0,
+ "write_s": 0.0,
+ "bit_depth": 8,
+ "per_frame_s": {}
+}

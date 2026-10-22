@@ -1,0 +1,275 @@
+#!/usr/bin/env bash
+# pc conf put <path> --from <file>|--line 'k=v'… [--reload <unit>|--daemon-reload] [--user] [--apply] | get <path> — ledgered, undoable config drop-in writer.
+# shellcheck disable=SC2034
+set -uo pipefail
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+SELF="$BIN/pc-conf"
+. "$BIN/pclib.sh"
+
+pc_usage 'usage: pc conf put <path> (--from <file> | --line <text> [--line <text>…]) [--reload <unit> | --daemon-reload] [--user] [--apply]
+       pc conf get <path>
+
+put   replace <path> with the new content as one ledgered change. Without --apply prints
+      "would: <path> <old> → <new> (+A -R)" and the diff -u; with it saves the old content (or its
+      absence) and the new one under $PC_CONF_BACKUP (default ~/agents/backups/conf)/<stamp>-<name>.XXXXXX/,
+      writes (sudo outside $HOME), runs `sudo etckeeper commit` for /etc, then the reload
+      (`systemctl [--user] reload-or-restart <unit>` or `daemon-reload`), re-reads the file and
+      prints "rollback: pc undo <id>" (the undo restores the old bytes or removes the file).
+get   print the file and the ledger id of its last pc conf change (same path rules as put).
+
+Allowed: /etc/systemd/{system,user}/*.d/*.conf, /etc/systemd/*.conf.d/*.conf, /etc/sysctl.d/*.conf,
+/etc/tmpfiles.d/*.conf, /etc/netdata/**, /etc/default/grub.d/*.cfg, ~/.config/systemd/user/*.d/*.conf,
+/var/lib/fwupd/remotes.d/lvfs.conf (fwupd mutable override of the packaged lvfs remote),
+/etc/modprobe.d/90-agents-*.conf (read at the next module load or boot; blacklist/install lines for a
+storage, net or input driver, or a module modinfo cannot find, refused),
+/etc/NetworkManager/conf.d/zz-agents-*.conf (only `[keyfile] unmanaged-devices[+]=interface-name:<veth|br-|docker>…`;
+always reloaded: `nmcli general reload conf`),
+/etc/avahi/avahi-daemon.conf (only [server] allow-interfaces=/deny-interfaces= of exact names may change: avahi 0.8
+has no globs; no reload, restart with `pc units restart avahi-daemon --system --apply`), ~/.config/systemd/user/*.{service,timer}, /etc/apparmor.d/local/<profile> (always reparsed:
+`apparmor_parser -r -- /etc/apparmor.d/<profile>`, after `apparmor_parser -Q` proves the profile parses with
+the new content; a parse error exits 1 with nothing written; ssh*, tailscaled, docker*, bwrap* profiles refused).
+Refused (exit 2, "refused: <rule>"): ufw, ssh/sshd, sudoers, ~/.claude, drop-ins or reloads of
+tailscaled, ssh*, sshd*, dark-eye*, docker*, containerd, sentinel*, agent@*, the orchestrator unit
+(also via top-level <type>.d and prefix <x>-.<type>.d drop-ins),
+symlinks, and anything outside the roots. PC_CONF_ROOT prefixes every filesystem path (tests).' "$@"
+
+PC_SUB='pc conf'; PC_EXTRA_FLAGS=(--from: --line: --reload: --daemon-reload --user)
+pc_opt "$@"; ARGS=(${PC_ARGS[@]+"${PC_ARGS[@]}"})
+: "${PC_CONF_ROOT:=}" "${PC_CONF_BACKUP:=$HOME/agents/backups/conf}"
+[ -n "$PC_CONF_ROOT" ] && PC_CONF_ROOT=$(readlink -m "$PC_CONF_ROOT")
+
+refuse() { printf 'refused: %s\n' "$1" >&2; exit 2; }
+
+# unit_why <unit> — the deny rule for a unit name (any type suffix, any @instance), empty when allowed.
+unit_why() {
+  local b=${1##*/}
+  case $b in *.service|*.socket|*.timer|*.target|*.path|*.mount|*.slice|*.scope) b=${b%.*};; esac
+  case $b in
+    tailscaled|ssh|sshd|ssh[-@]*|sshd[-@]*|ufw) printf 'a second access path (%s)' "$b";;
+    dark-eye*|docker*|containerd|sentinel*|agent@*|"$ORCHESTRATOR_UNIT_BASE"|claude-orchestrator) printf 'fleet unit %s' "$b";;
+  esac
+}
+
+# dropin_why <dir> — the deny rule for a drop-in dir (without .d): a guarded unit, every unit of a type, or a "<prefix>-.<type>" covering a guarded unit.
+dropin_why() {
+  local d=$1 x g
+  case $d in service|socket|timer|target|path|mount|automount|swap|slice|scope|device)
+    printf 'top-level %s.d (applies to every %s)' "$d" "$d"; return;; esac
+  case $d in
+    *-.service|*-.socket|*-.timer|*-.target|*-.path|*-.mount|*-.slice|*-.scope)
+      x=${d%.*}
+      for g in tailscaled ssh sshd 'ssh-*' 'sshd-*' 'ssh@*' 'sshd@*' ufw 'dark-eye*' 'docker*' containerd \
+        'sentinel*' 'agent@*' "$ORCHESTRATOR_UNIT_BASE" claude-orchestrator; do
+        [ -n "$g" ] || continue
+        # shellcheck disable=SC2053
+        if [[ ${g%\*} == "$x"* ]] || { [[ $g == *\* ]] && [[ $x == $g ]]; }; then
+          printf 'prefix drop-in %s.d covers %s' "$d" "$g"; return
+        fi
+      done;;
+  esac
+  unit_why "$d"
+}
+
+# check <path> — exit 2 unless the logical path is inside an allowed root and on no deny rule.
+check() {
+  local p=$1 why d
+  case $p in /*) ;; *) refuse "not an absolute path: $p";; esac
+  case $p/ in */../*|*/./*|*//*) refuse "path not normalized: $p";; esac
+  case $p in
+    */ufw/*|*/ufw|*ufw.conf) refuse 'ufw';;
+    /etc/ssh/*|*/ssh.*|*/sshd.*|*/ssh@*|*/sshd@*) refuse 'ssh/sshd';;
+    /etc/sudoers*) refuse 'sudoers';;
+    "$HOME"/.claude/*|"$HOME"/.claude) refuse '~/.claude (settings.json is the owner'"'"'s)';;
+  esac
+  case $p in
+    /etc/systemd/system/*.d/*.conf|/etc/systemd/user/*.d/*.conf|"$HOME"/.config/systemd/user/*.d/*.conf)
+      d=${p%/*}; d=${d##*/}; d=${d%.d}
+      why=$(dropin_why "$d"); [ -n "$why" ] && refuse "$why"
+      [ "${p%/*/*}" = /etc/systemd/system ] || [ "${p%/*/*}" = /etc/systemd/user ] || \
+        [ "${p%/*/*}" = "$HOME/.config/systemd/user" ] || refuse "outside the allowed roots: $p";;
+    "$HOME"/.config/systemd/user/*.service|"$HOME"/.config/systemd/user/*.timer)
+      why=$(unit_why "${p##*/}"); [ -n "$why" ] && refuse "$why"
+      [ "${p%/*}" = "$HOME/.config/systemd/user" ] || refuse "outside the allowed roots: $p";;
+    /etc/systemd/*.conf.d/*.conf|/etc/sysctl.d/*.conf|/etc/tmpfiles.d/*.conf|/etc/default/grub.d/*.cfg)
+      [ "${p%/*/*}" = /etc/systemd ] || [ "${p%/*}" = /etc/sysctl.d ] || [ "${p%/*}" = /etc/tmpfiles.d ] || \
+        [ "${p%/*}" = /etc/default/grub.d ] || refuse "outside the allowed roots: $p";;
+    /etc/netdata/?*|/var/lib/fwupd/remotes.d/lvfs.conf|/etc/avahi/avahi-daemon.conf) ;;
+    /etc/modprobe.d/90-agents-*.conf) [ "${p%/*}" = /etc/modprobe.d ] || refuse "outside the allowed roots: $p";;
+    /etc/NetworkManager/conf.d/zz-agents-*.conf) [ "${p%/*}" = /etc/NetworkManager/conf.d ] || refuse "outside the allowed roots: $p";;
+    /etc/apparmor.d/local/*)
+      d=${p##*/}
+      [ "${p%/*}" = /etc/apparmor.d/local ] && [ "$d" != README ] || refuse "outside the allowed roots: $p"
+      why=$(unit_why "${d##*.}"); [ -n "$why" ] && refuse "$why"
+      case $d in *bwrap*|*tailscale*) refuse "guarded profile $d";; esac
+      [ -f "$PC_CONF_ROOT/etc/apparmor.d/$d" ] || refuse "no profile /etc/apparmor.d/$d";;
+    *) refuse "outside the allowed roots: $p";;
+  esac
+  local f="$PC_CONF_ROOT$p"
+  [ "$(readlink -m "$f")" = "$f" ] || refuse "symlink on the path: $p"
+}
+
+# modprobe_check <file> — exit 2 on a blacklist/install line for a storage, net or input driver or an unknown module.
+modprobe_check() {
+  local verb m path
+  while read -r verb m _ || [ -n "${verb:-}" ]; do
+    case $verb in blacklist|install) ;; *) continue;; esac
+    path=$(PATH=$PATH:/usr/sbin:/sbin modinfo -n -- "$m" 2>/dev/null) || refuse "$verb of unknown module ${m:-?}"
+    case $path in
+      */kernel/drivers/net/*|*/kernel/net/*|*/kernel/drivers/input/*|*/kernel/drivers/hid/*|*/kernel/drivers/nvme/*|\
+      */kernel/drivers/ata/*|*/kernel/drivers/scsi/*|*/kernel/drivers/block/*|*/kernel/drivers/md/*|\
+      */kernel/drivers/mmc/*|*/kernel/drivers/usb/*|*/kernel/drivers/pci/*|*/kernel/drivers/thunderbolt/*|*/kernel/fs/*)
+        refuse "$verb of storage/net/input driver $m";;
+    esac
+  done <"$1"
+}
+
+# nm_check <file> — exit 2 on any key but [keyfile] unmanaged-devices, or a device spec other than a docker-style interface-name.
+nm_check() {
+  local l k sec='' it
+  while IFS= read -r l || [ -n "$l" ]; do
+    l=${l#"${l%%[![:space:]]*}"}; l=${l%"${l##*[![:space:]]}"}
+    case $l in ''|'#'*|';'*) continue;; '['*']') sec=$l; continue;; esac
+    k=${l%%=*}; k=${k%"${k##*[![:space:]]}"}
+    [ "$sec" = '[keyfile]' ] && { [ "$k" = unmanaged-devices ] || [ "$k" = unmanaged-devices+ ]; } && [ "$k" != "$l" ] \
+      || refuse "NetworkManager key ${sec:-[]} $k (only [keyfile] unmanaged-devices)"
+    for it in $(tr ',;' '  ' <<<"${l#*=}"); do
+      [[ $it =~ ^interface-name:(veth|br-|docker)[A-Za-z0-9_.*-]*$ ]] || refuse "NetworkManager device spec $it (only interface-name:veth*/br-*/docker*)"
+    done
+  done <"$1"
+}
+
+# avahi_rest <file> — the file without its [server] allow-interfaces=/deny-interfaces= lines.
+avahi_rest() {
+  awk '/^[[:space:]]*\[.*\][[:space:]]*$/ { s = $0; gsub(/[[:space:]]/, "", s) }
+    !(s == "[server]" && /^[[:space:]]*(allow|deny)-interfaces[[:space:]]*=/)' "$1"
+}
+
+# avahi_check <old> <new> — exit 2 unless new differs from old only in [server] allow-/deny-interfaces= lists of exact names.
+avahi_check() {
+  local l k v
+  while IFS= read -r l || [ -n "$l" ]; do
+    k=${l%%=*}; k=${k//[[:space:]]/}
+    case $k in allow-interfaces|deny-interfaces) ;; *) continue;; esac
+    v=${l#*=}; v=${v//[[:space:]]/}
+    [[ $v =~ ^[A-Za-z0-9_.:-]+(,[A-Za-z0-9_.:-]+)*$ ]] \
+      || refuse "avahi $k=$v (exact interface names, comma separated; avahi 0.8 has no globs)"
+  done < <(awk '/^[[:space:]]*\[.*\][[:space:]]*$/ { s = $0; gsub(/[[:space:]]/, "", s) }
+    s == "[server]" && /^[[:space:]]*(allow|deny)-interfaces[[:space:]]*=/' "$2")
+  cmp -s <(avahi_rest "$1") <(avahi_rest "$2") || refuse 'avahi edit outside [server] allow-interfaces=/deny-interfaces='
+}
+
+fs() { printf '%s%s' "$PC_CONF_ROOT" "$1"; }
+is_home() { case $1 in "$HOME"/*) return 0;; esac; return 1; }
+as() { if is_home "$1"; then shift; "$@"; else shift; pc_root "$@"; fi; }
+readf() { cat -- "$(fs "$1")" 2>/dev/null || as "$1" cat -- "$(fs "$1")" 2>/dev/null; }
+token() {
+  local h; [ -e "$(fs "$1")" ] || { printf absent; return; }
+  h=$(readf "$1" | sha256sum) || { echo "pc conf: cannot read $1" >&2; return 1; }
+  printf 'sha:%s' "${h:0:12}"
+}
+
+# install_to <path> <src> — write src's bytes to path, keeping an existing file's mode (new files 0644).
+install_to() {
+  local f; f=$(fs "$1"); local m=0644
+  [ -e "$f" ] && m=$(stat -c %a "$f")
+  as "$1" install -D -m "$m" -- "$2" "$f"
+}
+
+# aa_check <profile> <file> — exit 1 unless the profile parses (no kernel load) with <file> as its local include.
+aa_check() {
+  local inc rc; inc=$(mktemp -d) && mkdir "$inc/local" && cp -- "$2" "$inc/local/$1" || return 1
+  pc_root apparmor_parser -Q -I "$inc" -- "$(fs "/etc/apparmor.d/$1")" >&2; rc=$?
+  rm -rf "$inc"; return $rc
+}
+
+etc_commit() {
+  case $1 in /etc/*) ;; *) return 0;; esac
+  command -v etckeeper >/dev/null || return 0
+  pc_root etckeeper commit "pc conf: $1" >/dev/null 2>&1 || echo "pc conf: etckeeper commit failed (the write stands)" >&2
+}
+
+# reload <path> <args…> — the requested reload; the scope is --user for a $HOME path or with --user.
+reload() {
+  local p=$1 mode=${2:-} unit=${3:-} user=${4:-0} a
+  case $mode in reload) a=(reload-or-restart "$unit");; daemon-reload) a=(daemon-reload);;
+    nm) pc_root nmcli general reload conf || { echo "pc conf: reload failed: nmcli general reload conf" >&2; return 1; }; return 0;;
+    apparmor) pc_root apparmor_parser -r -- "$(fs "/etc/apparmor.d/$unit")" || { echo "pc conf: reparse failed: /etc/apparmor.d/$unit" >&2; return 1; }; return 0;;
+    *) return 0;; esac
+  is_home "$p" && user=1
+  if [ "$user" = 1 ]; then systemctl --user "${a[@]}"; else pc_root systemctl "${a[@]}"; fi \
+    || { echo "pc conf: reload failed: systemctl ${a[*]}" >&2; return 1; }
+}
+
+case "${ARGS[0]:-}" in
+  state) token "${ARGS[1]:?path}";;
+  write)  # write <path> <src> [mode unit user]
+    install_to "${ARGS[1]}" "${ARGS[2]}" || exit 1
+    etc_commit "${ARGS[1]}"; reload "${ARGS[1]}" "${ARGS[@]:3}";;
+  restore)  # restore <path> <backupdir> [mode unit user]
+    if [ -e "${ARGS[2]}/absent" ]; then as "${ARGS[1]}" rm -f -- "$(fs "${ARGS[1]}")" || exit 1
+    else install_to "${ARGS[1]}" "${ARGS[2]}/old" || exit 1; fi
+    etc_commit "${ARGS[1]}"; reload "${ARGS[1]}" "${ARGS[@]:3}";;
+  get)
+    p=${ARGS[1]:-}; [ -n "$p" ] || { echo "pc conf get: need a path" >&2; exit 2; }
+    check "$p"
+    if [ -e "$(fs "$p")" ]; then readf "$p" || { echo "pc conf: cannot read $p" >&2; exit 1; }; else echo "(absent) $p"; fi
+    id=$(jq -r --arg t "$p" 'select(.target? == $t and has("rollback")) | .id' "$PC_LEDGER" 2>/dev/null | tail -1)
+    echo "ledger: ${id:-none}";;
+  put)
+    p=${ARGS[1]:-}; [ -n "$p" ] || { echo "pc conf put: need a path" >&2; exit 2; }
+    check "$p"
+    mode=; unit=; user=${PC_OPT[--user]-0}
+    [ -n "${PC_OPT[--reload]-}" ] && { mode=reload; unit=${PC_OPT[--reload]}; }
+    [ -n "${PC_OPT[--daemon-reload]-}" ] && { [ -z "$mode" ] || { echo "pc conf: --reload or --daemon-reload, not both" >&2; exit 2; }; mode=daemon-reload; }
+    [ -n "$unit" ] && { why=$(unit_why "$unit"); [ -n "$why" ] && refuse "$why"; }
+    case $p in /etc/apparmor.d/local/*)
+      [ -z "$mode" ] || { echo "pc conf: apparmor overrides always reparse their profile; no --reload/--daemon-reload" >&2; exit 2; }
+      mode=apparmor; unit=${p##*/};;
+    /etc/NetworkManager/*)
+      [ -z "$mode" ] || { echo "pc conf: NetworkManager confs always run nmcli general reload conf; no --reload/--daemon-reload" >&2; exit 2; }
+      mode=nm;; esac
+    new=$(mktemp); trap 'rm -f "$new"' EXIT
+    lines=0; i=0
+    while [ $i -lt ${#PC_EXTRA[@]} ]; do
+      case ${PC_EXTRA[$i]} in
+        --line) printf '%s\n' "${PC_EXTRA[$((i + 1))]}" >>"$new"; lines=1; i=$((i + 1));;
+        --line=*) printf '%s\n' "${PC_EXTRA[$i]#--line=}" >>"$new"; lines=1;;
+        --from|--reload) i=$((i + 1));;
+      esac
+      i=$((i + 1))
+    done
+    src=${PC_OPT[--from]-}
+    if [ -n "$src" ]; then
+      [ "$lines" = 0 ] || { echo "pc conf: --from or --line, not both" >&2; exit 2; }
+      cat -- "$src" >"$new" 2>/dev/null || { echo "pc conf: cannot read $src" >&2; exit 1; }
+    elif [ "$lines" = 0 ]; then echo "pc conf put: need --from <file> or --line <text>" >&2; exit 2; fi
+    case $p in /etc/modprobe.d/*) modprobe_check "$new";; /etc/NetworkManager/*) nm_check "$new";; esac
+    old=$(mktemp); trap 'rm -f "$new" "$old"' EXIT
+    before=absent
+    if [ -e "$(fs "$p")" ]; then
+      readf "$p" >"$old" || { echo "pc conf: cannot read $p (nothing written)" >&2; exit 1; }
+      before="sha:$(sha256sum <"$old" | cut -c1-12)"
+    fi
+    [ "$p" = /etc/avahi/avahi-daemon.conf ] && avahi_check "$old" "$new"
+    after="sha:$(sha256sum <"$new" | cut -c1-12)"
+    [ "$before" = "$after" ] && { echo "unchanged: $p $after"; exit 0; }
+    d=$(diff -u --label "$p" --label "$p" "$old" "$new")
+    add=$(tail -n +3 <<<"$d" | grep -c '^+'); del=$(tail -n +3 <<<"$d" | grep -c '^-')
+    if [ "$APPLY" != 1 ]; then
+      printf 'would: %s %s → %s (+%s -%s)\n%s\n' "$p" "$before" "$after" "$add" "$del" "$d"
+      exit 0
+    fi
+    [ "$mode" = apparmor ] && { aa_check "$unit" "$new" || { echo "pc conf: /etc/apparmor.d/$unit does not parse with the new $p (nothing written)" >&2; exit 1; }; }
+    n=${p#/}; printf -v stamp '%(%Y%m%d-%H%M%S)T' -1
+    mkdir -p "$PC_CONF_BACKUP" && bk=$(mktemp -d "$PC_CONF_BACKUP/$stamp-${n//\//_}.XXXXXX") || exit 1
+    cp -- "$new" "$bk/new"
+    if [ "$before" = absent ]; then : >"$bk/absent"; else cp -- "$old" "$bk/old"; fi
+    env=$(printf 'PC_CONF_ROOT=%q PC_CONF_BACKUP=%q' "$PC_CONF_ROOT" "$PC_CONF_BACKUP")
+    tail=$(printf ' %q' "$mode" "$unit" "$user")
+    PC_READ_CMD="$env $(printf '%q state %q' "$SELF" "$p")" \
+    PC_REDO="$env $(printf '%q write %q %q' "$SELF" "$p" "$bk/new")$tail" \
+      pc_apply "$p" "$before" "$after" "$env $(printf '%q restore %q %q' "$SELF" "$p" "$bk")$tail" \
+        "$SELF" write "$p" "$bk/new" "$mode" "$unit" "$user"
+    ;;
+  *) printf '%s\n' "$PC_USAGE" >&2; exit 2;;
+esac

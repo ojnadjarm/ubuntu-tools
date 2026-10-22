@@ -1,0 +1,305 @@
+#!/usr/bin/env bash
+# pc mem sample | growth [--days 3] [-n 15] | cpu [--since 24h] [--unit U] | swap-refresh [--apply] | agents [--json] — RSS + swap + CPU per unit over days, the units that grow, CPU s/h per hour, stale swap pulled back into RAM, and RAM per Claude session.
+set -uo pipefail
+export LC_ALL=C
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+PC_SUB='pc mem'
+
+pc_usage 'usage: pc mem sample
+       pc mem growth [--days 3] [-n 15]
+       pc mem cpu [--since 24h] [--unit U]
+       pc mem swap-refresh [--apply]
+       pc mem agents [--json]
+
+sample  appends one row per *.service and *.scope cgroup (system and user managers; user@*.service
+        itself is walked, not recorded) to $PC_MEM_LOG (default ~/agents/log/mem.tsv):
+        ts unit scope mem_kb swap_kb anon_kb top_pid top_cmd top_rss_kb top_swap_kb
+        mem/swap = memory.current / memory.swap.current, anon = memory.stat anon, top = the process
+        of the cgroup with the largest VmRSS+VmSwap (interpreters named by their script: node:voice.js).
+        The same walk appends cpu.stat usage_usec to $PC_MEM_CPU_LOG (default ~/agents/log/cpu.tsv):
+        ts unit scope cpu_usec
+        One find + one awk; run hourly by pc-mem-sample.timer. Read-only, no ledger entry.
+        Also records new ids from `docker ps -a --no-trunc` in $PC_MEM_NAMES (default
+        ~/agents/state/docker-names.tsv: id12 name first_seen; ids gone from docker kept 30 d).
+        Both logs rotate monthly via ~/agents/log/logrotate.conf; growth and cpu also read the plain <log>.1.
+growth  ranks units by MB/day of anon+swap (least-squares slope over the window), units with at
+        least two samples spanning >= $PC_MEM_MIN_SPAN s (default 3600); "LEAK" marks > 100 MB/day over
+        >= 6 h and >= 6 samples, "young" the same rate on less. Docker scopes print as <name> (docker),
+        Vass ones as <name> (Vass, owner-only), from $PC_MEM_NAMES; unknown ids stay the scope name.
+cpu     HOUR UNIT S/H from cpu.tsv: CPU s per hour between consecutive samples of a unit, credited to the
+        hour holding the interval midpoint (a counter that went down is a restart: the new counter is the
+        delta); top 15 per hour, or every hour of --unit U (user units print and match as user/<unit>). "BURST" marks an hour
+        >= 10x the unit median S/H in the window (median floor 1 s/h). No rows: "nothing: <reason>".
+swap-refresh  pulls swapped-out pages back into RAM: swapoff each device active in /proc/swaps (nice 19 /
+        ionice idle), then swapon exactly those (priority kept with -p; each retried once on failure) when MemAvailable >= used x 2 + 4096 MB, load1 < 4 and ci-window is
+        clear; else "nothing: <reason>" (rc 1 when refused). No unit is touched; --apply is ledgered.
+agents  one row per claude process: age, VmRSS, VmSwap, children (every descendant up to the next
+        claude, e.g. MCP servers), total, kind (agent-run: an agent-run/agent-exec ancestor; workflow:
+        -p/--print; else interactive) and cwd; then
+        fit N (avail <MB> − reserve $PC_MEM_RESERVE_MB MB) / p90 <MB>
+        p90 = nearest-rank p90 of the totals ($PC_MEM_AGENT_MB, default 800, with no session). Read-only.' "$@"
+
+PC_EXTRA_FLAGS=(--days: -n: --since: --unit:)
+pc_opt "$@"
+: "${PC_MEM_LOG:=$HOME/agents/log/mem.tsv}" "${PC_MEM_CPU_LOG:=${PC_MEM_LOG%/*}/cpu.tsv}" "${PC_MEM_MIN_SPAN:=3600}" "${PC_MEM_RESERVE_MB:=8192}" "${PC_MEM_AGENT_MB:=800}" "${PC_MEM_NAMES:=$HOME/agents/state/docker-names.tsv}"
+CG="$PC_SYS/fs/cgroup"
+# NAMES_AWK — awk nm(unit): a docker-<64 hex>.scope as its container name from $PC_MEM_NAMES (loaded into dn[] by load()).
+NAMES_AWK='
+  function load(f,  l, a) { while ((getline l < f) > 0) { split(l, a, "\t"); dn[a[1]] = a[2] } close(f) }
+  function nm(u,  id) {
+    if (u !~ /^docker-[0-9a-f]+\.scope$/ || length(u) != 77) return u
+    id = substr(u, 8, 12); if (!(id in dn)) return u
+    return dn[id] (tolower(dn[id]) ~ notours ? " (Vass, owner-only)" : " (docker)")
+  }'
+HDR=$'ts\tunit\tscope\tmem_kb\tswap_kb\tanon_kb\ttop_pid\ttop_cmd\ttop_rss_kb\ttop_swap_kb'
+
+# names — merge `docker ps -a` ids into $PC_MEM_NAMES (first_seen kept; gone ids dropped after 30 d); a failing docker leaves it as is.
+names() {
+  local now=$1 ps
+  ps=$(timeout 10 docker ps -a --no-trunc --format '{{.ID}}\t{{.Names}}' 2>/dev/null) || return 0
+  [ -d "${PC_MEM_NAMES%/*}" ] || mkdir -p "${PC_MEM_NAMES%/*}"
+  [ -e "$PC_MEM_NAMES" ] || : >"$PC_MEM_NAMES"
+  awk -F'\t' -v OFS='\t' -v now="$now" -v old=$(( now - 30 * 86400 )) '
+    FNR == NR { if ($1 != "") cur[substr($1, 1, 12)] = $2; next }
+    $1 in cur { print $1, cur[$1], $3; delete cur[$1]; next }
+    $3 >= old { print }
+    END { for (i in cur) print i, cur[i], now }' <(printf '%s\n' "$ps") "$PC_MEM_NAMES" >"$PC_MEM_NAMES.tmp" &&
+    mv "$PC_MEM_NAMES.tmp" "$PC_MEM_NAMES"
+}
+
+sample() {
+  local now
+  printf -v now '%(%s)T' -1
+  names "$now"
+  [ -d "${PC_MEM_LOG%/*}" ] || mkdir -p "${PC_MEM_LOG%/*}"
+  [ -s "$PC_MEM_LOG" ] || printf '%s\n' "$HDR" >"$PC_MEM_LOG"
+  [ -s "$PC_MEM_CPU_LOG" ] || printf 'ts\tunit\tscope\tcpu_usec\n' >"$PC_MEM_CPU_LOG"
+  find "$CG" -type d -name 'user@*.service' -o -type d \( -name '*.service' -o -name '*.scope' \) -print -prune 2>/dev/null |
+  awk -v now="$now" -v proc="$PC_PROC" -v cpulog="$PC_MEM_CPU_LOG" '
+    function rd(f,  v) { v = ""; if ((getline v < f) <= 0) v = ""; close(f); return v }
+    function kb(f,  v) { v = rd(f); return v ~ /^[0-9]+$/ ? int(v / 1024) : 0 }
+    function cmd(pid, name,  f, a, i, n, s, ors) {
+      f = proc "/" pid "/cmdline"; ors = RS; RS = "\0"; n = 0
+      while (n < 8 && (getline s < f) > 0) a[n++] = s
+      close(f); RS = ors
+      if (n == 0) return name
+      sub(/.*\//, "", a[0]); sub(/ .*/, "", a[0])
+      if (a[0] !~ /^(node|python[0-9.]*|bash|sh|perl|ruby|bun|deno|php)$/) return a[0] == "" ? name : a[0]
+      for (i = 1; i < n; i++) if (a[i] !~ /^-/) { sub(/.*\//, "", a[i]); return a[0] ":" a[i] }
+      return a[0]
+    }
+    {
+      d = $0; unit = d; sub(/.*\//, "", unit)
+      scope = d ~ /\/user@[0-9]+\.service\// ? "user" : "system"
+      mem = kb(d "/memory.current"); swp = kb(d "/memory.swap.current")
+      split(rd(d "/memory.stat"), st, " "); anon = st[1] == "anon" ? int(st[2] / 1024) : 0
+      best = -1; bp = "-"; bn = "-"; br = 0; bs = 0
+      f = d "/cgroup.procs"
+      while ((getline pid < f) > 0) {
+        if (pid == "") continue
+        sf = proc "/" pid "/status"; nm = "?"; r = 0; s = 0
+        while ((getline ln < sf) > 0) {
+          if (ln ~ /^Name:/) { nm = ln; sub(/^Name:[ \t]*/, "", nm) }
+          else if (ln ~ /^VmRSS:/) { split(ln, x, " "); r = x[2] }
+          else if (ln ~ /^VmSwap:/) { split(ln, x, " "); s = x[2]; break }
+        }
+        close(sf)
+        if (r + s > best) { best = r + s; bp = pid; bn = nm; br = r; bs = s }
+      }
+      close(f)
+      if (bp != "-") bn = cmd(bp, bn)
+      gsub(/[ \t]+/, "_", bn)
+      printf "%s\t%s\t%s\t%d\t%d\t%d\t%s\t%s\t%d\t%d\n", now, unit, scope, mem, swp, anon, bp, bn, br, bs
+      split(rd(d "/cpu.stat"), cs, " ")
+      if (cs[1] == "usage_usec") printf "%s\t%s\t%s\t%s\n", now, unit, scope, cs[2] >>cpulog
+    }' >>"$PC_MEM_LOG"
+}
+
+# logs <file> — the rotated <file>.1 (when present) then <file>, for readers that span a rotation.
+logs() { [ -s "$1.1" ] && printf '%s\n' "$1.1"; printf '%s\n' "$1"; }
+
+# cpu — CPU s/h per unit and hour from cpu.tsv deltas, top 15 per hour (or one --unit), BURST >= 10x the unit's median.
+cpu() {
+  local since=${PC_OPT[--since]:-24h} unit=${PC_OPT[--unit]:-} w now
+  case $since in
+    *[0-9]d) w=$(( ${since%d} * 86400 ));;
+    *[0-9]h) w=$(( ${since%h} * 3600 ));;
+    *) echo "pc mem cpu: bad --since '$since' (Nh or Nd)" >&2; exit 2;;
+  esac
+  printf -v now '%(%s)T' -1; now=${PC_MEM_NOW:-$now}
+  [ -s "$PC_MEM_CPU_LOG" ] || [ -s "$PC_MEM_CPU_LOG.1" ] || { echo "nothing: no cpu samples yet ($PC_MEM_CPU_LOG); run: pc mem sample"; return 0; }
+  awk -F'\t' -v from=$(( now - w )) -v want="$unit" '
+    FNR == 1 { next }
+    { k = ($3 == "user" ? "user/" : "") $2
+      if (want != "" && k != want) next
+      if (k in pt && $1 > pt[k] && $1 >= from) {
+        d = $4 - pv[k]; if (d < 0) d = $4
+        h = int((pt[k] + $1) / 7200) * 3600; b = h SUBSEP k
+        if (!(b in dt)) { n[k]++; hk[k, n[k]] = b }
+        du[b] += d; dt[b] += $1 - pt[k]
+      }
+      pt[k] = $1; pv[k] = $4 }
+    END {
+      for (k in n) {
+        m = n[k]; delete v
+        for (i = 1; i <= m; i++) {
+          x = du[hk[k, i]] * 3600 / 1e6 / dt[hk[k, i]]
+          for (j = i - 1; j >= 1 && v[j] > x; j--) v[j + 1] = v[j]
+          v[j + 1] = x
+        }
+        med = m % 2 ? v[(m + 1) / 2] : (v[m / 2] + v[m / 2 + 1]) / 2
+        if (med < 1) med = 1
+        for (i = 1; i <= m; i++) {
+          split(hk[k, i], p, SUBSEP); x = du[hk[k, i]] * 3600 / 1e6 / dt[hk[k, i]]
+          if (want == "" && x < 0.05) continue
+          printf "%d\t%.1f\t%s\t%s\n", p[1], x, k, (x >= 10 * med ? "BURST" : "")
+        }
+      }
+    }' $(logs "$PC_MEM_CPU_LOG") | sort -t$'\t' -k1,1n -k2,2gr |
+    awk -F'\t' -v all="${unit:+1}" -v names="$PC_MEM_NAMES" -v notours="$PC_NOT_OURS" "$NAMES_AWK"'
+      BEGIN { load(names) }
+      !all && c[$1]++ >= 15 { next }
+      { if (!NR0++) printf "%-11s  %-50s %8s\n", "HOUR", "UNIT", "S/H"
+        printf "%-11s  %-50s %8s%s\n", strftime("%m-%d %H:00", $1), nm($3), $2, $4 != "" ? "  " $4 : "" }
+      END { if (!NR0) print "nothing: no unit used CPU between two samples in the window" }'
+}
+
+growth() {
+  local days=${PC_OPT[--days]:-3} n=${PC_OPT[-n]:-15} now
+  case $days in ""|*[!0-9.]*) days=3;; esac
+  case $n in ""|*[!0-9]*) n=15;; esac
+  printf -v now '%(%s)T' -1; now=${PC_MEM_NOW:-$now}
+  [ -r "$PC_MEM_LOG" ] || { echo "pc mem: no samples yet ($PC_MEM_LOG); run: pc mem sample" >&2; exit 1; }
+  printf '%-10s %8s %7s %4s  %-6s %-40s %s\n' MB/day now_MB span_h n scope unit top
+  awk -F'\t' -v from="$(awk -v n="$now" -v d="$days" 'BEGIN { printf "%d", n - d * 86400 }')" -v min="$PC_MEM_MIN_SPAN" '
+    FNR == 1 || $1 < from { next }
+    { k = $3 "\t" $2; y = ($5 + $6) / 1024; t = ($1 - from) / 86400
+      c[k]++; sx[k] += t; sy[k] += y; sxx[k] += t * t; sxy[k] += t * y
+      if (!(k in t0)) t0[k] = $1; t1[k] = $1; last[k] = y; top[k] = $8 }
+    END {
+      for (k in c) {
+        if (c[k] < 2 || t1[k] - t0[k] < min) continue
+        den = c[k] * sxx[k] - sx[k] * sx[k]; if (den <= 0) continue
+        m = (c[k] * sxy[k] - sx[k] * sy[k]) / den
+        split(k, u, "\t")
+        printf "%+.1f\t%.0f\t%.1f\t%d\t%s\t%s\t%s%s\n", m, last[k], (t1[k] - t0[k]) / 3600, c[k], u[1], u[2], top[k], (m > 100 ? (t1[k] - t0[k] >= 21600 && c[k] >= 6 ? "\tLEAK" : "\tyoung") : "")
+      }
+    }' $(logs "$PC_MEM_LOG") | sort -t$'\t' -k1,1gr | head -n "$n" |
+    awk -F'\t' -v min="$PC_MEM_MIN_SPAN" -v names="$PC_MEM_NAMES" -v notours="$PC_NOT_OURS" "$NAMES_AWK"'
+      BEGIN { load(names) }
+      { printf "%-10s %8s %7s %4s  %-6s %-40s %s%s\n", $1, $2, $3, $4, $5, nm($6), $7, $8 ? "  " $8 : "" }
+      END { if (!NR) print "(no unit has two samples " min " s apart in the window)" }'
+}
+
+# swap_set — the active swap devices from /proc/swaps, one "<path> <priority>" per line.
+swap_set() { awk 'NR > 1 { print $1, $5 }' "$PC_PROC/swaps" 2>/dev/null; }
+
+# swap_cycle <path prio>… — swapoff each device in turn, then swapon the ones that went off (retried once), then the read-back.
+swap_cycle() {
+  local rc=0 path prio off=() e
+  while [ $# -gt 0 ]; do
+    path=$1 prio=$2; shift 2
+    PC_ROOT_TIMEOUT=${PC_MEM_SWAPOFF_TIMEOUT:-1800} pc_root nice -n 19 ionice -c3 swapoff "$path" || { rc=1; break; }
+    off+=("$path $prio")
+  done
+  for e in ${off[@]+"${off[@]}"}; do
+    path=${e% *} prio=${e##* }
+    set -- "$path"; [ "$prio" -ge 0 ] && set -- -p "$prio" "$path"
+    PC_ROOT_TIMEOUT=60 pc_root swapon "$@" || { rc=1; PC_ROOT_TIMEOUT=60 pc_root swapon "$@"; }
+  done
+  awk '/^SwapTotal:/{t=$2} /^SwapFree:/{f=$2} END{printf "swap: used %d MB, free %d MB\n", (t-f)/1024, f/1024}' "$PC_PROC/meminfo"
+  return $rc
+}
+
+swap_refresh() {
+  local used avail load need ci set
+  read -r used avail < <(awk '/^SwapTotal:/{t=$2} /^SwapFree:/{f=$2} /^MemAvailable:/{a=$2} END{printf "%d %d\n", (t-f)/1024, a/1024}' "$PC_PROC/meminfo")
+  read -r load _ <"$PC_PROC/loadavg"
+  need=$(( used * 2 + 4096 ))
+  [ "$used" -gt 0 ] || { echo "nothing: swap used 0 MB"; return 0; }
+  set=$(swap_set); [ -n "$set" ] || { echo "nothing: no active swap in /proc/swaps"; return 0; }
+  [ "$avail" -ge "$need" ] || { echo "nothing: refused, MemAvailable $avail MB < $need MB (swap used $used MB x 2 + 4096)"; return 1; }
+  awk -v l="$load" 'BEGIN{exit !(l < 4)}' || { echo "nothing: refused, load1 $load >= 4"; return 1; }
+  ci=$("$BIN/ci-window" 2>&1) || { echo "nothing: refused, ${ci#ci-window: }"; return 1; }
+  if [ "$APPLY" != 1 ]; then
+    echo "would: swap $used MB → 0 MB on $(cut -d' ' -f1 <<<"$set" | paste -sd' ') (needs MemAvailable >= used x 2 + 4096 MB: $avail >= $need, load1 < 4: $load, outside ci-window)"
+    return 0
+  fi
+  PC_READ_CMD="awk '/^SwapTotal:/{t=\$2} /^SwapFree:/{f=\$2} END{printf \"%d MB\", (t-f)/1024}' $PC_PROC/meminfo" \
+    pc_apply swap "$used MB" "0 MB" ": none, the same swap set is back on at the end" swap_cycle $set
+}
+
+# agents — per-claude-process RSS, swap and descendants' RSS, then how many more sessions fit in MemAvailable.
+agents() {
+  local tck up avail rows cwd
+  tck=$(getconf CLK_TCK 2>/dev/null || echo 100)
+  read -r up _ <"$PC_PROC/uptime"
+  avail=$(awk '/^MemAvailable:/{printf "%d", $2/1024}' "$PC_PROC/meminfo")
+  rows=$(cd "$PC_PROC" && printf '%s\n' [0-9]* | awk -v proc="$PC_PROC" -v up="$up" -v tck="$tck" '
+    function argv(p, a,  f, n, s, ors) {
+      f = proc "/" p "/cmdline"; ors = RS; RS = "\0"; n = 0
+      while ((getline s < f) > 0) a[n++] = s
+      close(f); RS = ors; return n
+    }
+    {
+      p = $1; ln = ""; if ((getline ln < (proc "/" p "/stat")) <= 0) { close(proc "/" p "/stat"); next }
+      close(proc "/" p "/stat")
+      sub(/.*\) /, "", ln); split(ln, st, " "); ppid[p] = st[2]; start[p] = st[20]
+      f = proc "/" p "/status"; r = 0; s = 0; nm = ""
+      while ((getline x < f) > 0) {
+        if (x ~ /^Name:/) { nm = x; sub(/^Name:[ \t]*/, "", nm) }
+        else if (x ~ /^VmRSS:/) { split(x, y, " "); r = y[2] }
+        else if (x ~ /^VmSwap:/) { split(x, y, " "); s = y[2]; break }
+      }
+      close(f); rss[p] = r; swp[p] = s; if (nm == "claude") cl[p] = 1
+    }
+    END {
+      for (p in ppid) {
+        if (p in cl) continue
+        for (q = ppid[p]; q in ppid && !(q in cl); q = ppid[q]);
+        if (q in cl) kid[q] += rss[p]
+      }
+      for (p in cl) {
+        kind = "interactive"
+        for (q = ppid[p]; q in ppid; q = ppid[q]) {
+          n = argv(q, a); for (i = 0; i < n && i < 3; i++) if (a[i] ~ /(^|\/)agent-(run|exec)$/) kind = "agent-run"
+          if (kind != "interactive") break
+        }
+        if (kind == "interactive") { n = argv(p, a); for (i = 1; i < n; i++) if (a[i] == "-p" || a[i] == "--print") kind = "workflow" }
+        printf "%s\t%d\t%d\t%d\t%d\t%s\n", p, up - start[p] / tck, rss[p] / 1024, swp[p] / 1024, kid[p] / 1024, kind
+      }
+    }' | awk -F'\t' -v OFS='\t' '{ print $0, $3 + $4 + $5 }' | sort -t$'\t' -k7,7nr)
+  local out="" line
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    cwd=$(readlink "$PC_PROC/${line%%$'\t'*}/cwd" 2>/dev/null) || cwd=?
+    out+="$line"$'\t'"${cwd/#$HOME/\~}"$'\n'
+  done <<<"$rows"
+  printf '%s' "$out" | awk -F'\t' -v avail="$avail" -v res="$PC_MEM_RESERVE_MB" -v def="$PC_MEM_AGENT_MB" -v json="$JSON" '
+    function age(s) { return s < 3600 ? int(s / 60) "m" : s < 86400 ? sprintf("%.1fh", s / 3600) : sprintf("%.1fd", s / 86400) }
+    function js(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return "\"" s "\"" }
+    { n++; row[n] = $0; tot[n] = $7 }
+    END {
+      if (!json) printf "%-8s %6s %7s %7s %8s %8s  %-11s %s\n", "pid", "age", "rss_MB", "swap_MB", "child_MB", "total_MB", "kind", "cwd"
+      for (i = 1; i <= n; i++) {
+        split(row[i], c, "\t")
+        if (json) j = j (i > 1 ? "," : "") sprintf("{\"pid\":%d,\"age_s\":%d,\"rss_mb\":%d,\"swap_mb\":%d,\"child_mb\":%d,\"total_mb\":%d,\"kind\":%s,\"cwd\":%s}", c[1], c[2], c[3], c[4], c[5], c[7], js(c[6]), js(c[8]))
+        else printf "%-8s %6s %7d %7d %8d %8d  %-11s %s\n", c[1], age(c[2]), c[3], c[4], c[5], c[7], c[6], c[8]
+      }
+      if (n) { k = int(0.9 * n); if (k < 0.9 * n) k++; p90 = tot[n + 1 - k] } else p90 = def
+      if (p90 < 1) p90 = 1
+      fit = int((avail - res) / p90); if (fit < 0) fit = 0
+      if (json) printf "{\"sessions\":[%s],\"avail_mb\":%d,\"reserve_mb\":%d,\"p90_mb\":%d,\"fit\":%d}\n", j, avail, res, p90, fit
+      else printf "fit %d (avail %d MB − reserve %d MB) / p90 %d MB%s\n", fit, avail, res, p90, n ? "" : " (no session: default)"
+    }'
+}
+
+case ${PC_ARGS[0]:-} in
+  sample) sample;;
+  growth) growth;;
+  cpu) cpu;;
+  swap-refresh) swap_refresh; exit $?;;
+  agents) agents;;
+  *) printf '%s\n' "$PC_USAGE" >&2; exit 2;;
+esac

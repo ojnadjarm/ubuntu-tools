@@ -1,0 +1,358 @@
+#!/usr/bin/env python3
+# pc disk dupes|reclaim <root> [--apply] — duplicate files, done tickets' venvs/node_modules and old big logs under a root; reclaim hardlinks, deletes or zstd-compresses them, one ledger row each.
+import hashlib, json, os, re, shlex, shutil, subprocess, sys, time
+
+USAGE = """usage: pc disk dupes|reclaim <root> [--apply] [--json]
+
+dupes    groups of identical files >= $PC_DISK_MIN_MB (default 5) MB: MB COPIES SAVED_MB FILES, then a total
+reclaim  ACTION PATH MB REASON, dry run unless --apply:
+  link      a duplicate copy becomes a hardlink of the oldest copy (same fs, both idle > 24 h)
+  delete    .venv|venv (with pyvenv.cfg)|node_modules|.godot of a ticket with a done line in
+            $PC_DISK_HISTORY (default ~/agent-work/history.md), tree idle > 7 d; venvs leave <tree>.freeze.txt
+  compress  zstd -1 --rm on .json/.jsonl/.log/.txt files >= $PC_DISK_ZSTD_MB (default 200) MB idle > 14 d
+  skip      refused: owner data (~/agent-work/owner, ~/agents/backups, ~/Documents, $PC_DISK_PROTECT
+            colon list) at any root, games/*/build (rewritten nightly), other build/ dirs (not scanned),
+            vass/char3d names, paths or tickets on $PC_DISK_CLAIMS (default ~/agents/FILE-CLAIMS.md),
+            no done line, too young; a root inside owner data exits 2
+MB counts each inode once and a tree only for inodes with every link inside it (bytes freed).
+Idle = newest file mtime. --apply appends one $PC_LEDGER entry per action; `pc undo <id>` splits a link
+(cp --preserve=all), runs zstd -d, or prints the recreate command of a deleted tree."""
+
+HOME = os.path.expanduser("~")
+LEDGER = os.environ.get("PC_LEDGER", f"{HOME}/agents/log/changes.jsonl")
+HISTORY = os.environ.get("PC_DISK_HISTORY", f"{HOME}/agent-work/history.md")
+CLAIMS = os.environ.get("PC_DISK_CLAIMS", f"{HOME}/agents/FILE-CLAIMS.md")
+MIN_B = int(float(os.environ.get("PC_DISK_MIN_MB", "5")) * 2**20)
+ZSTD_B = int(float(os.environ.get("PC_DISK_ZSTD_MB", "200")) * 2**20)
+LINK_IDLE_H, TREE_IDLE_H, ZSTD_IDLE_H = 24, 7 * 24, 14 * 24
+REGEN = {".venv", "venv", "node_modules", ".godot"}
+ZSTD_EXT = (".json", ".jsonl", ".log", ".txt")
+BUILD_RE = re.compile(r"(^|/)games/[^/]+/build$")
+TICKET_RE = re.compile(r"^(T\d+)")
+PROTECT = {os.path.realpath(os.path.expanduser(x)) for x in
+           ["~/agent-work/owner", "~/agents/backups", "~/Documents"] + os.environ.get("PC_DISK_PROTECT", "").split(":") if x}
+NOW = time.time()
+
+
+def mb(b):
+    return f"{b / 2**20:.0f}"
+
+
+def idle_h(path):
+    """Hours since the newest file mtime in the tree (the path's own mtime when it holds no files)."""
+    newest = os.lstat(path).st_mtime
+    if os.path.isdir(path) and not os.path.islink(path):
+        files = [os.lstat(os.path.join(d, f)).st_mtime for d, _, fs in os.walk(path) for f in fs]
+        newest = max(files) if files else newest
+    return int((NOW - newest) // 3600)
+
+
+def tree_bytes(path):
+    """Bytes freed by deleting the tree: each inode once, only when all its links are inside."""
+    seen = {}
+    for d, _, fs in os.walk(path):
+        for f in fs:
+            st = os.lstat(os.path.join(d, f))
+            seen.setdefault((st.st_dev, st.st_ino), [st, 0])[1] += 1
+    return sum(st.st_blocks * 512 for st, n in seen.values() if n >= st.st_nlink)
+
+
+def protected(path):
+    return any(path == x or path.startswith(x + "/") for x in PROTECT)
+
+
+def read_lines(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            return fh.read().splitlines()
+    except OSError:
+        return []
+
+
+CLAIM_ROWS = [r for r in read_lines(CLAIMS) if r.startswith("- ")]
+CLAIMED = [os.path.normpath(os.path.expanduser(w)) for r in CLAIM_ROWS
+           for part in r[2:].split(" · ")[1:2] for w in part.split() if w.startswith(("/", "~"))]
+HIST = "\n".join(read_lines(HISTORY))
+
+
+def claimed(path):
+    return any(path == c or path.startswith(c + "/") or c.startswith(path + "/") for c in CLAIMED)
+
+
+def ticket_claimed(t):
+    return any(re.match(rf"- {t}([^0-9]|$)", r) for r in CLAIM_ROWS)
+
+
+def done(t):
+    return re.search(rf"^- \d{{4}}-\d{{2}}-\d{{2}} {t}([^0-9]|$)", HIST, re.M) is not None
+
+
+def scan(root):
+    """Walk root once: files by size, regenerable trees, compress candidates and refused subtrees."""
+    by_size, trees, big, skips = {}, [], [], []
+    for d, dirs, files in os.walk(root):
+        keep = []
+        for n in sorted(dirs):
+            p = os.path.join(d, n)
+            rel = os.path.relpath(p, root)
+            if os.path.islink(p) or n == ".git":
+                continue
+            if p in PROTECT:
+                skips.append((p, "owner data, never touched"))
+                continue
+            if BUILD_RE.search(rel):
+                skips.append((p, "games build, rewritten nightly"))
+                continue
+            if re.search(r"vass|char3d", n, re.I):
+                skips.append((p, "vass/char3d, never touched"))
+                continue
+            if n in REGEN and (n == "node_modules" or n == ".godot" or os.path.isfile(os.path.join(p, "pyvenv.cfg"))):
+                trees.append(p)
+                continue
+            if n == "build":
+                skips.append((p, "build output, not scanned"))
+                continue
+            keep.append(n)
+        dirs[:] = keep
+        for n in files:
+            p = os.path.join(d, n)
+            st = os.lstat(p)
+            if not os.path.isfile(p) or os.path.islink(p):
+                continue
+            if st.st_size >= MIN_B:
+                by_size.setdefault(st.st_size, []).append((p, st))
+            if st.st_size >= ZSTD_B and n.endswith(ZSTD_EXT) and st.st_nlink == 1:
+                big.append(p)
+    return by_size, trees, big, skips
+
+
+def digest(path, limit=None):
+    h = hashlib.blake2b()
+    with open(path, "rb") as fh:
+        left = limit
+        while chunk := fh.read(2**20 if left is None else min(2**20, left)):
+            h.update(chunk)
+            if left is not None:
+                left -= len(chunk)
+                if left <= 0:
+                    break
+    return h.hexdigest()
+
+
+def groups(by_size, exclude=()):
+    """Lists of inodes [(paths, stat)] with identical bytes, at least two distinct inodes each."""
+    out = []
+    for size, entries in by_size.items():
+        inodes = {}
+        for p, st in entries:
+            if p in exclude:
+                continue
+            inodes.setdefault((st.st_dev, st.st_ino), ([], st))[0].append(p)
+        if len(inodes) < 2:
+            continue
+        for key in ("head", "full"):
+            buckets = {}
+            for paths, st in inodes.values():
+                buckets.setdefault(digest(paths[0], 2**20 if key == "head" else None), []).append((paths, st))
+            inodes = {(st.st_dev, st.st_ino): (paths, st) for b in buckets.values() if len(b) > 1 for paths, st in b}
+            if not inodes:
+                break
+        full = {}
+        for paths, st in inodes.values():
+            full.setdefault(digest(paths[0]), []).append((sorted(paths), st))
+        out += [sorted(g, key=lambda e: (e[1].st_mtime, e[0][0])) for g in full.values() if len(g) > 1]
+    return sorted(out, key=lambda g: -g[0][1].st_size * (len(g) - 1))
+
+
+def table(rows):
+    w = [max(len(r[i]) for r in rows) for i in range(len(rows[0]) - 1)]
+    for r in rows:
+        print("  ".join(c.ljust(w[i]) for i, c in enumerate(r[:-1])) + "  " + r[-1])
+
+
+def cmd_dupes(root, as_json):
+    by_size, *_ = scan(root)
+    gs = groups(by_size)
+    if as_json:
+        print(json.dumps([{"bytes": g[0][1].st_size, "copies": len(g), "files": [p for ps, _ in g for p in ps]} for g in gs]))
+        return 0
+    rows = [("MB", "COPIES", "SAVED_MB", "FILES")]
+    rows += [(mb(g[0][1].st_size), str(len(g)), mb(g[0][1].st_size * (len(g) - 1)), f"{g[0][0][0]} (+{len(g) - 1})") for g in gs]
+    table(rows)
+    saved = sum(g[0][1].st_size * (len(g) - 1) for g in gs)
+    print(f"{len(gs)} groups, {sum(len(g) - 1 for g in gs)} extra copies, {mb(saved)} MB")
+    return 0
+
+
+def recreate_hint(p):
+    parent, name = os.path.split(p)
+    q = shlex.quote
+    if name == "node_modules":
+        return f"cd {q(parent)} && npm {'ci' if os.path.isfile(os.path.join(parent, 'package-lock.json')) else 'install'}"
+    if name == ".godot":
+        return f"godot --headless --path {q(parent)} --import"
+    cfg = "\n".join(read_lines(os.path.join(p, "pyvenv.cfg")))
+    if re.search(r"^uv\s*=", cfg, re.M):
+        return f"uv venv {q(p)} && uv pip install -p {q(p)} -r {q(p + '.freeze.txt')}"
+    return f"python3 -m venv {q(p)} && {q(p + '/bin/pip')} install -r {q(p + '.freeze.txt')}"
+
+
+def freeze(p):
+    pkgs = set()
+    for d, dirs, _ in os.walk(p):
+        for n in dirs:
+            if n.endswith(".dist-info"):
+                meta = dict(l.split(": ", 1) for l in read_lines(os.path.join(d, n, "METADATA")) if l.startswith(("Name: ", "Version: ")))
+                if "Name" in meta and "Version" in meta:
+                    pkgs.add(f"{meta['Name']}=={meta['Version']}")
+    with open(p + ".freeze.txt", "w") as fh:
+        fh.write("".join(f"{x}\n" for x in sorted(pkgs, key=str.lower)))
+
+
+def plan(root):
+    by_size, trees, big, skips = scan(root)
+    acts, skip = [], [(p, "-", why) for p, why in skips]
+    for p in big:
+        h = idle_h(p)
+        if claimed(p):
+            skip.append((p, mb(os.lstat(p).st_size), "claimed on FILE-CLAIMS"))
+        elif h < ZSTD_IDLE_H:
+            skip.append((p, mb(os.lstat(p).st_size), f"idle {h}h < 14d"))
+        else:
+            acts.append(("compress", p, os.lstat(p).st_size, f"idle {h}h, zstd -1"))
+    for g in groups(by_size, exclude=set(big)):
+        k = g[0][0][0]
+        for paths, st in g[1:]:
+            for p in paths:
+                if claimed(p) or claimed(k):
+                    skip.append((p, mb(st.st_size), "claimed on FILE-CLAIMS"))
+                elif st.st_dev != g[0][1].st_dev:
+                    skip.append((p, mb(st.st_size), "other filesystem"))
+                elif idle_h(p) < LINK_IDLE_H or idle_h(k) < LINK_IDLE_H:
+                    skip.append((p, mb(st.st_size), f"idle {min(idle_h(p), idle_h(k))}h < 24h"))
+                else:
+                    acts.append(("link", p, st.st_size, f"same bytes as {k}"))
+    for p in trees:
+        m = [TICKET_RE.match(c) for c in os.path.relpath(p, root).split("/")]
+        t = next((x.group(1) for x in reversed(m) if x), None)
+        b = tree_bytes(p)
+        if t is None:
+            skip.append((p, mb(b), "no ticket in path"))
+            continue
+        if not done(t):
+            skip.append((p, mb(b), f"{t} has no done line"))
+            continue
+        if claimed(p) or ticket_claimed(t):
+            skip.append((p, mb(b), "claimed on FILE-CLAIMS"))
+            continue
+        h = idle_h(p)
+        if h < TREE_IDLE_H:
+            skip.append((p, mb(b), f"idle {h}h < 7d"))
+            continue
+        acts.append(("delete", p, b, f"{t} done, idle {h}h"))
+    return acts, skip
+
+
+def pc_id():
+    n, out, digits = time.time_ns(), "", "0123456789abcdefghijklmnopqrstuvwxyz"
+    while n:
+        n, r = divmod(n, 36)
+        out = digits[r] + out
+    return out
+
+
+def sh(cmd):
+    return subprocess.run(["bash", "-c", cmd], capture_output=True, text=True).stdout.strip()
+
+
+def ledgered(target, before, after, rollback, redo, read, change):
+    """One ledger entry around change(), the same shape pc_apply writes; returns the id."""
+    i = pc_id()
+    os.makedirs(os.path.dirname(LEDGER), exist_ok=True)
+    row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "id": i,
+           "session": os.environ.get("CLAUDE_CODE_SESSION_ID", os.environ.get("CLAUDE_SESSION_ID", "")),
+           "agent": os.environ.get("AGENT_NAME", ""), "cmd": f"pc disk reclaim --apply {target}", "target": target,
+           "before": before, "after": after, "rollback": rollback, "redo": redo, "read": read}
+    with open(LEDGER, "a") as fh:
+        fh.write(json.dumps(row) + "\n")
+    try:
+        change()
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"pc disk: {target}: {e}", file=sys.stderr)
+    observed = sh(read)
+    with open(LEDGER, "a") as fh:
+        fh.write(json.dumps({"id": i, "verified": observed == after, "observed": observed}) + "\n")
+    return i, observed == after
+
+
+def apply_one(kind, p, why):
+    q = shlex.quote
+    if kind == "compress":
+        z = p + ".zst"
+        return ledgered(p, "plain", "zst", f"zstd -d --rm -q -- {q(z)}", f"zstd -1 --rm -q -- {q(p)}",
+                        f"[ -e {q(z)} ] && [ ! -e {q(p)} ] && echo zst || echo plain",
+                        lambda: subprocess.run(["zstd", "-1", "--rm", "-q", "--", p], check=True))
+    if kind == "link":
+        k = why.removeprefix("same bytes as ")
+
+        def link():
+            tmp = p + ".pcdisk-link"
+            os.link(k, tmp)
+            os.replace(tmp, p)
+        s = p + ".pcdisk-split"
+        return ledgered(p, "copy", "linked", f"cp --preserve=all -- {q(k)} {q(s)} && mv -f -- {q(s)} {q(p)}",
+                        f"ln -f -- {q(k)} {q(p)}", f"[ {q(p)} -ef {q(k)} ] && echo linked || echo copy", link)
+    hint = recreate_hint(p)
+
+    def delete():
+        if os.path.basename(p) != "node_modules" and os.path.basename(p) != ".godot":
+            freeze(p)
+        shutil.rmtree(p)
+    return ledgered(p, "present", "absent", f"echo {q('recreate: ' + hint)} >&2; exit 1", f"rm -rf -- {q(p)}",
+                    f"[ -e {q(p)} ] && echo present || echo absent", delete)
+
+
+def cmd_reclaim(root, apply):
+    acts, skip = plan(root)
+    rows = [("ACTION", "PATH", "MB", "REASON")]
+    rows += [(k, p, mb(b), why) for k, p, b, why in acts] + [("skip", p, m, why) for p, m, why in skip]
+    table(rows)
+    tot = {k: [sum(1 for a in acts if a[0] == k), sum(a[2] for a in acts if a[0] == k)] for k in ("link", "delete", "compress")}
+    summary = (f"link {tot['link'][0]} files {mb(tot['link'][1])} MB, delete {tot['delete'][0]} trees {mb(tot['delete'][1])} MB, "
+               f"compress {tot['compress'][0]} files {mb(tot['compress'][1])} MB")
+    if not apply:
+        print(f"would: {summary} (--apply)")
+        return 0
+    ids, failed = [], 0
+    for k, p, _, why in acts:
+        i, ok = apply_one(k, p, why)
+        ids.append(i)
+        failed += not ok
+        print(f"{k} {p}: {'ok' if ok else 'FAILED'}, rollback: pc undo {i}")
+    print(f"done: {summary}; failed {failed}")
+    print(f"rollback: pc undo <id> per action ({len(ids)} ids)")
+    return 1 if failed else 0
+
+
+def main(argv):
+    if any(a in ("-h", "--help") for a in argv):
+        print(USAGE)
+        return 0
+    flags = {a for a in argv if a.startswith("--")}
+    args = [a for a in argv if not a.startswith("--")]
+    bad = flags - {"--apply", "--json"}
+    if bad or len(args) != 2 or args[0] not in ("dupes", "reclaim"):
+        print(f"pc disk: {'unknown option ' + ' '.join(sorted(bad)) if bad else 'need dupes|reclaim <root>'}", file=sys.stderr)
+        return 2
+    root = os.path.realpath(args[1])
+    if not os.path.isdir(root):
+        print(f"pc disk: not a directory: {root}", file=sys.stderr)
+        return 2
+    if protected(root):
+        print(f"pc disk: refused, owner data: {root}", file=sys.stderr)
+        return 2
+    return cmd_dupes(root, "--json" in flags) if args[0] == "dupes" else cmd_reclaim(root, "--apply" in flags)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

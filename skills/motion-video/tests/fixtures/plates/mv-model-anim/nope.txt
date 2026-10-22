@@ -1,0 +1,1 @@
+shot.py: MV_MODEL_ANIM Nope not in ['Bend', 'Still']

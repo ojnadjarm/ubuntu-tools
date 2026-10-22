@@ -1,0 +1,2 @@
+# Skills whose tests run.sh and skill-desc.test.sh skip: <skill><TAB><why>; unpausing = delete the row.
+char3d	3D paused 2026-10-21, decisions/char3d.md

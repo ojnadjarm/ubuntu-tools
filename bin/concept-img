@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""concept-img: generate one AI concept image through OpenRouter's Image API under a hard dollar cap."""
+import argparse
+import base64
+import io
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.request
+
+USAGE = """usage: concept-img --model M (--prompt TEXT | --prompt-file F) --out out.png --log spend.tsv --start USD
+                   [--resolution 1K|2K|4K] [--aspect 3:4] [--ref img.png ...] [--cap USD [--reserve USD]]
+Before the call: spent = max(key usage - start, last logged total); with --cap, refuses (exit 3) when spent + reserve > cap (default: no cap).\nThe key's usage lags a few seconds, so run calls one at a time; a .png out converts other formats to PNG.
+After: writes the image, appends model, size, cost delta and the running total (last column) to the TSV log.
+env: OPENROUTER_KEY_FILE (default ~/agents/secrets/openrouter.key), CONCEPT_IMG_API (default https://openrouter.ai/api/v1)
+exit 0 image written · 1 API error (402 = key out of credit) · 2 usage · 3 cap reached"""
+HEADER = "time\tmodel\tresolution\taspect\tout\tcost_delta\tkey_usage\ttotal\n"
+
+
+def api(path, key, body=None):
+    """Call the OpenRouter API and return parsed JSON."""
+    base = os.environ.get("CONCEPT_IMG_API", "https://openrouter.ai/api/v1")
+    req = urllib.request.Request(base + path, data=None if body is None else json.dumps(body).encode(),
+                                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=300) as r:
+        return json.load(r)
+
+
+def usage(key):
+    """Return the key's total spend in USD."""
+    return float(api("/key", key)["data"]["usage"])
+
+
+def logged_total(log):
+    """Return the running total from the last row of the spend log, 0 if none."""
+    try:
+        return float(open(log).read().strip().splitlines()[-1].split("\t")[-1])
+    except (OSError, IndexError, ValueError):
+        return 0.0
+
+
+def data_url(path):
+    """Encode a local image as a data URL."""
+    ext = os.path.splitext(path)[1].lstrip(".").lower().replace("jpg", "jpeg") or "png"
+    with open(path, "rb") as f:
+        return f"data:image/{ext};base64," + base64.b64encode(f.read()).decode()
+
+
+def main():
+    p = argparse.ArgumentParser(usage=USAGE, add_help=False)
+    p.add_argument("-h", "--help", action="store_true")
+    for a in ("--model", "--prompt", "--prompt-file", "--out", "--log", "--aspect", "--resolution"):
+        p.add_argument(a)
+    p.add_argument("--start", type=float)
+    p.add_argument("--cap", type=float)
+    p.add_argument("--reserve", type=float, default=0.30)
+    p.add_argument("--ref", action="append", default=[])
+    a, extra = p.parse_known_args()
+    if a.help:
+        print(USAGE)
+        return 0
+    prompt = open(a.prompt_file).read().strip() if a.prompt_file else a.prompt
+    if extra or not (a.model and prompt and a.out and a.log) or a.start is None:
+        print(USAGE, file=sys.stderr)
+        return 2
+    key = open(os.path.expanduser(os.environ.get("OPENROUTER_KEY_FILE", "~/agents/secrets/openrouter.key"))).read().strip()
+
+    before = usage(key)
+    spent = max(before - a.start, logged_total(a.log))
+    if a.cap is not None and spent + a.reserve > a.cap:
+        print(f"concept-img: cap: spent {spent:.4f} + reserve {a.reserve:.2f} > cap {a.cap:.2f}", file=sys.stderr)
+        return 3
+    body = {"model": a.model, "prompt": prompt, "n": 1}
+    if a.resolution:
+        body["resolution"] = a.resolution
+    if a.aspect:
+        body["aspect_ratio"] = a.aspect
+    if a.ref:
+        body["input_references"] = [{"type": "image_url", "image_url": {"url": data_url(r)}} for r in a.ref]
+    try:
+        res = api("/images", key, body)
+    except urllib.error.HTTPError as e:
+        print(f"concept-img: HTTP {e.code}: {e.read().decode(errors='replace')[:400]}", file=sys.stderr)
+        return 1
+    os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+    raw = base64.b64decode(res["data"][0]["b64_json"])
+    if a.out.lower().endswith(".png") and not raw.startswith(b"\x89PNG"):
+        from PIL import Image
+        Image.open(io.BytesIO(raw)).save(a.out)
+    else:
+        with open(a.out, "wb") as f:
+            f.write(raw)
+
+    after = usage(key)
+    cost = float((res.get("usage") or {}).get("cost") or after - before)
+    total = max(after - a.start, logged_total(a.log) + cost)
+    new = not os.path.exists(a.log)
+    with open(a.log, "a") as f:
+        if new:
+            f.write(HEADER)
+        f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')}\t{a.model}\t{a.resolution or '-'}\t{a.aspect or '-'}\t"
+                f"{a.out}\t{cost:.4f}\t{after:.4f}\t{total:.4f}\n")
+    print(f"{a.out}\tcost {cost:.4f}\ttotal {total:.4f}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

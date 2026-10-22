@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# journal fixtures: systemd-resolved -> $PC_NET_RESOLVED_LOG or resolved.log; else wpa_supplicant ($PC_NET_WPA_LOG or wpa.log).
+case " $* " in *' systemd-resolved '*) exec cat "${PC_NET_RESOLVED_LOG:-$(dirname "$0")/../resolved.log}";; esac
+cat "${PC_NET_WPA_LOG:-$(dirname "$0")/../wpa.log}"

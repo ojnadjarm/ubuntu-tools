@@ -1,0 +1,23 @@
+1792357539.151876 box kernel: claude invoked oom-killer: gfp_mask=0x140cca(GFP_HIGHUSER_MOVABLE|__GFP_COMP), order=0, oom_score_adj=0
+1792357539.346884 box kernel: oom-kill:constraint=CONSTRAINT_NONE,nodemask=(null),cpuset=user.slice,mems_allowed=0,global_oom,task_memcg=/user.slice/user-1000.slice/user@1000.service/app.slice/tmux-spawn-789b037a.scope,task=script,pid=4193272,uid=1000
+1792357539.346922 box kernel: Out of memory: Killed process 4193272 (script) total-vm:38603424kB, anon-rss:33917808kB, file-rss:8kB, shmem-rss:0kB, UID:1000 pgtables:75588kB oom_score_adj:200
+1792415671.082894 box kernel: ffprobe invoked oom-killer: gfp_mask=0xcc0(GFP_KERNEL), order=0, oom_score_adj=200
+1792415671.084605 box kernel: memory: usage 6291456kB, limit 6291456kB, failcnt 125
+1792415671.091163 box kernel: oom-kill:constraint=CONSTRAINT_MEMCG,nodemask=(null),cpuset=user.slice,mems_allowed=0,oom_memcg=/user.slice/user-1000.slice/user@1000.service/app.slice/run-p376706-i17167927.scope,task_memcg=/user.slice/user-1000.slice/user@1000.service/app.slice/run-p376706-i17167927.scope,task=ffmpeg,pid=377461,uid=1000
+1792415671.091195 box kernel: Memory cgroup out of memory: Killed process 377461 (ffmpeg) total-vm:4682644kB, anon-rss:874476kB, file-rss:43980kB, shmem-rss:0kB, UID:1000 pgtables:3872kB oom_score_adj:200
+1792477044.600000 box kernel: python3 invoked oom-killer: gfp_mask=0xcc0(GFP_KERNEL), order=0, oom_score_adj=200
+1792477044.600100 box kernel: memory: usage 204800kB, limit 204800kB, failcnt 20
+1792477044.600200 box kernel: oom-kill:constraint=CONSTRAINT_MEMCG,nodemask=(null),cpuset=user.slice,mems_allowed=0,oom_memcg=/user.slice/user-1000.slice/user@1000.service/app.slice/run-p315046-i25467318.scope,task_memcg=/user.slice/user-1000.slice/user@1000.service/app.slice/run-p315046-i25467318.scope,task=python3,pid=315048,uid=1000
+1792477044.600300 box kernel: Memory cgroup out of memory: Killed process 315048 (python3) total-vm:424716kB, anon-rss:203528kB, file-rss:6296kB, shmem-rss:0kB, UID:1000 pgtables:464kB oom_score_adj:200
+1792540000.100000 box kernel: python3 invoked oom-killer: gfp_mask=0xcc0(GFP_KERNEL), order=0, oom_score_adj=200
+1792540000.100100 box kernel: memory: usage 49152kB, limit 49152kB, failcnt 20
+1792540000.100200 box kernel: oom-kill:constraint=CONSTRAINT_MEMCG,nodemask=(null),cpuset=user.slice,mems_allowed=0,oom_memcg=/user.slice/user-1000.slice/user@1000.service/app.slice/run-p2531638-i40269511.scope,task_memcg=/user.slice/user-1000.slice/user@1000.service/app.slice/run-p2531638-i40269511.scope,task=python3,pid=2531640,uid=1000
+1792540000.100300 box kernel: Memory cgroup out of memory: Killed process 2531640 (python3) total-vm:86836kB, anon-rss:47992kB, file-rss:6804kB, shmem-rss:0kB, UID:1000 pgtables:168kB oom_score_adj:200
+1792550000.100000 box kernel: script invoked oom-killer: gfp_mask=0xcc0(GFP_KERNEL), order=0, oom_score_adj=200
+1792550000.100100 box kernel: memory: usage 307200kB, limit 307200kB, failcnt 19
+1792550000.100200 box kernel: oom-kill:constraint=CONSTRAINT_MEMCG,nodemask=(null),cpuset=user.slice,mems_allowed=0,oom_memcg=/user.slice/user-1000.slice/user@1000.service/app.slice/run-p255327-i4462224.scope,task_memcg=/user.slice/user-1000.slice/user@1000.service/app.slice/run-p255327-i4462224.scope,task=script,pid=255329,uid=1000
+1792550000.100300 box kernel: Memory cgroup out of memory: Killed process 255329 (script) total-vm:311436kB, anon-rss:303236kB, file-rss:2256kB, shmem-rss:0kB, UID:1000 pgtables:652kB oom_score_adj:200
+1792560000.100000 box kernel: python3 invoked oom-killer: gfp_mask=0xcc0(GFP_KERNEL), order=0, oom_score_adj=200
+1792560000.100100 box kernel: memory: usage 204800kB, limit 204800kB, failcnt 20
+1792560000.100200 box kernel: oom-kill:constraint=CONSTRAINT_MEMCG,nodemask=(null),cpuset=docker-dbb277c04c98301d8a56a758e5e3ee1764cdf32863e47039cc8cc51c2ed60955.scope,mems_allowed=0,oom_memcg=/system.slice/docker-dbb277c04c98301d8a56a758e5e3ee1764cdf32863e47039cc8cc51c2ed60955.scope/user.slice/user-1000.slice/user@1000.service/app.slice/run-p40516-i19521285.scope,task_memcg=/system.slice/docker-dbb277c04c98301d8a56a758e5e3ee1764cdf32863e47039cc8cc51c2ed60955.scope/user.slice/user-1000.slice/user@1000.service/app.slice/run-p40516-i19521285.scope,task=python3,pid=41000,uid=1000
+1792560000.100300 box kernel: Memory cgroup out of memory: Killed process 41000 (python3) total-vm:424716kB, anon-rss:203100kB, file-rss:6296kB, shmem-rss:0kB, UID:1000 pgtables:464kB oom_score_adj:200

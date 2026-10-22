@@ -153,14 +153,14 @@
 
 /* the action bar rides the bottom of the screen, above the phone dock */
 .vbar { position: sticky; bottom: calc(var(--dock) + .75rem); z-index: 6; margin-top: auto; }
-.go { width: 100%; min-height: 4.2rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .25rem; border: 1px solid var(--g); color: var(--g2);
+.vbar .go { width: 100%; min-height: 4.2rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .25rem; border: 1px solid var(--g); color: var(--g2);
   background: color-mix(in srgb, var(--bg1) 86%, var(--g) 14%); box-shadow: 0 0 26px -8px var(--g), 0 -12px 28px -6px var(--bg); font-size: 1rem; letter-spacing: .2em; text-transform: uppercase; font-weight: 600;
   transition: border-color .2s, background-color .2s, box-shadow .3s, transform .12s var(--ei); }
-.go em { font-style: normal; font-weight: 400; font-size: .74rem; letter-spacing: .08em; color: var(--mid); text-transform: none; }
-.go:not(:disabled):hover { box-shadow: 0 0 34px -6px var(--g), 0 -12px 28px -6px var(--bg); }
-.go:not(:disabled):active { transform: scale(.985); }
-.go.on { border-color: var(--gold); color: var(--gold); background: color-mix(in srgb, var(--bg1) 84%, var(--gold) 16%); box-shadow: 0 0 30px -6px var(--gold), 0 -12px 28px -6px var(--bg); }
-.go.busy { border-color: var(--line3); color: var(--mid); background: var(--bg1); box-shadow: 0 -12px 28px -6px var(--bg); }
+.vbar .go em { font-style: normal; font-weight: 400; font-size: .74rem; letter-spacing: .08em; color: var(--mid); text-transform: none; }
+.vbar .go:not(:disabled):hover { box-shadow: 0 0 34px -6px var(--g), 0 -12px 28px -6px var(--bg); }
+.vbar .go:not(:disabled):active { transform: scale(.985); }
+.vbar .go.on { border-color: var(--gold); color: var(--gold); background: color-mix(in srgb, var(--bg1) 84%, var(--gold) 16%); box-shadow: 0 0 30px -6px var(--gold), 0 -12px 28px -6px var(--bg); }
+.vbar .go.busy { border-color: var(--line3); color: var(--mid); background: var(--bg1); box-shadow: 0 -12px 28px -6px var(--bg); }
 .recbar { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: clamp(.8rem, 3cqi, 2rem); padding: .45rem; border: 1px solid var(--line2); background: color-mix(in srgb, var(--bg1) 92%, transparent); box-shadow: 0 -12px 28px -6px var(--bg); }
 .recbar .nav { width: min(100%, 10rem); justify-content: center; }
 .recbar #back { justify-self: end; } .recbar #next { justify-self: start; }
@@ -188,8 +188,8 @@
   .vx .perch { width: clamp(5.5rem, 26vw, 8rem); }
   .vbar { bottom: calc(var(--dock) + .5rem); }
   .rec { width: 4.6rem; height: 4.6rem; }
-  .go { min-height: 3.8rem; }
+  .vbar .go { min-height: 3.8rem; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .vx *, .go, .rec { animation: none !important; transition: none !important; }
+  .vx *, .vbar .go, .rec { animation: none !important; transition: none !important; }
 }

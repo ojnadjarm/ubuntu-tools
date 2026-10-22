@@ -1,0 +1,10 @@
+[Unit]
+Description=pc disk reclaim of ~/agent-work daily at 03:40 (+<= 10 min, outside the 00:50-01:50 CI window)
+
+[Timer]
+OnCalendar=*-*-* 03:40
+RandomizedDelaySec=600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# char3d-setup [--check]: install MPFB 2.0.18 + CC0 system assets + faceunits01/visemes02 into the char3d Blender sandbox.
+set -euo pipefail
+RES=${CHAR3D_BLENDER_RES:-$HOME/.local/share/char3d/blender-res}
+DL=${CHAR3D_DOWNLOADS:-$HOME/.local/share/char3d/downloads}
+TICKET=${CHAR3D_TICKET:-T1032}
+BLENDER=${CHAR3D_BLENDER:-blender}
+MPFB_SHA=c075b3e9b94b8e5556a5f03f4653602d02ea306de08126e8f55ed6dee28a2dad
+MPFB_URL="https://extensions.blender.org/download/sha256:$MPFB_SHA/add-on-mpfb-v2.0.18.zip"
+MH=https://files.makehumancommunity.org
+PACKS=("sys|$MH/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip"
+       "faceunits01|$MH/functional/faceunits01.zip"
+       "visemes02|$MH/functional/visemes02.zip")
+DATA="$RES/extensions/.user/user_default/mpfb/data"
+STAMP="$DATA/.char3d-setup"
+
+check() {
+  [[ -f "$RES/extensions/user_default/mpfb/blender_manifest.toml" ]] || { echo "char3d-setup: MPFB missing in $RES"; return 1; }
+  for f in skins/old_caucasian_male/old_caucasian_male.mhmat packs/faceunits01.json packs/visemes02.json; do
+    [[ -f "$DATA/$f" ]] || { echo "char3d-setup: $DATA/$f missing"; return 1; }
+  done
+  echo "char3d-setup: ok ($RES, $(du -sh "$RES" | cut -f1))"
+}
+
+if [[ ${1:-} == --check ]]; then check; exit; fi
+if check >/dev/null 2>&1 && [[ -f "$STAMP" ]]; then check; exit 0; fi
+
+mkdir -p "$RES" "$DL"
+fetch() {  # fetch NAME URL -> $DL/NAME.zip (resumable, atomic)
+  [[ -s "$DL/$1.zip" ]] && return
+  curl -fsSL --retry 3 -o "$DL/$1.zip.part" "$2" && mv "$DL/$1.zip.part" "$DL/$1.zip"
+}
+fetch mpfb "$MPFB_URL"
+echo "$MPFB_SHA  $DL/mpfb.zip" | sha256sum -c --quiet || { rm -f "$DL/mpfb.zip"; echo "char3d-setup: mpfb.zip sha256 mismatch" >&2; exit 1; }
+for p in "${PACKS[@]}"; do fetch "${p%%|*}" "${p#*|}"; done
+
+PY=$(mktemp --suffix=.py)
+trap 'rm -f "$PY"' EXIT
+cat > "$PY" <<'EOF'
+import bpy, sys
+bpy.ops.extensions.package_install_files(filepath=sys.argv[sys.argv.index('--') + 1], repo='user_default', enable_on_install=True)
+print('DATA', bpy.utils.extension_path_user('bl_ext.user_default.mpfb', path='data', create=True))
+EOF
+BLENDER_USER_RESOURCES="$RES" heavy run --ticket "$TICKET" -- "$BLENDER" -b --factory-startup -noaudio \
+  --python-exit-code 1 --python "$PY" -- "$DL/mpfb.zip" | grep '^DATA'
+mkdir -p "$DATA"
+for p in "${PACKS[@]}"; do unzip -oq "$DL/${p%%|*}.zip" -d "$DATA"; done
+date -Is > "$STAMP"
+check

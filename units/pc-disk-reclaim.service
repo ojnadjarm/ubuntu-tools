@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily ~/agent-work disk reclaim (pc disk reclaim --apply: links 24 h-idle duplicates, done tickets' venvs, old traces; T1126)
+
+[Service]
+Type=oneshot
+TimeoutStartSec=1800
+Nice=19
+IOSchedulingClass=idle
+Environment=PATH=%h/agents/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/sh -c '%h/agents/bin/ci-window >/dev/null || exit 0; exec nice -n 19 %h/agents/bin/pc disk reclaim %h/agent-work --apply'

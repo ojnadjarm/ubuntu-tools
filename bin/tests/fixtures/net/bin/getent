@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+[ -n "${PC_NET_GETENT_FAIL:-}" ] && exit 2
+echo "192.0.2.10      STREAM $2"

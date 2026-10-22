@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# fixture `journalctl -k -b all …` (OOM traces, every boot) and `journalctl --user … -g '^Started (…) '` (run.sh/agent-verify scopes).
+d="$(cd "$(dirname "$0")/.." && pwd)/journal"
+case " $* " in
+  *' --user '*) cat "$d/user-started.txt";;
+  *' -k '*'-b all '*) cat "$d/kernel-oom.txt";;
+esac

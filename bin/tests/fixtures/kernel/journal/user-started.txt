@@ -1,0 +1,4 @@
+Started run-p315046-i25467318.scope - [systemd-run] /usr/bin/bash -c "\"\${@:3}\"; rc=\$?; exit \$rc" _ /tmp/agent-verify.h8o0f50w/run-tests.Z70gMh/bin__tests__oom.test.sh.oom /tmp/agent-verify.h8o0f50w/run-tests.Z70gMh/bin__tests__oom.test.sh.cpu env SUDO_SHIM_TEST=bin/tests/oom.test.sh bash "/tmp/run-sh.x/bin/tests/oom.test.sh".
+Started run-p2531638-i40269511.scope - [systemd-run] /usr/bin/bash -c "\"\${@:3}\"; rc=\$?; exit \$rc" _ /tmp/run-tests.3gLAjN/bin__tests__oom.test.sh.oom /tmp/run-tests.3gLAjN/bin__tests__oom.test.sh.cpu env SUDO_SHIM_TEST=bin/tests/oom.test.sh bash "/tmp/run-sh.y/bin/tests/oom.test.sh".
+Started run-p255327-i4462224.scope - [systemd-run] /usr/bin/bash -c "script -qc \"sleep 6\" /dev/null".
+Started run-p40516-i19521285.scope - [systemd-run] /usr/bin/bash -c "sleep 1".

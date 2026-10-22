@@ -1,0 +1,420 @@
+#!/usr/bin/env python3
+"""os-survey [--quick] [--since 24h] — the Ubuntu wave planner's measurements in one read-only run.
+
+Sections (measurements.txt shape, `## <area>` then rows): status (non-OK rows), doctor, failures, cpu (units cost),
+memory (growth, agents), timers (overlap), kernel (oom kills, dmesg digest), journal (lines per unit, 1 h), fleet-ci
+(newest verdict), agents-log (error clusters, raw calls), boot, disk, network. Without --quick also: apparmor (DENIED
+by profile), agent-work (bytes written per window, top writer dirs), docker (stats), command-not-found (7 d of
+transcripts), caches (~/.cache top dirs), daemons (watchman / browser MCP / node MCP: count, RSS, inotify watches),
+netdata (cgroup CPU over OS_SURVEY_NETDATA_WAIT s as s/h, top 5 threads s/h, charts per plugin), sudo (COMMAND counts),
+journal-sources (1 h user + system lines by identifier), io (GB written per cgroup since boot, gone remainder). Every probe has a timeout (OS_SURVEY_TIMEOUT, default and max 10 s) and
+fails soft to one `n/a: <why>` row; rows naming Vass containers end `(Vass, owner-only)`. Never launches a browser.
+Roots: AGENT_WORK (else ~/agent-work), HARNESS_HOME (else ~/agents), OS_SURVEY_PROJECTS (else ~/.claude/projects),
+OS_SURVEY_CACHE (else ~/.cache), OS_SURVEY_PROC (else /proc), OS_SURVEY_CGROUP (else /sys/fs/cgroup); OS_SURVEY_BIN = the only dir commands run from (tests). Exit 0 (2 on usage).
+"""
+import argparse, calendar, glob, json, os, re, shutil, signal, subprocess, sys, time
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+
+HOME = os.path.expanduser('~')
+AW = os.environ.get('AGENT_WORK') or os.path.join(HOME, 'agent-work')
+AG = os.environ.get('HARNESS_HOME') or os.path.join(HOME, 'agents')
+PROJECTS = os.environ.get('OS_SURVEY_PROJECTS') or os.path.join(HOME, '.claude', 'projects')
+CACHE = os.environ.get('OS_SURVEY_CACHE') or os.path.join(HOME, '.cache')
+PROC = os.environ.get('OS_SURVEY_PROC') or '/proc'
+CGROUP = os.environ.get('OS_SURVEY_CGROUP') or '/sys/fs/cgroup'
+BIN = os.environ.get('OS_SURVEY_BIN')
+TIMEOUT = min(10.0, float(os.environ.get('OS_SURVEY_TIMEOUT') or 10))
+VASS = re.compile(r'vass|moodle45', re.I)
+TAG = ' (Vass, owner-only)'
+RG_BATCH = 1000
+NETDATA_WAIT = max(0.1, min(TIMEOUT, float(os.environ.get('OS_SURVEY_NETDATA_WAIT') or 5)))
+NETDATA_URL = os.environ.get('NETDATA_URL') or 'http://127.0.0.1:19999'
+HZ = os.sysconf('SC_CLK_TCK')
+DAEMONS = [('watchman', r'^(\S*/)?watchman( |$)'), ('playwright-mcp', r'^(\S*/)?node (\S*/)?playwright-mcp( |$)'), ('node-mcp', r'^(\S*/)?node \S*mcp\S*( |$)')]
+
+
+class NA(Exception):
+    pass
+
+
+def run(argv, nomatch_ok=False):
+    """Stdout lines of one command, or NA on missing command, timeout or empty output with an error (rc 1 = no match when nomatch_ok)."""
+    path = os.path.join(BIN, argv[0]) if BIN else shutil.which(argv[0], path=os.environ.get('PATH', '') + ':/usr/sbin:/sbin')
+    if not path or not os.access(path, os.X_OK):
+        raise NA(f'{argv[0]} not found')
+    p = subprocess.Popen([path] + argv[1:], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                         stdin=subprocess.DEVNULL, start_new_session=True)
+    try:
+        out, err = p.communicate(timeout=TIMEOUT)
+    except subprocess.TimeoutExpired:
+        os.killpg(p.pid, signal.SIGKILL)
+        p.communicate()
+        raise NA(f'timeout {TIMEOUT:g} s')
+    lines = [l.rstrip() for l in out.splitlines() if l.strip()]
+    if p.returncode and not lines and not (nomatch_ok and p.returncode == 1):
+        raise NA(f'rc {p.returncode}: {err.strip()[:120]}')
+    return lines
+
+
+def probe(label, argv, n=None, keep=None, tail=None, shape=None):
+    """One labelled block of rows from a command: filtered, shaped, capped."""
+    try:
+        lines = run(argv)
+    except NA as e:
+        return [f'{label}: n/a: {e}']
+    if keep:
+        lines = [l for l in lines if re.search(keep, l)]
+    if shape:
+        lines = [shape(l) for l in lines]
+    lines = lines[-tail:] if tail else lines[:n] if n else lines
+    return [f'{label}:'] + ['  ' + l.strip()[:200] for l in lines or ['(no rows)']]
+
+
+def status(a):
+    return probe('pc status --brief', ['pc', 'status', '--brief']) + probe('pc status non-OK', ['pc', 'status'], keep=r'\[(WARN|FAIL)\]')
+
+
+def doctor(a):
+    return probe('pc doctor --quick', ['pc', 'doctor', '--quick', '--brief'])
+
+
+def failures(a):
+    return probe(f'pc failures --since {a.since}', ['pc', 'failures', '--since', a.since], n=15)
+
+
+def cpu(a):
+    return probe(f'pc units cost --all --since {a.since} (top 12)', ['pc', 'units', 'cost', '--all', '--since', a.since], n=13)
+
+
+def memory(a):
+    return probe('pc mem growth (top 8)', ['pc', 'mem', 'growth', '-n', '8']) + probe('pc mem agents', ['pc', 'mem', 'agents'], n=10)
+
+
+def timers(a):
+    return probe('pc timers --overlap', ['pc', 'timers', '--overlap'], n=10)
+
+
+def kernel(a):
+    return (probe('pc kernel oom', ['pc', 'kernel', 'oom'], tail=1)
+            + probe(f'pc kernel dmesg --digest --since {a.since} (top 10)', ['pc', 'kernel', 'dmesg', '--digest', '--since', f'-{a.since}'], n=10))
+
+
+def journal(a):
+    try:
+        units = Counter()
+        for l in run(['journalctl', '--since', '-1h', '-o', 'json', '--output-fields=_SYSTEMD_UNIT,SYSLOG_IDENTIFIER']):
+            try:
+                e = json.loads(l)
+            except ValueError:
+                continue
+            units[e.get('_SYSTEMD_UNIT') or e.get('SYSLOG_IDENTIFIER') or '?'] += 1
+        rows = [f'lines 1h: {sum(units.values())}'] + [f'  {u} {n}' for u, n in units.most_common(10)]
+    except NA as e:
+        rows = [f'lines 1h: n/a: {e}']
+    return rows + probe('pc journal size', ['pc', 'journal', 'size'])
+
+
+def fleet_ci(a):
+    logs = sorted(glob.glob(os.path.join(AG, 'log', 'fleet-ci', '*.txt')))
+    if not logs:
+        return ['n/a: no fleet-ci log']
+    lines = open(logs[-1], errors='replace').read().splitlines()
+    verdict = [l for l in lines if re.match(r'(PASS|FAIL) \d+/\d+', l)]
+    reds = [l for l in lines if l.startswith('✖')]
+    return [f'{os.path.basename(logs[-1])}: {verdict[-1] if verdict else "no verdict line"}',
+            f'red files: {len(reds[-1].split(":", 1)[1].split()) if reds else 0}']
+
+
+def agents_log(a):
+    return (probe(f'agents-log --errors --cluster --since {a.since} (top 10)', ['agents-log', '--errors', '--cluster', '--since', a.since], n=12)
+            + probe(f'agents-log --raw --since {a.since}', ['agents-log', '--raw', '--since', a.since], n=10))
+
+
+def boot(a):
+    return probe('systemd-analyze', ['systemd-analyze'], n=2) + probe('systemd-analyze blame (top 8)', ['systemd-analyze', 'blame'], n=8)
+
+
+def disk(a):
+    return (probe('df', ['df', '-BM', '--output=target,size,used,avail,pcent', '/', '/tmp'])
+            + probe('pc docker disk', ['pc', 'docker', 'disk']))
+
+
+def network(a):
+    return probe('pc net wifi', ['pc', 'net', 'wifi']) + probe('pc net tailscale', ['pc', 'net', 'tailscale'], shape=lambda l: l.split('serve:')[0])
+
+
+def apparmor(a):
+    lines = run(['journalctl', '-k', '--since', f'-{a.since}', '-g', 'apparmor="DENIED"', '-o', 'cat'], nomatch_ok=True)
+    prof = Counter(m.group(1) for l in lines for m in [re.search(r'profile="([^"]+)"', l)] if m)
+    return [f'DENIED {a.since}: {sum(prof.values())}'] + [f'  {p} {n}' for p, n in prof.most_common(8)]
+
+
+def agent_work(a):
+    now, deadline = time.time(), time.time() + TIMEOUT
+    wins = {a.since: now - seconds(a.since), '6h': now - 6 * 3600, '1h': now - 3600}
+    total, written, by_dir, partial = 0, Counter(), Counter(), ''
+    for root, dirs, files in os.walk(AW):
+        if time.time() > deadline:
+            partial = f' (partial: timeout {TIMEOUT:g} s)'
+            break
+        for f in files:
+            try:
+                st = os.lstat(os.path.join(root, f))
+            except OSError:
+                continue
+            total += st.st_size
+            for w, t in wins.items():
+                if st.st_mtime >= t:
+                    written[w] += st.st_size
+            if st.st_mtime >= wins['6h']:
+                by_dir['(top)' if root == AW else '/'.join(os.path.relpath(root, AW).split(os.sep)[:3])] += st.st_size
+    mb = lambda b: f'{b / 1e6:,.1f} MB'
+    return ([f'size {mb(total)}{partial}', 'written (rewrites count, not net growth): '
+             + ', '.join(f'{w} {mb(written[w])}' for w in wins), 'writers 6h:']
+            + [f'  {d} {mb(b)}' for d, b in by_dir.most_common(5)])
+
+
+def docker(a):
+    return probe('pc docker stats', ['pc', 'docker', 'stats'], n=15)
+
+
+CNF = re.compile(r'^(?:\S*/)?bash: (?:line \d+: )?([A-Za-z0-9_.+-]+): command not found$', re.M)
+
+
+def cnf_hits(files):
+    """(tool_use id, name) -> epoch of tool_result lines that start with a bash command-not-found; calls whose input quotes it are skipped."""
+    lines, quoted, results = [], set(), []
+    for i in range(0, len(files), RG_BATCH):
+        lines += run(['rg', '-j1', '-N', '--no-filename', '-F', 'command not found'] + files[i:i + RG_BATCH], nomatch_ok=True)
+    for l in lines:
+        try:
+            d = json.loads(l)
+            blocks = d['message']['content']
+        except (ValueError, KeyError, TypeError):
+            continue
+        for b in blocks if isinstance(blocks, list) else []:
+            if not isinstance(b, dict):
+                continue
+            if b.get('type') == 'tool_use' and 'command not found' in json.dumps(b.get('input')):
+                quoted.add(b.get('id'))
+            elif b.get('type') == 'tool_result':
+                c = b.get('content')
+                text = c if isinstance(c, str) else '\n'.join(x.get('text', '') for x in c or [] if isinstance(x, dict))
+                results.append((b.get('tool_use_id'), CNF.findall(text), d.get('timestamp')))
+    hits = set()
+    for u, names, ts in results:
+        if u in quoted:
+            continue
+        for name in names:
+            hits.add((u, name))
+    when = {u: epoch(ts) for u, _, ts in results}
+    return [(name, when[u]) for u, name in hits]
+
+
+def epoch(ts):
+    try:
+        return calendar.timegm(time.strptime(ts[:19], '%Y-%m-%dT%H:%M:%S'))
+    except (TypeError, ValueError):
+        return time.time()
+
+
+def command_not_found(a):
+    cut = time.time() - 7 * 86400
+    files = [p for p in glob.glob(os.path.join(PROJECTS, '**', '*.jsonl'), recursive=True) if os.path.getmtime(p) >= cut]
+    if not files:
+        return ['transcripts 7 d: 0 files']
+    by = {}
+    for name, t in cnf_hits(files):
+        by.setdefault(name, []).append(t)
+    helpers = test_helpers()
+    noise = sum(len(by.pop(h)) for h in helpers & by.keys())
+    day = lambda t: time.strftime('%m-%d', time.gmtime(t))
+    rows, total, early = [], 0, 0
+    for name, ts in by.items():
+        path = shutil.which(name)
+        since = os.lstat(path).st_ctime if path else 0
+        now = [t for t in ts if t >= since]
+        tag = f' (on PATH now since {time.strftime("%Y-%m-%d %H:%M", time.gmtime(since))} UTC, {len(ts) - len(now)} before)' if path else ''
+        rows.append((len(now), len(ts), f'  {name} {len(now)} {day(min(ts))}..{day(max(ts))}{tag}'))
+        total, early = total + len(now), early + len(ts) - len(now)
+    sbin = sum(len(ts) for c, ts in by.items() if any(os.path.exists(os.path.join(d, c)) for d in ('/usr/sbin', '/sbin')))
+    return ([f'transcripts 7 d: {len(files)} files, {total} hits (one per call), {early} before PATH install, sbin tools {sbin}, test helpers dropped {noise}']
+            + [r for _, _, r in sorted(rows, key=lambda r: (-r[0], -r[1]))[:10]])
+
+
+def test_helpers():
+    """Shell function names defined in the fleet tests: unexported ones show up as `bash: line N: ok: command not found`."""
+    names = set()
+    for p in glob.glob(os.path.join(AG, 'bin', 'tests', '*.sh')):
+        names.update(re.findall(r'^\s*(?:function\s+)?([A-Za-z_]\w*)\s*\(\)', open(p, errors='replace').read(), re.M))
+    return names
+
+
+def caches(a):
+    lines = run(['du', '-m', '--max-depth=1', CACHE])
+    rows = sorted((l.split('\t', 1) for l in lines if '\t' in l), key=lambda r: -int(r[0]) if r[0].isdigit() else 0)
+    name = lambda p: '(total)' if os.path.relpath(p, CACHE) == '.' else os.path.relpath(p, CACHE)
+    return [f'  {name(p)} {mb} MB' for mb, p in rows[:7]] or ['(no rows)']
+
+
+def read(path):
+    with open(path, errors='replace') as f:
+        return f.read()
+
+
+def daemons(a):
+    seen, deadline, partial = {k: [0, 0, 0] for k, _ in DAEMONS}, time.time() + TIMEOUT, ''
+    for pid in filter(str.isdigit, os.listdir(PROC)):
+        if time.time() > deadline:
+            partial = f' (partial: timeout {TIMEOUT:g} s)'
+            break
+        d = os.path.join(PROC, pid)
+        try:
+            cmd = read(os.path.join(d, 'cmdline')).replace('\0', ' ').strip()
+            kind = next((k for k, rx in DAEMONS if re.search(rx, cmd)), None)
+            if not kind:
+                continue
+            rss = int(re.search(r'^VmRSS:\s+(\d+)', read(os.path.join(d, 'status')), re.M).group(1))
+            watches = 0
+            for fd in os.listdir(os.path.join(d, 'fd')):
+                try:
+                    if os.readlink(os.path.join(d, 'fd', fd)) == 'anon_inode:inotify':
+                        watches += sum(l.startswith('inotify') for l in read(os.path.join(d, 'fdinfo', fd)).splitlines())
+                except OSError:
+                    pass
+        except (OSError, AttributeError):
+            continue
+        for i, v in enumerate((1, rss, watches)):
+            seen[kind][i] += v
+    return [f'  {k} n {n}, RSS {kb / 1024:.0f} MB, inotify watches {w}{partial}' for k, (n, kb, w) in seen.items()]
+
+
+def netdata(a):
+    cg = os.path.join(CGROUP, 'system.slice', 'netdata.service')
+    usec = lambda: int(re.search(r'^usage_usec (\d+)', read(os.path.join(cg, 'cpu.stat')), re.M).group(1))
+    try:
+        u0 = usec()
+        time.sleep(NETDATA_WAIT)
+        ms = (usec() - u0) / 1000
+        rows = [f'cpu {NETDATA_WAIT:g} s: {ms:.0f} ms = {ms / NETDATA_WAIT * 3.6:.1f} s/h']
+    except (OSError, AttributeError) as e:
+        return [f'n/a: no netdata cgroup: {e}'[:200]]
+    up = float(read(os.path.join(PROC, 'uptime')).split()[0])
+    threads = Counter()
+    for pid in read(os.path.join(cg, 'cgroup.procs')).split():
+        try:
+            pcomm = read(os.path.join(PROC, pid, 'comm')).strip()
+        except OSError:
+            continue
+        for tid in glob.glob(os.path.join(PROC, pid, 'task', '*', 'stat')):
+            try:
+                st = read(tid)
+            except OSError:
+                continue
+            comm, f = st[st.index('(') + 1:st.rindex(')')], st[st.rindex(')') + 2:].split()
+            age = max(1.0, up - int(f[19]) / HZ)
+            threads[pcomm if comm == pcomm else f'{pcomm}/{comm}'] += (int(f[11]) + int(f[12])) / HZ / age * 3600
+    rows += ['top threads (since start):'] + [f'  {t} {v:.2f} s/h' for t, v in threads.most_common(5)]
+    try:
+        charts = Counter(c.get('plugin') or '?' for c in json.loads('\n'.join(run(['curl', '-s', '-m', '3', f'{NETDATA_URL}/api/v1/charts'])))['charts'].values())
+        rows.append(f'charts {sum(charts.values())}: ' + ', '.join(f'{p} {n}' for p, n in charts.most_common(6)))
+    except (NA, ValueError, KeyError) as e:
+        rows.append(f'charts: n/a: {e}'[:200])
+    return rows
+
+
+def sudo(a):
+    cmds = Counter(os.path.basename(m.group(1)) for l in run(['journalctl', '--since', f'-{a.since}', 'SYSLOG_IDENTIFIER=sudo', '-o', 'cat', '-q'], nomatch_ok=True)
+                   for m in [re.search(r'COMMAND=(\S+)', l)] if m)
+    return [f'COMMAND {a.since}: {sum(cmds.values())}'] + [f'  {c} {n}' for c, n in cmds.most_common(8)]
+
+
+def journal_sources(a):
+    by = {}
+    for scope in ('user', 'system'):
+        by[scope] = Counter()
+        for l in run(['journalctl', f'--{scope}', '--since', '-1h', '-o', 'json', '-q', '--output-fields=SYSLOG_IDENTIFIER,_COMM'], nomatch_ok=True):
+            try:
+                e = json.loads(l)
+            except ValueError:
+                continue
+            by[scope][e.get('SYSLOG_IDENTIFIER') or e.get('_COMM') or '?'] += 1
+    both = by['user'] + by['system']
+    return ([f'lines 1h: user {sum(by["user"].values())}, system {sum(by["system"].values())}']
+            + [f'  {i} {n} (user {by["user"][i]}, system {by["system"][i]})' for i, n in both.most_common(8)])
+
+
+def io(a):
+    wb, deadline, partial = {}, time.time() + TIMEOUT, ''
+    for root, dirs, files in os.walk(CGROUP):
+        if time.time() > deadline:
+            partial = f' (partial: timeout {TIMEOUT:g} s)'
+            break
+        if 'io.stat' in files and root != CGROUP:
+            try:
+                wb[os.path.relpath(root, CGROUP)] = sum(int(x) for x in re.findall(r'wbytes=(\d+)', read(os.path.join(root, 'io.stat'))))
+            except OSError:
+                pass
+    kids = Counter()
+    for c, b in wb.items():
+        if os.path.dirname(c):
+            kids[os.path.dirname(c)] += b
+    gone = sum(max(0, own - kids[c]) for c, own in wb.items() if c in kids)
+    total = sum(b for c, b in wb.items() if not os.path.dirname(c))
+    leaves = sorted(((b, c) for c, b in wb.items() if c not in kids), reverse=True)[:8]
+    gb = lambda b: f'{b / 1e9:,.1f} GB'
+    return [f'written since boot {gb(total)}, gone cgroups {gb(gone)}{partial}'] + [f'  {c} {gb(b)}' for b, c in leaves]
+
+
+SECTIONS = [
+    ('status', True, status), ('doctor', True, doctor), ('failures', True, failures), ('cpu', True, cpu),
+    ('memory', True, memory), ('timers', True, timers), ('kernel', True, kernel), ('journal', True, journal),
+    ('fleet-ci', True, fleet_ci), ('agents-log', True, agents_log), ('boot', True, boot), ('disk', True, disk),
+    ('network', True, network), ('apparmor', False, apparmor), ('agent-work', False, agent_work),
+    ('docker', False, docker), ('command-not-found', False, command_not_found), ('caches', False, caches),
+    ('daemons', False, daemons), ('netdata', False, netdata), ('sudo', False, sudo),
+    ('journal-sources', False, journal_sources), ('io', False, io),
+]
+
+
+def seconds(s):
+    m = re.fullmatch(r'(\d+)([mhd])', s)
+    if not m:
+        raise ValueError(s)
+    return int(m.group(1)) * {'m': 60, 'h': 3600, 'd': 86400}[m.group(2)]
+
+
+def section(fn, a):
+    try:
+        return fn(a)
+    except NA as e:
+        return [f'n/a: {e}']
+    except Exception as e:  # noqa: BLE001 — every section fails soft
+        return [f'n/a: {type(e).__name__}: {e}'[:200]]
+
+
+def main():
+    ap = argparse.ArgumentParser(prog='os-survey', description=__doc__.split('\n\n', 1)[1],
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('--quick', action='store_true', help='the 13 cheap sections only (<= 15 s)')
+    ap.add_argument('--since', default='24h', help='window for failures, cpu, agents-log, apparmor, agent-work, dmesg, sudo (30m, 24h, 2d)')
+    a = ap.parse_args()
+    try:
+        seconds(a.since)
+    except ValueError:
+        ap.error(f'--since: want <n>m|h|d, got {a.since!r}')
+    t0 = time.time()
+    todo = [(n, fn) for n, quick, fn in SECTIONS if quick or not a.quick]
+    with ThreadPoolExecutor(4) as ex:
+        res = list(ex.map(lambda s: (s[0], section(s[1], a)), todo))
+    for name, rows in res:
+        print(f'## {name}')
+        for r in rows:
+            print(r + TAG if VASS.search(r) else r)
+    na = sum(any(r.startswith('n/a') or ': n/a: ' in r for r in rows) for _, rows in res)
+    print(f'--- {len(res) - na}/{len(res)} sections clean in {time.time() - t0:.1f} s (since {a.since})')
+
+
+if __name__ == '__main__':
+    main()

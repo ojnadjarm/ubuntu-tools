@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# pc pkg install|remove <pkg…> [--apply] — apt packages with a ledger and an undo: simulate first, install or remove only the exact set.
+# shellcheck disable=SC2034
+set -uo pipefail
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+
+pc_usage 'usage: pc pkg install <pkg…> [--auto <pkg>[,<pkg>…]] [--apply]
+       pc pkg remove <pkg…> [--apply]
+
+install runs `apt-get -s install --no-install-recommends` first and prints
+  would: install <new set> (<MB> MB)    or    nothing: already installed
+--apply (outside ci-window) installs it under sudo -n (timeout 600 s, nice 19), ledgers the exact
+new set and prints `rollback: pc undo <id>` (= pc pkg remove <new set> --apply). --auto marks
+those packages auto after the install (the undo of a remove restores the auto marks it saw).
+remove only removes packages pc pkg still owns (the last pc pkg ledger row for them installed
+them), and refuses when apt would also remove anything else. Refused by name (exit 3): openssh*, ufw, sudo, tailscale, docker*, containerd*,
+linux-*, systemd*, network-manager*, gdm3, apparmor*. Exit 1: apt error, refused set, ci-window.' "$@"
+
+PC_SUB='pc pkg'; PC_EXTRA_FLAGS=(--auto:)
+pc_opt "$@"
+sub=${PC_ARGS[0]:-}; PKGS=("${PC_ARGS[@]:1}")
+
+# refused_name <pkg> — exit 3 when the package is on the deny-list (access, fleet, kernel, session).
+refused_name() {
+  case $1 in
+    openssh*|ufw|sudo|tailscale|docker*|containerd*|linux-*|systemd*|network-manager*|gdm3|apparmor*)
+      echo "pc pkg: refused ($1 is on the deny-list: access, fleet, kernel or session package)" >&2; exit 3;;
+  esac
+}
+
+# state <pkg…> — installed when every package is installed, absent when none is, else partial.
+state() {
+  local n
+  n=$(dpkg-query -W -f='${Package} ${db:Status-Status}\n' "$@" 2>/dev/null | grep -c ' installed$')
+  if [ "$n" -eq "$#" ]; then echo installed; elif [ "$n" -eq 0 ]; then echo absent; else echo partial; fi
+}
+
+# simulate install|remove <pkg…> — apt-get -s output; exit 1 with apt's error on stderr.
+simulate() {
+  local op=$1 out; shift
+  out=$(pc_timeout 60 nice -n 19 apt-get -s "$op" --no-install-recommends "$@" 2>&1) \
+    || { grep '^E:' <<<"$out" >&2 || printf '%s\n' "$out" >&2; exit 1; }
+  printf '%s\n' "$out"
+}
+
+# size_mb <pkg…> — summed Installed-Size of the candidates, in MB with one decimal.
+size_mb() {
+  apt-cache show --no-all-versions "$@" 2>/dev/null \
+    | awk '/^Installed-Size:/{k += $2} END {printf "%.1f", k / 1024}'
+}
+
+# owned — every package whose last finished pc pkg ledger row (oldest rotation first) installed it, one per line.
+owned() {
+  { printf '%s\n' "$PC_LEDGER".*.gz | sort -Vr | while IFS= read -r f; do [ -r "$f" ] && zcat "$f"; done
+    cat "$PC_LEDGER" 2>/dev/null; } \
+    | jq -rs '(map(select(has("verified")) | .id)) as $done
+        | reduce (.[] | select((.target // "") | startswith("pkg ")) | select(.after == "installed" or .after == "absent")
+                  | select(.id | IN($done[]))) as $r
+            ({}; reduce ($r.target[4:] | split(" ")[]) as $p (.; .[$p] = ($r.after == "installed")))
+        | to_entries[] | select(.value) | .key' 2>/dev/null
+}
+
+ci_gate() {
+  [ "$APPLY" = 1 ] || return 0
+  "$BIN/ci-window" >/dev/null 2>&1 || { echo "pc pkg: refused, inside the CI window ${CI_WINDOW:-00:50-01:50}" >&2; exit 1; }
+}
+
+[ "$sub" = state ] && { state "${PKGS[@]}"; exit 0; }
+case $sub in install|remove) ;; *) printf '%s\n' "$PC_USAGE" >&2; exit 2;; esac
+[ ${#PKGS[@]} -gt 0 ] || { echo "pc pkg $sub: need at least one package" >&2; exit 2; }
+IFS=, read -ra auto <<<"${PC_OPT[--auto]-}"
+for p in "${PKGS[@]}" "${auto[@]}"; do
+  [[ $p =~ ^[a-z0-9][a-z0-9+.-]*(:[a-z0-9]+)?$ ]] || { echo "pc pkg: not a package name: $p" >&2; exit 2; }
+  refused_name "$p"
+done
+
+sim=$(simulate "$sub" "${PKGS[@]}") || exit 1
+mapfile -t inst < <(awk '$1 == "Inst" && $3 !~ /^\[/ {print $2}' <<<"$sim")
+mapfile -t other < <(awk '$1 == "Remv" || ($1 == "Inst" && $3 ~ /^\[/) {print $2}' <<<"$sim")
+mapfile -t remv < <(awk '$1 == "Remv" {print $2}' <<<"$sim")
+PC_ROOT_TIMEOUT=600
+
+if [ "$sub" = install ]; then
+  [ ${#other[@]} -eq 0 ] || { echo "pc pkg: refused, apt would also remove or upgrade: ${other[*]}" >&2; exit 1; }
+  [ ${#inst[@]} -gt 0 ] || { echo 'nothing: already installed'; exit 0; }
+  for p in "${inst[@]}"; do refused_name "$p"; done
+  new=${inst[*]}
+  for p in "${auto[@]}"; do [[ " $new " == *" ${p%:*} "* ]] || { echo "pc pkg: --auto $p is not in the new set" >&2; exit 2; }; done
+  # Only the requested names go on the command line, so dependencies stay marked auto.
+  req=(); for p in "${PKGS[@]}"; do [[ " $new " == *" ${p%:*} "* ]] && req+=("$p"); done
+  [ "$APPLY" = 1 ] || { echo "would: install $new ($(size_mb "${inst[@]}") MB)"; exit 0; }
+  ci_gate
+  printf -v rb '%q remove %s --apply' "$BIN/pc-pkg" "$new"
+  printf -v PC_READ_CMD '%q state %s' "$BIN/pc-pkg" "$new"
+  pc_apply "pkg $new" absent installed "$rb" \
+    pc_root nice -n 19 env DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends "${req[@]}" || exit $?
+  [ ${#auto[@]} -eq 0 ] || pc_root apt-mark auto "${auto[@]}" >/dev/null || { echo "pc pkg: apt-mark auto ${auto[*]} failed" >&2; exit 1; }
+  exit 0
+fi
+
+[ ${#remv[@]} -gt 0 ] || { echo 'nothing: not installed'; exit 0; }
+mine=" $(owned | tr '\n' ' ') "
+for p in "${PKGS[@]}" "${remv[@]}"; do
+  refused_name "$p"
+  [[ $mine == *" ${p%:*} "* ]] || { echo "pc pkg: refused, $p was not installed by pc pkg (no ledger row)" >&2; exit 1; }
+done
+new=${remv[*]}
+[ "$APPLY" = 1 ] || { echo "would: remove $new ($(size_mb "${remv[@]}") MB)"; exit 0; }
+ci_gate
+printf -v rb '%q install %s --apply' "$BIN/pc-pkg" "$new"
+autos=$(apt-mark showauto "${remv[@]}" 2>/dev/null | tr '\n' ',')
+[ -z "$autos" ] || rb+=" --auto ${autos%,}"
+printf -v PC_READ_CMD '%q state %s' "$BIN/pc-pkg" "$new"
+pc_apply "pkg $new" installed absent "$rb" \
+  pc_root nice -n 19 env DEBIAN_FRONTEND=noninteractive apt-get remove -y -q "${remv[@]}"

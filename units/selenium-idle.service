@@ -1,0 +1,10 @@
+[Unit]
+Description=Stop moodle-shared-selenium-1 after 2 h without a Selenium session, outside the CI window (T1120; undo: docker start moodle-shared-selenium-1)
+
+[Service]
+Type=oneshot
+TimeoutStartSec=120
+Nice=19
+SuccessExitStatus=3
+Environment=PATH=%h/agents/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/sh -c '%h/agents/bin/ci-window >/dev/null || exit 0; exec %h/agents/bin/pc docker idle-stop selenium --after 2h --apply'

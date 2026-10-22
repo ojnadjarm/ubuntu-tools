@@ -1,0 +1,60 @@
+{
+  "schema": "char3d/2",
+  "id": "placeholder",
+  "name": "Placeholder",
+  "notes": "Smallest spec that exercises every stage; used by tests/smoke.test.sh.",
+  "materials": {
+    "skin": {"kind": "skin", "color": "#d89a74"},
+    "cloth": {"kind": "cloth", "color": "#5c3889"},
+    "hair": {"kind": "hair", "color": "#eef1f8"},
+    "wood": {"kind": "wood", "color": "#6a4232"},
+    "glow": {"kind": "emissive", "color": "#be8cff", "emission": {"base": 3.0, "amp": 2.0, "period_s": 2.0}}
+  },
+  "body": {"base": "placeholder", "height_m": 1.75, "skin": "skin"},
+  "face": {
+    "eyes": {"iris": "#5a76ac"},
+    "expressions": {"neutral": {}, "smile": {"mouthSmileLeft": 0.7}},
+    "visemes": {"sil": {}, "aa": {"jawOpen": 0.5}}
+  },
+  "hair": [{"id": "beard", "kind": "beard", "material": "hair", "attach": "jaw", "length_m": 0.3, "strands": 200}],
+  "garments": [
+    {"id": "robe", "kind": "robe", "material": "cloth", "attach": "hips", "profile": [[0.17, 1.45], [0.22, 1.0], [0.34, 0.05]]},
+    {"id": "hat", "kind": "hat", "material": "cloth", "attach": "head"}
+  ],
+  "props": [
+    {
+      "id": "staff",
+      "kind": "staff",
+      "attach": "hand.L",
+      "length_m": 1.7,
+      "parts": [{"id": "shaft", "kind": "shaft", "material": "wood"}, {"id": "crystal", "kind": "crystal", "material": "glow"}]
+    }
+  ],
+  "detail": {"subdiv": {"draft": 1, "final": 1}, "layers": [{"kind": "folds", "parts": ["robe"], "depth_m": 0.005}]},
+  "uv": {"default_set": "main", "sets": [{"id": "main", "size": 64, "parts": []}]},
+  "bake": {"mode": "flat", "size": {"draft": 64, "final": 64}},
+  "rig": {"generator": "placeholder"},
+  "motion": {"fps": 24, "clips": [{"id": "idle", "type": "idle", "seconds": 0.5, "loop": true}]},
+  "secondary": {},
+  "look": {
+    "name": "cinematic",
+    "engine": "BLENDER_EEVEE",
+    "samples": {"draft": 4, "final": 4},
+    "size": {"draft": [320, 180], "final": [320, 180]}
+  },
+  "renders": [{"id": "turntable", "kind": "turntable", "frames": 4, "target": "chest"}],
+  "asset": {"lods": [0.5]},
+  "export": {"gltf": true, "actions": true},
+  "qa": {
+    "thresholds": {
+      "penetration_cm": 0.5,
+      "plant_drift_cm": 1.0,
+      "luma_min": 0.02,
+      "luma_max": 0.95,
+      "mp4_mb": 20,
+      "gltf_errors": 0,
+      "lod0_tris_max": 200000,
+      "lod1_ratio": 0.9
+    }
+  }
+}

@@ -1,0 +1,528 @@
+{
+  "$id": "char3d/2",
+  "title": "char3d character spec (AAA game asset: high-poly detail, retopo, UV sets, baked PBR, LODs)",
+  "type": "object",
+  "required": [
+    "schema",
+    "id",
+    "name",
+    "materials",
+    "body",
+    "face",
+    "hair",
+    "garments",
+    "props",
+    "rig",
+    "motion",
+    "secondary",
+    "look",
+    "renders",
+    "export",
+    "qa"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"type": "string", "enum": ["char3d/2"]},
+    "id": {"type": "string", "pattern": "[a-z][a-z0-9_]*"},
+    "name": {"type": "string"},
+    "notes": {"type": "string"},
+    "reference": {"type": "object", "additionalProperties": {"type": "string"}},
+    "materials": {"type": "object", "additionalProperties": {"$ref": "#/$defs/material"}},
+    "body": {"$ref": "#/$defs/body"},
+    "face": {"$ref": "#/$defs/face"},
+    "hair": {"type": "array", "items": {"$ref": "#/$defs/hair"}},
+    "garments": {"type": "array", "items": {"$ref": "#/$defs/garment"}},
+    "props": {"type": "array", "items": {"$ref": "#/$defs/prop"}},
+    "rig": {"$ref": "#/$defs/rig"},
+    "motion": {"$ref": "#/$defs/motion"},
+    "secondary": {"$ref": "#/$defs/secondary"},
+    "look": {"$ref": "#/$defs/look"},
+    "renders": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/shot"}},
+    "export": {"$ref": "#/$defs/export"},
+    "qa": {"$ref": "#/$defs/qa"},
+    "detail": {"$ref": "#/$defs/detail"},
+    "retopo": {"$ref": "#/$defs/retopo"},
+    "uv": {"$ref": "#/$defs/uv"},
+    "bake": {"$ref": "#/$defs/bake"},
+    "textures": {"$ref": "#/$defs/textures"},
+    "asset": {"$ref": "#/$defs/asset"},
+    "seed": {"type": "integer"}
+  },
+  "$defs": {
+    "color": {"type": "string", "pattern": "#[0-9a-fA-F]{6}"},
+    "unit": {"type": "number", "minimum": 0, "maximum": 1},
+    "role": {
+      "type": "string",
+      "enum": [
+        "root",
+        "hips",
+        "spine",
+        "chest",
+        "neck",
+        "head",
+        "jaw",
+        "eye.L",
+        "eye.R",
+        "hand.L",
+        "hand.R",
+        "foot.L",
+        "foot.R",
+        "toe.L",
+        "toe.R"
+      ]
+    },
+    "arkit": {"type": "object", "additionalProperties": {"$ref": "#/$defs/unit"}},
+    "profile": {"type": "array", "minItems": 2, "items": {"type": "array", "minItems": 2, "items": {"type": "number"}}},
+    "material": {
+      "type": "object",
+      "required": ["kind", "color"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"type": "string", "enum": ["cloth", "skin", "hair", "metal", "wood", "leather", "emissive", "eye", "glass"]},
+        "color": {"$ref": "#/$defs/color"},
+        "roughness": {"$ref": "#/$defs/unit"},
+        "sheen": {"$ref": "#/$defs/unit"},
+        "emission": {
+          "type": "object",
+          "required": ["base"],
+          "additionalProperties": false,
+          "properties": {
+            "base": {"type": "number", "minimum": 0},
+            "amp": {"type": "number", "minimum": 0},
+            "period_s": {"type": "number", "minimum": 0}
+          }
+        }
+      }
+    },
+    "body": {
+      "type": "object",
+      "required": ["base", "height_m", "skin"],
+      "additionalProperties": false,
+      "properties": {
+        "base": {"type": "string", "enum": ["mpfb", "placeholder"]},
+        "height_m": {"type": "number", "minimum": 0.3, "maximum": 3},
+        "macros": {"type": "object", "additionalProperties": {"$ref": "#/$defs/unit"}},
+        "targets": {"type": "object", "additionalProperties": {"type": "number", "minimum": -1, "maximum": 1}},
+        "skin": {"type": "string"},
+        "hide_under": {"type": "array", "items": {"type": "string"}},
+        "heads_tall": {"type": "number", "minimum": 5, "maximum": 9}
+      }
+    },
+    "face": {
+      "type": "object",
+      "required": ["eyes", "expressions", "visemes"],
+      "additionalProperties": false,
+      "properties": {
+        "eyes": {
+          "type": "object",
+          "required": ["iris"],
+          "additionalProperties": false,
+          "properties": {
+            "iris": {"$ref": "#/$defs/color"},
+            "iris_outer": {"$ref": "#/$defs/color"},
+            "sclera": {"$ref": "#/$defs/color"},
+            "pupil": {"$ref": "#/$defs/unit"},
+            "cornea": {"type": "string", "enum": ["fresnel_gloss", "blended", "refract"]}
+          }
+        },
+        "lids": {"type": "string", "enum": ["bones", "shapes"]},
+        "brows": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {"material": {"type": "string"}, "style": {"type": "string", "enum": ["bushy", "thin", "none"]}}
+        },
+        "shape_packs": {"type": "array", "items": {"type": "string", "enum": ["faceunits01", "visemes01", "visemes02"]}},
+        "expressions": {"type": "object", "additionalProperties": {"$ref": "#/$defs/arkit"}},
+        "visemes": {"type": "object", "additionalProperties": {"$ref": "#/$defs/arkit"}},
+        "gaze": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "saccades_per_s": {"type": "number", "minimum": 0},
+            "blinks_per_s": {"type": "number", "minimum": 0},
+            "convergence_offset_deg": {"type": "number"},
+            "lid_follow": {"$ref": "#/$defs/unit"}
+          }
+        }
+      }
+    },
+    "hair": {
+      "type": "object",
+      "required": ["id", "kind", "material", "attach"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string"},
+        "kind": {"type": "string", "enum": ["beard", "moustache", "scalp", "brows", "ponytail", "braid"]},
+        "material": {"type": "string"},
+        "attach": {"$ref": "#/$defs/role"},
+        "length_m": {"type": "number", "minimum": 0},
+        "width_m": {"type": "number", "minimum": 0},
+        "render": {"type": "string", "enum": ["curves", "cards"]},
+        "strands": {"type": "integer", "minimum": 0},
+        "cards": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "count": {"type": "integer", "minimum": 1},
+            "atlas": {"type": "integer", "enum": [512, 1024, 2048, 4096]},
+            "layers": {"type": "integer", "minimum": 1}
+          }
+        }
+      }
+    },
+    "garment": {
+      "type": "object",
+      "required": ["id", "kind", "material"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string"},
+        "kind": {
+          "type": "string",
+          "enum": [
+            "robe",
+            "mantle",
+            "sash",
+            "belt",
+            "hat",
+            "hood",
+            "cape",
+            "cloak",
+            "tunic",
+            "leggings",
+            "boots",
+            "gloves",
+            "armor",
+            "helmet",
+            "plume",
+            "quiver_strap",
+            "pouch",
+            "pauldron",
+            "bracer"
+          ]
+        },
+        "material": {"type": "string"},
+        "layer": {"type": "integer", "minimum": 0},
+        "attach": {"$ref": "#/$defs/role"},
+        "profile": {"$ref": "#/$defs/profile"},
+        "params": {"type": "object"},
+        "trim": {
+          "type": "object",
+          "required": ["material", "edges"],
+          "additionalProperties": false,
+          "properties": {
+            "material": {"type": "string"},
+            "width_m": {"type": "number", "minimum": 0},
+            "edges": {"type": "array", "items": {"type": "string", "enum": ["hem", "cuffs", "front", "collar", "band", "rim"]}}
+          }
+        },
+        "decals": {"type": "array", "items": {"type": "object"}}
+      }
+    },
+    "prop": {
+      "type": "object",
+      "required": ["id", "kind", "attach", "parts"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string"},
+        "kind": {"type": "string", "enum": ["staff", "sword", "shield", "bow", "quiver", "arrow", "wand", "book"]},
+        "attach": {"$ref": "#/$defs/role"},
+        "length_m": {"type": "number", "minimum": 0},
+        "grip": {"$ref": "#/$defs/unit"},
+        "parts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["id", "kind", "material"],
+            "additionalProperties": false,
+            "properties": {
+              "id": {"type": "string"},
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "shaft",
+                  "crystal",
+                  "claw",
+                  "knob",
+                  "blade",
+                  "guard",
+                  "hilt",
+                  "board",
+                  "boss",
+                  "limb",
+                  "string",
+                  "body",
+                  "binding",
+                  "ferrule",
+                  "fletching"
+                ]
+              },
+              "material": {"type": "string"},
+              "count": {"type": "integer", "minimum": 1},
+              "size_m": {"type": "number", "minimum": 0}
+            }
+          }
+        }
+      }
+    },
+    "rig": {
+      "type": "object",
+      "required": ["generator"],
+      "additionalProperties": false,
+      "properties": {
+        "generator": {"type": "string", "enum": ["rigify", "placeholder"]},
+        "metarig": {"type": "string", "enum": ["human", "basic_human"]},
+        "ik_stretch": {"$ref": "#/$defs/unit"},
+        "weights": {"type": "string", "enum": ["capsule", "transfer"]}
+      }
+    },
+    "clip": {
+      "type": "object",
+      "required": ["id", "type", "seconds"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string"},
+        "type": {"type": "string", "enum": ["idle", "walk", "talk", "beats", "mocap"]},
+        "seconds": {"type": "number", "minimum": 0.1},
+        "loop": {"type": "boolean"},
+        "gait": {"type": "object"},
+        "beats": {"type": "array", "items": {"type": "object"}},
+        "line": {"type": "string"},
+        "expression": {"type": "string"},
+        "source": {
+          "type": "object",
+          "required": ["path", "licence"],
+          "properties": {"path": {"type": "string"}, "licence": {"type": "string"}}
+        }
+      }
+    },
+    "motion": {
+      "type": "object",
+      "required": ["fps", "clips"],
+      "additionalProperties": false,
+      "properties": {
+        "fps": {"type": "integer", "minimum": 12, "maximum": 60},
+        "clips": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/clip"}}
+      }
+    },
+    "secondary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cloth": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["garment"],
+            "additionalProperties": false,
+            "properties": {
+              "garment": {"type": "string"},
+              "quality": {"type": "integer", "minimum": 1},
+              "collision_quality": {"type": "integer", "minimum": 1},
+              "self_collision": {"type": "boolean"},
+              "air_damping": {"type": "number", "minimum": 0},
+              "cage_verts": {"type": "integer", "minimum": 0}
+            }
+          }
+        },
+        "springs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["target", "k", "c"],
+            "additionalProperties": false,
+            "properties": {
+              "target": {"type": "string"},
+              "bones": {"type": "integer", "minimum": 1},
+              "k": {"type": "number", "minimum": 0},
+              "c": {"type": "number", "minimum": 0},
+              "preroll_periods": {"type": "integer", "minimum": 0}
+            }
+          }
+        },
+        "pulses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["material"],
+            "additionalProperties": false,
+            "properties": {"material": {"type": "string"}, "light_w": {"type": "number", "minimum": 0}}
+          }
+        }
+      }
+    },
+    "look": {
+      "type": "object",
+      "required": ["name", "engine"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string", "enum": ["grim", "painterly", "cinematic"]},
+        "engine": {"type": "string", "enum": ["BLENDER_EEVEE", "CYCLES"]},
+        "light_rig": {"type": "string", "enum": ["studio", "closeup", "night"]},
+        "hdri": {"type": "string"},
+        "hdri_strength": {"type": "number", "minimum": 0},
+        "view": {"type": "string"},
+        "contrast": {"type": "string"},
+        "raytrace": {"type": "boolean"},
+        "samples": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 1}},
+        "size": {
+          "type": "object",
+          "additionalProperties": {"type": "array", "minItems": 2, "items": {"type": "integer", "minimum": 16}}
+        }
+      }
+    },
+    "shot": {
+      "type": "object",
+      "required": ["id", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string"},
+        "kind": {"type": "string", "enum": ["turntable", "clip", "closeup", "still"]},
+        "clip": {"type": "string"},
+        "seconds": {"type": "number", "minimum": 0},
+        "frames": {"type": "integer", "minimum": 1},
+        "lens_mm": {"type": "number", "minimum": 8},
+        "fstop": {"type": "number", "minimum": 0.5},
+        "half_m": {"type": "number", "minimum": 0.05},
+        "target": {"$ref": "#/$defs/role"},
+        "expression": {"type": "string"}
+      }
+    },
+    "export": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "gltf": {"type": "boolean"},
+        "morphs": {"type": "boolean"},
+        "actions": {"type": "boolean"},
+        "hair": {"type": "string", "enum": ["cards", "none"]},
+        "fbx": {"type": "boolean"}
+      }
+    },
+    "qa": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"thresholds": {"type": "object", "additionalProperties": {"type": "number"}}}
+    },
+    "detail": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subdiv": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 6}},
+        "layers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind", "parts"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "folds",
+                  "weave",
+                  "embroidery",
+                  "seams",
+                  "stitches",
+                  "wear",
+                  "pores",
+                  "wrinkles",
+                  "carve",
+                  "grain",
+                  "facets"
+                ]
+              },
+              "parts": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+              "depth_m": {"type": "number", "minimum": 0},
+              "scale": {"type": "number", "minimum": 0},
+              "material": {"type": "string"},
+              "params": {"type": "object"}
+            }
+          }
+        }
+      }
+    },
+    "retopo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default": {"type": "string", "enum": ["construction", "decimate", "quadriflow", "instant_meshes"]},
+        "parts": {
+          "type": "object",
+          "additionalProperties": {"type": "string", "enum": ["construction", "decimate", "quadriflow", "instant_meshes"]}
+        },
+        "ratio": {"type": "object", "additionalProperties": {"$ref": "#/$defs/unit"}}
+      }
+    },
+    "uv": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default_set": {"type": "string"},
+        "margin_px": {"type": "integer", "minimum": 0},
+        "sets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "size", "parts"],
+            "additionalProperties": false,
+            "properties": {
+              "id": {"type": "string"},
+              "size": {"type": "integer", "enum": [64, 128, 256, 512, 1024, 2048, 4096]},
+              "parts": {"type": "array", "items": {"type": "string"}},
+              "texel_px_cm": {"type": "number", "minimum": 0}
+            }
+          }
+        }
+      }
+    },
+    "bake": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {"type": "string", "enum": ["flat", "cycles"]},
+        "maps": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["normal", "ao", "curvature", "albedo", "roughness", "metallic", "emissive", "thickness"]
+          }
+        },
+        "size": {"type": "object", "additionalProperties": {"type": "integer", "enum": [64, 128, 256, 512, 1024, 2048, 4096]}},
+        "samples": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 1}},
+        "cage_m": {"type": "number", "minimum": 0}
+      }
+    },
+    "textures": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "use_baked": {"type": "boolean"},
+        "paint": {"type": "string", "enum": ["none", "gradient"]},
+        "detail_normals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind", "material"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {"type": "string", "enum": ["weave", "pores", "leather", "wood", "scratches", "hammered"]},
+              "material": {"type": "string"},
+              "scale": {"type": "number", "minimum": 0},
+              "strength": {"type": "number", "minimum": 0}
+            }
+          }
+        }
+      }
+    },
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "lods": {"type": "array", "items": {"type": "number", "minimum": 0.01, "maximum": 1}},
+        "skeleton": {"type": "string", "enum": ["game", "full"]},
+        "max_influences": {"type": "integer", "minimum": 1, "maximum": 8}
+      }
+    }
+  }
+}
