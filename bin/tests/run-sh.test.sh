@@ -79,8 +79,8 @@ has 'without --portable host-only files run' "$(tail -1 <<<"$out")" '^FAIL 0/2 f
 rm "$W/bin/tests/hostx.test.sh" "$W/bin/tests/hosty.test.sh" "$W/bin/tests/host-only.txt"
 
 if systemd-run --user --scope -q bash -c 'test -e "/sys/fs/cgroup$(sed -n "s/^0:://p" /proc/self/cgroup)/memory.max"' 2>/dev/null; then
-  printf 'python3 -c "x=b\\"1\\"*(400<<20)"\necho survived\n' >"$W/bin/tests/oom.test.sh"
-  out=$(TEST_MEM_MAX=200M RUN_TESTS_ROOT="$W" bash "$RUN" --only '*oom*' 2>&1); rc=$?
+  printf 'python3 -c "x=b\\"1\\"*(64<<20)"\necho survived\n' >"$W/bin/tests/oom.test.sh"
+  out=$(TEST_MEM_MAX=48M RUN_TESTS_ROOT="$W" bash "$RUN" --only '*oom*' 2>&1); rc=$?
   is  'over-cap run exits 1' "$rc" 1
   has 'over-cap file is reported oom' "$out" '^FAIL bin/tests/oom\.test\.sh [0-9.]+ oom$'
   has 'only the allocating child is killed' "$out" '^  \| survived$'
@@ -158,6 +158,8 @@ ln -s "$R/skills/foo" "$K/claude/foo"
 printf 'echo plain\n' >"$R/bin/tests/plain.test.sh"
 printf 'echo "$(command -v docker) rc=$(docker ps >/dev/null 2>&1; echo $?) cwd=$PWD" >%q\n' "$K/dock.out" >"$R/skills/foo/tests/dock.test.sh"
 printf 'touch %q\n' "$K/lesson.ran" >"$K/claude/make-lesson/tests/x.test.sh"
+mkdir -p "$R/skills/held/tests"; printf 'held\tfixture pause\n# comment\n' >"$R/bin/tests/paused-skills.txt"
+printf 'touch %q\n' "$K/held.ran" >"$R/skills/held/tests/h.test.sh"
 sk() { RUN_TESTS_ROOT="$R" RUN_TESTS_SKILLS="$K/claude:$R/skills" bash "$RUN" -j 2 "$@" 2>&1; }
 out=$(sk)
 is  'skills: a full run without --skills leaves them out' "$(tail -1 <<<"$out" | grep -cE '^PASS 1/1 files')" 1
@@ -167,6 +169,8 @@ is  'skills: --skills adds the symlinked skill once' "$(tail -1 <<<"$out" | grep
 has 'skills: listed under a skills/ label' "$out" '^ok skills/foo/tests/dock\.test\.sh [0-9.]+$'
 has 'skills: make-lesson is listed as skipped' "$out" '^skip skills/make-lesson/tests/x\.test\.sh \(ailearning is off limits\)$'
 is  'skills: make-lesson never runs' "$(test -e "$K/lesson.ran" && echo ran || echo none)" none
+has 'skills: a paused-skills.txt row is listed as skipped' "$out" '^skip skills/held/tests/h\.test\.sh \(fixture pause\)$'
+is  'skills: a paused skill never runs' "$(test -e "$K/held.ran" && echo ran || echo none)" none
 has 'selftest: docker in a skill test is the run shim' "$(cat "$K/dock.out" 2>/dev/null)" '/run-tests\.[A-Za-z0-9]+/shim/docker rc=125 '
 is  'skills: runs from the first dir that lists it' "$(sed -n 's/.* cwd=//p' "$K/dock.out" 2>/dev/null)" "$K/claude/foo/tests"
 rm -f "$K/dock.out"
@@ -177,9 +181,9 @@ has 'skills: timings row for the skill test' "$(cat "$R/state/test-timings.tsv" 
 # Sudo shim (T538): every file sees lib/sudo-shim as `sudo` (argv logged, `-n true` by SUDO_SHIM_MODE, the rest rc 1);
 # a `# live-sudo` header keeps the real one. The fixture tests only resolve `sudo`; nothing calls the real sudo.
 U="$W/su"; mkdir -p "$U/bin/tests/lib"; cp "$(dirname "$RUN")/lib/sudo-shim" "$U/bin/tests/lib/"; cp "$RUN" "$U/bin/tests/run.sh"
-printf 'echo "path=$(command -v sudo)" >%q\nsudo -n true; echo "deny=$?" >>%q\nSUDO_SHIM_MODE=allow sudo -n true; echo "allow=$?" >>%q\nsudo -n ufw status; echo "rest=$?" >>%q\ncat "$SUDO_SHIM_LOG" >>%q\n' \
-  "$U/shim.out" "$U/shim.out" "$U/shim.out" "$U/shim.out" "$U/shim.out" >"$U/bin/tests/shim.test.sh"
-printf '#!/usr/bin/env bash\n# live-sudo: fixture\necho "path=$(command -v sudo)" >%q\n' "$U/live.out" >"$U/bin/tests/live.test.sh"
+printf 'echo "path=$(command -v sudo)" >%q\nsudo -n true; echo "deny=$?" >>%q\nSUDO_SHIM_MODE=allow sudo -n true; echo "allow=$?" >>%q\nsudo -n ufw status; echo "rest=$?" >>%q\ncat "$SUDO_SHIM_LOG" >>%q\necho "rootlog=${PC_TEST_ROOT_LOG:-}" >>%q\n' \
+  "$U/shim.out" "$U/shim.out" "$U/shim.out" "$U/shim.out" "$U/shim.out" "$U/shim.out" >"$U/bin/tests/shim.test.sh"
+printf '#!/usr/bin/env bash\n# live-sudo: fixture\necho "path=$(command -v sudo)" >%q\necho "rootlog=${PC_TEST_ROOT_LOG:-}" >>%q\n' "$U/live.out" "$U/live.out" >"$U/bin/tests/live.test.sh"
 out=$(bash "$U/bin/tests/run.sh" -j 2 2>&1)
 is  'sudo: both files pass' "$(tail -1 <<<"$out" | grep -cE '^PASS 2/2 files')" 1
 has 'selftest: sudo in a test is the run shim' "$(cat "$U/shim.out" 2>/dev/null)" '^path=.*/run-tests\.[A-Za-z0-9]+/sudo/sudo$'
@@ -188,6 +192,8 @@ has 'sudo shim: SUDO_SHIM_MODE=allow answers -n true' "$(cat "$U/shim.out" 2>/de
 has 'sudo shim: any other command is refused rc 1' "$(cat "$U/shim.out" 2>/dev/null)" '^rest=1$'
 has 'sudo shim: argv is logged with the test file' "$(cat "$U/shim.out" 2>/dev/null)" '^bin/tests/shim\.test\.sh	-n ufw status$'
 is  'live-sudo header keeps the real sudo' "$(sed -n 's/^path=//p' "$U/live.out" 2>/dev/null)" "$(command -v sudo)"
+is  'live-sudo file logs pc_root calls to state (T1136)' "$(sed -n 's/^rootlog=//p' "$U/live.out" 2>/dev/null)" "$U/state/test-root-calls.tsv"
+has 'a shimmed file gets no root log' "$(cat "$U/shim.out" 2>/dev/null)" '^rootlog=$'
 
 # Private TMPDIR per file (T632): a test's mktemp lands in the run root, removed when it exits or is killed by the
 # timeout; `tmp residue` counts new tmp.* in the base TMPDIR (a test that writes there by hand is the control).

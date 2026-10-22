@@ -203,7 +203,7 @@ fi
 new=$(mktemp)
 CMD_ALL=()
 CLAUDE_PIDS=()
-declare -A PARENT CLAUDE_CMD R1_CMD R1_AGE R1_SID CH_PCT BR_CMD BR_KEY BR_PREV
+declare -A PARENT MANAGER CLAUDE_CMD R1_CMD R1_AGE R1_SID CH_PCT BR_CMD BR_KEY BR_PREV
 
 for d in "$PROC"/[0-9]*; do
   pid=${d##*/}
@@ -234,6 +234,7 @@ for d in "$PROC"/[0-9]*; do
   CMD_ALL+=("$cmd")
   [ "$comm" = "claude" ] && { CLAUDE_PIDS+=("$pid"); CLAUDE_CMD[$pid]="$cmd"; }
   PARENT[$pid]="$ppid"
+  [ "$comm" = systemd ] && MANAGER[$pid]=1   # rule 1: a loop reparented here lost its Bash parent
   # /proc/*/stat truncates comm to 15 chars ("xdg-desktop-por"), too short to match or to
   # restart by; prefer argv[0]'s basename, which carries the full executable name.
   fname="$comm"
@@ -336,10 +337,16 @@ done
 
 if [ "$DRY" = 1 ]; then rm -f "$new"; else mv "$new" "$state"; fi
 
-# --- rule 1 verdict: only loops whose owner session is gone ---
+# --- rule 1 verdict: loops whose owner session is gone, or reparented to systemd (ppid = user manager) ---
 for pid in "${!R1_CMD[@]}"; do
-  owner_live "$pid" "${R1_SID[$pid]}" && continue
-  stop_pid 1 "$pid" "shell loop under a scratchpad, owner gone, $((R1_AGE[$pid] / 60)) min old" "${R1_CMD[$pid]}"
+  pp=${PARENT[$pid]:-0}
+  if [ -n "${MANAGER[$pp]+x}" ]; then
+    why="reparented to systemd pid $pp"
+  else
+    owner_live "$pid" "${R1_SID[$pid]}" && continue
+    why="owner gone"
+  fi
+  stop_pid 1 "$pid" "shell loop under a scratchpad, $why, $((R1_AGE[$pid] / 60)) min old" "${R1_CMD[$pid]}"
 done
 
 # --- rule 6 verdict: a Chrome tree hot over STRIKES_MIN runs, with no Playwright call for BROWSER_IDLE ---

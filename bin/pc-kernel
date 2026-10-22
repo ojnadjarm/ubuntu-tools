@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pc kernel [dmesg|modules|sysctl|cgroups|cmdline|taint] — ring buffer with a severity digest, modules, ledgered sysctl, cgroup cost and PSI.
+# pc kernel [dmesg|oom|modules|sysctl|cgroups|cmdline|taint|zswap|mglru] — ring buffer digest, OOM kills, modules, ledgered sysctl and mm knobs, cgroup cost and PSI.
 # shellcheck disable=SC2034
 set -uo pipefail
 BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -7,34 +7,49 @@ BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 
 pc_usage 'usage: pc kernel [--json]                                   overview: release, boot, taint, lockdown, dmesg digest
        pc kernel dmesg [--level err,warn] [--since -1h] [-n 30] [--digest] [--json]
+       pc kernel oom [--since 7d] [--json]                     OOM kills: global|memcg, scope, cmd, anon MB, class
        pc kernel modules [<name>] [--json]
        pc kernel sysctl get <key|prefix> [--json]
-       pc kernel sysctl set <key> <value> [--apply] [--force --why "<text>"]
+       pc kernel sysctl set <key> <value> [--apply] [--persist] [--force --why "<text>"]
        pc kernel cgroups [<unit>] [--user] [--json]
        pc kernel cmdline [--json]
        pc kernel taint [--json]
+       pc kernel zswap [status] [--json]
+       pc kernel zswap set enabled=Y compressor=zstd max_pool_percent=20 [--apply] [--persist]
+       pc kernel mglru [status] [--json]
+       pc kernel mglru set min_ttl_ms=1000 [--apply] [--persist]
 
-Read-only except `sysctl set`, which is runtime only (never /etc/sysctl.d), ledgered through
-pc_apply and undone with `pc undo`. Keys under kernel.sysrq/kernel.yama and
+Read-only except `sysctl set`, ledgered through pc_apply and undone with `pc undo`. It is
+runtime only unless --persist, which also writes `<key> = <value>` into /etc/sysctl.d/91-pc.conf
+through `pc conf` in the same ledger entry (one `pc undo` restores the value and the file). Keys under kernel.sysrq/kernel.yama and
 kernel.perf_event_paranoid, kernel.unprivileged_bpf_disabled,
 kernel.apparmor_restrict_unprivileged_userns, net.ipv4.ip_forward are refused (exit 3) unless
-both --force and --why are given.' "$@"
+both --force and --why are given.
+`zswap set`/`mglru set` write /sys/module/zswap/parameters and /sys/kernel/mm/lru_gen through
+pc_apply (one ledger entry per call, `pc undo` restores the old values); --persist also writes
+the `w` lines of /etc/tmpfiles.d/90-agents-mm.conf through `pc conf put` (no reboot, no grub).
+`oom` reads the kernel journal of every boot since --since (default: the start of this boot).
+Class: real = global OOM (the box ran out), test-cap = memcg kill capped below 1G in a run.sh or
+agent-verify scope, or in a run-* scope of the user manager inside a container (BY ct:<id>, install-fresh
+--suite runs run.sh there), cap = any other memcg kill (a workload outgrew its own MemoryMax).' "$@"
 
-PC_SUB='pc kernel'; PC_EXTRA_FLAGS=(--digest --user --force --level: --since: --why: -n:)
+PC_SUB='pc kernel'; PC_EXTRA_FLAGS=(--digest --user --force --persist --level: --since: --why: -n:)
 pc_opt "$@"; ARGS=("${PC_ARGS[@]}")
 LEVEL=${PC_OPT[--level]-err,warn}; SINCE=${PC_OPT[--since]-}; N=${PC_OPT[-n]-30}; WHY=${PC_OPT[--why]-}
-DIGEST=${PC_OPT[--digest]-0}; USERMODE=${PC_OPT[--user]-0}; FORCE=${PC_OPT[--force]-0}
+DIGEST=${PC_OPT[--digest]-0}; USERMODE=${PC_OPT[--user]-0}; FORCE=${PC_OPT[--force]-0}; PERSIST=${PC_OPT[--persist]-0}
+TMPFILES=${PC_TMPFILES:-/etc/tmpfiles.d/90-agents-mm.conf}; PC_CONF_BIN=${PC_CONF_BIN:-$BIN/pc-conf}
+SYSCTL_CONF=${PC_SYSCTL_CONF:-/etc/sysctl.d/91-pc.conf}
 
 CGROOT="$PC_SYS/fs/cgroup"; LVJSON='[3,4]' 
 LEVELS='["emerg","alert","crit","err","warn","notice","info","debug"]'
 BTIME=0; while read -r k v _; do [ "$k" = btime ] && { BTIME=$v; break; }; done <"$PC_PROC/stat"
 
-# since_epoch <-Nsmhd|date-string> — the cutoff as an epoch, empty for an empty argument.
+# since_epoch <[-]Nsmhd|date-string> — the cutoff as an epoch, empty for an empty argument.
 since_epoch() {
   local s=$1 n u m
   [ -n "$s" ] || return 0
   case $s in
-    -[0-9]*[smhd]) n=${s:1}; u=${n: -1}; n=${n%?}
+    -[0-9]*[smhd]|[0-9]*[smhd]) n=${s#-}; u=${n: -1}; n=${n%?}
       case $u in s) m=1;; m) m=60;; h) m=3600;; d) m=86400;; esac
       printf '%s\n' $((NOW - n * m));;
     *) date -d "$s" +%s 2>/dev/null;;
@@ -65,24 +80,68 @@ kmsg() {
   printf '%s' "$out"
 }
 
-# dmesg_model <cut> <digest-cut> — {since,level,lines,digest}: filtered lines plus the masked digest.
+# kernel_lines <cut> — [{t,epoch,pri,msg}] of every level: the ring buffer, or journalctl -k when the cut predates it.
+kernel_lines() {
+  local ring j
+  ring=$(kmsg | jq -c --argjson bt "$BTIME" '[.dmesg[] | {t: .time, epoch: ($bt + (.time | floor)), pri: (.pri % 8), msg: (.msg | rtrimstr(" "))}]') || return 1
+  if [ "$1" -lt "$(jq '.[0].epoch // 0' <<<"$ring")" ]; then
+    j=$(pc_cmd journalctl -k --since "@$1" -o json --output-fields=PRIORITY,MESSAGE --no-pager -q 2>/dev/null |
+        jq -s -c --argjson bt "$BTIME" '[.[] | (.__REALTIME_TIMESTAMP | tonumber / 1000000) as $e
+          | {t: ($e - $bt), epoch: ($e | floor), pri: ((.PRIORITY // "6") | tonumber),
+             msg: (.MESSAGE | if type == "string" then . else implode end | rtrimstr(" "))}]')
+    [ "${j:-[]}" != '[]' ] && ring=$j
+  fi
+  printf '%s' "$ring"
+}
+
+# dmesg_model <cut> <digest-cut> — {since,level,lines,digest}: filtered lines plus the folded, tagged digest.
 dmesg_model() {
-  kmsg | jq -c --argjson bt "$BTIME" --argjson lv "$LVJSON" --argjson n "$N" \
+  local src cls=''
+  src=$(kernel_lines "$2") || return 1
+  [[ $src == *'invoked oom-killer'* ]] && cls=$(oom_classified "$2" | cut -f2,3,7)
+  printf '%s' "$src" | jq -c --argjson lv "$LVJSON" --argjson n "$N" --rawfile cls <(printf '%s' "$cls") \
     --argjson cut "$1" --argjson dcut "$2" --argjson names "$LEVELS" '
-    [ .dmesg[] | (.pri % 8) as $l
-      | select(($lv | length) == 0 or ($lv | index($l)))
-      | {t: .time, epoch: ($bt + (.time | floor)), level: $names[$l], pri: $l, msg: (.msg | rtrimstr(" "))} ]
-    | map(. + {time: (.epoch | strftime("%Y-%m-%dT%H:%M:%S"))}) as $all
-    | { since: ($dcut | strftime("%Y-%m-%dT%H:%M:%S")),
-        level: $lv,
-        lines: [ $all[] | select(.epoch >= $cut) ] | (if $n > 0 then .[-$n:] else . end),
-        digest: [ $all[] | select(.epoch >= $dcut) ]
-          | group_by(.msg | gsub("[0-9a-f:.]{4,}"; "#"))
-          | map({count: length, level: .[0].level,
-                 first: (map(.epoch) | min | strftime("%Y-%m-%dT%H:%M:%S")),
-                 last:  (map(.epoch) | max | strftime("%Y-%m-%dT%H:%M:%S")),
-                 sample: (.[0].msg | gsub("[0-9a-f:.]{4,}"; "#"))})
-          | sort_by(-.count) }'
+    ($cls | split("\n") | map(select(length > 0) | split("\t") | {key: (.[0] + "\t" + .[1]), value: .[2]}) | from_entries) as $class
+    | def lvok: .pri as $p | ($lv | length) == 0 or ($lv | index($p));
+      def mask: gsub("[0-9a-f:.]{4,}"; "#");
+      def key: if startswith("[UFW BLOCK]") then "[UFW BLOCK] " + ([match("\\b(IN|PROTO)=[^ ]*"; "g").string] | join(" "))
+               elif startswith("oom-report") then gsub("[0-9a-f]{6,}|[0-9]+"; "#")
+               else mask | gsub("\\\\[A-Za-z0-9_.\\\\]+"; "#") | gsub("[0-9]+"; "#") end;
+      def tag: if startswith("[UFW BLOCK]") then "owner:ufw-logging"
+               elif startswith("oom-report") then "oom:" + capture("class=(?<c>.*)$").c
+               elif test("^\\[Firmware Bug\\]: CPU[0-9]+: Topology domain|^ACPI( BIOS)? Error.*AE_NOT_FOUND") then "known-harmless"
+               else "unknown" end;
+      def oomscope: (if test("oom_memcg=") then sub(".*oom_memcg="; "") else sub(".*task_memcg="; "") end) | sub(",.*"; "") | split("/") | last;
+      def report($c): ($c.kind // "unknown") as $k
+        | {t: $c.t, epoch: $c.epoch, pri: $c.pri, msg: "oom-report \($k) \($c.scope) class=\($class[$k + "\t" + $c.scope] // "unknown")"};
+      # One OOM report (invoker line … Killed process, or 10 s without one) becomes one row.
+      def fold: reduce (.[], null) as $l ({out: [], cur: null};
+          if .cur != null and ($l == null or ($l.msg | test("invoked oom-killer")) or $l.epoch > .cur.epoch + 10)
+          then .out += [report(.cur)] | .cur = null else . end
+          | if $l == null then .
+            elif ($l.msg | test("invoked oom-killer")) then .cur = {t: $l.t, epoch: $l.epoch, pri: $l.pri, scope: "-"}
+            elif .cur == null then .out += [$l]
+            else .cur.pri = ([.cur.pri, $l.pri] | min)
+              | if ($l.msg | startswith("oom-kill:constraint=")) then
+                  .cur.kind = (if ($l.msg | test("global_oom|constraint=CONSTRAINT_NONE")) then "global" else "memcg" end)
+                  | .cur.scope = ($l.msg | oomscope)
+                elif ($l.msg | test("Killed process")) then
+                  .cur.kind //= (if ($l.msg | startswith("Memory cgroup")) then "memcg" else "global" end)
+                  | .cur.epoch = $l.epoch | .out += [report(.cur)] | .cur = null
+                else . end
+            end) | .out;
+      def shape: map(. + {level: $names[.pri], time: (.epoch | strftime("%Y-%m-%dT%H:%M:%S"))});
+    { since: ($dcut | strftime("%Y-%m-%dT%H:%M:%S")),
+      level: $lv,
+      lines: [ .[] | select(lvok and .epoch >= $cut) ] | shape | (if $n > 0 then .[-$n:] else . end),
+      digest: [ .[] | select(.epoch >= $dcut) ] | fold | map(select(lvok)) | shape
+        | group_by(.msg | key)
+        | map({count: length, level: .[0].level,
+               first: (map(.epoch) | min | strftime("%Y-%m-%dT%H:%M:%S")),
+               last:  (map(.epoch) | max | strftime("%Y-%m-%dT%H:%M:%S")),
+               tag: (.[0].msg | tag),
+               sample: (.[0].msg | if startswith("oom-report") then key else mask end)})
+        | sort_by(-.count) }'
 }
 
 do_dmesg() {
@@ -96,7 +155,7 @@ do_dmesg() {
     printf '%s' "$model" | jq -r '.lines[] | [.time, .level, .msg] | @tsv' | column -t -s $'\t'
     printf '\ndigest since %s:\n' "$(printf '%s' "$model" | jq -r .since)"
   fi
-  printf '%s' "$model" | jq -r '.digest[] | ["  " + (.count|tostring), .level, (.first[11:19] + "→" + .last[11:19]), .sample] | @tsv' \
+  printf '%s' "$model" | jq -r '.digest[] | ["  " + (.count|tostring), .level, (.first[11:19] + "→" + .last[11:19]), .tag, .sample] | @tsv' \
     | column -t -s $'\t'
 }
 
@@ -176,17 +235,60 @@ do_sysctl_get() {
   fi
 }
 
+# sysctl_conf_merge <key> <value> — the persist file with the key's line replaced, or appended.
+sysctl_conf_merge() {
+  local f="${PC_CONF_ROOT:-}$SYSCTL_CONF"
+  if [ -r "$f" ]; then
+    awk -v k="$1" '{ n = $0; sub(/=.*/, "", n); gsub(/[ \t]/, "", n); sub(/^-/, "", n); gsub("/", ".", n)
+                     if (n != k) print }' "$f"
+  else
+    echo '# pc kernel sysctl set --persist: reapplied at boot by systemd-sysctl'
+  fi
+  printf '%s = %s\n' "$1" "$2"
+}
+
+# sysctl_persist <key> <value> <before> — the runtime value and its 91-pc.conf line as one ledger entry.
+sysctl_persist() {
+  local key=$1 val=$2 before=$3 new conf rc ftok ntok n stamp bk env doit undo rd out
+  [ -x "$PC_CONF_BIN" ] || { echo "pc kernel: --persist needs \`pc conf\` (T1040), not installed" >&2; return 4; }
+  new=$(mktemp); sysctl_conf_merge "$key" "$val" >"$new"
+  # A dry `pc conf put` applies its deny-list and gives the diff.
+  conf=$("$PC_CONF_BIN" put "$SYSCTL_CONF" --from "$new" 2>&1); rc=$?
+  [ $rc = 0 ] || { printf '%s\n' "$conf" >&2; rm -f "$new"; return $rc; }
+  ftok=$("$PC_CONF_BIN" state "$SYSCTL_CONF"); ntok="sha:$(sha256sum <"$new" | cut -c1-12)"
+  n=${SYSCTL_CONF#/}; printf -v stamp '%(%Y%m%d-%H%M%S)T' -1
+  bk="${PC_CONF_BACKUP:-$HOME/agents/backups/conf}/$stamp-sysctl-${n//\//_}.XXXXXX"
+  if [ "$APPLY" = 1 ]; then
+    mkdir -p "${bk%/*}" && bk=$(mktemp -d "$bk") && cp -- "$new" "$bk/new" || { rm -f "$new"; return 1; }
+    if [ "$ftok" = absent ]; then : >"$bk/absent"; else cat -- "${PC_CONF_ROOT:-}$SYSCTL_CONF" >"$bk/old"; fi
+  fi
+  rm -f "$new"
+  env=$(printf 'PC_CONF_ROOT=%q PC_CONF_BACKUP=%q' "${PC_CONF_ROOT:-}" "${PC_CONF_BACKUP:-}")
+  doit="timeout $PC_ROOT_TIMEOUT sudo -n sysctl -qw $(printf %q "$key=$val") && $env $(printf '%q write %q %q' "$PC_CONF_BIN" "$SYSCTL_CONF" "$bk/new")"
+  undo="timeout $PC_ROOT_TIMEOUT sudo -n sysctl -qw $(printf %q "$key=$before") && $env $(printf '%q restore %q %q' "$PC_CONF_BIN" "$SYSCTL_CONF" "$bk")"
+  rd="echo \"\$(cat /proc/sys/${key//.//}) file=\$($env $(printf '%q state %q' "$PC_CONF_BIN" "$SYSCTL_CONF"))\""
+  out=$(PC_READ_CMD="$rd" PC_REDO="$doit" pc_apply "$key" "$before file=$ftok" "$val file=$ntok" "$undo" bash -c "$doit") \
+    || { printf '%s\n' "$out"; return 1; }
+  printf '%s\n' "$out"
+  [ "$APPLY" = 1 ] || printf '%s\n' "$conf"
+}
+
 do_sysctl_set() {
-  local key=$1 val=$2 before out id
+  local key=$1 val=$2 before out id rc
   if guarded "$key" && { [ "$FORCE" != 1 ] || [ -z "$WHY" ]; }; then
     printf 'pc kernel: refused (%s is on the sysctl guard list) — pass --force and --why "<reason>" to override.\n' "$key" >&2
     exit 3
   fi
   before=$(sysctl_read "$key")
   [ -n "$before" ] || { echo "pc kernel: cannot read $key" >&2; exit 1; }
-  out=$(PC_READ_CMD="sysctl -n $key" pc_apply "$key" "$before" "$val" \
-        "timeout $PC_ROOT_TIMEOUT sudo -n sysctl -qw $key=$before" \
-        timeout "$PC_ROOT_TIMEOUT" sudo -n sysctl -qw "$key=$val") || { printf '%s\n' "$out"; exit 1; }
+  if [ "$PERSIST" = 1 ]; then
+    out=$(sysctl_persist "$key" "$val" "$before"); rc=$?
+    [ $rc = 0 ] || { [ -n "$out" ] && printf '%s\n' "$out"; exit $rc; }
+  else
+    out=$(PC_READ_CMD="sysctl -n $key" pc_apply "$key" "$before" "$val" \
+          "timeout $PC_ROOT_TIMEOUT sudo -n sysctl -qw $key=$before" \
+          timeout "$PC_ROOT_TIMEOUT" sudo -n sysctl -qw "$key=$val") || { printf '%s\n' "$out"; exit 1; }
+  fi
   printf '%s\n' "$out"
   # The reason for overriding the guard belongs in the ledger next to the change.
   id=$(printf '%s\n' "$out" | tail -1 | sed -n 's/^rollback: pc undo //p')
@@ -313,7 +415,190 @@ do_taint() {
     "lockdown  \(.lockdown)"'
 }
 
+## --- mm knobs (zswap, mglru) ---------------------------------------------------
+ZSWAP_DIR="$PC_SYS/module/zswap/parameters"; ZSWAP_KEYS='compressor zpool max_pool_percent accept_threshold_percent shrinker_enabled enabled'
+MGLRU_DIR="$PC_SYS/kernel/mm/lru_gen"; MGLRU_KEYS='min_ttl_ms enabled'
+
+# knob_read_cmd <dir> <keys…> — a shell line printing "k=v k=v" for the keys, stored as the ledger re-read.
+knob_read_cmd() {
+  local d=$1 k line; shift
+  line="cd $(printf %q "$d") && echo"
+  for k in "$@"; do line+=" $k=\$(cat $k)"; done
+  printf '%s' "$line"
+}
+
+# knob_write_cmd <dir> <k=v…> — a shell line writing each value through sudo tee.
+knob_write_cmd() {
+  local d=$1 kv line; shift
+  line="cd $(printf %q "$d")"
+  for kv in "$@"; do
+    line+=" && printf '%s\\n' $(printf %q "${kv#*=}") | timeout $PC_ROOT_TIMEOUT sudo -n tee ${kv%%=*} >/dev/null"
+  done
+  printf '%s' "$line"
+}
+
+# knob_set <name> <dir> <allowed-keys> <k=v…> — one ledgered sysfs change; keys written in allowed order.
+knob_set() {
+  local name=$1 dir=$2 allowed=$3 kv k v keys=() new=() old=() before after out
+  shift 3
+  declare -A want=()
+  [ $# -gt 0 ] || { echo "pc kernel: $name set needs key=value (keys: $allowed)" >&2; exit 2; }
+  for kv in "$@"; do
+    k=${kv%%=*}; v=${kv#*=}
+    case " $allowed " in *" $k "*) :;; *) echo "pc kernel: $name has no key '$k' (keys: $allowed)" >&2; exit 2;; esac
+    [[ $kv == *=* && $v =~ ^[A-Za-z0-9_.-]+$ ]] || { echo "pc kernel: bad value in '$kv'" >&2; exit 2; }
+    [ -e "$dir/$k" ] || { echo "pc kernel: $dir/$k does not exist on this kernel" >&2; exit 2; }
+    want[$k]=$v
+  done
+  for k in $allowed; do
+    [ -n "${want[$k]+x}" ] || continue
+    keys+=("$k"); new+=("$k=${want[$k]}"); old+=("$k=$(<"$dir/$k")")
+  done
+  before=${old[*]}; after=${new[*]}
+  if [ "$before" = "$after" ]; then
+    printf 'already: %s %s\n' "$name" "$after"
+  else
+    out=$(PC_READ_CMD="$(knob_read_cmd "$dir" "${keys[@]}")" pc_apply "$name" "$before" "$after" \
+          "$(knob_write_cmd "$dir" "${old[@]}")" bash -c "$(knob_write_cmd "$dir" "${new[@]}")") \
+      || { printf '%s\n' "$out"; exit 1; }
+    printf '%s\n' "$out"
+  fi
+  [ "$PERSIST" = 1 ] || return 0
+  knob_persist "$dir" "${new[@]}"
+}
+
+# knob_persist <dir> <k=v…> — merge `w` lines for the keys into the tmpfiles file through pc conf.
+knob_persist() {
+  local dir=$1 kv tmp line; shift
+  [ -x "$PC_CONF_BIN" ] || { echo "pc kernel: --persist needs \`pc conf\` (T1040), not installed; the runtime change stands" >&2; exit 4; }
+  tmp=$(mktemp)
+  declare -A path=()
+  for kv in "$@"; do path["/sys${dir#"$PC_SYS"}/${kv%%=*}"]=${kv#*=}; done
+  if [ -r "$TMPFILES" ]; then
+    while IFS= read -r line; do
+      read -r _ p _ <<<"$line"
+      [ -n "${p:-}" ] && [ -n "${path[$p]+x}" ] && continue
+      printf '%s\n' "$line"
+    done <"$TMPFILES" >"$tmp"
+  else
+    echo '# pc kernel zswap/mglru --persist: mm knobs reapplied at boot by systemd-tmpfiles' >"$tmp"
+  fi
+  for kv in "$@"; do printf 'w /sys%s/%s - - - - %s\n' "${dir#"$PC_SYS"}" "${kv%%=*}" "${kv#*=}"; done >>"$tmp"
+  local a=(); [ "$APPLY" = 1 ] && a=(--apply)
+  "$PC_CONF_BIN" put "$TMPFILES" --from "$tmp" "${a[@]}"; local rc=$?
+  rm -f "$tmp"; return $rc
+}
+
+# zswap_json — parameters plus pool use: /proc/meminfo Zswap (pool) and Zswapped (stored), /proc/vmstat counters.
+zswap_json() {
+  [ -d "$ZSWAP_DIR" ] || { echo 'pc kernel: zswap is not built into this kernel' >&2; exit 1; }
+  local k v params=()
+  for k in $ZSWAP_KEYS; do [ -r "$ZSWAP_DIR/$k" ] && params+=("$k=$(<"$ZSWAP_DIR/$k")"); done
+  declare -A M=()
+  while read -r k v _; do M[${k%:}]=$v; done < <(cat "$PC_PROC/meminfo" "$PC_PROC/vmstat" 2>/dev/null)
+  pc_json '{params:($p|split(" ")|map(split("=")|{key:.[0],value:.[1]})|from_entries),
+            pool_kb:($pool|tonumber), stored_kb:($st|tonumber), stored_pages:(($st|tonumber)/4|floor),
+            written_back_pages:($wb|tonumber), zswpout_pages:($zo|tonumber), zswpin_pages:($zi|tonumber),
+            pswpout_pages:($po|tonumber), swap_used_kb:(($stt|tonumber)-($sf|tonumber))}' -c \
+    --arg p "${params[*]}" --arg pool "${M[Zswap]:-0}" --arg st "${M[Zswapped]:-0}" --arg wb "${M[zswpwb]:-0}" \
+    --arg zo "${M[zswpout]:-0}" --arg zi "${M[zswpin]:-0}" --arg po "${M[pswpout]:-0}" \
+    --arg stt "${M[SwapTotal]:-0}" --arg sf "${M[SwapFree]:-0}"
+}
+
+do_zswap_status() {
+  local j; j=$(zswap_json) || exit 1
+  [ "$JSON" = 1 ] && { printf '%s\n' "$j"; return 0; }
+  printf '%s' "$j" | jq -r 'def m($k): ((($k/1024)*10|round)/10|tostring) + "M";
+    "params        " + (.params|to_entries|map("\(.key)=\(.value)")|join(" ")),
+    "pool          \(m(.pool_kb))  stored \(m(.stored_kb)) (\(.stored_pages) pages, ratio \(if .pool_kb > 0 then ((.stored_kb/.pool_kb*10|round)/10|tostring) else "-" end))",
+    "written back  \(.written_back_pages) pages",
+    "zswpout       \(.zswpout_pages) pages  zswpin \(.zswpin_pages)  disk pswpout \(.pswpout_pages)",
+    "swap used     \(m(.swap_used_kb))"'
+}
+
+do_mglru_status() {
+  [ -d "$MGLRU_DIR" ] || { echo 'pc kernel: MGLRU is not built into this kernel' >&2; exit 1; }
+  local k out=()
+  for k in $MGLRU_KEYS; do [ -r "$MGLRU_DIR/$k" ] && out+=("$k=$(<"$MGLRU_DIR/$k")"); done
+  if [ "$JSON" = 1 ]; then
+    pc_json '$p|split(" ")|map(split("=")|{key:.[0],value:.[1]})|from_entries' -c --arg p "${out[*]}"
+  else
+    printf '%s\n' "${out[@]}"
+  fi
+}
+
 ## --- overview ---------------------------------------------------------------
+## --- oom ------------------------------------------------------------------
+OOM_TESTCAP_MB=1024
+
+# oom_rows <cut> — one TSV row per OOM kill: epoch kind scope cmd anon_mb limit_mb container (12 hex or -).
+oom_rows() {
+  pc_cmd journalctl -k -b all --since "@$1" -o short-unix --no-pager -q \
+    -g 'invoked oom-killer|^memory: usage .*limit|^oom-kill:constraint=|Killed process' 2>/dev/null |
+  awk '
+    { sub(/^[^ ]+ [^ ]+ kernel: /, "&\t"); split($0, h, "\t"); t = int($1); m = h[2] }
+    m ~ /invoked oom-killer/ { lim = 0; kind = ""; scope = ""; ct = "-" }
+    m ~ /^memory: usage/ { if (match(m, /limit [0-9]+kB/)) lim = int(substr(m, RSTART + 6, RLENGTH - 8) / 1024) }
+    m ~ /^oom-kill:constraint=/ {
+      kind = (m ~ /global_oom|constraint=CONSTRAINT_NONE/) ? "global" : "memcg"
+      cg = m; if (cg ~ /oom_memcg=/) sub(/.*oom_memcg=/, "", cg); else sub(/.*task_memcg=/, "", cg)
+      sub(/,.*/, "", cg); n = split(cg, a, "/"); scope = a[n]
+      if (match(cg, /\/docker-[0-9a-f]+\.scope\/.*user@[0-9]+\.service\//)) ct = substr(cg, RSTART + 8, 12)
+    }
+    m ~ /Killed process/ {
+      cmd = m; sub(/^[^(]*\(/, "", cmd); sub(/\).*/, "", cmd)
+      anon = 0; if (match(m, /anon-rss:[0-9]+kB/)) anon = int(substr(m, RSTART + 9, RLENGTH - 11) / 1024)
+      if (kind == "") kind = (m ~ /^Memory cgroup/) ? "memcg" : "global"
+      printf "%d\t%s\t%s\t%s\t%d\t%d\t%s\n", t, kind, (scope == "" ? "-" : scope), cmd, anon, lim, ct
+      kind = ""
+    }'
+}
+
+# oom_starters <cut> <scope…> — "<scope>\t<by>\t<test file>" from the user manager's Started lines.
+oom_starters() {
+  local cut=$1; shift
+  [ $# -gt 0 ] || return 0
+  local re; re=$(printf '%s|' "$@"); re=${re%|}; re=${re//./\\.}
+  pc_cmd journalctl --user --since "@$cut" -o cat --no-pager -q -g "^Started ($re) " 2>/dev/null |
+  awk '{ sc = $2; by = (index($0, "/tmp/agent-verify.") ? "agent-verify" : (index($0, "/run-tests.") ? "run.sh" : "systemd-run"))
+         f = "-"; if (match($0, / _ [^ ]+\.oom /)) { f = substr($0, RSTART + 3, RLENGTH - 8); sub(/.*\//, "", f); gsub(/__/, "/", f) }
+         printf "%s\t%s\t%s\n", sc, by, f }'
+}
+
+# oom_classified <cut> — oom_rows plus class, by and test file: "<file> (fixture root)" when it is not under ~/agents.
+oom_classified() {
+  local rows starters sc by f agents=${PC_AGENTS_DIR:-$HOME/agents}
+  rows=$(oom_rows "$1")
+  # shellcheck disable=SC2046
+  starters=$(oom_starters "$1" $(printf '%s\n' "$rows" | awk -F'\t' '$2 == "memcg" && $3 ~ /^run-p/ && $7 == "-" { print $3 }' | sort -u) |
+    while IFS=$'\t' read -r sc by f; do
+      [ "$f" != - ] && [ ! -e "$agents/$f" ] && f="$f (fixture root)"
+      printf '%s\t%s\t%s\n' "$sc" "$by" "$f"
+    done)
+  awk -F'\t' -v OFS='\t' -v capmb="$OOM_TESTCAP_MB" 'NR == FNR { by[$1] = $2; f[$1] = $3; next }
+    $0 != "" { ct = $7; NF = 6; b = (ct != "-") ? "ct:" ct : ($3 in by ? by[$3] : "-")
+               c = ($2 == "global") ? "real" : ((b == "run.sh" || b == "agent-verify" || (ct != "-" && $3 ~ /^run-/)) && $6 > 0 && $6 < capmb) ? "test-cap" : "cap"
+               print $0, c, b, (ct == "-" && $3 in f ? f[$3] : "-") }' <(printf '%s\n' "$starters") <(printf '%s\n' "$rows")
+}
+
+do_oom() {
+  local cut rows
+  cut=$(since_epoch "$SINCE"); : "${cut:=$BTIME}"
+  rows=$(oom_classified "$cut")
+  if [ "$JSON" = 1 ]; then
+    printf '%s\n' "$rows" | jq -R -s -c --argjson cut "$cut" 'split("\n") | map(select(length > 0) | split("\t")
+      | {time: (.[0] | tonumber | strflocaltime("%Y-%m-%dT%H:%M:%S")), kind: .[1], scope: .[2], cmd: .[3],
+         anon_mb: (.[4] | tonumber), limit_mb: (.[5] | tonumber), class: .[6], by: .[7], test: .[8]})
+      | {since: ($cut | strflocaltime("%Y-%m-%dT%H:%M:%S")), kills: ., count: (group_by(.class) | map({key: .[0].class, value: length}) | from_entries)}'
+    return 0
+  fi
+  [ -n "$rows" ] || { printf 'no OOM kills since %(%F %T)T\n' "$cut"; return 0; }
+  { printf 'TIME\tKIND\tCLASS\tSCOPE\tCMD\tANON_MB\tLIMIT_MB\tBY\tTEST\n'
+    printf '%s\n' "$rows" | awk -F'\t' -v OFS='\t' '{ print strftime("%Y-%m-%dT%H:%M:%S", $1), $2, $7, $3, $4, $5, ($6 > 0 ? $6 : "-"), $8, $9 }'
+  } | column -t -s $'\t'
+  printf '%s\n' "$rows" | awk -F'\t' '{ c[$7]++ } END { printf "kills: real=%d test-cap=%d cap=%d\n", c["real"], c["test-cap"], c["cap"] }'
+}
+
 do_overview() {
   local t model mods
   t=$(taint_json) || exit 1
@@ -335,10 +620,18 @@ do_overview() {
 case "${ARGS[0]:-}" in
   '')       do_overview;;
   dmesg)    do_dmesg;;
+  oom)      do_oom;;
   modules)  do_modules "${ARGS[1]:-}";;
   cgroups)  if [ -n "${ARGS[1]:-}" ]; then do_cgroups_unit "${ARGS[1]}"; else do_cgroups_all; fi;;
   cmdline)  do_cmdline;;
   taint)    do_taint;;
+  zswap|mglru)
+    case "${ARGS[1]:-status}" in
+      status) "do_${ARGS[0]}_status";;
+      set)    if [ "${ARGS[0]}" = zswap ]; then knob_set zswap "$ZSWAP_DIR" "$ZSWAP_KEYS" "${ARGS[@]:2}"
+              else knob_set mglru "$MGLRU_DIR" "$MGLRU_KEYS" "${ARGS[@]:2}"; fi;;
+      *)      echo "pc kernel: ${ARGS[0]} needs status or set" >&2; exit 2;;
+    esac;;
   sysctl)
     case "${ARGS[1]:-}" in
       get) [ -n "${ARGS[2]:-}" ] || { echo 'pc kernel: sysctl get needs a key' >&2; exit 2; }

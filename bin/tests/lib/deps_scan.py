@@ -128,7 +128,10 @@ def shell_words(text):
     for m in [None] + list(SEP.finditer(text)):
         toks = text[m.end() if m else 0:].split('\n', 1)[0].split()
         while toks and re.match(r'^\w+=\S*$', toks[0]):
-            toks.pop(0)
+            a = toks.pop(0)
+            if re.match(r'^\w+=\([^)]*$', a):
+                while toks and ')' not in toks.pop(0):
+                    pass
         while toks and toks[0] in PREFIX:
             w = toks.pop(0).lstrip('$')
             if w not in ('exec', 'command', 'time'):

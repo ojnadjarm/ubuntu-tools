@@ -56,6 +56,7 @@ body.nx { font-size: 1rem; min-height: 100svh; overflow-x: hidden; padding-botto
 .nx .grid { max-width: none; }
 .nx .grid:not(:has(> .nxs)) { zoom: var(--z); }
 .nx .cell { background: color-mix(in srgb, var(--bg1) 90%, transparent); transition: border-color .3s; }
+.nx .grid > .cell { align-self: start; }
 @media (hover: hover) { .nx .cell:hover { border-color: var(--line3); } }
 .nxs { grid-column: 1 / -1; min-width: 0; }
 .sm { color: var(--mid); font-size: .86rem; } .sm.pad { padding: 2rem 0; text-align: center; }
@@ -160,9 +161,9 @@ body.nx { font-size: 1rem; min-height: 100svh; overflow-x: hidden; padding-botto
 .spk { margin-top: auto; padding-top: .8rem; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 4.6rem; }
 .spk figcaption { display: flex; justify-content: space-between; gap: .6rem; font-size: .7rem; letter-spacing: .16em; text-transform: uppercase; color: var(--mute); margin-top: .35rem; }
 .spk figcaption b { color: var(--hi); letter-spacing: 0; font-weight: 600; }
-.eyebox { position: relative; min-height: max(20rem, calc(100svh - var(--rail) - 7.5rem)); display: flex; flex-direction: column; align-items: center; }
+.eyebox { position: relative; align-self: start; min-height: max(20rem, calc(100svh - var(--rail) - 7.5rem)); display: flex; flex-direction: column; align-items: center; }
 .eyefield { flex: 1 1 auto; align-self: stretch; min-height: 12rem; }
-.eyebox .verdict { text-align: center; }
+.eyebox .verdict { text-align: center; max-width: 100%; }
 .eyebox .verdict b { display: block; font-size: clamp(1.9rem, 1.2rem + 1.6vw, 3.2rem); letter-spacing: -.03em; color: var(--g); text-shadow: 0 0 24px var(--w34); line-height: 1.1; }
 .eyebox .verdict.bad b { color: var(--gold); text-shadow: 0 0 24px color-mix(in srgb, var(--gold) 35%, transparent); }
 .eyebox .verdict span { color: var(--mid); font-size: .86rem; text-shadow: 0 0 2px var(--bg), 0 0 10px var(--bg); }
@@ -173,6 +174,16 @@ body.nx { font-size: 1rem; min-height: 100svh; overflow-x: hidden; padding-botto
 .eyebox .verdict .pin a { color: var(--g); display: inline-flex; align-items: center; }
 @media (pointer: coarse) { .eyebox .verdict .pin a { min-height: 44px; } }
 .probs { list-style: none; font-size: .86rem; color: var(--gold); margin-top: .3rem; } .probs li { overflow-wrap: anywhere; }
+.probs summary, .probs .one { display: block; list-style: none; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; padding: .1rem .3rem; text-shadow: 0 0 2px var(--bg), 0 0 10px var(--bg); }
+.probs summary::-webkit-details-marker { display: none; }
+.probs summary::before, .probs .one::before { content: "▸ "; color: var(--mid); }
+.probs .one { cursor: default; } .probs .one::before { visibility: hidden; }
+.probs details[open] > summary::before { content: "▾ "; }
+.probs summary:focus-visible { outline: 1px solid var(--gold); outline-offset: 1px; }
+.probs time, .probs em { color: var(--mid); font-style: normal; }
+.probs details p { color: var(--mid); margin: .1rem 0 .4rem; text-shadow: 0 0 2px var(--bg), 0 0 10px var(--bg); }
+.probs details a { color: var(--g); }
+@media (pointer: coarse) { .probs summary, .probs .one { min-height: 44px; line-height: 44px; } .probs details a { display: inline-block; min-height: 44px; line-height: 44px; } }
 .nread { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: .5rem; width: 100%; margin-top: 1rem; }
 .nread div { text-align: center; border-top: 1px solid var(--line2); padding-top: .4rem; min-width: 0; transition: border-color .3s; }
 .nread dt { font-size: .66rem; letter-spacing: .18em; text-transform: uppercase; color: var(--mute); }

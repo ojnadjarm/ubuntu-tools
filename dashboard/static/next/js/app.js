@@ -10,6 +10,7 @@ import { decode, decodeAll } from "./ui/decode.js";
 import { fresh, roll, draw } from "./ui/num.js";
 import { sync } from "./ui/sync.js";
 import { verdict } from "./verdict.js";
+import { summary } from "./summary.js";
 import { bindTouch } from "./ui/touch.js";
 
 const M = {}, L = {}, S = {}, grid = document.getElementById("grid"), board = document.getElementById("board");
@@ -38,18 +39,8 @@ const firstOf = (sec) => { let v = null; try { v = sec === "voice" && byId[local
 const subsOf = (sec) => SCREENS.filter((s) => s.sec === sec);
 
 /* The hero band over a shared screen: the eye's perch, the decoded screen name and one summary line. */
-function summary(id) {
-  const D = store.D || {}, units = (D.units || []).filter((u) => u.group !== "desktop"), sites = D.sites || [];
-  const n = (a, f) => a.filter(f).length;
-  if (id === "services") return `${units.length} units · ${n(units, (u) => u.active === "failed")} failed · ${n(sites, (s) => s.state === "stray")} strays · ${(D.timers || []).length} timers`;
-  if (id === "sites") return `${sites.length} sites · ${n(sites, (s) => s.state === "down")} down · ${n(sites, (s) => s.state === "stray")} strays`;
-  if (id === "docs") return `${(D.plans || []).length} docs, newest first`;
-  if (id === "files") return `${((D.drop || {}).files || []).length} files in the drop`;
-  if (id === "todo") return `${(D.todo || []).length} steps only you can take · tap done when finished`;
-  return "the design system · tokens and components";
-}
 function band(s) {
-  return `<section class="band" aria-label="${esc(s.name)} summary"><div class="perch" id="perch" aria-hidden="true"></div><div class="bt"><p class="kin" data-dec>${esc(s.name)}</p><p class="bsum">${esc(summary(s.id))}</p></div></section>`;
+  return `<section class="band" aria-label="${esc(s.name)} summary"><div class="perch" id="perch" aria-hidden="true"></div><div class="bt"><p class="kin" data-dec>${esc(s.name)}</p><p class="bsum">${esc(summary(s.id, store.D || {}, () => { if (cur === s.id) refresh(); }))}</p></div></section>`;
 }
 
 function keys() {
@@ -200,7 +191,8 @@ function boot3d() {
   if (booting) return;
   booting = new Promise((ok) => (window.requestIdleCallback || ((f) => setTimeout(f, 60)))(ok, { timeout: 700 }))
     .then(() => import("./stage.js"))
-    .then((m) => { store.stage = m.createStage(document.getElementById("gl")); window.__stage = store.stage; document.body.classList.add("gl"); life(); rescene(); })
+    .then((m) => m.createStage(document.getElementById("gl")))
+    .then((st) => { store.stage = st; window.__stage = st; document.body.classList.add("gl"); life(); rescene(); })
     .catch((e) => { console.error(e); document.body.classList.add("nogl"); });
 }
 

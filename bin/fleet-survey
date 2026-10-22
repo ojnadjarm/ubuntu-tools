@@ -59,7 +59,7 @@ def main():
     ap.add_argument('--since', help='window for failures, clusters, tokens, red check.json (default 24h) and flaky (default 7d); 30m, 24h, 2d')
     ap.add_argument('--json', action='store_true', help='one object {section: {ok, ms, rows}}')
     ap.add_argument('--creative', action='store_true', help='add per-stack sections for motion-video and gamedev')
-    ap.add_argument('--shipped', nargs='?', const='open', choices=['open', 'all'],
+    ap.add_argument('--shipped', nargs='?', const='open', choices=('open', 'all'),
                     help='add per-wave counts and the open/unticketed backlog items (`all`: every item with its T-number and state)')
     ap.add_argument('--shipped-all', dest='shipped', action='store_const', const='all', help='same as --shipped all')
     ap.add_argument('--measure', action='store_true', help='add ci reds alone, hooks p50, cli p50, tmp residue, dup defs (<= 90 s)')

@@ -6,14 +6,27 @@ BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 . "$BIN/pclib.sh"
 
 pc_usage 'usage: pc thermal [zones|hwmon|fan|throttle] [--json]
+       pc thermal throttle [--seconds N] [--record] [--json]
+       pc thermal throttle --reasons [--window N] [--json]
        pc thermal watch --seconds N [--json]
 
 No verb prints all four sections. `zones` reads /sys/class/thermal (type, °C, trip points),
 `hwmon` takes the hottest sensor per chip from `sensors -j`, `fan` reports the ASUS fan rpm and
 the pwm1_enable mode **read-only** (writing it is refused, FLEET §5), `throttle` pairs the i915
-throttle reasons with x86_pkg_temp against the RAPL PL1. `watch` prints one line per second.' "$@"
+throttle reasons with x86_pkg_temp against the RAPL PL1 plus the per-CPU package/core throttle
+counters summed (+/h since the last record; --seconds N adds the delta over an N s window).
+`throttle --record` appends `ts pkg core max_temp load1 top_unit_by_cpu` to $PC_THERMAL_LOG
+(default ~/agents/log/thermal.tsv; top unit = largest cgroup CPU delta since the last record,
+docker scopes named from $PC_MEM_NAMES) plus `reasons`, the limits active over a 1 s window.
+`throttle --reasons` reads MSR 0x64F (core perf limit reasons) and 0x1B1 (package therm status)
+on every CPU (root, read-only; --window N samples N s at 10 Hz) and prints each set bit as
+`<scope>.<name> <active samples>/<samples x cpus> log <cpus with the sticky log bit>/<cpus>`.
+`watch` prints one line per second.' "$@"
 
+PC_EXTRA_FLAGS=(--record --reasons --window:)
 pc_opt "$@"
+: "${PC_THERMAL_LOG:=$HOME/agents/log/thermal.tsv}" "${PC_MEM_NAMES:=$HOME/agents/state/docker-names.tsv}"
+UNITS_STATE="${PC_THERMAL_LOG%.tsv}.units"
 c_of() { printf '%d.%d' $(( ${1:-0} / 1000 )) $(( (${1:-0} % 1000) / 100 )); }
 
 ## --- zones ------------------------------------------------------------------
@@ -81,6 +94,140 @@ throttle_json() {
     --argjson pl "$(( $(pc_rd "$PC_SYS/class/powercap/intel-rapl:0/constraint_0_power_limit_uw" 0) / 1000000 ))"
 }
 
+## --- throttle reasons from the MSRs ------------------------------------------
+# MSR_PY <window_s> [table] — decodes 0x64F/0x1B1/0x1A2 read live (root) or from a "sample cpu 0x64f 0x1b1 0x1a2" table.
+MSR_PY='
+import json, os, struct, sys, time
+n = int(sys.argv[1]); rows = []
+CORE = {0: "prochot", 1: "thermal", 4: "rsr", 5: "ratl", 6: "vr_therm_alert", 7: "vr_tdc",
+        8: "other_edp", 10: "pl1", 11: "pl2", 12: "max_turbo", 13: "tta"}
+PKG = {0: "thermal", 2: "prochot", 4: "critical", 6: "threshold1", 8: "threshold2", 10: "power_limit"}
+if len(sys.argv) > 2:
+    for l in open(sys.argv[2]):
+        f = l.split()
+        if len(f) == 5 and not l.startswith("#"):
+            rows.append((int(f[0]), int(f[1]), *(int(x, 16) for x in f[2:])))
+else:
+    cpus = sorted(int(d) for d in os.listdir("/dev/cpu") if d.isdigit())
+    fds = {c: os.open("/dev/cpu/%d/msr" % c, os.O_RDONLY) for c in cpus}
+    rd = lambda c, a: struct.unpack("<Q", os.pread(fds[c], 8, a))[0]
+    t = rd(cpus[0], 0x1A2)
+    for s in range(max(1, n * 10)):
+        if s: time.sleep(0.1)
+        rows += [(s, c, rd(c, 0x64F), rd(c, 0x1B1), t) for c in cpus]
+last = max(r[0] for r in rows); cpus = sorted({r[1] for r in rows}); p0 = cpus[0]
+pkg = [r for r in rows if r[1] == p0]; end = [r for r in rows if r[0] == last]
+out = []
+for b, nm in CORE.items():
+    out.append({"scope": "core", "name": nm, "active": sum(r[2] >> b & 1 for r in rows), "active_of": len(rows),
+                "log": sum(r[2] >> (b + 16) & 1 for r in end), "log_of": len(end)})
+for b, nm in PKG.items():
+    out.append({"scope": "pkg", "name": nm, "active": sum(r[3] >> b & 1 for r in pkg), "active_of": len(pkg),
+                "log": pkg[-1][3] >> (b + 1) & 1, "log_of": 1})
+print(json.dumps({"window_s": n, "cpus": len(cpus), "samples": last + 1,
+    "tjmax_c": rows[0][4] >> 16 & 0xFF, "tcc_offset_c": rows[0][4] >> 24 & 0x3F,
+    "pkg_below_tjmax_c": pkg[-1][3] >> 16 & 0x7F, "reasons": out,
+    "active": ["%s.%s" % (o["scope"], o["name"]) for o in out if o["active"]]}))
+'
+# reasons_json [window_s] — the decoded MSR bits, or {error} when they cannot be read.
+reasons_json() {
+  local n=${1:-0} out
+  if [ -n "$PC_FIXTURE" ]; then out=$(python3 -I -c "$MSR_PY" "$n" "$PC_FIXTURE/msr.tsv" 2>/dev/null)
+  else out=$(pc_timeout $((n + 10)) sudo -n python3 -I -c "$MSR_PY" "$n" 2>/dev/null); fi
+  [ -n "$out" ] && printf '%s\n' "$out" || printf '{"error":"MSR read failed (sudo -n python3 on /dev/cpu/N/msr; msr module loaded?)","active":null}\n'
+}
+t_reasons() {
+  reasons_json "$1" | jq -r 'if .error then "reasons n/a (\(.error))" else
+    "reasons " + ([.reasons[] | select(.active > 0 or .log > 0) |
+      "\(.scope).\(.name) \(.active)/\(.active_of) log \(.log)/\(.log_of)"] | if length > 0 then join(", ") else "none" end) +
+    " (\(.cpus) cpus x \(.samples) samples; tjmax \(.tjmax_c) C, tcc offset \(.tcc_offset_c) C, pkg \(.pkg_below_tjmax_c) C below)" end'
+}
+
+## --- per-CPU throttle counters and the record ------------------------------
+# thr_sum <package|core> — the counter summed over every CPU, or n/a when no CPU exposes it.
+thr_sum() {
+  local f s=0 n=0
+  for f in "$PC_SYS"/devices/system/cpu/cpu[0-9]*/thermal_throttle/"$1"_throttle_count; do
+    [ -r "$f" ] || continue
+    s=$((s + $(<"$f"))); n=1
+  done
+  [ "$n" = 1 ] && printf '%s' "$s" || printf 'n/a'
+}
+# units_cpu — "<cgroup path>\t<usage_usec>" for every leaf .service/.scope cgroup.
+units_cpu() {
+  local d k v
+  while IFS= read -r d; do
+    [ -r "$d/cpu.stat" ] && { read -r k v <"$d/cpu.stat"; printf '%s\t%s\n' "${d#"$PC_SYS"/fs/cgroup/}" "$v"; }
+  done < <(find -H "$PC_SYS/fs/cgroup" -type d \( -name '*.service' -o -name '*.scope' \) 2>/dev/null) |
+    awk -F'\t' '{p[NR]=$1; u[NR]=$2; q=$1; while (sub(/\/[^\/]*$/, "", q)) par[q]=1}
+                 END {for (i=1; i<=NR; i++) if (!(p[i] in par)) print p[i] "\t" u[i]}'
+}
+# top_unit — the leaf unit with the largest CPU delta since the last record (n/a without one); saves the state.
+top_unit() {
+  local cur; cur=$(units_cpu)
+  if [ -s "$UNITS_STATE" ]; then
+    awk -F'\t' 'NR==FNR {prev[$1]=$2; next}
+                 {d = ($1 in prev && $2 >= prev[$1]) ? $2 - prev[$1] : $2; if (d > best) {best=d; u=$1}}
+                 END {if (u == "") print "n/a"; else {sub(/.*\//, "", u); printf "%s:%ds\n", u, best/1000000}}' \
+      "$UNITS_STATE" - <<<"$cur" |
+      awk -v f="$PC_MEM_NAMES" 'BEGIN {while ((getline l < f) > 0) {split(l, a, "\t"); nm[a[1]] = a[2]}}
+                   {if (match($0, /^docker-[0-9a-f]+\.scope:/) && (substr($0, 8, 12) in nm)) $0 = "docker:" nm[substr($0, 8, 12)] substr($0, RLENGTH); print}'
+  else
+    echo n/a
+  fi
+  printf '%s\n' "$cur" >"$UNITS_STATE.tmp" && mv "$UNITS_STATE.tmp" "$UNITS_STATE"
+}
+LAST_TS= LAST_PKG= LAST_CORE=
+[ -s "$PC_THERMAL_LOG" ] && IFS=$'\t' read -r LAST_TS LAST_PKG LAST_CORE _ < <(tail -n 1 "$PC_THERMAL_LOG")
+case $LAST_TS in ''|*[!0-9]*) LAST_TS= LAST_PKG= LAST_CORE=;; esac
+counters_json() {
+  local now pkg core wp=null wc=null n=$SECONDS_
+  now=$(date +%s); pkg=$(thr_sum package); core=$(thr_sum core)
+  if [ "$n" -gt 0 ] 2>/dev/null; then
+    sleep "$n"
+    local p2 c2; p2=$(thr_sum package); c2=$(thr_sum core)
+    [ "$pkg" != n/a ] && { wp=$((p2 - pkg)); pkg=$p2; }
+    [ "$core" != n/a ] && { wc=$((c2 - core)); core=$c2; }
+    now=$(date +%s)
+  fi
+  pc_json '
+    def num: if . == "n/a" or . == "" then null else tonumber end;
+    ($pkg|num) as $p | ($core|num) as $c | ($lp|num) as $lp | ($lc|num) as $lc | ($lt|num) as $lt |
+    (if $lt then $now - $lt else null end) as $dt |
+    (($p != null and $lp != null and $p < $lp) or ($c != null and $lc != null and $c < $lc)) as $reset |
+    def delta($x; $l): if $x == null or $l == null then null elif $reset then $x else $x - $l end;
+    def rate($d): if $d == null or $dt == null or $dt < 1 or $reset then null else (($d * 3600 / $dt) | round) end;
+    {package_throttle:$p, core_throttle:$c, last_record_ts:$lt, since_record_s:$dt, reset_since_record:$reset,
+     package_throttle_since_record:delta($p;$lp), core_throttle_since_record:delta($c;$lc),
+     package_throttle_per_h:rate(delta($p;$lp)), core_throttle_per_h:rate(delta($c;$lc)),
+     window_s:(if $n > 0 then $n else null end), package_throttle_window:$wp, core_throttle_window:$wc}' -c \
+    --arg pkg "$pkg" --arg core "$core" --arg lp "$LAST_PKG" --arg lc "$LAST_CORE" --arg lt "$LAST_TS" \
+    --argjson now "$now" --argjson n "${n:-0}" --argjson wp "$wp" --argjson wc "$wc"
+}
+t_counters() {
+  counters_json | jq -r '
+    (.last_record_ts // 0 | strflocaltime("%m-%d %H:%M")) as $at |
+    . as $o | ("package", "core") as $k |
+    "\($k)_throttle " + (if $o["\($k)_throttle"] == null then "n/a" else
+      "\($o["\($k)_throttle"]) (" +
+      (if $o.last_record_ts == null then "no record yet"
+       elif $o.reset_since_record then "+\($o["\($k)_throttle_since_record"]) since boot; record \($at) predates the reset"
+       elif $o["\($k)_throttle_per_h"] == null then "+\($o["\($k)_throttle_since_record"]) since record \($at)"
+       else "+\($o["\($k)_throttle_per_h"])/h since record \($at)" end) +
+      (if $o.window_s then "; +\($o["\($k)_throttle_window"]) in \($o.window_s) s" else "" end) + ")" end)'
+}
+do_record() {
+  local row
+  row=$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s' "$(date +%s)" "$(thr_sum package)" "$(thr_sum core)" \
+    "$(zones_json | jq -r '[.[].c]|max // "n/a"')" "$(set -- $(pc_rd "$PC_PROC/loadavg" n/a); printf '%s' "$1")" "$(top_unit)" \
+    "$(reasons_json 1 | jq -r 'if .active == null then "n/a" elif (.active|length) == 0 then "none" else .active|join(",") end')")
+  mkdir -p "$(dirname "$PC_THERMAL_LOG")"
+  [ -s "$PC_THERMAL_LOG" ] || printf 'ts\tpkg\tcore\tmax_temp\tload1\ttop_unit_by_cpu\treasons\n' >"$PC_THERMAL_LOG"
+  head -1 "$PC_THERMAL_LOG" | grep -q $'\treasons$' || sed -i '1s/$/\treasons/' "$PC_THERMAL_LOG"
+  printf '%s\n' "$row" >>"$PC_THERMAL_LOG"
+  printf 'recorded %s: %s\n' "$PC_THERMAL_LOG" "$row"
+}
+
 ## --- text --------------------------------------------------------------------
 t_zones()   { zones_json | jq -r '.[] | "zone    \(.type) \(.c) °C" + (if (.trips|length)>0 then "  trips: " + ([.trips[]|"\(.type) \(.c)"]|join(", ")) else "" end)'; }
 t_hwmon()   { hwmon_json | jq -r '.[] | "hwmon   \(.chip)" + (if .c then " \(.c) °C" else "" end) + (if .fan_rpm then " \(.fan_rpm) rpm" else "" end)'; }
@@ -92,7 +239,13 @@ case "$sub" in
   zones)    [ "$JSON" = 1 ] && zones_json || t_zones;;
   hwmon)    [ "$JSON" = 1 ] && hwmon_json || t_hwmon;;
   fan)      [ "$JSON" = 1 ] && fan_json || t_fan;;
-  throttle) [ "$JSON" = 1 ] && throttle_json || t_thr;;
+  throttle)
+    w=${PC_OPT[--window]:-0}
+    case $w in ''|*[!0-9]*) printf 'pc thermal: --window takes whole seconds\n' >&2; exit 2;; esac
+    if [ -n "${PC_OPT[--reasons]:-}" ]; then [ "$JSON" = 1 ] && reasons_json "$w" || t_reasons "$w"
+    elif [ -n "${PC_OPT[--record]:-}" ]; then do_record
+    elif [ "$JSON" = 1 ]; then jq -c -s add <(throttle_json) <(counters_json)
+    else t_thr; t_counters; fi;;
   watch)
     n=$SECONDS_; [ "$n" = 0 ] && n=5
     i=0

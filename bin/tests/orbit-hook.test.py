@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """orbit-hook on fixtures: workflow transcripts stay lit while written, stale ones go out, plain subagents unchanged.
 Sandboxed: HOME, XDG dirs and the Eye bridge are all temporary; the selftest proves the real Eye is unreachable."""
-import http.server, io, json, os, signal, subprocess, sys, tempfile, threading, time
+import atexit, http.server, io, json, os, shutil, signal, subprocess, sys, tempfile, threading, time
 
 sys.path.insert(0, os.path.expanduser("~/agents/bin/tests/lib"))
 from budget import budget
@@ -27,6 +27,7 @@ class Bridge(http.server.BaseHTTPRequestHandler):
 
 
 root = tempfile.mkdtemp(prefix="orbit-test-")
+atexit.register(shutil.rmtree, root, True)
 srv = http.server.HTTPServer(("127.0.0.1", 0), Bridge)
 threading.Thread(target=srv.serve_forever, daemon=True).start()
 os.makedirs(f"{root}/cfg/dark-eye")

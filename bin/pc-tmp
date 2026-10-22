@@ -1,26 +1,38 @@
 #!/usr/bin/env bash
-# pc tmp [--apply] — /tmp (tmpfs, RAM) leftovers: leaked test dirs, finished tickets' scratch, old build caches; dry run lists them.
+# pc tmp [--apply] [--if-over <size>] — /tmp (tmpfs, RAM) leftovers: leaked test dirs, finished tickets' scratch, old build caches; dry run lists them.
 set -uo pipefail
 BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 . "$BIN/pclib.sh"
 
-pc_usage 'usage: pc tmp [--apply]
+pc_usage 'usage: pc tmp [--apply] [--if-over <size>]
 
 Lists KIND PATH MB AGE REASON for what is safe to delete from $PC_TMP_ROOT (default /tmp):
-  test-dir  tmp.* directories idle > 24 h
+  test-dir  tmp*, orbit-test-*, run-tests.*, night-probe-*, t<n>-* directories idle > 24 h
   scratch   <scratchpad>/T<n>*/ idle > 6 h whose T<n> has a done line in $PC_TMP_HISTORY
             (default ~/agent-work/history.md, "- <date> T<n>") and no row on $PC_TMP_CLAIMS
             (default ~/agents/FILE-CLAIMS.md); Vass sessions are never read
+  scratch-idle  <scratchpad>/<dir>/ with no T<n> in its name idle > 24h, any session
+            (live ones too); names or sessions with vass or char3d are never read
   build     remotion-webpack-bundle-* and cc*.ltrans* idle > 24 h
+  daemon    watchman whose TMPDIR is a dir under the root, gone or idle > 1 h (PATH = that TMPDIR,
+            MB = RSS); --apply sends TERM, the git fsmonitor hook starts one again on demand
+--if-over 2G  exits 0 with "nothing: /tmp X GB < limit" while df used on /tmp is below <size>.
 Idle = newest mtime anywhere in the tree. A path a process holds open (fd or cwd) is skipped.
---apply deletes the listed paths and appends one ledger entry (after: "deleted N, failed M");
+--apply deletes the listed paths (daemon rows: TERM) and appends one ledger entry (after: "deleted N, failed M");
 a path still present after rm -rf is named on stderr and exits 1; nothing to roll back (scratch only).' "$@"
 
-PC_SUB='pc tmp'
+PC_SUB='pc tmp'; PC_EXTRA_FLAGS=(--if-over:)
 pc_opt "$@"
 : "${PC_TMP_ROOT:=/tmp}" "${PC_TMP_HISTORY:=$HOME/agent-work/history.md}" "${PC_TMP_CLAIMS:=$HOME/agents/FILE-CLAIMS.md}"
 ROOT=$(readlink -f -- "$PC_TMP_ROOT")
 case $ROOT in /tmp|/tmp/*) ;; *) echo "pc tmp: refused, PC_TMP_ROOT must be under /tmp ($ROOT)" >&2; exit 2;; esac
+if [ -n "${PC_OPT[--if-over]-}" ]; then
+  limit=$(numfmt --from=iec -- "${PC_OPT[--if-over]}" 2>/dev/null) || { echo "pc tmp: bad --if-over size ${PC_OPT[--if-over]}" >&2; exit 2; }
+  used=$(df -B1 --output=used -- "$ROOT" | tail -1)
+  if [ "$used" -lt "$limit" ]; then
+    awk -v u="$used" -v l="$limit" 'BEGIN {printf "nothing: /tmp %.1f GB < %.1f GB\n", u / 2^30, l / 2^30}'; exit 0
+  fi
+fi
 printf -v NOW '%(%s)T' -1
 
 # idle_h <path> — hours since the newest mtime in the tree.
@@ -42,7 +54,7 @@ add() {  # add <kind> <path> <idle_h> <reason>
 }
 
 me=$(id -u)
-for p in "$ROOT"/tmp.*; do
+for p in "$ROOT"/tmp* "$ROOT"/orbit-test-* "$ROOT"/run-tests.* "$ROOT"/night-probe-* "$ROOT"/t[0-9]*-*; do
   [ -d "$p" ] && [ -O "$p" ] || continue
   h=$(idle_h "$p"); [ "$h" -ge 24 ] && add test-dir "$p" "$h" "idle ${h}h > 24h"
 done
@@ -58,6 +70,22 @@ for p in "$ROOT"/claude-"$me"/*/*/scratchpad/T[0-9]*/; do
   grep -qE "^- $t([^0-9]|$)" "$PC_TMP_CLAIMS" 2>/dev/null && continue
   h=$(idle_h "$p"); [ "$h" -ge 6 ] && add scratch "$p" "$h" "$t done, no claim, idle ${h}h > 6h"
 done
+for p in "$ROOT"/claude-"$me"/*/*/scratchpad/*/; do
+  p=${p%/}; [ -d "$p" ] && [ ! -L "$p" ] || continue
+  case ${p,,} in *vass*|*char3d*) continue;; esac
+  [[ ${p##*/} =~ (^|[^A-Za-z])[Tt][0-9]+ ]] && continue
+  h=$(idle_h "$p"); [ "$h" -ge 24 ] && add scratch-idle "$p" "$h" "no ticket name, idle ${h}h > 24h"
+done
+
+for c in "$PC_PROC"/[0-9]*/comm; do
+  [ "$(cat "$c" 2>/dev/null)" = watchman ] || continue
+  d=${c%/comm}; t=$(tr '\0' '\n' <"$d/environ" 2>/dev/null | sed -n 's/^TMPDIR=//p' | head -1); t=${t%/}
+  case $t in "$ROOT"/?*) ;; *) continue;; esac
+  mb=$(awk '/^VmRSS:/ {print int($2 / 1024)}' "$d/status" 2>/dev/null)
+  if [ ! -d "$t" ]; then ROWS+=("daemon"$'\t'"$t"$'\t'"$mb"$'\t'"gone"$'\t'"watchman ${d##*/}, TMPDIR gone")
+  else h=$(idle_h "$t"); [ "$h" -ge 1 ] && ROWS+=("daemon"$'\t'"$t"$'\t'"$mb"$'\t'"${h}h"$'\t'"watchman ${d##*/}, TMPDIR idle ${h}h > 1h")
+  fi
+done
 
 total=0
 { printf 'KIND\tPATH\tMB\tAGE\tREASON\n'
@@ -69,7 +97,13 @@ summary="${#ROWS[@]} paths, $total MB"
 if [ "$APPLY" != 1 ]; then echo "would: delete $summary (--apply)"; exit 0; fi
 deleted=0; FAILED=()
 for r in ${ROWS[@]+"${ROWS[@]}"}; do
-  IFS=$'\t' read -r _ p _ <<<"$r"
+  IFS=$'\t' read -r k p _ <<<"$r"
+  if [ "$k" = daemon ]; then
+    pid=${r##*$'\t'watchman }; pid=${pid%%,*}; kill -TERM "$pid" 2>/dev/null
+    for _ in $(seq 30); do grep -qs '^State:[[:space:]]*[^Z]' "$PC_PROC/$pid/status" || break; sleep 0.1; done
+    if grep -qs '^State:[[:space:]]*[^Z]' "$PC_PROC/$pid/status"; then FAILED+=("watchman $pid"); else deleted=$((deleted + 1)); fi
+    continue
+  fi
   case $p in "$ROOT"/?*) rm -rf -- "$p" 2>/dev/null;; esac
   if [ -e "$p" ] || [ -L "$p" ]; then FAILED+=("$p"); else deleted=$((deleted + 1)); fi
 done

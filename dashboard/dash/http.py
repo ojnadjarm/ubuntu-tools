@@ -7,6 +7,7 @@ from dash.routes import route
 from dash.services.files import MIME
 
 GZ_MIN = 1024
+STATIC_CACHE = "max-age=60"
 _assets = {}
 
 
@@ -46,8 +47,8 @@ class Handler(BaseHTTPRequestHandler):
         """True when the client's If-None-Match already holds etag."""
         return etag in [t.strip() for t in self.headers.get("If-None-Match", "").split(",")]
 
-    def send(self, code, body, ctype, etag=None, gz=None):
-        """Buffered into one write; gzip text >= GZ_MIN when accepted; GET 200s get an ETag and answer 304."""
+    def send(self, code, body, ctype, etag=None, gz=None, cache="no-cache"):
+        """Buffered into one write; gzip text >= GZ_MIN when accepted; GET 200s get an ETag, cache as Cache-Control, and answer 304."""
         post = self.command == "POST"
         zipped = len(body) >= GZ_MIN and compressible(ctype) and "gzip" in self.headers.get("Accept-Encoding", "")
         if zipped:
@@ -57,7 +58,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.fresh(etag):
                 self.send_response(304)
                 self.send_header("ETag", etag)
-                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Cache-Control", cache)
                 return self.end_headers()
         self.send_response(code)
         self.send_header("Content-Type", ctype)
@@ -68,7 +69,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Vary", "Accept-Encoding")
         if etag and not post and code == 200:
             self.send_header("ETag", etag)
-        self.send_header("Cache-Control", "no-store" if post else "no-cache")
+        self.send_header("Cache-Control", "no-store" if post else cache)
         self.end_headers()
         if not getattr(self, "head_only", False):
             self.wfile.write(body)
@@ -136,8 +137,9 @@ class Handler(BaseHTTPRequestHandler):
         if not full.startswith(base + os.sep) or not os.path.isfile(full):
             return self.send(404, b"not found\n", "text/plain")
         ctype = MIME.get(os.path.splitext(full)[1], "text/plain; charset=utf-8")
-        body, gz, etag = asset(full, ctype, rel.startswith("static/") and full.endswith(".html"))
-        self.send(200, body, ctype, etag, gz)
+        shared = rel.startswith("static/")
+        body, gz, etag = asset(full, ctype, shared and full.endswith(".html"))
+        self.send(200, body, ctype, etag, gz, STATIC_CACHE if shared and not full.endswith(".html") else "no-cache")
 
 
 class Server(ThreadingHTTPServer):

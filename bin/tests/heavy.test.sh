@@ -8,14 +8,16 @@ WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/stubs" "$WORK/cwd"
 cat >"$WORK/stubs/systemd-run" <<'EOF'
 #!/usr/bin/env bash
-# Stub: the bus probe (`... true`) exits $STUB_BUS_RC; otherwise logs argv and runs what follows `--`.
-[ "${*: -1}" = true ] && exit "${STUB_BUS_RC:-0}"
+# Stub: the bus probe (`... true`) is counted and exits $STUB_BUS_RC; otherwise logs argv and runs what follows `--`.
+[ "${*: -1}" = true ] && { echo probe >>"$STUB_PROBES"; exit "${STUB_BUS_RC:-0}"; }
 printf '%s\n' "$*" >>"$STUB_ARGV"
 while [ "$1" != -- ]; do shift; done; shift
 exec "$@"
 EOF
 chmod +x "$WORK/stubs/systemd-run"
-export STUB_ARGV="$WORK/argv" HEAVY_LOG="$WORK/log/heavy.jsonl"
+export STUB_ARGV="$WORK/argv" HEAVY_LOG="$WORK/log/heavy.jsonl" STUB_PROBES="$WORK/probes" XDG_RUNTIME_DIR="$WORK/run"
+CACHE="$WORK/run/pc-status/scope-ok"; BOOT=$(cat /proc/sys/kernel/random/boot_id)
+probes() { cat "$STUB_PROBES" 2>/dev/null | wc -l; }
 hv() { (cd "$WORK/cwd" && PATH="$WORK/stubs:$PATH" FOO=bar "$BIN/heavy" "$@"); }
 
 # 1. scope mode: argv, cwd, env, rc passthrough, summary line, ledger row.
@@ -34,6 +36,18 @@ cpu=$(tail -1 "$WORK/err" | sed -E 's/.* ([0-9.]+)s cpu.*/\1/')
 awk -v c="$cpu" 'BEGIN{exit !(c>0.05)}' && ok "cpu counted ($cpu s)" || nok 'cpu counted' "$cpu"
 tail -1 "$WORK/err" | grep -q 'ticket -$' && ok 'no ticket prints -' || nok 'no ticket prints -' "$(tail -1 "$WORK/err")"
 
+# 2b. scope probe cache (T1138): a positive probe is cached per boot id, a failed one is not.
+is 'probe cached for this boot' "$(cat "$CACHE" 2>/dev/null)" "$BOOT"
+is 'cached: second run skips the probe' "$(probes)" 1
+echo stale-boot-id >"$CACHE"
+hv run -- /bin/true 2>/dev/null
+is 'new boot id: probes again' "$(probes)" 2
+is 'new boot id: cache rewritten' "$(cat "$CACHE")" "$BOOT"
+for f in heavy agent-exec tests/run.sh; do
+  is "$f: one probe, inside scope_ok" "$(grep -c 'systemd-run --user --scope -q true' "$BIN/$f")" 1
+done
+rm -f "$CACHE"; : >"$STUB_PROBES"
+
 # 3. no user bus: nice -n 19 ionice -c3 fallback, said on stderr, systemd-run not used for the command.
 : >"$WORK/argv"
 out=$(STUB_BUS_RC=1 hv run --ticket T775 -- bash -c 'nice; exit 4' 2>"$WORK/err"); rc=$?
@@ -43,11 +57,14 @@ grep -q '^heavy: no user bus, falling back to nice -n 19 ionice -c3$' "$WORK/err
 is 'fallback skips systemd-run' "$(wc -c <"$WORK/argv")" 0
 tail -1 "$WORK/err" | grep -q 'cpu (nice), ticket T775$' && ok 'fallback summary' || nok 'fallback summary' "$(tail -1 "$WORK/err")"
 is 'fallback ledger mode' "$(tail -1 "$HEAVY_LOG" | jq -r .mode)" nice
+ev 'failed probe not cached' '[ ! -e "$CACHE" ]'
+STUB_BUS_RC=1 hv run -- /bin/true 2>/dev/null
+is 'failed probe retried' "$(probes)" 2
 
 # 4. usage errors exit 2 and run nothing.
 hv run --ticket T1 2>/dev/null; is 'no command exits 2' "$?" 2
 hv build -- true 2>/dev/null;  is 'unknown verb exits 2' "$?" 2
-is 'ledger rows: 3 runs only' "$(wc -l <"$HEAVY_LOG")" 3
+is 'ledger rows: 5 runs only' "$(wc -l <"$HEAVY_LOG")" 5
 
 
 # 5. heavy at (T989): stub systemctl, mktemp XDG dirs; persistent units, list, cancel, refusals.

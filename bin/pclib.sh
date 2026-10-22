@@ -15,7 +15,7 @@
 #   pc_root <cmd…>                  pc_timeout ${PC_ROOT_TIMEOUT:-5} sudo -n <cmd…>
 #   pc_cmd <name> [args…]           run $PC_FIXTURE/bin/<name> (recorded stdout) when it exists, else the real binary
 #   cached <name> <ttl> <cmd…>      stdout of cmd, reused while the cache entry is younger than ttl; FRESH=1 bypasses
-#   pc_smart_json                   `smartctl -j -H -A /dev/nvme0` (root; fixture under PC_FIXTURE), cached io_smart 1 h unless empty
+#   pc_smart_json                   `smartctl -j -H -A /dev/nvme0` (root; fixture under PC_FIXTURE), cached io_smart 1 h unless empty; --fresh keeps it
 #   pc_fleet_enabled                the enabled user units matching PC_FLEET_GLOBS, one per line
 #   pc_fleet_states [--system] <u…> "unit<TAB>active<TAB>sub<TAB>OK|FAIL" per unit (failed, failed oneshot, enabled but down)
 #   pc_unit_loops                   timer-driven user units failing >= 10/h in the last hour; exit 1 when any is ours
@@ -103,7 +103,22 @@ pc_json() { local f=$1; shift; jq -n "$@" "$f"; }
 # `timeout` this box ships polls and costs a flat ~100 ms per call (TSP-011).
 export PC_TIMEOUT_BIN="${PC_TIMEOUT_BIN:-$(command -v gnutimeout || echo timeout)}"
 pc_timeout() { "$PC_TIMEOUT_BIN" "$@"; }
-pc_root() { pc_timeout "$PC_ROOT_TIMEOUT" sudo -n "$@"; }
+# PC_TEST_ROOT_LOG: append `<test>\t<cmd>` per call (T1136: find tests that reach real root).
+pc_root() {
+  [ -n "${PC_TEST_ROOT_LOG:-}" ] && printf '%s\t%s\n' "${SUDO_SHIM_TEST:-$(_pc_test_caller)}" "$*" >>"$PC_TEST_ROOT_LOG"
+  pc_timeout "$PC_ROOT_TIMEOUT" sudo -n "$@"
+}
+# _pc_test_caller — the nearest *.test.* script among the process's ancestors, else $0.
+_pc_test_caller() {
+  local p=$$ w
+  while [ "${p:-0}" -gt 1 ]; do
+    while IFS= read -r -d '' w; do
+      case $w in *.test.*) printf '%s\n' "${w##*/}"; return ;; esac
+    done 2>/dev/null <"/proc/$p/cmdline"
+    p=$(awk '/^PPid:/ { print $2 }' "/proc/$p/status" 2>/dev/null)
+  done
+  printf '%s\n' "$0"
+}
 pc_cmd() {
   local n=$1; shift
   [ -n "$PC_FIXTURE" ] && [ -x "$PC_FIXTURE/bin/$n" ] && { "$PC_FIXTURE/bin/$n" "$@"; return; }
@@ -139,12 +154,18 @@ cached() {
   printf '%s\n%s\n' "$NOW" "$data" >"$f" 2>/dev/null
   printf '%s\n' "$data"
 }
-_pc_smart() {
-  if [ -n "$PC_FIXTURE" ]; then pc_cmd smartctl -j -H -A /dev/nvme0
-  else pc_root smartctl -j -H -A /dev/nvme0; fi
-}
+# _pc_smart — one root read at a time: a cold caller that waited on the lock serves the read it waited for.
+_pc_smart() (
+  if [ -n "$PC_FIXTURE" ]; then pc_cmd smartctl -j -H -A /dev/nvme0; exit; fi
+  f="$CACHE/io_smart.fill"
+  exec 9>>"$CACHE/io_smart.lock" && flock -w 30 9
+  ts=$(head -n 1 "$f" 2>/dev/null)
+  if [ -n "$ts" ] && [ $((NOW - ts)) -lt 60 ] 2>/dev/null; then sed 1d "$f"; exit; fi
+  { printf '%s\n' "$NOW"; pc_root smartctl -j -H -A /dev/nvme0; } >"$f"
+  sed 1d "$f"
+)
 pc_smart_json() {  # an empty read (sudo or smartctl failed) is not cached
-  local d; d=$(cached io_smart 3600 _pc_smart)
+  local d; d=$(FRESH=0 cached io_smart 3600 _pc_smart)
   [ -n "$d" ] || rm -f "$CACHE/io_smart"
   printf '%s\n' "$d"
 }

@@ -1,21 +1,36 @@
 #!/usr/bin/env bash
-# pc io [disks|procs|smart] [--seconds 0.3] [-n 5] [--json] — disk throughput/latency, top IO procs, SMART (default: disks + top 5 procs)
+# pc io [disks|procs|units|smart [--record|--trend]|sample|history [--since 24h]] [--seconds 0.3] [-n 5] [--json] — disk throughput/latency, top IO procs/units, SMART, hourly GB written per cgroup (default: disks + top 5 procs)
 # shellcheck disable=SC2034
 set -uo pipefail
 BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 . "$BIN/pclib.sh"
-pc_usage 'usage: pc io [disks|procs|smart] [--seconds 0.3] [-n 5] [--json]
+pc_usage 'usage: pc io [disks|procs|units|smart [--record|--trend]|sample|history [--since 24h]] [--seconds 0.3] [-n 5] [--json]
   disks   Δ reads/writes/sectors/ms per block device over the window -> MB/s, IOPS, await
-  procs   top IO-consuming processes over the window (pc_top.py --sort io)
+  procs   top IO-consuming processes over the window (pc_top.py --sort io); root pids show ?
+  units   top IO units from cgroup io.stat (init.scope, system.slice, user.slice; no sudo; -n default 10);
+          a slice whose children lack io.stat (io not delegated, e.g. user.slice) is one aggregate row
   smart   cached (1h) `smartctl -j -H -A /dev/nvme0` summary
+          --record  append today'"'"'s row (fresh read) to $PC_SMART_LOG (~/agents/log/smart.tsv), once a day
+          --trend   GB/day written over 7/30 d, unsafe-shutdown and wear deltas from that log
+  sample  append cgroup io.stat wbytes deltas since the last sample (state $PC_IO_STATE, default
+          $XDG_RUNTIME_DIR/pc-io-last.tsv; the first run is a baseline) to $PC_IO_LOG (~/agents/log/io-history.tsv):
+          ts seconds unit cgroup wbytes. Leaves at depth <= 4; "<parent> (gone)" = parent minus its children
+          (cgroups gone within the interval); "root (kernel/fs)" = root minus the slices; rows < 50 MB/h fold
+          into "(small)". A counter that went down counts the new counter. Docker scopes named via
+          $PC_IO_NAMES (~/agents/state/docker-names.tsv), then docker ps. Run hourly after pc mem sample.
+  history MM-DD HH:00  <unit>  <GB/h> per hour (interval midpoint), then a daily top 10 in GB and
+          the daily total with its unattributed (gone + root) share; --since Nh|Nd (default 24h)
   default disks + top 5 procs' "$@"
 
-PC_SUB='pc io'; PC_EXTRA_FLAGS=(-n:); SECONDS_=0.3
+PC_SUB='pc io'; PC_EXTRA_FLAGS=(-n: --record --trend --since:); SECONDS_=0.3
 pc_opt "$@"
-SECONDS_W=$SECONDS_; N=${PC_OPT[-n]-5}; VERB=disks_and_procs
+SECONDS_W=$SECONDS_; VERB=disks_and_procs
 for a in ${PC_ARGS[@]+"${PC_ARGS[@]}"}; do
-  case $a in disks|procs|smart) VERB=$a;; *) echo "pc io: unknown argument $a" >&2; exit 2;; esac
+  case $a in disks|procs|units|smart|sample|history) VERB=$a;; *) echo "pc io: unknown argument $a" >&2; exit 2;; esac
 done
+N=${PC_OPT[-n]-$([ "$VERB" = units ] && echo 10 || echo 5)}
+SMART_LOG=${PC_SMART_LOG:-$HOME/agents/log/smart.tsv}
+IO_LOG=${PC_IO_LOG:-$HOME/agents/log/io-history.tsv}
 
 # disks_json <seconds> — one JSON object keyed by device name, MB/s + IOPS + await(ms) over the window.
 disks_json() {
@@ -76,8 +91,167 @@ do_disks() {
   fi
 }
 
+# units_json <seconds> <n> — top-n units by Δ cgroup io.stat bytes, with each unit's share of the diskstats total.
+units_json() {
+  local fx=0; [ -n "$PC_FIXTURE" ] && fx=1
+  python3 - "$PC_SYS/fs/cgroup" "$PC_PROC/diskstats" "$1" "$2" "$fx" "$(id -u)" <<'PY'
+import sys, os, re, time, json, subprocess
+cg, diskstats, w, n, fixture, uid = sys.argv[1], sys.argv[2], float(sys.argv[3]), int(sys.argv[4]), sys.argv[5] == "1", sys.argv[6]
+
+def tick(path, t):
+    s = f"{path}.{t}"
+    return s if fixture and os.path.exists(s) else path
+
+def read_diskstats(t):
+    rows = {}
+    with open(tick(diskstats, t)) as f:
+        for line in f:
+            x = line.split()
+            rows[x[2]] = (f"{x[0]}:{x[1]}", int(x[5]) * 512, int(x[9]) * 512)
+    return rows
+
+def disks(rows):
+    """maj:min -> name of whole physical disks (no loop/ram/dm/md, no partitions)."""
+    names = [d for d in rows if not d.startswith(("loop", "ram", "zram", "dm-", "md"))]
+    return {rows[d][0]: d for d in names
+            if not any(o != d and re.fullmatch(re.escape(o) + (r"p\d+" if o[-1].isdigit() else r"\d+"), d) for o in names)}
+
+def subdirs(d):
+    try:
+        return [f"{d}/{x}" for x in sorted(os.listdir(d)) if os.path.isdir(f"{d}/{x}")]
+    except OSError:
+        return []
+
+def has_io(d):
+    return os.path.exists(f"{d}/io.stat") or os.path.exists(f"{d}/io.stat.0")
+
+def units():
+    """Leaf cgroups with io.stat; a cgroup whose children lack io.stat is an aggregate row (io not delegated)."""
+    out, agg = {}, []
+    def walk(d, user):
+        for p in subdirs(d):
+            name = os.path.basename(p)
+            kids = subdirs(p)
+            if any(has_io(k) for k in kids):
+                walk(p, user or name == "user.slice")
+            elif has_io(p):
+                out[("user:" if user else "") + name] = p
+                if kids and name.endswith(".slice"):
+                    agg.append(p[len(cg) + 1:])
+    walk(cg, False)
+    return out, agg
+
+def iostat(path, t, devs):
+    try:
+        with open(tick(f"{path}/io.stat", t)) as f:
+            data = f.read()
+    except OSError:
+        return None
+    r = wr = 0
+    for line in data.splitlines():
+        x = line.split()
+        if not x or x[0] not in devs:
+            continue
+        kv = dict(k.split("=", 1) for k in x[1:] if "=" in k)
+        r += int(kv.get("rbytes", 0)); wr += int(kv.get("wbytes", 0))
+    return r, wr
+
+def snap(t, us, devs):
+    ds = read_diskstats(t)
+    total = [sum(v[i] for v in ds.values() if v[0] in devs) for i in (1, 2)]
+    return {u: iostat(p, t, devs) for u, p in us.items()}, total
+
+d0 = read_diskstats(0); devs = disks(d0); us, agg = units()
+a, ta = snap(0, us, devs)
+if not fixture:
+    time.sleep(w)
+b, tb = snap(1, us, devs)
+tr, tw = max(0, tb[0] - ta[0]), max(0, tb[1] - ta[1])
+names = {}
+if any(u.startswith("docker-") and u.endswith(".scope") for u in us):
+    try:
+        ps = subprocess.run(["docker", "ps", "-a", "--no-trunc", "--format", "{{.ID}}\t{{.Names}}"],
+                            capture_output=True, text=True, timeout=5).stdout
+        names = dict(l.split("\t", 1) for l in ps.splitlines() if "\t" in l)
+    except (OSError, subprocess.SubprocessError):
+        pass
+rows = []
+for u, av in a.items():
+    bv = b.get(u)
+    if av is None or bv is None:
+        continue
+    r, wr = max(0, bv[0] - av[0]), max(0, bv[1] - av[1])
+    if r + wr == 0:
+        continue
+    m = re.fullmatch(r"docker-([0-9a-f]{64})\.scope", u)
+    rel = us[u][len(cg) + 1:]
+    rows.append({"unit": names.get(m.group(1), u) if m else u, "cgroup": rel, "aggregate": rel in agg,
+                 "read_mb_s": round(r / 1e6 / w, 3), "write_mb_s": round(wr / 1e6 / w, 3),
+                 "share_pct": round(100 * (r + wr) / (tr + tw), 1) if tr + tw else None})
+rows.sort(key=lambda x: x["read_mb_s"] + x["write_mb_s"], reverse=True)
+print(json.dumps({"seconds": w, "disks": sorted(devs.values()),
+                  "total_read_mb_s": round(tr / 1e6 / w, 3), "total_write_mb_s": round(tw / 1e6 / w, 3),
+                  "units": rows[:n], "undelegated": agg}))
+PY
+}
+
+do_units() {
+  local out; out=$(units_json "$SECONDS_W" "$N") || { echo "pc io units: sampling failed" >&2; exit 1; }
+  if [ "$JSON" = 1 ]; then
+    printf '%s\n' "$out"
+  else
+    printf '%-40s %10s %10s %6s\n' unit read_MB/s write_MB/s share
+    jq -r '.units[] | [.unit, .read_mb_s, .write_mb_s, (if .share_pct == null then "-" else "\(.share_pct)%" end)] | @tsv' \
+      <<<"$out" | while IFS=$'\t' read -r u r w s; do printf '%-40s %10s %10s %6s\n' "$u" "$r" "$w" "$s"; done
+    jq -r '"disk total (\(.disks | join(","))): read \(.total_read_mb_s) write \(.total_write_mb_s) MB/s over \(.seconds) s"' <<<"$out"
+    jq -r 'select(.undelegated != []) | "io not delegated below \(.undelegated | join(", ")): one aggregate row each"' <<<"$out"
+  fi
+}
+
+# procs_view [wide] — pc_top.py IO JSON on stdin -> rows with io_ok (false when <pid>/io exists but is unreadable).
+procs_view() {
+  python3 -c '
+import sys, os, json
+proc, as_json, wide = sys.argv[1], sys.argv[2] == "1", sys.argv[3] == "1"
+def readable(pid):
+    for p in (f"{proc}/{pid}/io.1", f"{proc}/{pid}/io"):
+        if os.path.exists(p):
+            try:
+                open(p).close(); return True
+            except OSError:
+                return False
+    return True
+def kthread(pid):
+    for p in (f"{proc}/{pid}/stat.1", f"{proc}/{pid}/stat"):
+        try:
+            return pid == "2" or open(p).read().rsplit(")", 1)[1].split()[1] == "2"
+        except (OSError, IndexError):
+            pass
+    return False
+rows = json.load(sys.stdin)
+for r in rows:
+    r["io_ok"] = readable(r["pid"])
+if as_json:
+    print(json.dumps(rows)); sys.exit()
+k = lambda v: f"{v / 1024:.1f}K" if wide else f"{round(v / 1024)}K"
+if wide:
+    print(f"{"pid":>7} {"comm":<20} {"cpu%":>6} {"wake/s":>7} {"rss":>7} {"pss":>7} {"io_r/s":>9} {"io_w/s":>9} unit")
+else:
+    print(f"{"pid":>7} {"comm":<20} {"io_r/s":>9} {"io_w/s":>9} unit")
+shown = [r for r in rows if r["io_ok"]]
+if not shown:
+    print("no readable process did IO in the window")
+for r in shown:
+    mid = f" {r["cpu"]:>6.1f} {r["wake"]:>7.1f} {r["rss"] // 1024:>6}M {r.get("pss", 0) // 1024:>6}M" if wide else ""
+    print(f"{r["pid"]:>7} {r["comm"]:<20.20}{mid} {k(r["io_r"]):>9} {k(r["io_w"]):>9} {r["unit"]}")
+bad = sum(1 for d in os.listdir(proc) if d.isdigit() and not readable(d) and not kthread(d))
+if bad:
+    print(f"{bad} processes of root/other users hide their IO (not ranked): pc io units")
+' "$PC_PROC" "$JSON" "${1:-0}"
+}
+
 do_procs() {
-  python3 "$BIN/pc_top.py" --seconds "$SECONDS_W" --sort io -n "$N" $([ "$JSON" = 1 ] && echo --json)
+  PC_PROC="$PC_PROC" python3 "$BIN/pc_top.py" --seconds "$SECONDS_W" --sort io -n "$N" --json | procs_view 1
 }
 
 do_smart() {
@@ -96,16 +270,201 @@ do_smart() {
   fi
 }
 
+# smart_record — one TSV row per day (PC_SMART_DATE overrides today); a second run the same day is a no-op.
+smart_record() {
+  local day=${PC_SMART_DATE:-$(date +%F)} raw row
+  if [ -s "$SMART_LOG" ] && grep -q "^$day"$'\t' "$SMART_LOG"; then echo "nothing: $day already in $SMART_LOG"; return 0; fi
+  raw=$(FRESH=1 pc_smart_json)
+  row=$(jq -r --arg d "$day" '.nvme_smart_health_information_log as $h
+    | [$d, ($h.data_units_written * 512000 / 1e12 * 1000 | round / 1000), ($h.data_units_read * 512000 / 1e12 * 1000 | round / 1000),
+       $h.percentage_used, $h.unsafe_shutdowns, $h.media_errors, $h.temperature] | @tsv' <<<"${raw:-{\}}" 2>/dev/null)
+  case $row in *$'\t'$'\t'*|*$'\t'|'') echo "pc io smart: no SMART data (needs sudo -n smartctl)" >&2; return 1;; esac
+  mkdir -p "$(dirname "$SMART_LOG")"
+  [ -s "$SMART_LOG" ] || printf 'date\twritten_tb\tread_tb\tpercent_used\tunsafe_shutdowns\tmedia_errors\ttemp_c\n' >"$SMART_LOG"
+  printf '%s\n' "$row" >>"$SMART_LOG"
+  echo "recorded: $row"
+}
+
+# smart_trend — rates between the newest row and the newest row at least 7/30 days older (else the oldest).
+smart_trend() {
+  python3 - "$SMART_LOG" <<'PY'
+import sys, csv, datetime as dt
+try:
+    rows = list(csv.DictReader(open(sys.argv[1]), delimiter="\t"))
+except OSError:
+    rows = []
+if len(rows) < 2:
+    print(f"trend: need 2 rows in {sys.argv[1]}, have {len(rows)}"); sys.exit(0)
+d = lambda r: dt.date.fromisoformat(r["date"])
+rows.sort(key=d); last = rows[-1]
+print(f"smart trend: {len(rows)} rows {rows[0]['date']}..{last['date']}")
+for w in (7, 30):
+    old = [r for r in rows if (d(last) - d(r)).days >= w]
+    base = old[-1] if old else rows[0]
+    days = (d(last) - d(base)).days
+    gb = (float(last["written_tb"]) - float(base["written_tb"])) * 1000 / days
+    print(f"written {w} d: {gb:.1f} GB/day (over {days} d)")
+base = ([r for r in rows if (d(last) - d(r)).days >= 30] or rows[:1])[-1]
+days = (d(last) - d(base)).days
+print(f"unsafe_shutdowns: +{int(last['unsafe_shutdowns']) - int(base['unsafe_shutdowns'])} over {days} d")
+print(f"percent_used: {base['percent_used']} -> {last['percent_used']} % over {days} d")
+PY
+}
+
+# io_sample — wbytes delta per cgroup since the state file's sample, appended to $IO_LOG; then the state is replaced.
+io_sample() {
+  local now; printf -v now '%(%s)T' -1
+  python3 - "$PC_SYS/fs/cgroup" "$PC_PROC/diskstats" "${PC_IO_STATE:-${XDG_RUNTIME_DIR:-/tmp}/pc-io-last.tsv}" \
+    "$IO_LOG" "${PC_IO_NAMES:-$HOME/agents/state/docker-names.tsv}" "${PC_IO_NOW:-$now}" <<'PY'
+import sys, os, re, subprocess
+cg, diskstats, state, log, names_f, now = sys.argv[1:6] + [int(sys.argv[6])]
+MIN_PER_H = 50e6
+
+with open(diskstats) as f:
+    ds = {x[2]: f"{x[0]}:{x[1]}" for x in (l.split() for l in f)}
+whole = [d for d in ds if not d.startswith(("loop", "ram", "zram", "dm-", "md"))]
+devs = {ds[d] for d in whole
+        if not any(o != d and re.fullmatch(re.escape(o) + (r"p\d+" if o[-1].isdigit() else r"\d+"), d) for o in whole)}
+
+def wbytes(d):
+    try:
+        data = open(f"{d}/io.stat").read()
+    except OSError:
+        return None
+    return sum(int(k[7:]) for x in data.splitlines() if x.split()[:1] and x.split()[0] in devs
+               for k in x.split()[1:] if k.startswith("wbytes="))
+
+cur, kids = {}, {}
+def walk(rel, depth):
+    d = f"{cg}/{rel}" if rel else cg
+    v = wbytes(d)
+    if v is None:
+        return False
+    cur[rel] = v; kids[rel] = []
+    if depth < 4:
+        for x in sorted(os.listdir(d)):
+            c = f"{rel}/{x}" if rel else x
+            if os.path.isdir(f"{cg}/{c}") and walk(c, depth + 1):
+                kids[rel].append(c)
+    return True
+walk("", 0)
+
+prev, pts = {}, None
+try:
+    for l in open(state):
+        k, v = l.rstrip("\n").split("\t")
+        if k == "#ts": pts = int(v)
+        else: prev[k] = int(v)
+except (OSError, ValueError):
+    prev, pts = {}, None
+tmp = f"{state}.tmp"
+with open(tmp, "w") as f:
+    f.write(f"#ts\t{now}\n" + "".join(f"{k}\t{v}\n" for k, v in cur.items()))
+os.replace(tmp, state)
+if pts is None or now <= pts:
+    print(f"baseline: {len(cur)} cgroups"); sys.exit(0)
+dt = now - pts
+
+def delta(p):
+    a = prev.get(p)
+    return cur[p] - a if a is not None and cur[p] >= a else cur[p]
+
+names = {}
+try:
+    for l in open(names_f):
+        x = l.rstrip("\n").split("\t")
+        if len(x) >= 2: names[x[0]] = x[1]
+except OSError:
+    pass
+def name(p):
+    if not p:
+        return "root (kernel/fs)"
+    b = os.path.basename(p)
+    m = re.fullmatch(r"docker-([0-9a-f]{64})\.scope", b)
+    if m:
+        i = m.group(1)
+        if i[:12] not in names:
+            try:
+                ps = subprocess.run(["docker", "ps", "-a", "--no-trunc", "--format", "{{.ID}}\t{{.Names}}"],
+                                    capture_output=True, text=True, timeout=5).stdout
+                names.update({a[:12]: n for a, n in (l.split("\t", 1) for l in ps.splitlines() if "\t" in l)})
+            except (OSError, subprocess.SubprocessError):
+                pass
+        return names.get(i[:12], f"docker-{i[:12]}")
+    return ("user:" if p.startswith("user.slice/") else "") + b
+
+rows, small = [], 0
+for p in cur:
+    v = delta(p) if not kids[p] else max(0, delta(p) - sum(delta(c) for c in kids[p]))
+    u = name(p) if not kids[p] or not p else f"{name(p)} (gone)"
+    if v * 3600 / dt >= MIN_PER_H: rows.append((u, p or "/", v))
+    else: small += v
+if small: rows.append(("(small)", "-", small))
+new = not os.path.exists(log) or os.path.getsize(log) == 0
+os.makedirs(os.path.dirname(log) or ".", exist_ok=True)
+with open(log, "a") as f:
+    if new: f.write("ts\tseconds\tunit\tcgroup\twbytes\n")
+    f.write("".join(f"{now}\t{dt}\t{u}\t{p}\t{v}\n" for u, p, v in sorted(rows, key=lambda r: -r[2])))
+print(f"sampled: {len(rows)} rows, {sum(r[2] for r in rows) / 1e9:.3f} GB over {dt} s -> {log}")
+PY
+}
+
+# io_history — GB/h per unit and hour (interval midpoint) over --since, a daily top 10 and the unattributed share.
+io_history() {
+  local since=${PC_OPT[--since]:-24h} w now
+  case $since in
+    *[0-9]d) w=$(( ${since%d} * 86400 ));;
+    *[0-9]h) w=$(( ${since%h} * 3600 ));;
+    *) echo "pc io history: bad --since '$since' (Nh or Nd)" >&2; exit 2;;
+  esac
+  printf -v now '%(%s)T' -1
+  python3 - "$IO_LOG" "$(( ${PC_IO_NOW:-$now} - w ))" <<'PY'
+import sys, os, time, collections as C
+log, start = sys.argv[1], int(sys.argv[2])
+rows = []
+for p in (f"{log}.1", log):
+    if os.path.exists(p):
+        with open(p) as f:
+            rows += [x for x in (l.rstrip("\n").split("\t") for l in f) if len(x) == 5 and x[0].isdigit()]
+if not rows:
+    print(f"nothing: no io samples yet ({log}); run: pc io sample"); sys.exit(0)
+rows = [(int(t), int(s), u, int(b)) for t, s, u, _, b in rows if int(t) >= start]
+if not rows:
+    print("nothing: no io samples in the window"); sys.exit(0)
+secs, hb, day = C.Counter(), C.Counter(), C.Counter()
+hour = lambda t, s: (t - s // 2) // 3600 * 3600
+for t, s in {(t, s) for t, s, _, _ in rows}:
+    secs[hour(t, s)] += s
+for t, s, u, b in rows:
+    h = hour(t, s); hb[h, u] += b; day[time.strftime("%m-%d", time.localtime(h)), u] += b
+for h in sorted({h for h, _ in hb}):
+    for (_, u), b in sorted(((k, v) for k, v in hb.items() if k[0] == h), key=lambda kv: -kv[1]):
+        print(f"{time.strftime('%m-%d %H:00', time.localtime(h))}  {u}  {b * 3600 / secs[h] / 1e9:.3f}")
+print("\ndaily top 10 (GB written):")
+for d in sorted({d for d, _ in day}):
+    us = sorted(((u, b) for (dd, u), b in day.items() if dd == d), key=lambda x: -x[1])
+    for u, b in us[:10]:
+        print(f"{d}  {u}  {b / 1e9:.3f}")
+    tot = sum(b for _, b in us); un = sum(b for u, b in us if u.endswith("(gone)") or u == "root (kernel/fs)")
+    print(f"{d}  total {tot / 1e9:.3f} GB  unattributed {100 * un / tot if tot else 0:.1f}%")
+PY
+}
+
 case "$VERB" in
+  sample) io_sample;;
+  history) io_history;;
   disks) do_disks;;
   procs) do_procs;;
-  smart) do_smart;;
+  units) do_units;;
+  smart) if [ -n "${PC_OPT[--record]-}" ]; then smart_record
+         elif [ -n "${PC_OPT[--trend]-}" ]; then smart_trend
+         else do_smart; fi;;
   disks_and_procs)
     # Both samplers share the same window; run them in parallel so the combined wall time
     # stays close to one window, not two.
     dtmp=$(mktemp); ptmp=$(mktemp); trap 'rm -f "$dtmp" "$ptmp"' EXIT
     disks_json "$SECONDS_W" >"$dtmp" &
-    python3 "$BIN/pc_top.py" --seconds "$SECONDS_W" --sort io -n "$N" --json >"$ptmp" &
+    PC_PROC="$PC_PROC" python3 "$BIN/pc_top.py" --seconds "$SECONDS_W" --sort io -n "$N" --json >"$ptmp" &
     wait
     if [ "$JSON" = 1 ]; then
       jq -n --argjson disks "$(<"$dtmp")" --argjson procs "$(<"$ptmp")" '{disks:$disks, procs:$procs}'
@@ -117,9 +476,7 @@ case "$VERB" in
         done
       echo
       echo "top $N by IO:"
-      printf '%7s %-20s %9s %9s %s\n' pid comm io_r/s io_w/s unit
-      jq -r '.[] | [.pid, .comm, (.io_r/1024|round), (.io_w/1024|round), .unit] | @tsv' "$ptmp" \
-        | while IFS=$'\t' read -r pid comm r w unit; do printf '%7s %-20.20s %8sK %8sK %s\n' "$pid" "$comm" "$r" "$w" "$unit"; done
+      procs_view <"$ptmp"
     fi
     ;;
 esac

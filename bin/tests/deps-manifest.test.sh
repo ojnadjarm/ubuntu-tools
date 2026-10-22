@@ -9,7 +9,7 @@ WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 
 # Fixture: stub tools zzfx-* on PATH, scripts that call some and only mention others.
 mkdir -p "$WORK/stubs" "$WORK/agents/bin"
-for t in a b c d e f g n1 n2 n3 n4 n5 n6 n7 n8; do printf '#!/bin/sh\n' >"$WORK/stubs/zzfx-$t"; chmod +x "$WORK/stubs/zzfx-$t"; done
+for t in a b c d e f g n1 n2 n3 n4 n5 n6 n7 n8 n9; do printf '#!/bin/sh\n' >"$WORK/stubs/zzfx-$t"; chmod +x "$WORK/stubs/zzfx-$t"; done
 cat >"$WORK/agents/bin/fx-shell" <<'EOF'
 #!/usr/bin/env bash
 # zzfx-n1 is only named in this comment
@@ -24,12 +24,13 @@ USAGE
 zzfx-n6() { :; }; zzfx-n6
 awk '{ print | "zzfx-n7" }' /dev/null
 msg='Rules, in prose; zzfx-n8 is a word here'
+list=(a zzfx-n9 b)
 EOF
 printf '#!/usr/bin/env python3\nimport subprocess\nsubprocess.run(["zzfx-e", "-x"])\n' >"$WORK/agents/bin/fx-py"
 mkdir -p "$WORK/pymods"; : >"$WORK/pymods/zzfxmod.py"
 fx() { PATH="$WORK/stubs:$PATH" PYTHONPATH="$WORK/pymods" python3 "$SCAN" "$WORK/agents/bin" "$@"; }
 case $WORK in "${TMPDIR:-/tmp}"/*) ok "sandbox: fixture in a temp dir";; *) nok sandbox "fixture in $WORK"; exit 1;; esac
-is "scanner finds calls, skips comments, strings, heredocs, functions, awk programs, prose assignments" \
+is "scanner finds calls, skips comments, strings, heredocs, functions, awk programs, prose and array assignments" \
   "$(fx | cut -f1 | grep '^zzfx-' | tr '\n' ' ')" "zzfx-a zzfx-b zzfx-c zzfx-d zzfx-e "
 printf 'zzfx-a\t-\tfx-shell\tadvisory\nzzfx-b\t-\tfx-shell\tadvisory\nzzfx-c\t-\tfx-shell\tadvisory\nzzfx-d\t-\tfx-shell\tadvisory\n' >"$WORK/DEPS.tsv"
 out=$(fx --deps "$WORK/DEPS.tsv"); rc=$?

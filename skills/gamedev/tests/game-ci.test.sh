@@ -100,8 +100,8 @@ ok "game-ci and cpp-ci source ci-lib.sh, no own record()" '(for f in game-ci cpp
 
 if command -v "${KTX:-ktx}" >/dev/null; then
 	A=$T/asset
-	echo glb >"$T/demo.glb"
-	budget() { echo "$1" >"$T/b.json"; "$here/scripts/asset-pipeline.sh" --glb "$T/demo.glb" --lods "1 0.5" --budget "$T/b.json" "$A" >"$T/out" 2>&1; echo $? >"$T/rc"; }
+	echo '{"asset": {"version": "2.0"}}' >"$T/demo.glb"
+	budget() { echo "$1" >"$T/b.json"; ASSET_CACHE=0 "$here/scripts/asset-pipeline.sh" --glb "$T/demo.glb" --lods "1 0.5" --budget "$T/b.json" "$A" >"$T/out" 2>&1; echo $? >"$T/rc"; }
 	budget '{"lod0": {"tris": 5000, "texture_px": 512}, "lod1": {"tris": 5000}}'
 	ok "T543: budget fits -> rc 0, budget OK line" '[ "$(rc)" = 0 ] && grep -qx "ASSET budget OK $T/b.json" "$T/out"'
 	STUB_TRIS=6000 budget '{"lod0": {"tris": 5000, "texture_px": 256}, "lod1": {"tris": 9000}}'

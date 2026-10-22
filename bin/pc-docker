@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pc docker stacks|ps|health|stats|logs|events|disk|restart|stop|start — compose stacks, health, stats, logs, events, disk use; ledgered restarts.
+# pc docker stacks|ps|health|stats|logs|events|disk|restart|stop|start|recreate|idle-stop — compose stacks, health, stats, logs, events, disk use; ledgered restarts.
 set -uo pipefail
 export LC_ALL=C
 BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -16,19 +16,23 @@ pc_usage 'usage: pc docker [stacks] [--json]                    compose project 
        pc docker events [--since 1h] [--json]             `docker events` since the cutoff
        pc docker disk [--json]                            `docker system df`, cached 300 s (EF01: images cost 0.5 s)
        pc docker restart|stop|start <container|stack> [--force] [--apply]
+       pc docker recreate <stack> [--force] [--apply]     `compose up -d --force-recreate` (picks up daemon.json log caps; no undo)
+       pc docker idle-stop selenium [--after 2h] [--apply] stop moodle-shared-selenium-1 when no Selenium session for --after
 
 A stack is a compose project (its dir under ~/moodle-envs, or the project name itself, e.g.
 "shared" or "moodle-shared"). `stop`/`restart` on the shared stack is refused while any other
-env is up, unless --force. No `prune` verb (moodle-keeper/maintenance own that); the daemon is
+env is up, unless --force; so is `recreate`, and Vass (vass*, 4.5, moodle45) is refused by name. No `prune` verb (moodle-keeper/maintenance own that); the daemon is
 never restarted. Mutating verbs print `would: …` and change nothing without --apply; with it
-the change is ledgered and undoable with `pc undo`.' "$@"
+the change is ledgered and undoable with `pc undo`. `idle-stop` is refused while a behat process or a browser runs; it
+prints `nothing:` when the container is down or had a session within --after.' "$@"
 
-FORCE=0; N=100; SINCE=; ARGV=()
+FORCE=0; N=100; SINCE=; AFTER=2h; ARGV=()
 while [ $# -gt 0 ]; do
   case $1 in
     --force) FORCE=1;;
     -n) N=$2; shift;; -n=*) N=${1#-n=};;
     --since) SINCE=$2; shift;; --since=*) SINCE=${1#*=};;
+    --after) AFTER=$2; shift;; --after=*) AFTER=${1#*=};;
     *) ARGV+=("$1");;
   esac
   shift
@@ -139,6 +143,66 @@ stack_state_str() {
   printf 'up=%s/%s' "$up" "$tot"
 }
 
+# stack_logcap_str <project> — how many of the project's containers log to json-file without a max-size cap.
+stack_logcap_str() {
+  local n=0 c
+  for c in $(docker ps -a --filter "label=com.docker.compose.project=$1" --format '{{.Names}}'); do
+    [ "$(docker inspect -f '{{.HostConfig.LogConfig.Type}} {{index .HostConfig.LogConfig.Config "max-size"}}' "$c" 2>/dev/null)" = 'json-file ' ] \
+      && n=$((n + 1))
+  done
+  printf 'uncapped=%s' "$n"
+}
+
+# do_recreate <stack> — force-recreate a compose stack; Vass refused by name, shared guarded like stop.
+do_recreate() {
+  local target=$1 SELF proj dir line
+  SELF=$(readlink -f "$0")
+  case "$target" in
+    vass*|4.5|moodle45) printf 'pc docker: refused — %s is Vass (never touched by agents)\n' "$target" >&2; exit 3;;
+  esac
+  line=$(resolve_stack "$target" 2>/dev/null) && [ -n "$line" ] \
+    || { printf 'pc docker recreate: needs a compose stack, not %s\n' "$target" >&2; exit 2; }
+  IFS=$'\t' read -r proj dir <<<"$line"
+  case "$proj ${dir##*/}" in
+    vass*|*" vass"*|*" 4.5"|moodle45*) printf 'pc docker: refused — %s is Vass (never touched by agents)\n' "$proj" >&2; exit 3;;
+  esac
+  if [ "$proj" = moodle-shared ] && [ "$FORCE" != 1 ]; then
+    local others; others=$(docker ps --format '{{.Label "com.docker.compose.project"}}' \
+      | grep -v '^$' | grep -vFx "$proj" | sort -u)
+    if [ -n "$others" ]; then
+      printf 'pc docker: refused — %s up, recreating the shared stack would interrupt it (use --force)\n' \
+        "$(printf '%s' "$others" | paste -sd, -)" >&2
+      exit 3
+    fi
+  fi
+  local rc p code now before=()
+  if [ "$APPLY" = 1 ]; then
+    for p in $(http_ports "$proj"); do before+=("$p=$(http_code "$p")"); done
+  fi
+  PC_READ_CMD="stack_logcap_str $proj" \
+    pc_apply "stack:$proj" "$(stack_logcap_str "$proj")" uncapped=0 \
+    "printf '%s\n' 'pc docker recreate: not reversible, the uncapped log config predated daemon.json' >&2; exit 1" \
+    docker compose -f "$dir/docker-compose.yml" up -d --force-recreate
+  rc=$?
+  for p in ${before[@]+"${before[@]}"}; do
+    code=${p#*=}; p=${p%%=*}
+    [ "$code" = 000 ] && continue
+    timeout 60 wait-for --label "pc-docker-$p" --every 2 \
+      --until "curl -s -o /dev/null -w %{http_code} --max-time 2 http://localhost:$p/ | grep -qx $code" >/dev/null 2>&1
+    now=$(http_code "$p")
+    printf 'http %s: %s (before %s)\n' "$p" "$now" "$code" >&2
+    [ "$now" = "$code" ] || { [ "$rc" = 0 ] && rc=1; }
+  done
+  exit $rc
+}
+
+# http_ports <project> — host ports the project publishes onto container port 80.
+http_ports() {
+  docker ps --filter "label=com.docker.compose.project=$1" --format '{{.Ports}}' \
+    | grep -oE ':[0-9]+->80/tcp' | sed 's/^://; s/->.*//' | sort -u
+}
+http_code() { curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://localhost:$1/"; }
+
 do_mutation() {
   local verb=$1 target=$2
   local SELF; SELF=$(readlink -f "$0")
@@ -179,6 +243,39 @@ do_mutation() {
     "$(printf '%q %q %q --apply' "$SELF" "$verb" "$target")" \
     docker "$verb" "$target"
   exit $?
+}
+
+# do_idle_stop <target> — stop the shared Selenium once it has had no session for $AFTER.
+do_idle_stop() {
+  local c=moodle-shared-selenium-1 n u secs state started last ago
+  case $1 in selenium|"$c") ;; *) printf 'pc docker idle-stop: knows only selenium, not %s\n' "$1" >&2; exit 2;; esac
+  [[ $AFTER =~ ^([0-9]+)([smhd])$ ]] || { printf 'pc docker idle-stop: --after needs <n>s|m|h|d, not %s\n' "$AFTER" >&2; exit 2; }
+  n=${BASH_REMATCH[1]}; u=${BASH_REMATCH[2]}
+  case $u in s) secs=$n;; m) secs=$((n * 60));; h) secs=$((n * 3600));; d) secs=$((n * 86400));; esac
+  local start="start: pc docker start $c --apply"
+  state=$(container_state "$c")
+  [ "$state" = running ] || { printf 'nothing: %s is %s\n%s\n' "$c" "$state" "$start"; exit 0; }
+  # Shells are skipped: a `bash -c` whose text names behat is a caller, not a run.
+  local pids; pids=$(pgrep -d, -f '[b]in/behat|tool/[b]ehat/cli/|[m]test (init )?behat')
+  if [ -n "$pids" ] && ps -o comm= -p "$pids" | grep -qvxE 'bash|sh|dash|zsh'; then
+    printf 'refused: a behat process is running, %s stays up\n' "$c" >&2; exit 3
+  fi
+  if docker top "$c" -o pid,comm 2>/dev/null | awk '$2 ~ /^chrom/ {f=1} END {exit !f}'; then
+    printf 'refused: a browser session is open in %s\n' "$c" >&2; exit 3
+  fi
+  started=$(date -d "$(docker inspect -f '{{.State.StartedAt}}' "$c" 2>/dev/null)" +%s 2>/dev/null || echo 0)
+  last=$(docker logs --timestamps --since "${secs}s" "$c" 2>&1 | grep -E 'Started new session|Removing session' | tail -1)
+  if [ -n "$last" ]; then
+    ago=$(( $(date +%s) - $(date -d "${last%% *}" +%s) ))
+    printf 'nothing: %s had a Selenium session %sm ago (< %s)\n' "$c" $((ago / 60)) "$AFTER"; exit 0
+  fi
+  if [ $(( $(date +%s) - started )) -lt "$secs" ]; then
+    printf 'nothing: %s started %sm ago (< %s)\n' "$c" $(( ($(date +%s) - started) / 60 )) "$AFTER"; exit 0
+  fi
+  PC_READ_CMD="docker inspect -f '{{.State.Status}}' $c" \
+    pc_apply "container:$c" running exited "docker start $c" docker stop "$c" | {
+      IFS= read -r l; printf '%s\n%s\n' "$l" "$start"; cat; }
+  exit "${PIPESTATUS[0]}"
 }
 
 ## --- dispatch ----------------------------------------------------------------
@@ -228,6 +325,12 @@ case "$sub" in
   restart|stop|start)
     [ -n "$arg" ] || { printf 'pc docker %s: needs a container or stack name (see -h)\n' "$sub" >&2; exit 2; }
     do_mutation "$sub" "$arg";;
+  recreate)
+    [ -n "$arg" ] || { printf 'pc docker recreate: needs a stack name (see -h)\n' >&2; exit 2; }
+    do_recreate "$arg";;
+  idle-stop)
+    [ -n "$arg" ] || { printf 'pc docker idle-stop: needs selenium (see -h)\n' >&2; exit 2; }
+    do_idle_stop "$arg";;
   *) printf 'pc docker: unknown verb %s (try -h)\n' "$sub" >&2; exit 2;;
 esac
 exit $?

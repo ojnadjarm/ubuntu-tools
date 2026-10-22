@@ -56,6 +56,6 @@ mkdir -p "$FX/red" && cp "$B" "$FX/red/build.json" 2>/dev/null
 (source "$HERE/../scripts/mvlib.sh" && mv_finish demo "$FX/red/build.json" "16x9: mv-review black 1x") 2>/dev/null
 rc=$?
 ok "$([[ $rc == 1 ]] && jq -e '.review == "FAIL" and .fails == ["16x9: mv-review black 1x"]' "$FX/red/build.json" >/dev/null 2>&1 && echo 1 || echo 0)" "mv_finish red review: rc 1, build.json review FAIL + fails"
-ok "$(pc failures --since 5m --json 2>/dev/null | jq -e '[.creative[] | select(.tool == "mv-build" and .project == "demo" and .failed == ["16x9:mv-review black 1x"])] | length == 1' >/dev/null && echo 1 || echo 0)" "red film review shows in pc failures --since 5m"
+ok "$(CI_SCRATCH_ROOTS=$FX/none pc failures --since 5m --json 2>/dev/null | jq -e '[.creative[] | select(.tool == "mv-build" and .project == "demo" and .failed == ["16x9:mv-review black 1x"])] | length == 1' >/dev/null && echo 1 || echo 0)" "red film review shows in pc failures --since 5m"
 echo "mv-film: $((n - bad))/$n"
 [[ $bad == 0 ]]

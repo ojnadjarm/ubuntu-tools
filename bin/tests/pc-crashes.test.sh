@@ -29,6 +29,11 @@ is 'fields from the queued crash' "$(jq -r '.[] | select(.name == "_usr_bin_time
   '/usr/bin/timeout|4|SIGILL|timeout 60 qrenderdoc --python x.py|queued|true'
 is 'signame falls back to kill -l, upload state uploaded' "$(jq -r '.[] | select(.name == "_usr_libexec_ls3.1000") | .signame + "|" + .upload' <<<"$j")" 'SIGSEGV|uploaded'
 is 'text list has 2 rows' "$(pc | wc -l)" 2
+printf 'ProblemType: Crash\nExecutablePath: /usr/bin/nosig\nProcCmdline: /usr/bin/nosig -b\n' >"$C/_usr_bin_nosig.1000.crash"
+touch -d '-2 days' "$C/_usr_bin_nosig.1000.crash"
+is 'crash without Signal: no stderr' "$(pc 2>&1 >/dev/null)" ''
+is 'crash without Signal: columns stay aligned' "$(pc | awk '$1 == "_usr_bin_nosig.1000" {print $3, $4, $5}')" '- 2d none'
+rm "$C/_usr_bin_nosig.1000.crash"
 
 printf '<?xml version="1.0" ?>\n<apport>\n  <ignore program="/usr/libexec/localsearch-3" mtime="1779187181"/>\n</apport>\n' >"$WORK/ign.xml"
 printf '#!/bin/sh\nprintf "%%s\\n" "kernel: traps: localsearch-3[11] general protection fault ip:1" "kernel: localsearch-3[12]: segfault at 0 ip 1" "kernel: traps: localsearch[13] general protection fault"\n' >"$WORK/fx/bin/journalctl"

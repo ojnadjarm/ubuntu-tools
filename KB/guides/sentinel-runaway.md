@@ -68,6 +68,10 @@ grep 'rule6' ~/agents/sentinel/state/sentinel.log        # past browser closes
 - 2026-10-07 13:40 and 10-08 (F02 again): the 10-03 fix still wiped it after the orchestrator idled > 24 h (transcript
   silent 10-06 11:36Z → 10-07 15:14Z, same process). Fix 10-10: the newest-transcript-per-running-claude check above.
 
+- 2026-10-21 (T1038): a worker's GPU-poll `while :; … sleep 0.1` loop (T598) ran 44 h at ~200 wakeups/s. Its Bash parent
+  died, it was reparented to `systemd --user`, and rule 1 spared it because the scratchpad's session (the orchestrator)
+  was live. Fix: rule 1 also fires when the loop's ppid is a `systemd` process, whatever the session.
+
 ## Links
 - Code: `~/agents/bin/sentinel-runaway`, called by `~/agents/bin/sentinel-check`
 - Tests: `~/agents/bin/tests/sentinel-runaway.test.sh`, `~/agents/bin/tests/sentinel-check.test.sh`

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pc undo list|show <id>|verify <id>|undo [<id>|--last] [--apply] [--force] — the change ledger and its rollbacks.
+# pc undo list|show <id>|verify <id>|drift|undo [<id>|--last] [--apply] [--force] — the change ledger and its rollbacks.
 # shellcheck disable=SC2034
 set -uo pipefail
 BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -10,22 +10,32 @@ pc_usage 'usage: pc undo list [-n N] [--json]
        pc undo <id>|--last [--apply] [--force]
        pc undo ack <id> --why "<reason>"
        pc undo verify <id>
+       pc undo drift [--json]
 
 The ledger is ~/agents/log/changes.jsonl (override with PC_LEDGER): one line per applied
 mutation with its inverse, one verification line per id. An undo is itself a ledgered change.
 `ack` appends a note that an unverified id is a known, resolved non-issue (never rewrites the
 original lines) so `pc doctor` stops failing on it. `verify` re-runs the stored read now and,
-when it equals `after`, appends a late verification (exit 0; exit 1 when it does not).' "$@"
+when it equals `after`, appends a late verification (exit 0; exit 1 when it does not).
+`drift` re-runs the stored read of every target'"'"'s latest entry (timeout 5 each, /usr/sbin on PATH)
+and classes it: same | superseded (a later entry wrote the same file or read, the rest still
+equal) | transient (swap, container:*, stack:*, a oneshot'"'"'s run state) | acked (`pc undo ack`) |
+noread | drift. Exit 1 only when a row is drift.' "$@"
 
 PC_SUB='pc undo'; PC_EXTRA_FLAGS=(--last --force --why: -n:)
 pc_opt "$@"; ARGS=("${PC_ARGS[@]}")
 N=${PC_OPT[-n]-20}; WHY=${PC_OPT[--why]-}; LAST=${PC_OPT[--last]-0}; FORCE=${PC_OPT[--force]-0}
 
-# entries [limit] — the ledger plus its logrotate .N.gz rotations as one JSON array, newest first, each apply line merged with its verification.
-entries() {
+# lines — the ledger plus its logrotate .N.gz rotations, oldest first.
+lines() {
   local f
-  { printf '%s\n' "$PC_LEDGER".*.gz | sort -Vr | while IFS= read -r f; do [ -r "$f" ] && zcat "$f"; done
-    cat "$PC_LEDGER" 2>/dev/null || :; } | jq -s --argjson n "${1:-0}" '
+  printf '%s\n' "$PC_LEDGER".*.gz | sort -Vr | while IFS= read -r f; do [ -r "$f" ] && zcat "$f"; done
+  cat "$PC_LEDGER" 2>/dev/null || :
+}
+
+# entries [limit] — every apply line as one JSON array, newest first, each merged with its verification.
+entries() {
+  lines | jq -s --argjson n "${1:-0}" '
     (map(select(has("verified"))) | INDEX(.id)) as $v
     | map(select(has("target")))
     | map(. + ($v[.id] // {verified:null, observed:null}))
@@ -34,7 +44,7 @@ entries() {
 
 sub="${ARGS[0]:-}"
 case "$sub" in
-  list|show|undo|ack|verify) ARGS=("${ARGS[@]:1}");;
+  list|show|undo|ack|verify|drift) ARGS=("${ARGS[@]:1}");;
   "") [ "$LAST" = 1 ] && sub=undo || sub=list;;
   *) sub=undo;;   # a bare id
 esac
@@ -59,6 +69,38 @@ case "$sub" in
     [ "$now" = "$after" ] || exit 1
     pc_json '{id:$id,verified:true,observed:$o,late:true}' -c --arg id "$id" --arg o "$now" >>"$PC_LEDGER"
     exit 0;;
+  drift)
+    rows=$(entries | jq --argjson acks "$(lines | jq -s 'map(select(.ack == true) | .id)' 2>/dev/null || echo '[]')" '
+      def files: [(.target | select(startswith("/"))), ((.read // "") | scan("pc-conf state ([^ )\"\u0027]+)") | .[0])];
+      to_entries | map(.value + {i: .key, f: (.value | files)}) as $all
+      | $all | group_by(.target) | map(.[0]) | sort_by(.i)
+      | map(. as $e | . + {acked: any($acks[]; . == $e.id),
+          supread: any($all[]; .i < $e.i and .target != $e.target and ($e.read // "") != "" and .read == $e.read),
+          supfile: any($all[]; .i < $e.i and .target != $e.target and any(.f[]; . as $p | $e.f | index([$p]) != null))})')
+    nows=$(jq -r '.[] | [(.read // "" | @base64), (if (.target | test("\\.service$")) and ((.read // "") | test("ActiveState")) then (if (.read | test("--user")) then "--user" else "--system" end) else "" end)] | @tsv' <<<"$rows" \
+      | while IFS=$'\t' read -r b mgr; do
+          r=$(base64 -d <<<"$b"); n=""; t=""
+          [ -n "$r" ] && n=$(timeout 5 bash -c "$r" 2>/dev/null </dev/null)
+          [ -n "$mgr" ] && t=$(base64 -d <<<"$b" | sed -n 's/.*show \([^ ]*\.service\) .*/\1/p' | head -1 | xargs -r -I{} systemctl "$mgr" show {} -p Type --value 2>/dev/null)
+          printf '%s\t%s\n' "$(printf %s "$n" | base64 -w0)" "$t"
+        done | jq -R 'split("\t") | {now: (.[0] | @base64d), type: .[1]}' | jq -s .)
+    out=$(jq --argjson nows "$nows" '
+      def norm: gsub("(file=)?(sha:[0-9a-f]+|absent)"; "") | gsub("^ +| +$"; "");
+      [., $nows] | transpose | map(.[0] + .[1]) | map(. + {class:
+        (if (.read // "") == "" then "noread"
+         elif .now == .after then "same"
+         elif .acked then "acked"
+         elif .supread or (.supfile and (.now | norm) == (.after | norm)) then "superseded"
+         elif .target == "swap" or (.target | test("^(container|stack):")) or .type == "oneshot" then "transient"
+         else "drift" end)})
+      | map({id, ts, target, class, after, now})' <<<"$rows")
+    if [ "$JSON" = 1 ]; then printf '%s\n' "$out"; else
+      jq -r '.[] | select(.class != "same") | [.class, .target, .after + " → " + .now, .id] | @tsv' <<<"$out" | column -t -s $'\t'
+      jq -r '[group_by(.class)[] | {(.[0].class): length}] | add // {} as $c
+        | [("same","superseded","transient","acked","noread","drift") | "\($c[.] // 0) \(.)"] | join(", ")' <<<"$out"
+    fi
+    jq -e 'any(.[]; .class == "drift") | not' <<<"$out" >/dev/null
+    exit;;
   list)
     if [ "$JSON" = 1 ]; then entries "$N"; exit 0; fi
     entries "$N" | jq -r '.[] | [.id, .ts, .target, (.before + " → " + .after), (if .verified == true then "ok" else "UNVERIFIED" end), ((.agent // "") as $a | if $a != "" then $a elif (.session // "") != "" then .session[0:8] else "-" end)] | @tsv' \

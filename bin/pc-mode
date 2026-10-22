@@ -4,6 +4,7 @@
 
 STATE="$HOME/agents/state/pc-mode"
 EXT=tiling-assistant@ubuntu.com
+MODES="${PC_SHELL_MODES:-/usr/share/gnome-shell/modes}"
 
 # schema key agent-value human-value
 KEYS='org.gnome.desktop.interface enable-animations false true
@@ -20,19 +21,31 @@ overview() {
     --method org.freedesktop.DBus.Properties.Set org.gnome.Shell OverviewActive "<$1>" >/dev/null 2>&1
 }
 
-# live_mode — agent, human or mixed, read from the live keys and the extension.
+# live_get SCHEMA KEY — one key's value from a cached list-recursively read, quotes stripped.
 declare -A SCHEMA
+live_get() {
+  local s k v
+  [ -n "${SCHEMA[$1]+x}" ] || SCHEMA[$1]=$'\n'"$(gsettings list-recursively "$1" 2>/dev/null)"
+  while read -r s k v; do [ "$s" = "$1" ] && [ "$k" = "$2" ] && { echo "${v//\'/}"; return; }; done <<<"${SCHEMA[$1]}"
+}
+
+# ext_on — GNOME Shell's enable rule from dconf: (session-mode or user-enabled) and not disabled.
+ext_on() {
+  [[ $(live_get org.gnome.shell disabled-extensions) == *"$EXT"* ]] && return 1
+  grep -qF "\"$EXT\"" "$MODES/${GNOME_SHELL_SESSION_MODE:-ubuntu}.json" 2>/dev/null && return 0
+  [ "$(live_get org.gnome.shell disable-user-extensions)" = true ] && return 1
+  [[ $(live_get org.gnome.shell enabled-extensions) == *"$EXT"* ]]
+}
+
+# live_mode — agent, human or mixed, read from the live keys and the extension.
 live_mode() {
   local schema key a h got n_a=0 n_h=0
   while read -r schema key a h; do
-    [ -n "${SCHEMA[$schema]+x}" ] || SCHEMA[$schema]=$'\n'"$(gsettings list-recursively "$schema" 2>/dev/null)"
-    got=""
-    while read -r _ k v; do [ "$k" = "$key" ] && { got=$v; break; }; done <<<"${SCHEMA[$schema]}"
-    got=${got//\'/}
+    got=$(live_get "$schema" "$key")
     [ "$got" = "$a" ] && n_a=$((n_a + 1))
     [ "$got" = "$h" ] && n_h=$((n_h + 1))
   done <<<"$KEYS"
-  if gnome-extensions list --enabled 2>/dev/null | grep -q "$EXT"; then
+  if ext_on; then
     n_h=$((n_h + 1))
   else
     n_a=$((n_a + 1))

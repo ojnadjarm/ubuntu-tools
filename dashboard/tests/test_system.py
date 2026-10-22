@@ -78,6 +78,37 @@ class Since24h(unittest.TestCase):
                 ev = system.since_24h()
         self.assertEqual([e["text"] for e in ev], ["hello\n2026-10-15"])
 
+    def sentinel(self, lines):
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        with tempfile.TemporaryDirectory() as h:
+            os.makedirs(os.path.join(h, "agents/sentinel/state"))
+            with open(os.path.join(h, "agents/sentinel/state/sentinel.log"), "w") as f:
+                f.write("".join((now + " " + l if l[0] != " " else l) + "\n" for l in lines))
+            with mock.patch.object(system, "HOME", h):
+                return system.since_24h()
+
+    def test_fail_fixed_in_same_second_is_one_row_with_outcome(self):
+        ev = self.sentinel(["FAIL: docker.moodle-shared\t2/3 up, ports 80,1025,8025;", " Container x  Started", "fixed by bash"])
+        self.assertEqual([e["text"] for e in ev], ["FAIL docker.moodle-shared · 2/3 up, ports 80,1025,8025 · fixed"])
+
+    def test_escalation_folds_into_its_fail(self):
+        ev = self.sentinel(["FAIL: network.internet\tunreachable;", "unresolved, escalating to Claude: network.internet\tunreachable;"])
+        self.assertEqual([e["text"] for e in ev], ["FAIL network.internet · unreachable · escalated"])
+
+    def test_escalation_of_another_check_keeps_its_own_row(self):
+        ev = self.sentinel(["FAIL: status.probe\tno valid JSON;", "unresolved, escalating to Claude: docker.moodle45r\t2/3 up;"])
+        self.assertEqual(sorted(e["text"] for e in ev), ["FAIL status.probe · no valid JSON", "unresolved, escalating to Claude docker.moodle45r · 2/3 up"])
+
+    def test_housekeeping_rows_drop_paths_and_commands(self):
+        raw = ["runaway removed /tmp/claude-1000/-home-x/f950f2b2/scratchpad (rule5: dead session's scratchpad, 141h old)",
+               "runaway killed pid 3129957 (rule1: shell loop under a scratchpad, reparented to systemd pid 5742, 2704 min old): /bin/bash -c source x",
+               "stuck-wait killed pid 620051 (registered wait, owner agent ac2939 ended): bash ~/.local/bin/wait-for --until [ $(wc -l < y)"]
+        ev = self.sentinel(raw)
+        self.assertEqual(sorted(e["text"] for e in ev), sorted([
+            "removed a dead session's scratchpad, 141h old", "killed a shell loop under a scratchpad, 2704 min old",
+            "stuck-wait killed a wait (registered wait, owner agent ac2939 ended)"]))
+        self.assertEqual(sorted(e["title"] for e in ev), sorted([raw[0][8:], raw[1][8:], raw[2]]))
+
 
 if __name__ == "__main__":
     unittest.main()

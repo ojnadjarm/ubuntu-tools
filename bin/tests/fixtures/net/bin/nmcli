@@ -1,2 +1,5 @@
 #!/usr/bin/env bash
-echo 'wlo1:wifi:connected:HomeNet'
+case "$*" in
+  *BSSID,CHAN*) printf '%s\n' '02\:00\:00\:00\:00\:0C:44' '02\:00\:00\:00\:00\:0B:6';;
+  *) echo 'wlo1:wifi:connected:HomeNet';;
+esac

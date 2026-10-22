@@ -34,6 +34,9 @@ is 'boots --json lists at least one boot' "$?" 0
 
 "$J" size --json | jq -e 'has("bytes") and .bytes>0' >/dev/null
 is 'size --json has bytes>0' "$?" 0
+want=$(systemd-analyze cat-config systemd/journald.conf 2>/dev/null | sed -n 's/^SystemMaxUse=//p' | tail -1)
+"$J" size | grep -qF "cap SystemMaxUse=${want:-default}"
+is 'size shows the journald SystemMaxUse cap' "$?" 0
 
 "$J" grep 'UFW BLOCK' --since 1h --json | jq -e 'type=="array"' >/dev/null
 is 'grep --json is valid JSON' "$?" 0

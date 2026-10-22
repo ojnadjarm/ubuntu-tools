@@ -75,7 +75,9 @@ MOVED='## Ports, names and URLs (hand)
 - Moodle 4.5 (vass): code is the owner checkout (no git writes).
 - Status page :19998 routes: `/classic` the old dashboard.'
 printf '%s\nold\n%s\n\n%s\n\n%s\n' "$B" "$E" "$MOVED" "$TABLE" >"$m"
-apply "$m"; PC_FACTS_FILE="$m" "$PCS" --facts --apply >/dev/null
+# The live run gets a private cache and a refusing sudo (T1136): no root `ufw status`, the live cache untouched.
+mkdir -p "$WORK/live/nosudo"; printf '#!/bin/sh\nexit 1\n' >"$WORK/live/nosudo/sudo"; chmod +x "$WORK/live/nosudo/sudo"
+apply "$m"; PATH="$WORK/live/nosudo:$PATH" XDG_RUNTIME_DIR="$WORK/live" PC_FACTS_FILE="$m" "$PCS" --facts --apply >/dev/null
 n_kept=$(grep -cxF -f <(printf '%s\n' "$MOVED") "$m")
 [ "$n_kept" = 8 ] && ok "moved hand lines 8/8 kept after two runs" || nok "moved hand lines" "$n_kept/8"
 [ "$(rows "$m")" = 3 ] && ok "table rows 3/3 next to the moved lines" || nok "rows with moved lines" "$(rows "$m")"

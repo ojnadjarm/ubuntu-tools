@@ -41,7 +41,7 @@ class Needs(unittest.TestCase):
             ev = system.since_24h()
         self.assertEqual([(e["kind"], e["t"], e["text"]) for e in ev], [
             ("runaway", ts[2], "took down sandbox asr (rule3: stale sandbox, 90h old) x3"),
-            ("runaway", ts[0], "killed pid 42 (rule3: hand-run Dark Eye body outside dark-eye.service, 2h old): eye-render")])
+            ("runaway", ts[0], "killed a hand-run Dark Eye body outside dark-eye.service, 2h old")])
 
     def test_stuck_wait_kill_is_an_event(self):
         from dash.services import system
@@ -54,7 +54,7 @@ class Needs(unittest.TestCase):
         with mock.patch.object(system, "HOME", home):
             ev = system.since_24h()
         self.assertEqual([(e["kind"], e["t"], e["text"]) for e in ev], [
-            ("runaway", t, "stuck-wait killed pid 505171 (owner ended; owner agent a51b09): 'until grep -q facts p2.log; do sleep 3; done'")])
+            ("runaway", t, "stuck-wait killed a wait (owner ended; owner agent a51b09)")])
 
     def test_old_high_push_still_needs_with_many_newer_pushes(self):
         from dash.services import system

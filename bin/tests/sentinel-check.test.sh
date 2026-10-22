@@ -132,7 +132,9 @@ tick "$OWN"
 exec 8>&-
 { [ "$rc" = 0 ] && grep -q 'lock busy' "$ST/sentinel.log"; } && ok "a busy lock is logged, not silent" || nok "busy lock log" "rc=$rc $(cat "$ST/sentinel.log")"
 # TSP-044: a failed transient run-* scope >= 10 min old is reset through pc units; a young one,
-# a non-transient one and a non-run unit are left alone. The systemctl stub answers read-only argv.
+# a non-transient one and a non-run unit are left alone. T1128: a named transient unit (systemd-run
+# --unit) >= 30 min old is reset too; a 10 min one, a fleet-glob one and a not-ours one are kept.
+# The systemctl stub answers read-only argv.
 mv "$BIN/systemctl" "$BIN/systemctl.replay"
 cat >"$BIN/systemctl" <<'EOF'
 #!/bin/sh
@@ -140,21 +142,32 @@ echo "systemctl $*" >>"$CALLS"
 now=$(date +%s)
 case "$*" in
   "--user list-units --state=failed --plain --no-legend")
-    for u in run-old.scope run-young.scope run-static.scope fx.service; do echo "$u loaded failed failed fixture"; done;;
+    for u in run-old.scope run-young.scope run-static.scope fx.service probe-old.service probe-young.service \
+      sentinel-probe.service vass-probe.service; do echo "$u loaded failed failed fixture"; done;;
   "--user show run-old.scope "*)    printf 'Description=[systemd-run] bash -c balloon\nStateChangeTimestamp=@%s\nTransient=yes\n' $((now-1200));;
   "--user show run-young.scope "*)  printf 'Description=young\nStateChangeTimestamp=@%s\nTransient=yes\n' $((now-60));;
   "--user show run-static.scope "*) printf 'Description=static\nStateChangeTimestamp=@%s\nTransient=no\n' $((now-1200));;
+  "--user show fx.service "*)       printf 'Description=persistent\nStateChangeTimestamp=@%s\nTransient=no\n' $((now-2400));;
+  "--user show probe-old.service "*)   printf 'Description=[systemd-run] /usr/bin/sh -c "exit 3"\nStateChangeTimestamp=@%s\nTransient=yes\n' $((now-2400));;
+  "--user show probe-young.service "*) printf 'Description=young probe\nStateChangeTimestamp=@%s\nTransient=yes\n' $((now-600));;
+  "--user show sentinel-probe.service "*|"--user show vass-probe.service "*)
+    printf 'Description=kept\nStateChangeTimestamp=@%s\nTransient=yes\n' $((now-2400));;
 esac
 exit 0
 EOF
 chmod +x "$BIN/systemctl"
 : >"$ST/sentinel.log"; tick ''
-[ "$(grep -c '^pc units reset-failed' "$CALLS")" = 1 ] && grep -q '^pc units reset-failed run-old.scope --user --apply$' "$CALLS" \
+[ "$(grep -c '^pc units reset-failed' "$CALLS")" = 2 ] && grep -q '^pc units reset-failed run-old.scope --user --apply$' "$CALLS" \
   && ok "an old failed transient run-* scope is reset via pc units" || nok "transient reset" "$(grep '^pc ' "$CALLS")"
+grep -q '^pc units reset-failed probe-old.service --user --apply$' "$CALLS" \
+  && ok "a named failed transient unit >= 30 min old is reset" || nok "named transient reset" "$(grep '^pc ' "$CALLS")"
+grep -qE '^pc units reset-failed (probe-young|sentinel-probe|vass-probe|fx)\.service' "$CALLS" \
+  && nok "young, fleet, not-ours and persistent units are kept" "$(grep '^pc ' "$CALLS")" \
+  || ok "young, fleet, not-ours and persistent units are kept"
 grep -q 'reset failed transient run-old.scope .*balloon' "$ST/sentinel.log" \
   && ok "the reset is one log line with its Description" || nok "transient reset log" "$(cat "$ST/sentinel.log")"
 bad_argv=$(grep '^systemctl' "$CALLS" | grep -v -e '^systemctl --user list-units --state=failed --plain --no-legend$' \
-  -e '^systemctl --user show run-[a-z]*\.scope -p Transient -p Description -p StateChangeTimestamp --timestamp=unix$')
+  -e '^systemctl --user show [a-z-]*\.\(scope\|service\) -p Transient -p Description -p StateChangeTimestamp --timestamp=unix$')
 [ -z "$bad_argv" ] && grep -q '^systemctl --user show run-old' "$CALLS" \
   && ok "selftest: the systemctl stub saw only read-only argv" || nok "systemctl argv" "${bad_argv:-no show call}"
 mv "$BIN/systemctl.replay" "$BIN/systemctl"

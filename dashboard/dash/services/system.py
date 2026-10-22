@@ -55,6 +55,18 @@ def agents():
     return [runners.view(s, F, r, human_cal) for s, r in zip(specs, out)]
 
 
+CHORE = re.compile(r"^(killed|took down|removed|restarted) (.*?) \((.*?)\)(?::.*)?$")
+
+
+def chore(text, wait=False):
+    """A housekeeping action without its path or command: the verb and why."""
+    m = CHORE.match(text)
+    if not m or not re.search(r"/|^pid \d+$", m.group(2)):
+        return text
+    why = ", ".join(c for c in re.sub(r"^rule\d+: ", "", m.group(3)).split(", ") if not re.search(r"/|\bpid \d+", c))
+    return "%s a %s" % (m.group(1), "wait (%s)" % why if wait else why)
+
+
 def since_24h():
     """Recent pushes, sentinel failures, runaway actions and stuck-wait kills (one row per loop), newest first."""
     cut = datetime.now(timezone.utc) - timedelta(hours=24)
@@ -84,24 +96,37 @@ def since_24h():
                 ev.append(last)
     sl = os.path.join(HOME, "agents/sentinel/state/sentinel.log")
     if os.path.exists(sl):
-        loops = {}
+        loops, open_fail, fail_checks = {}, None, set()
+
+        def checks(s):
+            return {c.split("\t")[0].strip() for c in s.split(";") if c.strip()}
+
         for line in open(sl).read().splitlines()[-200:]:
             r = re.match(r"^(\S+) (runaway|stuck-wait) ((?:killed|took down|removed|restarted) .*)$", line)
             if r:
                 t = when(r.group(1))
                 if t and t >= cut:
                     text = r.group(3) if r.group(2) == "runaway" else r.group(2) + " " + r.group(3)
+                    short = chore(r.group(3)) if r.group(2) == "runaway" else r.group(2) + " " + chore(r.group(3), True)
                     key = re.sub(r"\d+", "N", text.split(")", 1)[0])
                     e = loops.setdefault(key, {"kind": "runaway", "prio": "default", "n": 0})
-                    e.update(t=r.group(1), text=text, n=e["n"] + 1)
+                    e.update(t=r.group(1), text=short, title=text, n=e["n"] + 1)
+                continue
+            o = re.match(r"^\S+ (fixed by bash|cleared on re-check|unresolved, escalating)(?:[^:]*: ?(.*))?", line)
+            if o and open_fail and checks(o.group(2) or "") <= fail_checks:
+                open_fail["text"] += " · " + {"f": "fixed", "c": "cleared", "u": "escalated"}[o.group(1)[0]]
+                open_fail = None
                 continue
             m = re.match(r"^(\S+) (FAIL|unresolved.*?): ?(.*)$", line)
             if not m:
                 continue
             t = when(m.group(1))
+            open_fail = None
             if t and t >= cut:
-                ev.append({"t": m.group(1), "kind": "incident", "prio": "high",
-                           "text": (m.group(2) + " " + m.group(3)).strip()})
+                detail = m.group(3).strip().rstrip(";").replace(";", "; ").replace("\t", " · ")
+                ev.append({"t": m.group(1), "kind": "incident", "prio": "high", "text": (m.group(2) + " " + detail).strip()})
+                open_fail = ev[-1] if m.group(2) == "FAIL" else None
+                fail_checks = checks(m.group(3))
         for e in loops.values():
             n = e.pop("n")
             ev.append(dict(e, text=e["text"] + (" x%d" % n if n > 1 else "")))
@@ -114,20 +139,71 @@ FLEET = re.compile(r"^(dark-eye|docker|sentinel|agent@|agents-dashboard|moodle-k
 DESKTOP = re.compile(r"^(gvfs-|org\.gnome\.|org\.freedesktop\.|evolution-|xdg-|pipewire|wireplumber|dbus|at-spi|gnome-|gcr-|dconf|localsearch|filter-chain|snap\.)")
 
 
+CGROUP = "/sys/fs/cgroup"
+PAGE = os.sysconf("SC_PAGE_SIZE")
+TICK = os.sysconf("SC_CLK_TCK")
+MIN_AGE = 30
+
+
+def cg_pids(cg):
+    """Every pid in a cgroup and its children."""
+    pids = []
+    for d, _, _ in os.walk(CGROUP + cg):
+        try:
+            pids += [int(x) for x in open(os.path.join(d, "cgroup.procs")).read().split()]
+        except OSError:
+            pass
+    return pids
+
+
+def proc_rss(pid):
+    try:
+        return int(open("/proc/%d/statm" % pid).read().split()[1]) * PAGE
+    except (OSError, IndexError, ValueError):
+        return 0
+
+
+def proc_stat(pid):
+    """(parent pid, start in seconds since boot) of a process; (0, 0.0) once it is gone."""
+    try:
+        f = open("/proc/%d/stat" % pid).read().rsplit(")", 1)[1].split()
+        return int(f[1]), int(f[19]) / TICK
+    except (OSError, IndexError, ValueError):
+        return 0, 0.0
+
+
+def uptime():
+    return float(open("/proc/uptime").read().split()[0])
+
+
 def user_units():
-    """Running or failed user services, grouped fleet / yours / desktop, with resident memory."""
+    """Running or failed user services, grouped fleet / yours / desktop, with resident memory (RSS of the main process and processes alive >= MIN_AGE s, plus scopes it spawned at any depth such as tmux panes)."""
     out = []
-    units = [u for u in json.loads(run(["systemctl", "--user", "list-units", "--type=service", "--all", "-o", "json"], 10) or "[]")
-             if u["sub"] == "running" or u["active"] == "failed"]
-    props = unit_props(["ActiveEnterTimestamp", "MemoryCurrent"], [u["unit"] for u in units])
+    listed = json.loads(run(["systemctl", "--user", "list-units", "--type=service,scope", "--all", "-o", "json"], 10) or "[]")
+    units = [u for u in listed if u["unit"].endswith(".service") and (u["sub"] == "running" or u["active"] == "failed")]
+    scopes = [u["unit"] for u in listed if u["unit"].endswith(".scope") and u["sub"] == "running"]
+    props = unit_props(["ActiveEnterTimestamp", "ControlGroup", "MainPID"], [u["unit"] for u in units] + scopes)
+    pids = {n: cg_pids(props[n]["ControlGroup"]) for n in props if props[n].get("ControlGroup")}
+    owner = {p: n for n in pids if n.endswith(".service") for p in pids[n]}
+    stat = {p: proc_stat(p) for ps in pids.values() for p in ps}
+    main = {int(props[n].get("MainPID") or 0) for n in props}
+    now = uptime()
+    mem = {n: sum(proc_rss(p) for p in ps if p in main or now - stat[p][1] >= MIN_AGE) for n, ps in pids.items()}
+    for sc in scopes:
+        for p in pids.get(sc, []):
+            pp = stat[p][0]
+            while pp and pp not in owner:
+                pp = (stat.get(pp) or proc_stat(pp))[0]
+            if pp:
+                mem[owner[pp]] += mem[sc]
+                break
     for u in units:
         p = props.get(u["unit"], {})
         since = p.get("ActiveEnterTimestamp", "") if u["active"] == "active" else ""
-        rss = p.get("MemoryCurrent", "")
         out.append({"unit": u["unit"], "what": u["description"][:1].lower() + u["description"][1:], "active": u["active"], "sub": u["sub"],
                     "since": runners.iso(since),
                     "group": "fleet" if FLEET.match(u["unit"]) else "desktop" if DESKTOP.match(u["unit"]) else "his",
-                    "rss": int(rss) if rss.isdigit() else None})
+                    "rss": mem.get(u["unit"]) or None})
     order = {"fleet": 0, "his": 1, "desktop": 2}
     out.sort(key=lambda u: (order[u["group"]], u["active"] != "failed", u["unit"]))
     return out

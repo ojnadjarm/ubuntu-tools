@@ -170,6 +170,157 @@ for cmd in KILL_PASS:
     rc, out = run(cmd)
     check(f'pass {cmd[:55]!r}', rc == 0 and out is None or print('     got', rc, out))
 
+# T1047: a raw state-change tool at command position gets a non-blocking pc-verb hint (exit 0, additionalContext).
+HINT = [
+    ('pactl set-sink-volume @DEFAULT_SINK@ 50%', '`pc audio vol <node> <0-150%|+N|-N> --apply`'),
+    ('pactl set-default-sink bluez_output.X 2>&1; echo rc=$?', '`pc audio default sink <name> --apply`'),
+    ('timeout 5 pactl set-sink-mute X 1', '`pc audio mute <node> on|off|toggle --apply`'),
+    ('XDG_RUNTIME_DIR=/run/user/$UID /usr/bin/pactl unload-module 5', '`pc audio --help`'),
+    ('powerprofilesctl get; powerprofilesctl set balanced; echo rc=$?', '`pc power profile balanced --apply`'),
+    ('sudo systemctl restart netdata', '`pc units restart netdata --apply`'),
+    ('cd ~; systemctl --user stop dark-eye.service && ls', '`pc units stop dark-eye.service --user --apply`'),
+    ('sudo -n systemctl --system start foo.timer', '`pc units start foo.timer --system --apply`'),
+    ('for u in a; do systemctl --user stop $u; done', '`pc units stop $u --user --apply`'),
+    ('if true; then systemctl --user restart a; fi', '`pc units restart a --user --apply`'),
+    ('if x; then :; else pactl set-sink-mute x 1; fi', '`pc audio mute <node> on|off|toggle --apply`'),
+    ('if x; then :; elif ! powerprofilesctl set power-saver; then :; fi', '`pc power profile power-saver --apply`'),
+    ('{ pactl set-sink-mute x 1; }', '`pc audio mute <node> on|off|toggle --apply`'),
+    ('while ! systemctl --user start a; do :; done', '`pc units start a --user --apply`'),
+    ('sudo -u someone systemctl --user stop x', '`pc units stop x --user --apply`'),
+    ('x=$(pactl set-default-sink tv)', '`pc audio default sink <name> --apply`'),
+]
+
+
+def hint(cmd):
+    """(exit code, additionalContext or None, permissionDecision or None) of the hook on cmd."""
+    rc, out = run(cmd)
+    o = (out or {}).get('hookSpecificOutput', {})
+    return rc, o.get('additionalContext'), o.get('permissionDecision')
+
+
+for cmd, want in HINT:
+    rc, ctx, dec = hint(cmd)
+    check(f'hint {cmd[:55]!r}', rc == 0 and dec is None and ctx and want in ctx and 'pc undo' in ctx
+          or print('     got', rc, ctx, dec))
+NO_HINT = [
+    'systemctl --user status netdata', 'systemctl --user cat foo-start.service', 'systemctl show -p ActiveState x',
+    'systemctl --user daemon-reload', 'echo pactl set-sink-mute x 1', 'grep -n "systemctl stop" notes.md',
+    "cat > s.sh <<'EOF'\npactl set-sink-mute x 1\nEOF\nchmod +x s.sh", 'claude -p "run powerprofilesctl set balanced"',
+    'pc audio vol earbuds 50% --apply', 'pc units stop foo --apply',
+    'systemctl -H host stop foo', 'systemctl --host=host restart foo', 'systemctl -M box start foo',
+    'pactl list short sinks', 'pactl get-default-sink', 'x=$(pactl get-default-sink)', 'pactl info',
+    'powerprofilesctl get', 'powerprofilesctl', 'echo do systemctl stop x', 'echo { pactl set-sink-mute x 1',
+    'ssh host systemctl stop foo',
+]
+for cmd in NO_HINT:
+    rc, out = run(cmd)
+    check(f'no hint {cmd[:52]!r}', rc == 0 and out is None or print('     got', rc, out))
+ok, reason = denied("pkill -f vite; pactl list short sinks")
+check('a deny wins over a hint (one JSON object, deny)', ok and '[v]ite' in reason)
+
+# T1082: Claude Code's shell runs `grep` as ugrep and `find` as bfs; name the two gotchas before they fail.
+SHADOW = [
+    ("grep -oiE '.{0,30}(dbpass|_pass=|-P [^ ]+).{0,25}' actions.jsonl | head -12", 'command grep'),
+    ('sed -n 49p d/CLAUDE.md | grep -o ".\\{0,200\\}vendor.\\{0,200\\}"', 'complexity'),
+    ("f=x; LC_ALL=C grep -ao -m2 '.\\{0,200\\}asyncRewake.\\{0,200\\}' \"$f\" | head -c 1500", 'command grep'),
+    ("grep -o '\"summary\": \"[^\"]*\\(sshpass -p \\|curl [^\"]*-u \\)[^\"]\\{0,40\\}' log/a.jsonl", 'command grep'),
+    ("cd /x && grep -o 'declutter [0-9a-z-]*[^\"]\\{0,120\\}' $f | sort -u", 'command grep'),
+    ("find ~/agent-work -newermt '-1 day' -type f | wc -l", 'command find'),
+    ('ls; find . -newerct yesterday', "-newermt $(date -d '-1 day' +%F)"),
+]
+for cmd, want in SHADOW:
+    rc, ctx, dec = hint(cmd)
+    check(f'shadow hint {cmd[:48]!r}', rc == 0 and dec is None and ctx and want in ctx or print('     got', rc, ctx, dec))
+NO_SHADOW = [
+    'grep -c x f', "grep -oE '.{0,400}x' f", "grep -oE '.{0,15}x.{0,15}' f", "grep -oE '.{40}x.{40}' f",
+    "command grep -oE '.{0,30}x.{0,30}' f", "rg -o '.{0,30}x.{0,30}' f", "grep -F '.{0,30}x.{0,30}' f",
+    "grep -P '.{0,30}x.{0,30}' f", "timeout 5 grep -oE '.{0,30}x.{0,30}' f", "ls | xargs grep -oE '.{0,30}x.{0,30}'",
+    "echo grep -oE '.{0,30}x.{0,30}'", "grep -oE 'a+b.{0,40}' f", "grep -oE 'execve\\(\"[^\"]+\", \\[[^]]{0,160}' f",
+    "grep -o '.\\{200\\}<task-id>[^<]*</task-id>.\\{0,300\\}' f", 'grep -ohE \'"(votes|refut[a-z]*)":[^,}]{0,60}\' f',
+    'find . -newer ref.txt', 'find . -newermt 2026-10-20', "find . -newermt '2026-10-20 10:00'", 'find . -newermt @1760000000',
+    'find . -newermt "@$(( $(date +%s) - 86400))"',
+    "find . -newermt \"$(date -d '-1 day' +%F)\"", "command find . -newermt '-1 day'", "echo find . -newermt '-1 day'",
+]
+for cmd in NO_SHADOW:
+    rc, out = run(cmd)
+    check(f'no shadow hint {cmd[:45]!r}', rc == 0 and out is None or print('     got', rc, out))
+
+# T1082: a command that deletes the cwd it cd'd into fails the Bash tool's closing `pwd` (getcwd, exit 1).
+CDRM = [
+    ('d=$(mktemp -d); cd $d && ffmpeg -i x f.png; rm -rf "$d"', 'cd ~ && rm -rf $d'),
+    ('S=/tmp/s/t811; cd $S; python3 b.py; rm -rf $S', 'cd ~ && rm -rf $S'),
+    ('T=$(mktemp -d); cd "$T/sub" && make; rm -rf "${T}"', 'cd ~ && rm -rf $T'),
+    ('cd /tmp/x && ls && rm -fr /tmp/x/', 'cd ~ && rm -rf /tmp/x'),
+]
+for cmd, want in CDRM:
+    ok, reason = denied(cmd)
+    check(f'deny cd-then-rm {cmd[:48]!r}', ok and 'getcwd' in reason and f'`{want}`' in reason or print('     got', reason))
+NO_CDRM = [
+    'd=$(mktemp -d); cd $d && ls; cd ~ && rm -rf "$d"', 'd=$(mktemp -d); (cd $d && ls); rm -rf $d',
+    'cd $d && rm -rf build', 'cd /x && rm -rf /x2', 'rm -rf $d; cd $d', 'cd $d; rm -rf $d; cd /', 'cd $d; rm $d/f',
+    "echo 'cd $d; rm -rf $d'",
+]
+for cmd in NO_CDRM:
+    rc, out = run(cmd)
+    check(f'no cd-then-rm deny {cmd[:45]!r}', rc == 0 and out is None or print('     got', rc, out))
+
+
+def cwd_event(cmd, cwd, sep=': '):
+    """A PreToolUse event that carries the session cwd, keys spaced like json.dumps or compact like Claude Code."""
+    return json.dumps({'cwd': cwd, 'hook_event_name': 'PreToolUse', 'tool_name': 'Bash', 'tool_input': {'command': cmd}},
+                      separators=(', ', sep))
+
+
+gone = os.path.join(WORK, 'gone')
+for sep in (': ', ':'):
+    rc, out = run('', raw=cwd_event('ls -la', gone, sep))
+    o = (out or {}).get('hookSpecificOutput', {})
+    check(f'deny a call whose cwd was deleted (sep {sep!r})', rc == 0 and o.get('permissionDecision') == 'deny'
+          and 'cd ~ &&' in o.get('permissionDecisionReason', '') or print('     got', rc, out))
+for cmd, cwd in (('cd ~ && ls', gone), ('cd /tmp; ls', gone), ('ls -la', WORK)):
+    rc, out = run('', raw=cwd_event(cmd, cwd, ':'))
+    check(f'no cwd deny {cmd!r} in {os.path.basename(cwd)}', rc == 0 and out is None or print('     got', rc, out))
+
+# T1082: raw apt gets the pc pkg hint only once ~/agents/bin/pc-pkg exists (T1087).
+rc, out = run('sudo -n apt-get install -y iw')
+check('no apt hint while pc-pkg is missing', rc == 0 and out is None or print('     got', rc, out))
+os.makedirs(os.path.join(WORK, 'agents', 'bin'), exist_ok=True)
+open(os.path.join(WORK, 'agents', 'bin', 'pc-pkg'), 'w').close()
+for cmd, want in (('sudo -n apt-get install -y iw nvme-cli', '`pc pkg install iw nvme-cli --apply`'),
+                  ('sudo apt remove weston', '`pc pkg remove weston --apply`')):
+    rc, ctx, dec = hint(cmd)
+    check(f'apt hint {cmd!r}', rc == 0 and dec is None and ctx and want in ctx or print('     got', rc, ctx, dec))
+for cmd in ('apt-cache policy iw', 'apt list --installed', "echo 'apt-get install x'", 'dpkg -l iw'):
+    rc, out = run(cmd)
+    check(f'no apt hint {cmd!r}', rc == 0 and out is None or print('     got', rc, out))
+os.remove(os.path.join(WORK, 'agents', 'bin', 'pc-pkg'))
+for cmd in ('sudo -n apt-get install -y iw nvme-cli', 'sudo apt remove weston'):
+    SPAWNED.pop(cmd)
+
+# T1147: sudo once per loop item writes 3 journal lines each; nudge to one root shell.
+SUDO_LOOP = [
+    'ls /tmp | while read p; do sudo -n du -sk "$p"; done',
+    'sudo -n find /tmp -maxdepth 1 | while read p; do n=$(sudo -n du -sm "$p"); echo $n; done',
+    'for d in /tmp/*; do sudo du -sk $d; done',
+    'until false; do nice sudo -n true; done',
+    'ls /tmp | xargs -I{} sudo -n du -sk {}',
+    'find /tmp | xargs -r -n 1 sudo du -sk',
+    'for f in a; do `sudo ls`; done',
+    'while read p\n  do\n  n=`sudo du -sk $p`\ndone < l',
+]
+for cmd in SUDO_LOOP:
+    rc, ctx, dec = hint(cmd)
+    check(f'sudo-loop hint {cmd[:46]!r}', rc == 0 and dec is None and ctx and "sudo -n bash -c '" in ctx
+          and 'sudo -n find' in ctx or print('     got', rc, ctx, dec))
+NO_SUDO_LOOP = [
+    "sudo -n bash -c 'for p in /tmp/*; do du -sk \"$p\"; done'", 'sudo -n find /tmp -exec du -sk {} +',
+    'sudo -n du -sk /tmp', 'for f in a b; do echo $f; done; sudo -n ls', "echo 'while read p; do sudo x; done'",
+    "grep -n 'do sudo' notes.md", 'ls | xargs grep sudo', "cat > s.sh <<'EOF'\nfor f in x; do sudo ls; done\nEOF\nls",
+]
+for cmd in NO_SUDO_LOOP:
+    rc, out = run(cmd)
+    check(f'no sudo-loop hint {cmd[:43]!r}', rc == 0 and out is None or print('     got', rc, out))
+
 
 def p50(cmd):
     """Median wall ms of 10 hook runs on cmd."""
@@ -197,13 +348,15 @@ load, ncpu = os.getloadavg()[0], os.cpu_count()
 u = f', unjudged at load {load:.2f}' if load > ncpu / 2 else ''
 ms = miss_ms(event('ls -la; git status'))
 check(f'front miss median {ms:.1f} ms (budget 8 ms{u})', ms <= 8 or u)
+ms = miss_ms(event('systemctl --user status netdata; systemctl show x'))
+check(f'front read-only systemctl miss median {ms:.1f} ms, no python (budget 10 ms{u})', ms <= 10 or u)
 ms = miss_ms(event('cat <<EOF\n' + 'a' * 100000 + '\nEOF'))
 check(f'front 100 KB miss median {ms:.1f} ms (budget 15 ms{u})', ms <= 15 or u)
 
-trig = [c for c, _ in DENY + KILL_DENY + KILL_OWN][:20]
+trig = [c for c, _ in DENY + KILL_DENY + KILL_OWN][:20] + [c for c, _ in HINT]
 same = [c for c in trig if subprocess.run([HOOK], input=event(c).encode(), capture_output=True, env=ENV, cwd=WORK).stdout
         == subprocess.run(['/usr/bin/python3', '-IS', IMPL], input=event(c).encode(), capture_output=True, env=ENV, cwd=WORK).stdout]
-check(f'front deny output byte-identical to the impl on {len(same)}/{len(trig)} trigger commands', len(same) == len(trig) == 20)
+check(f'front deny/hint output byte-identical to the impl on {len(same)}/{len(trig)} trigger commands', len(same) == len(trig) == 20 + len(HINT))
 
 rc, out = run('', raw=json.dumps({'tool_name': 'Write', 'tool_input': {'content': 'until x; do sleep 1; done'}}))
 check('pass a non-Bash tool', rc == 0 and out is None)
@@ -244,6 +397,20 @@ kdata = [c for c in kills if c.lstrip().startswith(('echo ', 'grep ', 'printf ',
          and not any(o in c for o in (';', '&', '|', '$(', '\n'))]
 print(f'     replay: {sum("pkill" in c or "pgrep" in c for c in cmds)} pkill/pgrep commands, {len(kills)} self-kill denies')
 check('replay: 0 self-kill denies where pkill is data (echo/grep/claude -p text)', not kdata or print('     data', kdata[:3]))
+rw = [c for c in cmds if 'pactl' in c or 'powerprofilesctl' in c or 'systemctl' in c]
+hinted = [c for c, (_, o) in zip(rw, run_many(rw)) if o and 'additionalContext' in o.get('hookSpecificOutput', {})]
+hdata = [c for c in hinted if c.lstrip().startswith(('echo ', 'grep ', 'printf ', 'claude ', 'rg '))
+         and not any(o in c for o in (';', '&', '|', '$(', '\n'))]
+print(f'     replay: {len(rw)} pactl/powerprofilesctl/systemctl commands, {len(hinted)} pc-verb hints')
+check('replay: 0 pc-verb hints where the tool is data (echo/grep/claude -p text)', not hdata or print('     data', hdata[:3]))
+sh = [c for c in cmds if 'grep' in c and '{' in c or '-newer' in c or 'cd ' in c and 'rm ' in c]
+res = run_many(sh)
+shint = [c for c, (_, o) in zip(sh, res) if o and 'shadow (KB' in o.get('hookSpecificOutput', {}).get('additionalContext', '')]
+cdrm = [c for c, (_, o) in zip(sh, res) if o and 'cds into' in o.get('hookSpecificOutput', {}).get('permissionDecisionReason', '')]
+sdata = [c for c in shint + cdrm if c.lstrip().startswith(('echo ', 'printf ', 'claude ', 'rg '))
+         and not any(o in c for o in (';', '&', '|', '$(', '\n'))]
+print(f'     replay: {len(sh)} grep/find/cd+rm commands, {len(shint)} ugrep/bfs hints, {len(cdrm)} cd-then-rm denies')
+check('replay: 0 shadow hints or cd-then-rm denies where the tool is data', not sdata or print('     data', sdata[:3]))
 lost = [c for c, (d, _) in zip(hits, denied_many(hits)) if not d]
 check(f'replay: the fast path keeps all {len(hits)} denies ({len(lost)} lost)', not lost or print('     lost', lost[:3]))
 

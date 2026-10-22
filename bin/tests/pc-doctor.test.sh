@@ -196,6 +196,30 @@ cat >"$FLED4" <<'EOF'
 {"ts":"2026-01-01T00:00:00+0000","id":"fakenoread1","session":"s1","cmd":"bar","target":"t2","before":"x","after":"y","rollback":"r2","read":""}
 {"id":"fakenoread1","verified":false,"observed":"x"}
 EOF
+FLED5="$WORK/ledger-reverted.jsonl"   # T1093: an unverified row whose rollback ran and verified back to `before`
+cat >"$FLED5" <<'EOF'
+{"ts":"2026-01-01T00:00:00+0000","id":"fakerev1","session":"s1","cmd":"foo","target":"t","before":"a","after":"b","rollback":"undo-t","redo":"foo","read":""}
+{"id":"fakerev1","verified":false,"observed":"c"}
+{"ts":"2026-01-01T00:01:00+0000","id":"fakerev2","session":"s1","cmd":"bash -c undo-t","target":"t","before":"b","after":"a","rollback":"foo","redo":"undo-t","read":""}
+{"id":"fakerev2","verified":true,"observed":"a"}
+EOF
+FLED6="$WORK/ledger-open.jsonl"   # T1093: no rollback, an unverified rollback, a plain open row, a verified match that came first: 5 open
+cat >"$FLED6" <<'EOF'
+{"ts":"2026-01-01T00:00:00+0000","id":"fakenoroll1","session":"s1","cmd":"foo","target":"t","before":"a","after":"b","rollback":"","redo":"foo","read":""}
+{"id":"fakenoroll1","verified":false,"observed":"c"}
+{"ts":"2026-01-01T00:01:00+0000","id":"fakenoroll2","session":"s1","cmd":"bash -c ","target":"t","before":"b","after":"a","rollback":"foo","redo":"","read":""}
+{"id":"fakenoroll2","verified":true,"observed":"a"}
+{"ts":"2026-01-01T00:00:00+0000","id":"fakerev3","session":"s1","cmd":"bar","target":"u","before":"x","after":"y","rollback":"undo-u","redo":"bar","read":""}
+{"id":"fakerev3","verified":false,"observed":"z"}
+{"ts":"2026-01-01T00:01:00+0000","id":"fakerev4","session":"s1","cmd":"bash -c undo-u","target":"u","before":"y","after":"x","rollback":"bar","redo":"undo-u","read":""}
+{"id":"fakerev4","verified":false,"observed":"z"}
+{"ts":"2026-01-01T00:02:00+0000","id":"fakeopen1","session":"s1","cmd":"baz","target":"v","before":"p","after":"q","rollback":"r","read":""}
+{"id":"fakeopen1","verified":false,"observed":"p"}
+{"ts":"2026-01-01T00:03:00+0000","id":"fakeearly1","session":"s1","cmd":"pc x set a","target":"w","before":"b","after":"a","rollback":"pc x set b","redo":"pc x set a","read":""}
+{"id":"fakeearly1","verified":true,"observed":"a"}
+{"ts":"2026-01-01T00:05:00+0000","id":"fakelate2","session":"s1","cmd":"pc x set b","target":"w","before":"a","after":"b","rollback":"pc x set a","redo":"pc x set b","read":""}
+{"id":"fakelate2","verified":false,"observed":"a"}
+EOF
 
 # Fake /proc trees (6, 6b): the browsers row reads only playwright/Chrome cmdlines and the residue row only
 # probe comms and uinput, so one tree carries a browsers case (pids 4xxx) and a residue case (pids 5xxx).
@@ -259,6 +283,8 @@ FPROC="$F1" LEDGER="$FLED2" FLOAD=0.50 SLOW=always MODE=always drun r-live
 rm -f "$FR/pc-status/sudo-ok" "$FR/pc-status/alert-spool" "$WORK/state/sudo-calls"
 FPROC="$F2" LEDGER="$FLED3" FLOAD=6.00 SLOW=always MODE=always drun r-orphan
 FPROC="$F4" LEDGER="$FLED4" drun r-stale
+LEDGER="$FLED5" drun r-reverted
+LEDGER="$FLED6" drun r-open
 sudo_true=$(grep -c '^true' "$WORK/state/sudo-calls"); sudo_ls=$(grep -c '^ls ' "$WORK/state/sudo-calls")
 FPROC="$F3" LEDGER="$FLED3" FLOAD=1.10 SLOW=serial MODE=always drun r-server
 FAKE_UNDO=slow FLOAD=0.50 fdoc --json >"$WORK/idle-full.json" 2>/dev/null
@@ -283,6 +309,17 @@ r=$(row r-stale ledger)
 is 'a row still false live, or with no read, still fails' "$(st "$r")" FAIL
 case "$(dt "$r")" in *'2 unverified (fakestill1,fakenoread1)'*) ok 'the failing ledger row names both ids';; *) nok 'the failing ledger row names both ids' "$r";; esac
 is 'a false re-read appends nothing' "$(wc -l <"$FLED4")" 4
+is 'the FAIL row ends with one ack command per open row' "$(dt "$r")" \
+  'exit 1: 2 changes · 2 unverified (fakestill1,fakenoread1) · 0 without rollback · fix: pc undo ack fakestill1 --why "<cause>"; pc undo ack fakenoread1 --why "<cause>"'
+
+# --- 5c. a row rolled back by a verified undo to its `before` is reverted, not open (T1093) ----
+r=$(row r-reverted ledger)
+is 'a reverted pair is OK without an ack' "$(st "$r")" OK
+is 'the reverted row is listed once' "$(dt "$r")" '2 changes · 0 unverified (1 reverted: fakerev1 by fakerev2) · 0 without rollback'
+r=$(row r-open ledger)
+is 'no rollback, an unverified rollback, or a match older than the row still fails' "$(st "$r")" FAIL
+is 'the fix line shows 3 open rows and counts the rest' "$(dt "$r")" \
+  'exit 1: 7 changes · 5 unverified (fakenoroll1,fakerev3,fakerev4,fakeopen1,fakelate2) · 1 without rollback (fakenoroll1) · fix: pc undo ack fakenoroll1 --why "<cause>"; pc undo ack fakerev3 --why "<cause>"; pc undo ack fakerev4 --why "<cause>"; +2 more'
 
 # --- 6. the browsers row: a fixture /proc, never a real process ---------------
 # TSP-020: a playwright-mcp / headless-chrome tree that outlived its task.
@@ -405,7 +442,7 @@ sdrun() {   # sdrun <n fails of the timer service> <n fails of a Restart= servic
     for _ in $(seq 1 "$2"); do echo '{"USER_UNIT":"restarty.service"}'; done; } >"$WORK/state/fails.json"
   for i in $(seq 1 "$3"); do echo 'x is critical' >"$WORK/aspool/1-$i"; done
   HOME="$WORK/home" XDG_RUNTIME_DIR="$WORK/run" HARNESS_CONFIG=/dev/null PC_LEDGER="$WORK/none.jsonl" PC_PROC="$WORK/proc-none" \
-    PC_ALERT_SPOOL="$WORK/aspool" PC_ALERT_LOG="$WORK/alert.log" AGENT_WORK="$WORK/aw" PC_AGENT_WORK_MAX_MB="$4" \
+    PC_ALERT_SPOOL="$WORK/aspool" PC_ALERT_LOG="$WORK/alert.log" AGENT_WORK="${AW:-$WORK/aw}" PC_AGENT_WORK_MAX_MB="$4" \
     FAKE_STATE="$WORK/state" FAKE_MODE=never FAKE_SLOW=never PC_DOCTOR_JOBS=1 PATH="$SB:$DS:$PATH" PC_NOT_OURS='^fx-foreign' \
     "$FB/doctor" --quick --json >"$WORK/sd.json" 2>/dev/null
 }
@@ -427,6 +464,56 @@ is '2 fails/h is OK' "$(row sd unit-loops | cut -f1)" OK
 is 'an empty retry spool is OK' "$(row sd alert-spool | cut -f1)" OK
 is 'the same fixture under a 100 MB cap is OK' "$(row sd agent-work | cut -f1)" OK
 is 'a non-timer unit failing 20/h is not this row' "$(row sd unit-loops | cut -f1)" OK
+# T1086: the agent-work row names the 24 h growth, days to the cap and the top 3 ticket dirs.
+# Sparse files carry the apparent size find reads, so GBs cost no disk; old files are not growth.
+G="$WORK/awg"; mkdir -p "$G/research/2026-10-20/T9001/a" "$G/games/show/build" "$G/evidence/T9002" "$G/evidence/T9003" "$G/research/2026-10-19/T9000"
+truncate -s 3G "$G/research/2026-10-20/T9001/a/x.glb"; truncate -s 2G "$G/games/show/build/y.pck"
+truncate -s 1G "$G/evidence/T9002/z.png"; truncate -s 512M "$G/evidence/T9003/w.png"
+truncate -s 5G "$G/research/2026-10-19/T9000/old.blend"; touch -d '3 days ago' "$G/research/2026-10-19/T9000/old.blend"
+AW="$G" sdrun 0 0 0 1000000
+r=$(row sd agent-work)
+is 'growth far from the cap is an OK agent-work row' "$(st "$r")" OK
+case "$(dt "$r")" in *'written +6.5 GB/24h, +6.5 GB/6h · net n/a · cap in '*' d · writers 6h: research/2026-10-20/T9001 3.0 GB, games/show 2.0 GB, evidence/T9002 1.0 GB') ok 'the row names the rates and the top 3 writer dirs';; *) nok 'the row names the rates and the top 3 writer dirs' "$r";; esac
+case "$r" in *T9000*|*T9003*) nok 'old files and the 4th dir are not in the top' "$r";; *) ok 'old files and the 4th dir are not in the top';; esac
+AW="$G" sdrun 0 0 0 9000
+r=$(row sd agent-work)
+is 'a cap under 2 d away is a WARN even under the cap' "$(st "$r")" WARN
+case "$(dt "$r")" in *'cap in 0.3 d'*) ok 'the WARN row names the days left';; *) nok 'the WARN row names the days left' "$r";; esac
+mkdir -p "$WORK/awq/research/2026-10-19/T9000"; truncate -s 1G "$WORK/awq/research/2026-10-19/T9000/old"; touch -d '3 days ago' "$WORK/awq/research/2026-10-19/T9000/old"
+AW="$WORK/awq" sdrun 0 0 0 100
+r=$(row sd agent-work)
+is 'no growth under the cap is OK' "$(st "$r")" OK
+case "$(dt "$r")" in *'written +0.0 GB/24h, +0.0 GB/6h · net n/a · writers 6h: none') ok 'no growth reads +0.0 GB/24h';; *) nok 'no growth reads +0.0 GB/24h' "$r";; esac
+# T1102: the cap rate is the net growth from the size history; 6 h written × 4 only while net is n/a; never the 24 h written total.
+printf -v T '%(%s)T' -1
+mkdir -p "$WORK/awn/games/show/build"; truncate -s 1G "$WORK/awn/games/show/build/y.pck"; touch -d '1 hour ago' "$WORK/awn/games/show/build/y.pck"
+printf '%s\t%s\n' $((T - 43200)) "$(du -sm "$WORK/awn" | cut -f1)" >"$WORK/awn.tsv"
+PC_AW_HISTORY="$WORK/awn.tsv" AW="$WORK/awn" sdrun 0 0 0 1000
+r=$(row sd agent-work)
+is 'a 1 GB rewrite inside the 6 h window with a flat size is OK' "$(st "$r")" OK
+case "$(dt "$r")" in *'written +1.0 GB/24h, +1.0 GB/6h · net +0.0 GB/24h · writers 6h: games/show 1.0 GB') ok 'the row splits written 24 h, 6 h and net';; *) nok 'the row splits written 24 h, 6 h and net' "$r";; esac
+is 'a sample is appended to a history older than 1 h' "$(wc -l <"$WORK/awn.tsv")" 2
+PC_AW_HISTORY="$WORK/awn.tsv" AW="$WORK/awn" sdrun 0 0 0 1000
+is 'at most one sample per hour' "$(wc -l <"$WORK/awn.tsv")" 2
+mkdir -p "$WORK/binm"; cp "$FB"/* "$WORK/binm/"
+sed -i 's/rate = (net == "n\/a") ? w6 \* 4 : net/rate = (net > w6 * 4) ? net : w6 * 4/' "$WORK/binm/doctor"
+is 'mutation selftest: the mutant uses max(net, 6 h written × 4)' "$(grep -c 'rate = (net > w6 \* 4) ? net : w6 \* 4$' "$WORK/binm/doctor")" 1
+rm -f "$WORK/run/pc-status/aw-growth"*; cp "$WORK/awn.tsv" "$WORK/awn-m.tsv"
+PC_AW_HISTORY="$WORK/awn-m.tsv" FB="$WORK/binm" AW="$WORK/awn" sdrun 0 0 0 1000
+is 'mutation: max(net, 6 h × 4) WARNs on the rewrite inside the window' "$(st "$(row sd agent-work)")" WARN
+mkdir -p "$WORK/awr/research/2026-10-21/T9101" "$WORK/awr/evidence/T9103"; truncate -s 5G "$WORK/awr/research/2026-10-21/T9101/a.blend"; truncate -s 300K "$WORK/awr/evidence/T9103/c.json"
+PC_AW_HISTORY="$WORK/awr.tsv" AW="$WORK/awr" sdrun 0 0 0 30000
+r=$(row sd agent-work)
+is 'a real +5 GB in 6 h without history is a WARN' "$(st "$r")" WARN
+case "$(dt "$r")" in *'net n/a · cap in 1.5 d · writers 6h: research/2026-10-21/T9101 5.0 GB, evidence/T9103 300 KB') ok 'no history: the 6 h rate sets the days; writers are named by path, small ones in KB';; *) nok 'no history: the 6 h rate sets the days; writers are named by path, small ones in KB' "$r";; esac
+is 'the first run starts the history' "$(wc -l <"$WORK/awr.tsv")" 1
+mkdir -p "$WORK/awg2/evidence/T9102"; head -c 3145728 /dev/urandom >"$WORK/awg2/evidence/T9102/x.bin"; touch -d '3 days ago' "$WORK/awg2/evidence/T9102/x.bin"
+printf '%s\t0\n' $((T - 2592000 - 7200)) $((T - 21660)) >"$WORK/awg2.tsv"
+PC_AW_HISTORY="$WORK/awg2.tsv" AW="$WORK/awg2" sdrun 0 0 0 25
+r=$(row sd agent-work)
+is 'net growth from the history with no recent writes is a WARN' "$(st "$r")" WARN
+case "$(dt "$r")" in *'+0.0 GB/6h · net +0.0 GB/24h · cap in 1.'*' d'*) ok 'the net rate sets the days';; *) nok 'the net rate sets the days' "$r";; esac
+is 'samples older than 30 d are pruned' "$(awk -v t=$((T - 2592000)) '$1 < t' "$WORK/awg2.tsv" | wc -l)" 0
 is 'the doctor never asked the stub to mutate' "$(cat "$WORK/state/refused" 2>/dev/null | wc -l)" 0
 # T734: a timer loop of a unit matching PC_NOT_OURS is named on an OK row, never a FAIL.
 sdrun 0 0 0 100 48

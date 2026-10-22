@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # agent-preflight — the first command of every Dark-Eye agent: the six things every
 # one of them re-derived by hand, the three rules and the three commands. < 0.5 s.
-# Exit 1 when the tree is dirty or a hand-run body is live ("do not restart").
+# Exit 1 when code is newer than the running body, the tree cannot be read, or a hand-run body is live ("do not restart").
 set -uo pipefail
 
 EYE=${DARK_EYE_DIR:-$HOME/the-dark-eye}
@@ -16,25 +16,48 @@ for a in "$@"; do
 done
 
 # --- the probes, all at once ------------------------------------------------
+T=$(mktemp -d) || exit 1; trap 'rm -rf "$T"' EXIT
 {
-  systemctl --user show dark-eye -p ActiveState,SubState,NRestarts,MainPID > /tmp/.pf.unit 2>/dev/null
+  systemctl --user show dark-eye --timestamp=unix -p ActiveState,SubState,NRestarts,MainPID,ActiveEnterTimestamp > $T/unit 2>/dev/null
 } &
 { journalctl --user -u dark-eye -n 400 --no-pager -o cat 2>/dev/null |
-    grep -E 'eye up at|\[eye-render\] backend ' | tail -3 > /tmp/.pf.journal; } &
-{ eye health 2>/dev/null > /tmp/.pf.health; eye status 2>/dev/null > /tmp/.pf.orbit; } &
-{ git -C "$EYE" status --porcelain 2>/dev/null > /tmp/.pf.git; } &
-{ pactl get-default-sink 2>/dev/null > /tmp/.pf.sink
-  pactl list sinks short 2>/dev/null | grep -c bluez > /tmp/.pf.buds
-  pw-metadata -n settings 2>/dev/null | sed -n "s/.*'log.level' value:'\\([0-9]*\\)'.*/log.level \\1/p" | head -1 > /tmp/.pf.pwlog; } &
+    grep -E 'eye up at|\[eye-render\] backend ' | tail -3 > $T/journal; } &
+{ eye health 2>/dev/null > $T/health; eye status 2>/dev/null > $T/orbit; } &
+{ git -C "$EYE" status --porcelain > $T/git 2>$T/giterr && : > $T/giterr; } &
+{ pactl get-default-sink 2>/dev/null > $T/sink
+  pactl list sinks short 2>/dev/null | grep -c bluez > $T/buds
+  pw-metadata -n settings 2>/dev/null | sed -n "s/.*'log.level' value:'\\([0-9]*\\)'.*/log.level \\1/p" | head -1 > $T/pwlog; } &
 wait
 
-. /tmp/.pf.unit 2>/dev/null || true
-BACKEND=$(grep -o 'backend [a-z]*' /tmp/.pf.journal | tail -1)
-LASTUP=$(grep 'eye up at' /tmp/.pf.journal | tail -1)
-DIRTY=$(wc -l < /tmp/.pf.git)
-SINK=$(cat /tmp/.pf.sink)
-BUDS=$(cat /tmp/.pf.buds)
-PWLOG=$(cat /tmp/.pf.pwlog)
+. $T/unit 2>/dev/null || true
+BACKEND=$(grep -o 'backend [a-z]*' $T/journal | tail -1)
+LASTUP=$(grep 'eye up at' $T/journal | tail -1)
+DIRTY=$(wc -l < $T/git)
+# shipped code (body/src, eye-render, bridge; tests excluded) changed or deleted since the unit started
+STARTED=${ActiveEnterTimestamp:-} STARTED=${STARTED#@} NEWER="" TREEERR=""
+[ -z "${ActiveState:-}" ] && TREEERR="systemctl show dark-eye printed nothing"
+if [ "${ActiveState:-}" = active ] && [ -n "$STARTED" ] && [ "$STARTED" != 0 ]; then
+  SHIPPED=(body/src bridge body/render/target/release/eye-render)
+  if ! TREEERR=$(cd "$EYE" 2>&1); then
+    TREEERR="cd: ${TREEERR#*cd: }"
+  elif [ -s $T/giterr ]; then
+    TREEERR="git: $(head -1 $T/giterr)"
+  else
+    HAVE=(); for f in "${SHIPPED[@]}"; do [ -e "$EYE/$f" ] && HAVE+=("$f"); done
+    [ ${#HAVE[@]} -gt 0 ] && NEWER=$(cd "$EYE" && find "${HAVE[@]}" -type f -newermt "@$STARTED" 2>$T/find)
+    [ -s $T/find ] && TREEERR=$(head -1 $T/find)
+    # a deletion, a rename's old path or a copy's new path counts when its nearest existing directory changed after the start
+    while read -r f; do
+      d=$(dirname "$f"); while [ "$d" != . ] && [ ! -d "$EYE/$d" ]; do d=$(dirname "$d"); done
+      [ "$(stat -c %Y "$EYE/$d")" -ge "$STARTED" ] && NEWER+=$'\n'"$f"
+    done < <(sed -nE -e 's/^(R.|.R) (.*) -> .*/\2/p;t' -e 's/^(C.|.C) .* -> //p;t' -e 's/^(D.|.D) //p' "$T/git" | grep -E '^(body/src|bridge)/')
+    NEWER=$(grep -vE '(^|/)tests?/|\.test\.' <<<"$NEWER" | grep . | sort)
+  fi
+fi
+NNEWER=$(grep -c . <<<"$NEWER")
+SINK=$(cat $T/sink)
+BUDS=$(cat $T/buds)
+PWLOG=$(cat $T/pwlog)
 HOUR=$(date +%H)
 
 # a hand-run body / eye-render is any such pid outside the unit's cgroup; a sandbox
@@ -50,17 +73,23 @@ for p in $(pgrep -x eye-render 2>/dev/null; pgrep -x node 2>/dev/null); do
     HAND="$HAND $p"
   fi
 done
-rm -f /tmp/.pf.unit /tmp/.pf.journal /tmp/.pf.git /tmp/.pf.sink /tmp/.pf.buds /tmp/.pf.pwlog
 
 # --- the screen -------------------------------------------------------------
 echo "UNIT      ${ActiveState:-?}/${SubState:-?} pid ${MainPID:-?} NRestarts=${NRestarts:-?} ${BACKEND:-backend ?}"
 echo "          ${LASTUP:-no 'eye up at' in the last 400 lines}"
-echo "BRIDGE    $(cat /tmp/.pf.health 2>/dev/null || echo 'no answer')"
-echo "TREE      $DIRTY dirty file(s) in $EYE$([ "$DIRTY" -gt 0 ] && echo ' — DO NOT RESTART: a restart ships a half-applied build')"
+echo "BRIDGE    $(cat $T/health 2>/dev/null || echo 'no answer')"
+if [ -n "$TREEERR" ]; then
+  echo "TREE      unknown ($TREEERR) — do not restart"
+elif [ "${ActiveState:-}" != active ] || [ -z "$STARTED" ] || [ "$STARTED" = 0 ]; then
+  echo "TREE      body not running ($DIRTY dirty in $EYE)"
+elif [ "$NNEWER" -eq 0 ]; then
+  echo "TREE      $DIRTY dirty, 0 newer than the running body (started $(date -d "@$STARTED" '+%m-%d %H:%M')) — a restart ships the running code"
+else
+  echo "TREE      $DIRTY dirty, $NNEWER newer than the running body (started $(date -d "@$STARTED" '+%m-%d %H:%M')) — DO NOT RESTART: $(head -5 <<<"$NEWER" | paste -sd' ')"
+fi
 echo "HAND-RUN  ${HAND:-none}${HAND:+ — outside the unit cgroup, DO NOT RESTART}${SAND:+   sandbox:$SAND}"
-echo "ORBITERS  $(cat /tmp/.pf.orbit 2>/dev/null || echo '-')"
+echo "ORBITERS  $(cat $T/orbit 2>/dev/null || echo '-')"
 echo "CHANNEL   ${HOUR}h · sink $SINK · bluez sinks $BUDS · pipewire ${PWLOG:-log.level ?}"
-rm -f /tmp/.pf.health /tmp/.pf.orbit
 
 if [ -z "$BRIEF" ]; then
   cat <<'EOF'
@@ -74,5 +103,5 @@ COMMANDS  eval "$(body-sandbox up --name t1 --eye offscreen --stats --audio null
 EOF
 fi
 
-{ [ "$DIRTY" -gt 0 ] || [ -n "$HAND" ]; } && exit 1
+{ [ "$NNEWER" -gt 0 ] || [ -n "$TREEERR" ] || [ -n "$HAND" ]; } && exit 1
 exit 0

@@ -21,6 +21,16 @@ UNITDIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 TRANSDIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/systemd/transient"
 SELF=$(readlink -f "$0")
 
+# scope_ok — a user-bus scope can start; a positive probe is cached per boot in $XDG_RUNTIME_DIR/pc-status/scope-ok (T1138).
+scope_ok() {
+  local f=${XDG_RUNTIME_DIR:+$XDG_RUNTIME_DIR/pc-status/scope-ok} b
+  b=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
+  [ -n "$f" ] && [ -n "$b" ] && [ "$(cat "$f" 2>/dev/null)" = "$b" ] && return 0
+  systemd-run --user --scope -q true >/dev/null 2>&1 || return 1
+  [ -n "$f" ] && [ -n "$b" ] && mkdir -p "${f%/*}" 2>/dev/null && printf '%s\n' "$b" >"$f" 2>/dev/null
+  return 0
+}
+
 # sd_quote — one ExecStart argument in double quotes with systemd's escapes.
 sd_quote() { local s=${1//\\/\\\\}; s=${s//\"/\\\"}; s=${s//%/%%}; s=${s//\$/\$\$}; printf '"%s"' "$s"; }
 
@@ -106,7 +116,7 @@ while [ $# -gt 0 ]; do
 done
 [ $# -gt 0 ] || { usage >&2; exit 2; }
 
-if systemd-run --user --scope -q true >/dev/null 2>&1; then
+if scope_ok; then
   MODE=scope
   PRE=(systemd-run --user --scope -q --expand-environment=no --slice=fleet-heavy.slice
        -p CPUWeight=idle -p IOWeight=10 --nice=19 --)

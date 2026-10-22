@@ -80,6 +80,10 @@ SKILL_SKIP=(
   $'skills/make-lesson/*\tailearning is off limits'
   $'skills/moodle-ai-setup/tests/setup.test.sh\tits live half drives the real moodle53 container'
 )
+# Paused skills (T1103): each `<skill><TAB><why>` row of paused-skills.txt skips all of skills/<skill>/; unpausing = delete the row.
+while IFS=$'\t' read -r s why; do
+  [[ -n $s && $s != \#* ]] && SKILL_SKIP+=("skills/$s/*"$'\t'"$why")
+done < <(cat "$root/bin/tests/paused-skills.txt" 2>/dev/null)
 
 # A file is host-only when listed in host-only.txt (`<path under the root>[  # <reason>]`) or tagged in its first 5 lines.
 host_only() { awk -v f="$1" '$1 == f { x = 1 } END { exit !x }' "$root/bin/tests/host-only.txt" 2>/dev/null || head -n 5 "$2" | grep -qE '^(#|//) host-only'; }
@@ -190,13 +194,14 @@ newest_of() {
 }
 
 run_one() {
-  local rel=$1 n=${2:-10} t0 rc s cmd path=$root/$1 p=$PATH tmp file_timeout
+  local rel=$1 n=${2:-10} t0 rc s cmd path=$root/$1 p=$PATH tmp file_timeout rlog
   grep -qxF -- "$rel" <<<"$slow" && n=0
   file_timeout=$(awk -F'\t' -v r="$rel" '$1 == r { print $2; exit }' "$logs/caps" 2>/dev/null)
   # Skill tests run from where they were found, with the docker shim first on PATH: no real Moodle container.
   [[ $rel == skills/* ]] && path=$(awk -F'\t' -v r="$rel" '$1 == r { print $2; exit }' "$logs/skills.tsv") p=$logs/shim:$p
-  # The sudo shim comes first on PATH unless the file has a `# live-sudo` line in its first 5 lines (T538).
-  head -n 5 "$path" | grep -qE '^(#|//) live-sudo' || p=$logs/sudo:$p
+  # The sudo shim comes first on PATH unless the file has a `# live-sudo` line in its first 5 lines (T538); a live-sudo
+  # file logs its pc_root calls to state/test-root-calls.tsv (T1136).
+  head -n 5 "$path" | grep -qE '^(#|//) live-sudo' && rlog=$root/state/test-root-calls.tsv || p=$logs/sudo:$p
   case $rel in
     dashboard/tests/*.py) cmd=(bash -c 'cd "$1/dashboard" && exec python3 -m pytest -q -p no:cacheprovider "${2#dashboard/}"' _ "$root" "$rel") ;;
     *.sh) cmd=(bash "$path") ;;
@@ -206,9 +211,10 @@ run_one() {
   # The slug is the file stem without punctuation: test greps for words like `push` must not match the TMPDIR path.
   s=${rel##*/} s=${s%%.*}
   grep -qF -- '--tmpfs /tmp' "$path" || tmp=$(mktemp -d "$runroot/${s//[^[:alnum:]]/}.XXXX")
-  cmd=(env "PATH=$p" "SUDO_SHIM_TEST=$rel" ${tmp:+"TMPDIR=$tmp"} "${cmd[@]}")
+  # Empty CI_UNITS: ci-window inside a test never sees the live CI units (its own scope sits outside the CI's cgroup).
+  cmd=(env "PATH=$p" "SUDO_SHIM_TEST=$rel" CI_UNITS= ${tmp:+"TMPDIR=$tmp"} ${rlog:+"PC_TEST_ROOT_LOG=$rlog"} "${cmd[@]}")
   # Own scope per file: the cgroup OOM killer hits only this file; the wrapper marks an oom_kill for the report.
-  [[ -n $scoped ]] && cmd=(systemd-run --user --scope -q --expand-environment=no -p "MemoryMax=$mem" -p MemorySwapMax=0 -p OOMPolicy=continue
+  [[ -n $scoped ]] && cmd=(systemd-run --user --scope -q --slice=agents.slice --expand-environment=no -p "MemoryMax=$mem" -p MemorySwapMax=0 -p OOMPolicy=continue
     bash -c '"${@:3}"; rc=$?; c=/sys/fs/cgroup$(sed -n "s/^0:://p" /proc/self/cgroup); [ -e "$c/memory.events" ] && grep -qE "^oom_kill [1-9]" "$c/memory.events" && : >"$1"; awk "/^usage_usec/ { print \$2 / 1e6 }" "$c/cpu.stat" >"$2" 2>/dev/null; exit $rc'
     _ "$logs/${rel//\//__}.oom" "$logs/${rel//\//__}.cpu" "${cmd[@]}")
   t0=$(date +%s.%N)
@@ -239,11 +245,11 @@ exec_ok() {
   printf '#!/bin/sh\n' >"$f" && chmod +x "$f" && "$f" 2>/dev/null; rc=$?
   rm -f "$f"; return $rc
 }
-own_tmp= runroot=
+own_tmp= runroot= logs=
 tmp_base=${TMPDIR:-/tmp}
 residue() { find "$tmp_base" -maxdepth 1 -name 'tmp.*' -user "$(id -u)" 2>/dev/null | wc -l; }
 tmp_before=$(residue)
-trap 'rm -rf ${runroot:+"$runroot"} ${own_tmp:+"$own_tmp"}' EXIT
+trap 'rm -rf ${logs:+"$logs"} ${runroot:+"$runroot"} ${own_tmp:+"$own_tmp"}' EXIT
 trap 'exit 143' INT TERM HUP
 if ! exec_ok "${TMPDIR:-/tmp}"; then
   for base in ${XDG_RUNTIME_DIR:+"$XDG_RUNTIME_DIR"} "$HOME/.cache"; do
@@ -273,7 +279,16 @@ export CREATIVE_CI_LOG=$runroot/creative-ci.jsonl RUN_TESTS_ID=${runroot##*/}
 timings="$root/state/test-timings.tsv"
 history="$root/state/test-timings-history.tsv"
 mem=${TEST_MEM_MAX:-6G} scoped=
-systemd-run --user --scope -q true >/dev/null 2>&1 && scoped=1
+# scope_ok — a user-bus scope can start; a positive probe is cached per boot in $XDG_RUNTIME_DIR/pc-status/scope-ok (T1138).
+scope_ok() {
+  local f=${XDG_RUNTIME_DIR:+$XDG_RUNTIME_DIR/pc-status/scope-ok} b
+  b=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
+  [ -n "$f" ] && [ -n "$b" ] && [ "$(cat "$f" 2>/dev/null)" = "$b" ] && return 0
+  systemd-run --user --scope -q true >/dev/null 2>&1 || return 1
+  [ -n "$f" ] && [ -n "$b" ] && mkdir -p "${f%/*}" 2>/dev/null && printf '%s\n' "$b" >"$f" 2>/dev/null
+  return 0
+}
+scope_ok && scoped=1
 export root tmo logs slow mem scoped runroot
 export -f run_one
 t0=$(date +%s)

@@ -18,6 +18,7 @@
 # hint mv-otio: uv venv -p 3.12 ~/.local/opt/mv-otio + opentimelineio 0.18.1, otio-kdenlive-adapter 0.0.3, otio-fcpx-xml-adapter 1.0.0 (mv-otio prints the line; T646).
 # hint npm:playwright-core playwright:chromium-headless-shell: `npm install -g playwright-core`, then `playwright-core install --with-deps chromium-headless-shell` (install-fresh.sh --suite does both).
 # hint claude eye body-sandbox tailscale: the agent CLI, The Dark Eye repo, tailscale.com/install.sh.
+# hint ruff uv: uv from astral.sh/uv/install.sh into ~/.local/bin; then uv tool install ruff (user scope, ~/.local/bin/ruff; T1129).
 # tool	apt	verbs	level
 bc	bc	improve-meter.test.sh,mv-encode,mv-mix,mv-render	test
 blender	blender	asset-pipeline.sh,mv-render	optional:media
@@ -36,9 +37,12 @@ dbus-run-session	dbus-daemon	pc-dbus.test.sh,pc-win.test.sh	test
 dconf	dconf-cli	baseline.sh	advisory
 dmidecode	dmidecode	pc-hw	advisory
 docker	docker.io	boot-check.sh,moodle-envs,moodle-keep,pc-docker,pc-doctor,pc-net,pc-status,sentinel-check	advisory
+etckeeper	etckeeper	pc-conf	advisory
 eye	-	agent-preflight,plan-publish	advisory
+expect	expect	agents	advisory
 ffmpeg	ffmpeg	game-ci,mv-encode,mv-mix,mv-render,mv-review,test_voice.py	test
 ffprobe	ffmpeg	game-ci,mv-encode,mv-render,mv-review	optional:media
+flake8	flake8	agents	advisory
 fwupdmgr	fwupd	pc-hw	advisory
 gcc	gcc libc6-dev	orchestrator-handover.test.sh	test
 gdbus	libglib2.0-bin	boot-check.sh,lockcheck.sh,pc-mode,pc-status	advisory
@@ -95,7 +99,9 @@ python3:numpy	python3-numpy	ocr_find.py	advisory
 python3:pytest	python3-pytest	run.sh	test
 renderdoccmd	-	godot-smoke.sh	optional:gamedev
 resolvectl	systemd-resolved	pc-net,pc-status	advisory
+rg	ripgrep	os-survey	advisory
 rsync	rsync	ailearning-ci-daily	advisory
+ruff	-	agents	advisory
 run-clang-tidy	clang-tidy	cpp-tidy	optional:gamedev
 sensors	lm-sensors	pc-hw,pc-status,pc-thermal	advisory
 shellcheck	shellcheck	qa-metrics.sh	test
@@ -103,6 +109,8 @@ shutdown	systemd	maintenance-run	advisory
 smartctl	smartmontools	pc-hw,pc-io,pc-status	advisory
 snap	snapd	machine-inventory	advisory
 spirv-cross	spirv-cross	shader-check.sh	optional:gamedev
+spirv-dis	spirv-tools	shader-stats	optional:gamedev
+spirv-opt	spirv-tools	shader-stats	optional:gamedev
 spirv-val	spirv-tools	shader-check.sh	optional:gamedev
 ss	iproute2	pc-net	advisory
 ssh-add	openssh-client	code-review-sandbox	advisory
@@ -120,7 +128,9 @@ turbostat	linux-tools-common	pc-power	advisory
 ufw	ufw	pc-net	advisory
 unzip	unzip	cc0-fetch.sh,mv-assets	optional:media
 upower	upower	pc-status	advisory
+uv	-	maintenance-run	advisory
 vulkaninfo	vulkan-tools	gamedev	optional:gamedev
+watchman	watchman	agent-verify,pc-tmp	advisory
 weston	weston	cpp-vk-run.sh,game-ci,godot-smoke.sh	optional:gamedev
 wine	wine	game-ci	optional:gamedev
 wl-copy	wl-clipboard	pc-clip	advisory
@@ -131,6 +141,7 @@ xrandr	x11-xserver-utils	a11y_tree.py,env.sh,pc-mutter,pc-win	advisory
 ydotool	ydotool	env.sh,pc-click,pc-drag,pc-key,pc-move,pc-scroll,rd_type.py	advisory
 ydotoold	ydotool	pc-doctor,pc-status	advisory
 zip	zip	gamedev-tools.test.sh	test
+zstd	zstd	pc-disk	advisory
 tracy-capture	-	cpp-ci	optional:gamedev
 tracy-csvexport	-	cpp-ci	optional:gamedev
 addr2line	binutils	cpp-ci	optional:gamedev

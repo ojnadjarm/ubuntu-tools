@@ -2,7 +2,7 @@
 # Every flag in each gamedev CLI's --help is documented on a doc line, or under a ## heading, naming that CLI; no build.
 set -u
 export LC_ALL=C
-G=$(cd "$(dirname "$0")/.." && pwd)
+G=$(cd "$(dirname "$0")/.." && pwd -P)
 A=$(cd "$G/../.." && pwd)
 fails=0
 ok() { echo "ok   $1"; }

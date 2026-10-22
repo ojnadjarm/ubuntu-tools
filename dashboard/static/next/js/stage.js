@@ -12,6 +12,9 @@ const MORPH_MS = 1100, FORM_MS = 2200, ORBIT_FPS = 6, ORBIT_S = 180, LIFE_FPS = 
 const LIFE_RATE = [0, LIFE_FPS, WARM_FPS, 60], MASS_RATE = [0, WARM_FPS, 60];
 const COL = { mint: [0.074, 1, 0.35], gold: [1, 0.637, 0.133], vio: [0.434, 0.074, 1], ice: [0.347, 0.807, 1] };
 const smooth = (x) => x * x * (3 - 2 * x);
+const slice = () => new Promise((ok) => (window.requestIdleCallback ? requestIdleCallback(() => ok(), { timeout: 200 }) : setTimeout(ok, 16)));
+const later = (ms) => new Promise((ok) => setTimeout(ok, ms));
+const nextFrame = (S) => new Promise((ok) => { const f = S.frames, chk = () => (S.frames > f ? ok() : requestAnimationFrame(chk)); requestAnimationFrame(chk); });
 
 /* Where the world span of a scene sits on screen: centre, camera distance and tilt, from its box. */
 function fitOf(sc) {
@@ -22,13 +25,14 @@ function fitOf(sc) {
   return { cx: b.left + b.width / 2, cy: b.top + b.height / 2 + (fixed ? -0.25 * sy : 0.4 * sy), d, tilt: sc.tilt || 0 };
 }
 
-export function createStage(canvas) {
+/* Builds the stage in input-yielding slices (engine, recorded passes, atlas upload, program compiles, tier probe); resolves once the first visible frame needs no GPU setup. */
+export async function createStage(canvas) {
   const life = createLife({ seed: 7, still: () => still.matches });
   let eng, field, mass, eye, U, tex, crowd;
   const E = { x: innerWidth / 2, y: innerHeight * 0.4, r: 0, vx: 0, vy: 0, vr: 0, set: false, calm: false, vis: true };
   const rings = { n: 0, cur: new Float32Array(32), goal: new Float32Array(32), flash: new Float32Array(8) };
   const par = { x: 0, y: 0, tx: 0, ty: 0 }, rip = { i: 0, list: [0, 1, 2, 3].map(() => [0, 0, -9, 0]) };
-  let sc = null, fitFrom = null, fitNow = null, morphT0 = 0, drift = 0, lastNow = 0, scrollT = 0, spin = 0, ft = 0, bootT0 = 0, viaT0 = 0, aliveT = 0, tempo = 1;
+  let live = false, probing = false, sc = null, fitFrom = null, fitNow = null, morphT0 = 0, drift = 0, lastNow = 0, scrollT = 0, spin = 0, ft = 0, bootT0 = 0, viaT0 = 0, aliveT = 0, tempo = 1;
   const st = { life, E, sc: null, spin: 0, hooks: new Set() };
 
   const director = {
@@ -49,6 +53,7 @@ export function createStage(canvas) {
     },
     /* The wanted frame rate: 60 for input, travel, screen morphs and the alive grace, 30 while data settles, the orbit and idle life slower, else 0 until life.nextAt. */
     step(t, dt, full) {
+      if (!live) return 0;
       const now = performance.now(), fdt = lastNow ? Math.min(0.1, (now - lastNow) / 1000) : dt;
       lastNow = now;
       let fps = full ? 60 : 0;
@@ -99,6 +104,7 @@ export function createStage(canvas) {
       if (sc && sc.frame) sc.frame(st);
     },
     probe(S) {
+      if (!probing) return;
       const k = S.k;
       U.uRes.value.set(S.hdr.width, S.hdr.height);
       U.uEye.value.set(S.hdr.width / 2, S.hdr.height / 2, (Math.min(innerWidth, innerHeight) / 3) * k);
@@ -195,6 +201,8 @@ export function createStage(canvas) {
     return e;
   }
 
+  canvas.style.visibility = "hidden";
+  await slice();
   eng = createEngine(canvas, director);
   st.eng = eng;
   st.S = eng.S;
@@ -276,5 +284,44 @@ export function createStage(canvas) {
   st.massProject = (x, y, z) => { const v = new st.ctx.T.Vector3(x, y, z).applyMatrix4(mass.pts.matrixWorld).project(mass.cam); return { x: ((v.x + 1) * innerWidth) / 2, y: ((1 - v.y) * innerHeight) / 2 }; };
   st.ringPoint = ringPoint;
   st.frames = () => eng.S.frames;
+
+  /* GPU setup off the first frame, the canvas hidden so no compositor readback waits on it: one frame and the eye probe are recorded instead of drawn, every program they use compiles (in parallel where KHR_parallel_shader_compile exists) and links one per slice, then the tier probe the engine skipped runs here. */
+  async function warm() {
+    const { r } = st.ctx, render = r.render, passes = new Map();
+    r.render = (o, c) => { if (!passes.has(o)) passes.set(o, [c, r.getRenderTarget()]); };
+    try {
+      eng.wake(0);
+      await nextFrame(eng.S);
+      probing = true; director.probe(eng.S);
+    } finally { probing = false; r.render = render; }
+    await slice();
+    r.initTexture(tex);
+    const progs = new Set();
+    for (const [o, [c]] of passes) { await slice(); for (const m of r.compile(o, c)) progs.add(r.properties.get(m).currentProgram); }
+    const par = r.extensions.has("KHR_parallel_shader_compile");
+    for (const p of progs) { while (par && !p.isReady()) await later(8); await slice(); p.getUniforms(); }
+    const px = new Uint16Array(4);
+    for (const [o, [c, t]] of passes) {
+      if (!t) continue;
+      await slice();
+      const was = [t.scissor.clone(), t.scissorTest];
+      t.scissor.set(0, 0, 1, 1); t.scissorTest = true; r.setRenderTarget(t);
+      render.call(r, o, c);
+      r.readRenderTargetPixels(t, 0, 0, 1, 1, px);
+      t.scissor.copy(was[0]); t.scissorTest = was[1];
+    }
+    probing = true;
+    try {
+      await slice(); eng.probe();
+      let ms = Infinity;
+      for (let i = 0; i < 3; i++) { await slice(); ms = Math.min(ms, eng.probe()); }
+      const S = eng.S, perMp = ms / ((S.hdr.width * S.hdr.height) / 1e6);
+      eng.setTier(perMp < 2.2 ? "high" : perMp < 5 ? "mid" : "low"); // engine.js thresholds
+      S.probeMs = +ms.toFixed(2);
+    } finally { probing = false; }
+    live = true;
+    canvas.style.visibility = "";
+  }
+  await warm();
   return st;
 }

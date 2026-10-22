@@ -3,7 +3,7 @@ import { esc, when, gb, num } from "/static/js/core/fmt.js";
 import { dust } from "../shapes.js";
 import { fitEye, FACE } from "../gl/cam.js";
 import { odo, trail } from "../ui/num.js";
-import { verdict } from "../verdict.js";
+import { verdict, linked } from "../verdict.js";
 
 export const own = true;
 const sec = (D, n) => ((D.status || {}).sections || {})[n] || {};
@@ -30,18 +30,25 @@ const kv = (rows) => `<dl class="kv">${rows.map(([a, b]) => `<dt>${a}</dt><dd>${
 const pane = (cls, t, s, body) => `<section class="pane ${cls}"><h2><span data-dec>${t}</span><s>${s}</s></h2>${body}</section>`;
 const spark = (D, k, unit) => { const v = sv(D, k); return `<figure class="spk">${trail("ov." + k, v, v.length ? `${k}, last 30 minutes, now ${v[v.length - 1].toFixed(0)} ${unit}` : "")}<figcaption>${k} · 30 min <b>${v.length ? odo("ov.s" + k, v[v.length - 1].toFixed(0)) + " " + unit : "—"}</b></figcaption></figure>`; };
 
-/* The four counts of `agents-status --owner`: running, done today, waiting on you, queued. */
-const owner = (D) => { const o = D.owner || {}; return o.running === undefined ? "" : `<p class="owner">${[[o.running, "running"], [o.done, "done today"], [o.waiting, "waiting on you"], [o.queued, "queued"]].map(([n, t]) => `<span><b>${n}</b> ${t}</span>`).join("")}</p>`; };
+/* The four counts of `agents-status --owner`: running, done today, to do (open owner-todo steps), queued. */
+const owner = (D) => { const o = D.owner || {}; return o.running === undefined ? "" : `<p class="owner">${[[o.running, "running"], [o.done, "done today"], [o.waiting, "to do"], [o.queued, "queued"]].map(([n, t]) => `<span><b>${n}</b> ${t}</span>`).join("")}</p>`; };
 
 /* The pinned test site: its index and lesson board, from `/api/status` `test_site`. */
 export const pin = (D) => (D.test_site || []).length ? `<p class="pin">test site ${D.test_site.map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.name)}</a>`).join("")}</p>` : "";
+
+/* One line per need (age · first clause); a longer need opens into its full server text, ~/drop paths link into /files. */
+const OPEN = new Set();
+addEventListener("toggle", (e) => { const d = e.target; if (d.matches && d.matches(".probs details")) d.open ? OPEN.add(d.dataset.k) : OPEN.delete(d.dataset.k); }, true);
+const need = (r) => {
+  const sum = [r.t ? `<time>${esc(when(r.t))}</time>` : "", r.tag ? `<em>${esc(r.tag)}</em>` : "", esc(r.head)].filter(Boolean).join(" · ");
+  return r.head === r.full ? `<li><span class="one">${sum}</span></li>` : `<li><details data-k="${esc(r.k)}"${OPEN.has(r.k) ? " open" : ""}><summary>${sum}</summary><p>${linked(r.full)}</p></details></li>`;
+};
 
 export function render(grid, D) {
   const pw = sec(D, "power"), res = sec(D, "resources"), host = sec(D, "host"), net = sec(D, "network"), disk = sec(D, "disk");
   const ram = /(\d+) MB of (\d+) MB/.exec(val(res, "ram_available")), G = gauges(D), vd = verdict(D), dk = D.docker || [];
   const bh = val(pw, "battery_health"), free = (/,\s*(\S+) free/.exec(val(res, "disk_root")) || [])[1] || "", bat = num(val(pw, "battery"));
-  const ev = (D.events || []).slice(0, 6).map((e) => `<div class="ev"><span class="t">${esc(when(e.t))}</span><span class="kd ${esc(e.kind)}">${esc(e.kind)}</span><span class="x">${esc(e.text.split("\t")[0])}</span></div>`).join("");
-  const probs = vd.items;
+  const ev = (D.events || []).slice(0, 6).map((e) => `<div class="ev"><span class="t">${esc(when(e.t))}</span><span class="kd ${esc(e.kind)}">${esc(e.kind)}</span><span class="x" title="${esc(e.title || e.text)}">${esc(e.text)}</span></div>`).join("");
   const up = dk.filter((c) => c.state === "running").length;
   return `<div class="nxs hero">` +
     `<div class="side">` +
@@ -49,7 +56,7 @@ export function render(grid, D) {
     pane("p2", "disk", "smart " + esc((val(disk, "smart") || "?").toLowerCase()), `<div class="nbig">${odo("ov.disk", String(G[1].v))}<u>% · ${esc(gb(free))} free</u></div>${kv([["wear", val(disk, "percent_used") || "—"], ["spare", val(disk, "available_spare") || "—"]])}${spark(D, "io", "KB/s")}`) +
     pane("p3", "memory · cpu", "now", `<div class="nbig">${ram ? odo("ov.ram", (ram[1] / 1024).toFixed(1)) : "—"}<u>GB free of ${ram ? (ram[2] / 1024).toFixed(0) : "—"}</u></div>${kv([["load", val(host, "load") || "—"], ["temp", (val(res, "temp_max") || "—").replace(" C", " °C")]])}${spark(D, "cpu", "%")}`) +
     `</div><div class="eyebox" id="eyebox"><div class="eyefield" id="eyefield" aria-hidden="true"></div><div class="verdict${vd.bad ? " bad" : ""}" role="status">${owner(D)}${pin(D)}<b data-dec>${vd.text}</b>` +
-    (probs.length ? `<ul class="probs">${probs.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>` : `<span>nothing failed · every agent finished clean · no push waits on you</span>`) + `</div>` +
+    (vd.rows.length ? `<ul class="probs">${vd.rows.map(need).join("")}</ul>` : `<span>nothing failed · every agent finished clean · no push waits on you</span>`) + `</div>` +
     `<dl class="nread">${G.map((g, i) => `<div class="${g.bad ? "bad" : ""}" style="--r:${i}"><dt>${g.k}</dt><dd>${g.v === "—" ? "—" : odo("ov.g" + i, String(g.v))}<u>${esc(g.u)}</u></dd></div>`).join("")}</dl></div>` +
     `<div class="side">` +
     pane("p4", "network", "tailscale " + (val(net, "tailscale") === "Running" ? "on" : esc((val(net, "tailscale") || "?").toLowerCase())), `<div class="nbig">${esc(val(net, "internet") || "—")}</div><p class="sm">${esc(val(net, "wifi_ssid") || "no wifi")}</p>${kv([["lan", val(net, "lan_ip") || "—"], ["tailnet", val(net, "tailscale_ip") || "—"]])}${spark(D, "net", "kbit/s")}`) +

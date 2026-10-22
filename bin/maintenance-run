@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Weekly maintenance: /tmp sweep (pc tmp), apt full-upgrade, autoremove, needrestart, docker prune, reboot gate.
+# Weekly maintenance: /tmp sweep (pc tmp), apt full-upgrade, autoremove, needrestart, docker image + build-cache prune, uv cache prune, reboot gate.
 # Exit 0 ok · 3 reboot required but refused (deferred) · 4 reboot scheduled · 1 error.
 set -uo pipefail
 export LC_ALL=C DEBIAN_FRONTEND=noninteractive
@@ -11,6 +11,8 @@ WINDOW_END=5                                   # exclusive hour — not overrida
 REBOOT_DELAY=${MAINT_REBOOT_DELAY:-5}          # minutes announced and passed to shutdown
 AUTO_REBOOT=${MAINT_AUTO_REBOOT:-0}            # 1 = gated reboots; 0 or unset = never, push and exit 3 (owner 2026-09-13, T116)
 DOCKER_PKGS="docker.io docker-buildx docker-compose-v2 containerd"
+SETTLE_MAX=${MAINT_GATE_SETTLE:-120}           # seconds a mid-restart service may take to settle before the gate refuses (T1144)
+VERDICT_UNITS=${MAINT_GATE_VERDICT_UNITS-fleet-ci-daily.service ailearning-ci-daily.service}  # CI verdicts, not machine faults (T1039)
 
 dry=0; with_docker=0; assume_reboot=0; ignore_window=0
 for a in "$@"; do case "$a" in
@@ -79,6 +81,19 @@ fi
 svc=$(sudo needrestart -b 2>/dev/null | sed -n 's/^NEEDRESTART-SVC: //p' | tr '\n' ' ')
 out "services needing restart: ${svc:-none}"
 run docker image prune -af --filter until=168h
+bc() { docker system df --format '{{.Type}}\t{{.Size}}' 2>/dev/null | awk -F'\t' '$1 == "Build Cache" {print $2}'; }
+bc_before=$(bc)
+run docker builder prune -f --filter until=168h
+[ "$dry" = 1 ] || out "build cache ${bc_before:-?} → $(bc | grep . || echo ?)"
+if pgrep -x uv >/dev/null 2>&1; then out "uv cache: skip: uv busy"
+elif command -v uv >/dev/null; then
+  uvdir=$(uv cache dir 2>/dev/null); uvmb() { du -sm "$uvdir" 2>/dev/null | cut -f1; }
+  uv_before=$(uvmb)
+  urc=0; run nice -n 19 uv cache prune || urc=$?
+  [ "$urc" = 0 ] || out "uv cache prune FAILED rc $urc: see $STATE/last-apt.log"
+  [ "$dry" = 1 ] || out "uv cache ${uv_before:-?} → $(uvmb | grep . || echo ?) MB"
+else out "uv cache: skip: uv not on PATH"
+fi
 
 # --- reboot decision --------------------------------------------------------
 reboot_required=0
@@ -102,12 +117,28 @@ refuse=""
 hour=$(TZ=Europe/Madrid date +%-H)
 [ "$ignore_window" = 1 ] || { [ "$hour" -ge "$WINDOW_START" ] && [ "$hour" -lt "$WINDOW_END" ]; } \
   || refuse="$refuse time-window(now ${hour}h, allowed ${WINDOW_START}-${WINDOW_END}h Europe/Madrid);"
-# The pending reboot is the fault this run clears, so it never blocks itself (T347-10).
-if ! st_out=$(pc status --check 2>/dev/null); then
-  if grep -qv '^FAIL host\.reboot_required:' <<<"${st_out:-no output}"; then
-    fails=$(awk '/^FAIL / && !/^FAIL host\.reboot_required:/ && n < 3 {sub(/^FAIL /, ""); printf "%s%s", (n++ ? ", " : ""), $0}' <<<"$st_out")
-    refuse="$refuse pc-status-check${fails:+($fails)};"
-  fi
+# The pending reboot is the fault this run clears, so it never blocks itself (T347-10); CI verdict units are dropped (T1039).
+health() { # [--fresh] -> the FAIL rows that block a reboot; empty when the check passes
+  local o; o=$(pc status --check "$@" 2>/dev/null) && return 0
+  awk -v skip=" $VERDICT_UNITS " '
+    /^FAIL host\.reboot_required:/ {next}
+    /^FAIL host\.failed_units: [0-9]+: / {
+      sub(/^FAIL host\.failed_units: [0-9]+: /, ""); n = split($0, u, ", "); keep = ""; k = 0
+      for (i = 1; i <= n; i++) { b = u[i]; sub(/^[a-z]+:/, "", b); if (!index(skip, " " b " ")) keep = keep (k++ ? ", " : "") u[i] }
+      if (k) print "FAIL host.failed_units: " k ": " keep
+      next }
+    {print}' <<<"${o:-no output}"
+}
+# settling <rows>: every row is a unit mid-restart or tailscale Starting (apt postinst restarts, T1144).
+settling() { [ -n "$1" ] && ! grep -qvE '^FAIL (services\.[^:]+: (activating|deactivating|reloading)|network\.tailscale: Starting)( |$)' <<<"$1"; }
+st_out=$(health); waited=0
+while settling "$st_out" && [ "$waited" -lt "$SETTLE_MAX" ]; do
+  sleep 10; waited=$((waited + 10)); st_out=$(health --fresh)
+done
+[ "$waited" = 0 ] || out "gate settle $waited s"
+if [ -n "$st_out" ]; then
+  fails=$(awk '/^FAIL / && n < 3 {sub(/^FAIL /, ""); printf "%s%s", (n++ ? ", " : ""), $0}' <<<"$st_out")
+  refuse="$refuse pc-status-check${fails:+($fails)};"
 fi
 if ! bc_out=$("$HOME/agents/bin/boot-check.sh" 2>/dev/null); then
   fails=$(awk '/^FAIL / && n < 3 {sub(/^FAIL /, ""); printf "%s%s", (n++ ? ", " : ""), $0}' <<<"$bc_out")

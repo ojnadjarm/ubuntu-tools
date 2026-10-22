@@ -129,8 +129,10 @@ sudo ufw reload && sudo systemctl restart systemd-journald NetworkManager docker
 | `/etc/xml/catalog`, `/etc/xml/libdbus-1-dev.xml` | XML catalog entries that `libdbus-1-dev` (step 3) registers at install | **do not restore**: the package writes them again | — |
 | `/etc/passwd`, `/etc/group`, `/etc/shadow`, `/etc/gshadow` | **not copied**: groups `docker`, `input` added to the user (step 2), the rest is package system users | | — |
 
-Kernel command line: `quiet splash` + `crashkernel=2G-4G:320M,…` from `/etc/default/grub.d/kdump-tools.cfg`
-(package default, not ours; H: the size scales with RAM). No firmware/BIOS setting is relied on beyond
+Kernel command line: `quiet splash` + the package's `crashkernel=` range, then `crashkernel=448M` from
+`/etc/default/grub.d/zz-agents-kdump.cfg` (sorts after the untouched package `kdump-tools.cfg`; the kernel uses
+the last `crashkernel=`) · T1055 (H: size it from `sudo kdump-config show` "crashkernel suggested size", rounded
+up to 64M; then `sudo update-grub`). No firmware/BIOS setting is relied on beyond
 the battery charge-limit support (`/sys/class/power_supply/BAT0/charge_control_end_threshold`) and Secure Boot
 being off on this box (not required).
 
@@ -255,7 +257,7 @@ gzip -dc "$(ls ~/agents/backups/moodle/5.2/*.sql.gz | tail -1)" | docker exec -i
 | CPU / thermal | i5-12500H, thermald | thermald only on Intel |
 | Audio | Intel HDA, HDMI to a 2011 Samsung TV (EF10: TV standby undetectable) | `pactl list short sinks`; never play a sound to test (`pc audio` verbs, silent proof in `quirks.md`) |
 | Sensors | lm-sensors | `sudo sensors-detect --auto` then `sensors` |
-| crashkernel | 512M on 37 GB RAM (kdump-tools default) | nothing, scales with RAM |
+| crashkernel | 448M (`zz-agents-kdump.cfg`; package default 1024M on 32-64 GB) | re-size from `sudo kdump-config show` |
 | Disk | NVMe behind Intel VMD | `sudo smartctl -H /dev/nvme0` PASSED; `pc status` smart= |
 | Buds | Sony WF-1000XM5 `HARNESS_BUDS_MAC` in config.env | pair, update the MAC |
 - **Verify:** `pc status` has no FAIL line; `pc hw` lists the expected devices.

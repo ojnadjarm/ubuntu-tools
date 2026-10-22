@@ -1,2 +1,7 @@
 #!/usr/bin/env bash
+if [ "${1:-}" = statistics ]; then
+  [ -n "${PC_NET_RESOLVECTL_FAIL:-}" ] && { echo 'Failed to issue io.systemd.Resolve.Monitor.DumpStatistics() varlink call: Connection timed out' >&2; exit 1; }
+  echo '{"transactions":{"currentTransactions":0,"totalTransactions":5000,"totalTimeouts":2,"totalTimeoutsServedStale":0,"totalFailedResponses":1,"totalFailedResponsesServedStale":0},"cache":{"size":7,"hits":200,"misses":600},"dnssec":{"secure":0,"insecure":0,"bogus":0,"indeterminate":0}}'
+  exit 0
+fi
 echo 'Global: 1.1.1.1 8.8.8.8'

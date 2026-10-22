@@ -1,9 +1,9 @@
 [Unit]
-Description=Daily sweep of idle test dirs and done scratch in /tmp (pc tmp --apply)
+Description=Sweep of idle test dirs and done scratch in /tmp (pc tmp --apply; --if-over 2G outside 03:xx)
 
 [Service]
 Type=oneshot
 TimeoutStartSec=300
 Nice=10
 Environment=PATH=%h/agents/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=%h/agents/bin/pc tmp --apply
+ExecStart=/bin/sh -c 'if [ "$$(date +%%H)" = 03 ]; then exec %h/agents/bin/pc tmp --apply; else exec %h/agents/bin/pc tmp --apply --if-over 2G; fi'

@@ -32,7 +32,11 @@ n=$(cat "$FIX/b.count" 2>/dev/null || echo 0); n=$((n + 1)); echo $n >"$FIX/b.co
 [ "$n" -le "${FAILS:-0}" ] && { echo "FAIL b run $n"; exit 1; }
 echo "b fine"
 EOF
-chmod +x "$B/"* "$B/tests/"* "$WORK/path/"*
+# Stub systemctl first on PATH (T1108): prints AIL_STATE (oneshot default activating) for the first AIL_ACTIVE polls, then inactive; rc 0 only for active.
+mkdir -p "$WORK/sys"
+printf '#!/bin/sh\n# STUB\necho "$*" >>"%s/systemctl.calls"\ns=inactive; [ "$(grep -c . "%s/systemctl.calls")" -le "${AIL_ACTIVE:-0}" ] && s=${AIL_STATE:-activating}\necho "$s"; [ "$s" = active ] || exit 3\n' "$WORK" "$WORK" >"$WORK/sys/systemctl"
+export PATH="$WORK/sys:$PATH" FLEET_CI_AFTER_CAP=3
+chmod +x "$B/"* "$B/tests/"* "$WORK/path/"* "$WORK/sys/"*
 
 LOG="$H/agents/log/fleet-ci/$(date +%F).txt"; FIRST="${LOG%.txt}.first.txt"; NOTE="$H/agents/state/ci-fix/$(date +%F).md"
 calls() { grep -c . "$WORK/$1.calls" 2>/dev/null || echo 0; }
@@ -47,6 +51,7 @@ for s in agent-run notify-owner pc; do
   grep -q '^# STUB' "$B/$s" && grep -q '^# STUB' "$(PATH="$WORK/path:$PATH"; command -v "$s")"; ok "selftest: $s is a stub" 0 $?
 done
 grep -Eq '(^|[;&|(] *)(agent-run|notify-owner|pc|ci-window|run\.sh) ' "$B/fleet-ci-daily"; ok "selftest: no verb called off \$B" 1 $?
+grep -q '^# STUB' "$(command -v systemctl)"; ok "selftest: systemctl is a stub" 0 $?
 ok "selftest: fixture suite is 2 files" 2 "$(ls "$B/tests"/*.test.sh | wc -l)"
 [ "$bad" -eq 0 ] || { echo "selftest failed: nothing runs"; exit 1; }
 
@@ -56,6 +61,22 @@ ok "green: the quiet gate ran first" yes "$(has 'ci-window: 1-min load 1.00 < 4'
 ok "green: no fix attempt" 0 "$(calls agent-run)"
 ok "green: no push" 0 "$(calls notify-owner)"
 ok "green: one quiet wait, no re-run" "1 no" "$(grep -c '^ci-window:' "$LOG") $(has 're-run |' "$(cat "$LOG")")"
+
+# Wait for ailearning-ci-daily (T1108): activating (a running oneshot) for 2 polls, then the suite; never inactive → the cap, then the suite anyway.
+AIL_ACTIVE=2 FAILS=0 run; ok "after ailearning: rc 0" 0 $?
+ok "after ailearning: 3 polls (2 activating, 1 inactive)" 3 "$(calls systemctl)"
+ok "after ailearning: polls read the unit only" "--user is-active ailearning-ci-daily.service" "$(sort -u "$WORK/systemctl.calls")"
+AIL_ACTIVE=2 AIL_STATE=active FAILS=0 run; ok "after ailearning active: 3 polls" "0 3" "$? $(calls systemctl)"
+ok "after ailearning: the log's line after the header" yes "$(has 'waited 0 min for ailearning-ci-daily (' "$(sed -n 2p "$LOG")")"
+ok "after ailearning: the suite ran" yes "$(has 'PASS 2/2 files' "$(cat "$LOG")")"
+AIL_ACTIVE=999 FAILS=0 run; ok "ailearning never done: rc 0" 0 $?
+ok "ailearning never done: cap line" yes "$(has 'cap 3 s reached; running anyway)' "$(sed -n 2p "$LOG")")"
+ok "ailearning never done: the suite ran anyway" yes "$(has 'PASS 2/2 files' "$(cat "$LOG")")"
+# Mutation: without the wait the polls and the line are gone.
+cp "$B/fleet-ci-daily" "$WORK/fleet-ci-daily.orig"; sed -i '/fleet-ci-after-ailearning/d' "$B/fleet-ci-daily"
+AIL_ACTIVE=2 FAILS=0 run >/dev/null 2>&1
+ok "mutation: no wait, no polls (the 3-poll check goes red)" 0 "$(calls systemctl)"
+cp -p "$WORK/fleet-ci-daily.orig" "$B/fleet-ci-daily"
 
 # A live ailearning nightly (stub systemctl says active) inside a fake fleet-ci-daily.service cgroup: the empty CI_UNITS keeps the gate on load alone.
 mkdir -p "$WORK/busy"; printf '#!/bin/sh\n[ "$3" = ailearning-ci-daily.service ] && echo active || echo inactive\n' >"$WORK/busy/systemctl"; chmod +x "$WORK/busy/systemctl"
@@ -144,7 +165,7 @@ FAILS=0 run; ok "agent-verify fails: nightly still rc 0" 0 $?
 ok "agent-verify fails: the log says so" yes "$(has 'fleet-ci-daily: agent-verify --recheck failed rc 4' "$(cat "$LOG")")"
 rm -f "$B/agent-verify"
 # Recheck (T853): the newest log's red files re-run alone; all green → reset-failed + need resolve via pc (stub); any red → nothing cleared.
-grep -q 'systemctl' "$B/fleet-ci-daily"; ok "selftest: recheck reaches systemd only through pc" 1 $?
+grep -v 'is-active' "$B/fleet-ci-daily" | grep -q 'systemctl'; ok "selftest: recheck reaches systemd only through pc" 1 $?
 L="${LOG%/*}"; recheck() { rm -f "$WORK/pc.calls" "$WORK/b.count"; echo "1.00 1 1 1/100 1" >"$CI_LOADAVG"; HOME="$H" bash "$B/fleet-ci-daily" --recheck; }
 rm -f "$L"/*.txt; printf 'FAIL 1/2 files\n✖ fleet ci red: bin/tests/a.test.sh\n' >"$L/2026-10-18.txt"
 printf 'FAIL 0/2 files\n✖ fleet ci red: bin/tests/a.test.sh bin/tests/b.test.sh\n' >"$L/2026-10-19.txt"; : >"$L/2026-10-19.first.txt"

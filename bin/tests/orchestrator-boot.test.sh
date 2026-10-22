@@ -98,7 +98,7 @@ out=$(systemd-analyze --user verify "$REAL" 2>&1 | grep -v 'spice-vdagent')
 [ -z "$out" ] && ok "systemd-analyze verify: real unit clean" || nok "verify real unit" "$out"
 
 # --- boot a private user manager ---------------------------------------------
-systemd-run --user --scope --quiet --unit="orchboot-$$" -p Delegate=yes \
+systemd-run --user --scope --quiet --slice=agents.slice --unit="orchboot-$$" -p Delegate=yes \
   env -u TMUX -u DBUS_SESSION_BUS_ADDRESS XDG_RUNTIME_DIR="$RUN" SYSTEMD_UNIT_PATH="$U" \
   /usr/lib/systemd/systemd --user --log-target=null >/dev/null 2>&1 &
 timeout 20 wait-for --label orchboot-mgr --every 0.2 --until "[ -S '$RUN/systemd/private' ]" >/dev/null \

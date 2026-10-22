@@ -10,6 +10,7 @@ TAIL = 40
 SUITE = re.compile(r'tests/run\.sh(?![^;&|]*--only)')
 GREP = re.compile(r"""\bgrep(?:\s+-\w+)*\s+(['"])(\^.*?)\1\s+("[^"]+"|'[^']+'|[^\s|;&)<>]+)""")
 QUIET_WAIT = 300
+SBIN = os.environ.get('AGENT_VERIFY_SBIN', '/usr/local/sbin:/usr/sbin:/sbin')
 
 
 def check_cmd(text):
@@ -50,13 +51,61 @@ def scope_prefix():
     return pre if ok else []
 
 
+def sbin_path(path):
+    """PATH with each SBIN dir appended when missing (T1107: units ship PATH without sbin)."""
+    have = path.split(':') if path else []
+    return ':'.join(have + [d for d in SBIN.split(':') if d and d not in have])
+
+
+def watchmen(tmp):
+    """Pids of live watchman daemons whose TMPDIR is TMP."""
+    want, pids = f'TMPDIR={tmp}'.encode(), []
+    for d in glob.glob('/proc/[0-9]*'):
+        try:
+            if open(f'{d}/comm').read().strip() != 'watchman' or open(f'{d}/stat').read().rsplit(')', 1)[1].split()[0] == 'Z':
+                continue
+            if want in open(f'{d}/environ', 'rb').read().split(b'\0'):
+                pids.append(int(d[6:]))
+        except (OSError, IndexError):
+            continue
+    return pids
+
+
+def gone(tmp):
+    """True once no watchman runs on TMP, polled for up to 2 s."""
+    for _ in range(20):
+        if not watchmen(tmp):
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def stop_watchman(tmp):
+    """Shut down, then TERM, the watchman daemons a CHECK started on its private TMPDIR (T1124: git fsmonitor leaves one per run)."""
+    if not watchmen(tmp):
+        return
+    try:
+        subprocess.run(['watchman', '--no-spawn', '--no-local', 'shutdown-server'], env={**os.environ, 'TMPDIR': tmp},
+                       capture_output=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    if gone(tmp):
+        return
+    for pid in watchmen(tmp):
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+    gone(tmp)
+
+
 def run(cmd, timeout, cwd=None):
     """Run a CHECK command in a memory-capped scope with a private TMPDIR; the verdict record without ticket/brief."""
     started = datetime.datetime.now().astimezone()
     t0 = time.monotonic()
     tmp = tempfile.mkdtemp(prefix='agent-verify.')
     try:
-        p = subprocess.Popen(scope_prefix() + ['env', f'TMPDIR={tmp}', 'bash', '-c', cmd], stdout=subprocess.PIPE,
+        p = subprocess.Popen(scope_prefix() + ['env', f'TMPDIR={tmp}', f"PATH={sbin_path(os.environ.get('PATH', ''))}", 'bash', '-c', cmd], stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE, text=True, start_new_session=True, cwd=cwd)
         try:
             out, err = p.communicate(timeout=timeout)
@@ -66,6 +115,7 @@ def run(cmd, timeout, cwd=None):
             out, _ = p.communicate()
             rc, err = 124, f'timeout after {timeout}s'
     finally:
+        stop_watchman(tmp)
         shutil.rmtree(tmp, ignore_errors=True)
     left = sum(len(d) + len(f) for _, d, f in os.walk(tmp))
     return {'check': cmd, 'cwd': cwd or os.getcwd(), 'rc': rc, 'ok': rc == 0, 'started': started.isoformat(timespec='seconds'),

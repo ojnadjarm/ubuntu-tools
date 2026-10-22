@@ -6,7 +6,7 @@ StartLimitBurst=5
 
 [Service]
 Type=forking
-Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 WorkingDirectory=%h
 # Remote Control registers at launch; under linger the unit starts before Wi-Fi associates.
 ExecStartPre=/usr/bin/nm-online -q -t 60

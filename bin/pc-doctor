@@ -68,11 +68,13 @@ check_run() {
   done
   if [ "$n" -gt 1 ]; then read -r load _ </proc/loadavg; note=" (best of $n, first ${first}ms, load $load)"; fi
   out=${out##*$'\n'}; out=${out//$'\t'/ }
-  if [ "$rc" = 2 ] && [[ $WARN_CHECKS == *" $name "* ]]; then row WARN "$name" "${out:0:120}$note" "$ms"
-  elif [ "$rc" != 0 ]; then row FAIL "$name" "exit $rc: ${out:0:120}$note" "$ms"
+  local wd=120; [ "$name" = agent-work ] && wd=220   # room for the 6 h writers (T1102)
+  if [ "$rc" = 2 ] && [[ $WARN_CHECKS == *" $name "* ]]; then row WARN "$name" "${out:0:$wd}$note" "$ms"
+  elif [ "$rc" != 0 ]; then local w=120; [ "$name" = ledger ] && w=400   # room for the ledger's fix commands
+    row FAIL "$name" "exit $rc: ${out:0:$w}$note" "$ms"
   else
     timing "$ms" "$budget"
-    if [ "$TS" = OK ]; then row OK "$name" "${out:0:120}$note" "$ms"
+    if [ "$TS" = OK ]; then row OK "$name" "${out:0:$wd}$note" "$ms"
     else row "$TS" "$name" "${out:0:100} ($TD)$note" "$ms"; fi
   fi
 }
@@ -184,7 +186,15 @@ check status-check 2000 status_check
 
 ## --- 4. the change ledger ---------------------------------------------------
 # Two faults an agent leaves behind: a change that never verified, and one recorded without a
-# rollback (nothing to hand `pc undo`). A row whose stored read equals `after` now is verified late.
+# rollback (nothing to hand `pc undo`). A row whose stored read equals `after` now is verified late;
+# one whose rollback ran later in the ledger as a verified undo back to its `before` is reverted.
+LEDGER_JQ='(map(select(.cmd))) as $ap | (map(select(.verified != null)) | INDEX(.id)) as $vf |
+  (map(select(.ack == true)) | map(.id)) as $ackd |
+  ($ap | to_entries | map(.key as $n | .value | select(($vf[.id].verified // false) == true)
+    | {k: ([.target, .redo, .before, .after] | tojson), id, $n}) | group_by(.k) | map({key: .[0].k, value: .}) | from_entries) as $undo |
+  ($ap | to_entries | map(.key as $n | .value | select((.rollback // "") != "" and ($vf[.id].verified // false) != true and (.id as $i | $ackd | index($i)) == null)
+    | {id, by: ([$undo[[.target, .rollback, .after, .before] | tojson][]? | select(.n > $n)] | first | .id)}
+    | select(.by != null)) | INDEX(.id)) as $rev |'
 ledger_audit() {
   local f=$PC_LEDGER id after rd
   [ -e "$f" ] || { echo "no ledger yet at $f"; return 0; }
@@ -192,25 +202,19 @@ ledger_audit() {
   while IFS= read -r -d '' id && IFS= read -r -d '' after && IFS= read -r -d '' rd; do
     [ "$(pc_timeout 2 bash -c '. "$1"; eval "$2"' _ "$BIN/pclib.sh" "$rd" 2>/dev/null)" = "$after" ] &&
       pc_json '{id:$id,verified:true,observed:$o,late:true}' -c --arg id "$id" --arg o "$after" >>"$f"
-  done < <(jq -s -j '
-    (map(select(.verified != null)) | INDEX(.id)) as $vf | (map(select(.ack == true)) | map(.id)) as $ackd |
-    .[] | select(.cmd and (.read // "") != "" and ($vf[.id].verified // false) != true and (.id as $i | $ackd | index($i)) == null)
+  done < <(jq -s -j "$LEDGER_JQ"'
+    $ap[] | select((.read // "") != "" and ($vf[.id].verified // false) != true and $rev[.id] == null and (.id as $i | $ackd | index($i)) == null)
     | .id, "\u0000", .after, "\u0000", .read, "\u0000"' "$f")
-  jq -s -r '
-    (map(select(.cmd)) )                                as $ap |
-    (map(select(.verified != null)) | INDEX(.id))       as $vf |
-    (map(select(.ack == true)) | map(.id))              as $ackd |
-    ($ap | map(select(($vf[.id].verified // false) != true))) as $unver |
+  jq -s -r "$LEDGER_JQ"'
+    ($ap | map(select(($vf[.id].verified // false) != true and $rev[.id] == null))) as $unver |
     ($unver | map(select(.id as $i | ($ackd | index($i)) == null))) as $unack |
     ($unver | map(select(.id as $i | ($ackd | index($i)) != null))) as $acked |
     ($ap | map(select($vf[.id].late == true)))          as $late |
     ($ap | map(select((.rollback // "") == "")))        as $noroll |
-    "\($ap|length) changes · \($unver|length) unverified\(if ($acked|length)>0 then ", acked" else "" end)\(if ($unack|length)>0 then " (" + ($unack|map(.id)|join(",")) + ")" else "" end)\(if ($late|length)>0 then " (\($late|length) verified late: " + ($late|map(.id)|join(",")) + ")" else "" end) · \($noroll|length) without rollback\(if ($noroll|length)>0 then " (" + ($noroll|map(.id)|join(",")) + ")" else "" end)"
+    "\($ap|length) changes · \($unver|length) unverified\(if ($acked|length)>0 then ", acked" else "" end)\(if ($unack|length)>0 then " (" + ($unack|map(.id)|join(",")) + ")" else "" end)\(if ($late|length)>0 then " (\($late|length) verified late: " + ($late|map(.id)|join(",")) + ")" else "" end)\(if ($rev|length)>0 then " (\($rev|length) reverted: " + ($rev|map(.id + " by " + .by)|join(", ")) + ")" else "" end) · \($noroll|length) without rollback\(if ($noroll|length)>0 then " (" + ($noroll|map(.id)|join(",")) + ")" else "" end)\(if ($unack|length)>0 then " · fix: " + ($unack[0:3]|map("pc undo ack \(.id) --why \"<cause>\"")|join("; ")) + (if ($unack|length)>3 then "; +\($unack|length - 3) more" else "" end) else "" end)"
   ' "$f"
-  jq -s -e '
-    (map(select(.cmd))) as $ap | (map(select(.verified != null)) | INDEX(.id)) as $vf |
-    (map(select(.ack == true)) | map(.id)) as $ackd |
-    ($ap | all(.id as $i | (($vf[$i].verified // false) == true or ($ackd | index($i)) != null) and (.rollback // "") != ""))
+  jq -s -e "$LEDGER_JQ"'
+    ($ap | all(.id as $i | (($vf[$i].verified // false) == true or $rev[$i] != null or ($ackd | index($i)) != null) and (.rollback // "") != ""))
   ' "$f" >/dev/null
 }
 check ledger 1500 ledger_audit
@@ -348,11 +352,40 @@ alert_spool() {
 check alert-spool 500 alert_spool
 
 # $AGENT_WORK over its size cap: lossless intermediates and node_modules left behind (T360).
+# aw_growth — `<bytes 24h> <bytes 6h>` written, then the top 3 ticket-level dirs written in 6 h as `<bytes> <dir>` (T1086, T1102).
+aw_growth() {
+  pc_timeout 3 find "$AGENT_WORK" -type f -newermt "@$((NOW - 86400))" -printf '%T@ %s %P\n' 2>/dev/null |
+    awk -v six=$((NOW - 21600)) '{ p = $0; sub(/^[^ ]+ [^ ]+ /, "", p); t += $2; if ($1 < six) next
+           n = split(p, a, "/"); k = a[1]; if (n > 2) k = k "/" a[2]
+           if (n > 3 && a[2] ~ /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/) k = k "/" a[3]
+           s[k] += $2; w += $2 }
+         END { print t + 0, w + 0; for (k in s) print s[k], k }' | { read -r t; echo "$t"; sort -rn | head -3; }
+}
+# aw_net <mb> — samples `<epoch>\t<mb>` into the size history (<= 1 row/h, 30 d kept); prints the net MB/24h
+# against the sample >= 6 h old nearest to 24 h ago, or `n/a`.
+aw_net() {
+  local f=${PC_AW_HISTORY:-$HOME/agents/state/agent-work-size.tsv} last
+  last=$(tail -n 1 "$f" 2>/dev/null | cut -f1)
+  if [ $((NOW - ${last:-0})) -ge 3600 ] 2>/dev/null; then
+    mkdir -p "${f%/*}" && { awk -v old=$((NOW - 2592000)) '$1 >= old' "$f" 2>/dev/null; printf '%s\t%s\n' "$NOW" "$1"; } >"$f.tmp" && mv "$f.tmp" "$f"
+  fi
+  awk -v now="$NOW" -v mb="$1" '{ a = now - $1; d = a - 86400; if (d < 0) d = -d
+      if (a >= 21600 && (!b || d < bd)) { b = a; bd = d; m = $2 } }
+    END { if (b) printf "%.1f\n", (mb - m) * 86400 / b; else print "n/a" }' "$f" 2>/dev/null || echo n/a
+}
 agent_work_size() {
-  local max=${PC_AGENT_WORK_MAX_MB:-25600} mb
+  local max=${PC_AGENT_WORK_MAX_MB:-25600} mb g net=n/a
   mb=$(pc_timeout 3 du -sm "$AGENT_WORK" 2>/dev/null | cut -f1)
-  printf '%s MB in AGENT_WORK (warn > %s MB)\n' "${mb:-?}" "$max"
-  [ "${mb:-0}" -le "$max" ] || return 2
+  g=$(cached "aw-growth6h${AGENT_WORK//\//_}" 600 aw_growth)
+  [[ $mb =~ ^[0-9]+$ ]] && net=$(aw_net "$mb")
+  awk -v mb="${mb:-?}" -v max="$max" -v net="$net" 'NR == 1 { r = $1 / 1048576; w6 = $2 / 1048576; next }
+    { top = top (top ? ", " : "") $2 " " ($1 < 1048576 ? sprintf("%.0f KB", $1 / 1024) : $1 < 1073741824 ? sprintf("%.0f MB", $1 / 1048576) : sprintf("%.1f GB", $1 / 1073741824)) }
+    END { printf "%s MB (warn > %s MB) · written +%.1f GB/24h, +%.1f GB/6h · net %s", mb, max, r / 1024, w6 / 1024,
+            net == "n/a" ? net : sprintf("%+.1f GB/24h", net / 1024)
+          rate = (net == "n/a") ? w6 * 4 : net
+          if (rate >= 1 && mb != "?") { days = (max - mb) / rate; if (days < 0) days = 0
+            if (days > 30) printf " · cap in > 30 d"; else printf " · cap in %.1f d", days; if (days < 2) warn = 1 }
+          print " · writers 6h: " (top ? top : "none"); exit (mb != "?" && (mb > max || warn)) ? 2 : 0 }' <<<"$g"
 }
 check agent-work 1500 agent_work_size
 

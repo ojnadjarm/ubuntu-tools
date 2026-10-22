@@ -61,6 +61,11 @@ flock -n 9 || { echo "fleet-ci-daily: a run is already going" >&2; exit 75; }
 
 exec >"$LOG" 2>&1
 echo "fleet-ci-daily $(date -Is)"
+# T1108: ailearning-ci-daily (01:00, up to ~2.5 h) finishes first; cap FLEET_CI_AFTER_CAP s, then the suite runs anyway.
+t0=$(date +%s); cap="${FLEET_CI_AFTER_CAP:-6000}"
+timeout "$cap" "$B/wait-for" --label fleet-ci-after-ailearning --every "${CI_QUIET_EVERY:-15}" --until 'case "$(systemctl --user is-active ailearning-ci-daily.service)" in active|activating|reloading|deactivating) exit 1;; esac' >/dev/null; arc=$?
+w=$(( $(date +%s) - t0 ))
+echo "waited $(( w / 60 )) min for ailearning-ci-daily ($w s$([ "$arc" -eq 0 ] || echo ", cap $cap s reached; running anyway"))"
 "$B/ci-window" --quiet
 F="${CI_AUTOFIX_RERUN:-}"
 if [ -f "$F" ] && grep -q '^✖ fleet ci red: ' "$F"; then

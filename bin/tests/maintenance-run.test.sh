@@ -8,7 +8,7 @@ has() { grep -q -- "$3" <<<"$2" && ok "$1" || nok "$1" "missing '$3' in: $2"; }
 
 # Stubs: every binary that could reach the real machine logs its call (CALLS, reset per case; AUDIT, never reset) and does nothing.
 mkdir -p "$WORK/stub"; CALLS="$WORK/calls.log"; AUDIT="$WORK/audit.log"; : >"$CALLS"; : >"$AUDIT"
-for n in shutdown sudo notify-owner pc systemctl docker apt-get dpkg needrestart; do
+for n in shutdown sudo notify-owner pc systemctl docker apt-get dpkg needrestart uv pgrep du sleep; do
   printf '#!/bin/sh\necho "%s $*" >>"%s"\necho "%s $*" >>"%s"\n' "$n" "$CALLS" "$n" "$AUDIT" >"$WORK/stub/$n"; chmod +x "$WORK/stub/$n"
 done
 printf 'case "$*" in -s*) printf "Inst fixture-a [1] (2 x)\\nInst fixture-b [1] (2 x)\\n" ;; esac\n' >>"$WORK/stub/apt-get"
@@ -26,7 +26,7 @@ is 'selftest: shutdown resolves to the stub' "$(command -v shutdown)" "$WORK/stu
 is 'selftest: sudo resolves to the stub' "$(command -v sudo)" "$WORK/stub/sudo"
 shutdown -r +5; sudo shutdown -r +5
 is 'selftest: stub shutdown recorded, nothing rebooted' "$(grep -c shutdown "$CALLS")" 2
-for n in apt-get dpkg needrestart docker; do is "selftest: $n resolves to the stub" "$(command -v $n)" "$WORK/stub/$n"; done
+for n in apt-get dpkg needrestart docker uv sleep; do is "selftest: $n resolves to the stub" "$(command -v $n)" "$WORK/stub/$n"; done
 is 'selftest: pc under the fake HOME resolves to the stub' "$(PATH="$FH/agents/bin:$PATH" command -v pc)" "$FH/agents/bin/pc"
 : >"$CALLS"
 
@@ -83,13 +83,76 @@ grep -q 'd\.four' <<<"$out" && nok 'refusal names at most 3 checks' "$out" || ok
 push=$(sed -n 's/^would run: notify-owner -t maintenance "\(.*\)"$/\1/p' <<<"$out")
 [ -n "$push" ] && [ "${#push}" -le 200 ] && ok 'refusal push with names stays <= 200 chars' || nok 'refusal push with names stays <= 200 chars' "${#push}: $push"
 
+# 2d. T1039: CI verdict units (MAINT_GATE_VERDICT_UNITS) are not machine faults; any other failed unit still refuses.
+pcstub 'FAIL host.reboot_required: 3 d (gnome-shell)\nFAIL host.failed_units: 2: user:ailearning-ci-daily.service, user:fleet-ci-daily.service' 1
+out=$(gate_mr)
+grep -q 'pc-status-check\|ci-daily' <<<"$out" && nok 'only CI verdict units failed: no health refusal' "$out" || ok 'only CI verdict units failed: no health refusal'
+pcstub 'FAIL host.failed_units: 2: user:fleet-ci-daily.service, user:pcbench-fail-fixture.service' 1
+out=$(grep 'REBOOT REFUSED' <<<"$(gate_mr)")
+has 'CI + another unit: refused naming the other' "$out" 'pc-status-check(host.failed_units: 1: user:pcbench-fail-fixture.service)'
+grep -q 'ci-daily' <<<"$out" && nok 'CI + another unit: CI unit not named' "$out" || ok 'CI + another unit: CI unit not named'
+pcstub 'FAIL host.failed_units: 1: user:fleet-ci-daily.service\nFAIL services.docker: inactive' 1
+has 'CI unit + another FAIL row: refused' "$(gate_mr)" 'pc-status-check(services.docker: inactive)'
+printf 'HARNESS_HOST=fixture\nMAINT_AUTO_REBOOT=1\nMAINT_GATE_VERDICT_UNITS=\n' >"$WORK/config.env"
+pcstub 'FAIL host.failed_units: 1: user:fleet-ci-daily.service' 1
+has 'empty MAINT_GATE_VERDICT_UNITS counts CI units again' \
+  "$(HOME="$FH" HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" --assume-reboot --dry-run --dry-run-ignore-window 2>&1)" 'pc-status-check(host.failed_units: 1: user:fleet-ci-daily.service)'
+
+# 2e. T1144: FAIL rows that are all transitional (a service mid-restart, tailscale Starting) are re-checked
+# every 10 s, fresh, up to 120 s before refusing; a real FAIL refuses at once. sleep is the stub.
+pcseq() { # <row…>: status call n prints row n, the last one repeats; an OK row exits 0
+  printf '%s\n' "$@" >"$WORK/pcseq"; : >"$WORK/pcseq.n"
+  cat >"$FH/agents/bin/pc" <<S
+#!/bin/sh
+echo "pc \$*" >>"$CALLS"
+echo >>"$WORK/pcseq.n"; n=\$(wc -l <"$WORK/pcseq.n")
+row=\$(sed -n "\${n}p" "$WORK/pcseq"); [ -n "\$row" ] || row=\$(tail -n 1 "$WORK/pcseq")
+printf '%b\n' "\$row"
+case "\$row" in OK*) exit 0;; esac
+exit 1
+S
+  chmod +x "$FH/agents/bin/pc"; : >"$CALLS"; }
+nsleep() { grep -c '^sleep 10$' "$CALLS"; }
+printf '#!/bin/sh\nexit 0\n' >"$FH/agents/bin/boot-check.sh"; chmod +x "$FH/agents/bin/boot-check.sh"
+pcseq 'FAIL host.reboot_required: 3 d (gnome-shell)\nFAIL services.netdata: deactivating' 'OK fixture'
+out=$(gate_mr)
+has 'deactivating then active: allowed' "$out" 'REBOOT ALLOWED'
+has 'deactivating then active: settle logged' "$out" 'gate settle 10 s'
+is 'deactivating then active: 1 retry' "$(nsleep)" 1
+has 'the retry reads fresh' "$(grep '^pc status' "$CALLS" | sed -n 2p)" 'pc status --check --fresh'
+pcseq 'FAIL services.netdata: activating'
+out=$(gate_mr)
+has 'activating never settles: refused naming it' "$out" 'REBOOT REFUSED: pc-status-check(services.netdata: activating)'
+has 'activating never settles: after 120 s' "$out" 'gate settle 120 s'
+is 'activating never settles: 12 retries' "$(nsleep)" 12
+pcseq 'FAIL network.tailscale: Starting\nFAIL services.ssh: reloading' 'OK fixture'
+has 'tailscale Starting + reloading: allowed after settling' "$(gate_mr)" 'REBOOT ALLOWED'
+pcseq 'FAIL services.netdata: failed'
+out=$(gate_mr)
+has 'failed: refused' "$out" 'pc-status-check(services.netdata: failed)'
+is 'failed: no retry' "$(nsleep)" 0
+grep -q 'gate settle' <<<"$out" && nok 'failed: no settle line' "$out" || ok 'failed: no settle line'
+pcseq 'FAIL services.netdata: deactivating\nFAIL services.docker: inactive' 'OK fixture'
+out=$(gate_mr)
+has 'transitional + real FAIL: refused at once' "$out" 'pc-status-check(services.netdata: deactivating, services.docker: inactive)'
+is 'transitional + real FAIL: no retry' "$(nsleep)" 0
+pcseq 'FAIL services.netdata: deactivating' 'OK fixture'
+has 'MAINT_GATE_SETTLE=0: refused at once' "$(MAINT_GATE_SETTLE=0 gate_mr)" 'pc-status-check(services.netdata: deactivating)'
+is 'MAINT_GATE_SETTLE=0: no retry' "$(nsleep)" 0
+mkdir -p "$WORK/mut"; sed 's/^\(while \)settling /\1false \&\& settling /' "$BIN/maintenance-run" >"$WORK/mut/maintenance-run"
+cp "$BIN/fleetlib.sh" "$BIN/env.sh" "$WORK/mut/"
+pcseq 'FAIL services.netdata: deactivating' 'OK fixture'
+has 'mutation: without the settle loop a restart refuses' \
+  "$(printf 'HARNESS_HOST=fixture\nMAINT_AUTO_REBOOT=1\n' >"$WORK/config.env"; HOME="$FH" HARNESS_CONFIG="$WORK/config.env" bash "$WORK/mut/maintenance-run" --assume-reboot --dry-run --dry-run-ignore-window 2>&1)" 'REBOOT REFUSED: pc-status-check(services.netdata: deactivating)'
+rm -f "$FH/agents/bin/boot-check.sh"; pcstub 'OK fixture' 0
+
 # 3. Unset: fails safe to 0, a missing switch never reboots (T116).
 printf 'HARNESS_HOST=fixture\n' >"$WORK/config.env"
 out=$(HOME="$FH" HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" --assume-reboot --dry-run 2>&1)
 has 'unset defaults to auto-reboot off' "$out" 'REBOOT REFUSED: auto-reboot-disabled-by-owner'
 
 # Audit: every dry run's apt-get -s reached the stub, never /usr/bin/apt-get.
-is 'selftest: all 8 dry runs used the apt-get stub' "$(grep -c '^apt-get -s full-upgrade' "$AUDIT")" 8
+is 'selftest: all 19 dry runs used the apt-get stub' "$(grep -c '^apt-get -s full-upgrade' "$AUDIT")" 19
 
 # 4. Real run: the upgrade count is this run's "Setting up" lines, printed once.
 printf 'Setting up old-run (1)\nSetting up old-run (2)\n' >"$FH/agents/maintenance/state/last-apt.log"
@@ -123,6 +186,45 @@ has 'pc tmp failure logs its rc' "$(HOME="$FH" HARNESS_CONFIG="$WORK/config.env"
 pcstub 'ledger 42: deleted 3 paths, 1 MB' 0
 has 'pc tmp success logs the ledger line' "$(HOME="$FH" HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" 2>&1)" 'tmp: ledger 42: deleted 3 paths'
 pcstub 'OK fixture' 0
+
+# 4e. T1095: after the image prune, the build cache is pruned with the age filter and its size reported; volumes never.
+printf '#!/bin/sh\necho "sudo $*" >>"%s"\nexit 0\n' "$CALLS" >"$WORK/stub/sudo"
+cp "$WORK/stub/docker" "$WORK/docker.ok"
+printf '#!/bin/sh\necho "docker $*" >>"%s"\ncase "$*" in "builder prune"*) touch "%s/pruned" ;; "system df"*) [ -e "%s/pruned" ] && s=12MB || s=821.6MB; printf "Images\\t1GB\\nBuild Cache\\t%%s\\n" "$s" ;; esac\nexit 0\n' \
+  "$CALLS" "$WORK" "$WORK" >"$WORK/stub/docker"
+: >"$CALLS"
+out=$(HOME="$FH" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" 2>&1)
+has 'builder prune with the 168h filter' "$(cat "$CALLS")" 'docker builder prune -f --filter until=168h'
+is 'builder prune runs after the image prune' "$(grep -o 'docker [a-z]* prune' "$CALLS" | tr '\n' ' ')" 'docker image prune docker builder prune '
+has 'build cache before and after reported' "$(cat "$FH/agents/maintenance/state/last-summary.txt")" 'build cache 821.6MB → 12MB'
+grep -q 'volume prune\|system prune' "$CALLS" && nok 'never prunes volumes' "$(cat "$CALLS")" || ok 'never prunes volumes'
+has 'dry run only prints the builder prune' "$(run_mr 0)" 'would run: docker builder prune -f --filter until=168h'
+mv "$WORK/docker.ok" "$WORK/stub/docker"
+
+# 4f. T1116: the uv cache is pruned and its size reported, unless a uv process runs (then skipped).
+cp "$WORK/stub/pgrep" "$WORK/pgrep.ok"; cp "$WORK/stub/uv" "$WORK/uv.ok"; cp "$WORK/stub/du" "$WORK/du.ok"
+printf '#!/bin/sh\necho "pgrep $*" >>"%s"\nexit 1\n' "$CALLS" >"$WORK/stub/pgrep"
+printf '#!/bin/sh\necho "uv $*" >>"%s"\ncase "$*" in "cache dir") echo "%s/uvcache" ;; "cache prune"*) touch "%s/uvpruned" ;; esac\nexit 0\n' \
+  "$CALLS" "$WORK" "$WORK" >"$WORK/stub/uv"
+printf '#!/bin/sh\n[ -e "%s/uvpruned" ] && s=5000 || s=12634\nprintf "%%s\\t%%s\\n" "$s" "$3"\n' "$WORK" >"$WORK/stub/du"
+: >"$CALLS"
+out=$(HOME="$FH" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" 2>&1)
+has 'uv cache prune runs when uv is idle' "$(cat "$CALLS")" 'uv cache prune'
+has 'uv cache before and after reported' "$(cat "$FH/agents/maintenance/state/last-summary.txt")" 'uv cache 12634 → 5000 MB'
+has 'dry run only prints the uv prune' "$(run_mr 0)" 'would run: nice -n 19 uv cache prune'
+rm -f "$WORK/uvpruned"; printf '#!/bin/sh\necho "pgrep $*" >>"%s"\necho 4242\nexit 0\n' "$CALLS" >"$WORK/stub/pgrep"
+: >"$CALLS"
+out=$(HOME="$FH" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" 2>&1)
+has 'uv busy: skipped in the summary' "$(cat "$FH/agents/maintenance/state/last-summary.txt")" 'uv cache: skip: uv busy'
+grep -q 'uv cache prune' "$CALLS" && nok 'uv busy: never prunes' "$(cat "$CALLS")" || ok 'uv busy: never prunes'
+printf '#!/bin/sh\nexit 1\n' >"$WORK/stub/pgrep"
+printf '#!/bin/sh\ncase "$*" in "cache dir") echo "%s/uvcache" ;; "cache prune"*) exit 2 ;; esac\nexit 0\n' "$WORK" >"$WORK/stub/uv"
+HOME="$FH" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" >/dev/null 2>&1
+has 'uv prune failure logs its rc' "$(cat "$FH/agents/maintenance/state/last-summary.txt")" 'uv cache prune FAILED rc 2'
+rm -f "$WORK/stub/uv"
+HOME="$FH" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" >/dev/null 2>&1
+has 'uv missing: skipped in the summary' "$(cat "$FH/agents/maintenance/state/last-summary.txt")" 'uv cache: skip: uv not on PATH'
+mv "$WORK/pgrep.ok" "$WORK/stub/pgrep"; mv "$WORK/uv.ok" "$WORK/stub/uv"; mv "$WORK/du.ok" "$WORK/stub/du"
 
 # 5-6. The unit's chain (T116): env -i with agent@.service's environment, a parent that sources
 # fleetlib.sh like agent-run, then maintenance-run as a child, not dry, with a reboot pending.

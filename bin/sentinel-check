@@ -172,15 +172,24 @@ step runaway sentinel-runaway $DRY || log "sentinel-check: sentinel-runaway fail
 # shellcheck disable=SC2086
 step waits sentinel-waits $DRY || log "sentinel-check: sentinel-waits failed rc $?"
 
-# A hand-typed `systemd-run` without --collect leaves a failed run-* scope that nothing else clears
-# (pc status lists it apart, no FAIL); one older than SENTINEL_TRANSIENT_AGE s is reset and logged.
+# A hand-typed `systemd-run` without --collect leaves a failed transient unit that nothing else clears
+# (pc status lists it apart, no FAIL): a run-* scope older than SENTINEL_TRANSIENT_AGE s, or a unit named
+# by --unit older than SENTINEL_TRANSIENT_NAMED_AGE s, is reset and logged; fleet and not-ours units stay.
+# shellcheck source=/dev/null
+. "${BASH_SOURCE[0]%/*}/pclib.sh"
 reset_transient() {
-  local u props since desc now; now=$(date +%s)
-  for u in $(systemctl --user list-units --state=failed --plain --no-legend 2>/dev/null | awk '$1 ~ /^run-/{print $1}'); do
+  local u g props since desc age now; now=$(date +%s)
+  for u in $(systemctl --user list-units --state=failed --plain --no-legend 2>/dev/null | awk '{print $1}'); do
+    [[ $u =~ $PC_NOT_OURS ]] && continue
+    for g in $PC_FLEET_GLOBS; do
+      # shellcheck disable=SC2254  # deliberate: $g is a fleet glob
+      case "$u" in $g) continue 2;; esac
+    done
     props=$(systemctl --user show "$u" -p Transient -p Description -p StateChangeTimestamp --timestamp=unix 2>/dev/null)
     grep -qx 'Transient=yes' <<<"$props" || continue
+    age=${SENTINEL_TRANSIENT_NAMED_AGE:-1800}; [[ $u == run-* ]] && age=${SENTINEL_TRANSIENT_AGE:-600}
     since=$(sed -n 's/^StateChangeTimestamp=@//p' <<<"$props")
-    [ -n "$since" ] && [ $((now - since)) -ge "${SENTINEL_TRANSIENT_AGE:-600}" ] || continue
+    [ -n "$since" ] && [ $((now - since)) -ge "$age" ] || continue
     desc=$(sed -n 's/^Description=//p' <<<"$props")
     [ -z "$PROFILE" ] && pc units reset-failed "$u" --user --apply >/dev/null 2>&1 &&
       log "reset failed transient $u after $(( (now - since) / 60 )) min: ${desc:0:120}"

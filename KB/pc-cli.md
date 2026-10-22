@@ -22,7 +22,7 @@ Regenerate: `pc help --md > ~/agents/KB/pc-cli.md`. Never hand-edit.
 | `pc selftest` | drives gnome-calculator with type/key/clip and a screenshot; prints PASS or FAIL. | `pc selftest` | — |
 | `pc shot` | screenshot the screen or a region; --diff reports what changed since the previous shot. | `pc shot [out.png] [--scale F] [--region X,Y,W,H] [--diff [PREV]] [--ignore X,Y,W,H] [--changed-only] [--quiet]` | — |
 | `pc spotify` | drive the Spotify desktop app over MPRIS; no screenshots, ever. | `pc spotify <command> [args]` | — |
-| `pc status` | live health snapshot of this machine (text, --json, --check, --brief, --facts [--apply], --fresh). | `pc status [--json\|--check\|--brief\|--facts [--apply]] [--fresh]` | 0.11 s |
+| `pc status` | live health snapshot of this machine (text, --json, --check, --brief, --facts [--apply], --fresh, --timing). | `pc status [--json\|--check\|--brief\|--facts [--apply]] [--fresh] [--timing]` | 0.11 s |
 | `pc tree` | AT-SPI UI tree. | `pc tree [app-substring] [--depth N] [--json] [--max N] [--interactive] [--find "name"] [--role R]` | — |
 | `pc type` | type text via mutter RemoteDesktop keysyms ("\n" = Enter, "\t" = Tab). | `pc type [--force] "text"` | — |
 | `pc wait` | sleep S seconds, then take a screenshot; prints its path. | `pc wait SECONDS [shot args]` | — |
@@ -35,10 +35,11 @@ Regenerate: `pc help --md > ~/agents/KB/pc-cli.md`. Never hand-edit.
 |---|---|---|---|
 | `pc hw` | PCI/USB/DMI/sensors/block/memory, cached where it never changes. | `pc hw [summary] [--json]` | 0.09 s |
 | `pc idle` | idle power baseline: median package/psys watts over a window, the top wakers and the resident fleet RSS. | `pc idle [--seconds 60] [--json\|--tsv]` | — |
-| `pc io` | disk throughput/latency, top IO procs, SMART (default: disks + top 5 procs) | `pc io [disks\|procs\|smart] [--seconds 0.3] [-n 5] [--json]` | 0.39 s |
-| `pc kernel` | ring buffer with a severity digest, modules, ledgered sysctl, cgroup cost and PSI. | `pc kernel [--json]                                   overview: release, boot, taint, lockdown, dmesg digest` | 0.16 s |
+| `pc io` | disk throughput/latency, top IO procs/units, SMART, hourly GB written per cgroup (default: disks + top 5 procs) | `pc io [disks\|procs\|units\|smart [--record\|--trend]\|sample\|history [--since 24h]] [--seconds 0.3] [-n 5] [--json]` | 0.39 s |
+| `pc kernel` | ring buffer digest, OOM kills, modules, ledgered sysctl and mm knobs, cgroup cost and PSI. | `pc kernel [--json]                                   overview: release, boot, taint, lockdown, dmesg digest` | 0.16 s |
+| `pc mem` | RSS + swap + CPU per unit over days, the units that grow, CPU s/h per hour, stale swap pulled back into RAM, and RAM per Claude session. | `pc mem sample` | — |
 | `pc net` | interfaces, listeners, port owners, tailscale, firewall (read-only), wifi, DNS. | `pc net [ifaces\|listeners\|tailscale] [--json]        default: ifaces + listeners + tailscale one-liners` | 0.28 s |
-| `pc power` | watts, GPU, battery and the power profiles; mutations ledgered. | `pc power [status] [--seconds 0.3] [--deep] [--json]` | 0.55 s |
+| `pc power` | watts, GPU, battery, power limits and the power profiles; mutations ledgered. | `pc power [status] [--seconds 0.3] [--deep] [--json]` | 0.55 s |
 | `pc thermal` | every thermal zone, hwmon chip, the ASUS fan (read-only) and the throttle reasons. | `pc thermal [zones\|hwmon\|fan\|throttle] [--json]` | 0.19 s |
 | `pc top` | per-process CPU/wake/RSS/PSS/IO/unit snapshot over one sampling window | `pc top [--seconds 0.3] [--sort cpu\|wake\|io\|rss] [-n 15] [--unit SUBSTR] [--all-users] [--json]` | 0.38 s |
 | `pc trace` | eBPF/perf one-liners as verbs: who wakes the CPU, who writes the disk, what a pid waits on. | `pc trace <verb> [pid\|comm] [--seconds N] [-n N] [--by comm\|pid\|unit] [--json]` | 1.75 s |
@@ -58,12 +59,18 @@ Regenerate: `pc help --md > ~/agents/KB/pc-cli.md`. Never hand-edit.
 
 | command | description | usage | bench (warm) |
 |---|---|---|---|
+| `pc conf` | ledgered, undoable config drop-in writer. | `pc conf put <path> (--from <file> \| --line <text> [--line <text>…]) [--reload <unit> \| --daemon-reload] [--user] [--apply]` | — |
 | `pc crashes` | apport crash reports in /var/crash; archive one set so apport-autoreport stops failing. | `pc crashes [list] [--json]` | — |
+| `pc disk` | duplicate files, done tickets' venvs/node_modules and old big logs under a root; reclaim hardlinks, deletes or zstd-compresses them, one ledger row each. | `pc disk dupes\|reclaim <root> [--apply] [--json]` | — |
 | `pc docker` | compose stacks, health, stats, logs, events, disk use; ledgered restarts. | `pc docker [stacks] [--json]                    compose project -> services (state/health/ports/uptime)` | 0.05 s |
 | `pc journal` | structured journalctl queries: errors, per-unit digest, unit tail, grep, boots, size. | `pc journal [errors\|digest\|unit\|grep\|boots\|size] [args]` | 0.06 s |
-| `pc search-index` | GNOME's file indexer (localsearch-3): its cost, busiest dirs, .trackerignore excludes. | `pc search-index status [-n N] [--json]` | — |
-| `pc tmp` | /tmp (tmpfs, RAM) leftovers: leaked test dirs, finished tickets' scratch, old build caches; dry run lists them. | `pc tmp [--apply]` | — |
-| `pc units` | systemd units/timers (user+system), per-unit cost, journal tail, guarded restart and reset-failed. | `pc units [list\|timers\|fleet\|show\|cost\|log\|deps\|start\|stop\|restart\|reset-failed] [args]` | 0.04 s |
+| `pc pkg` | apt packages with a ledger and an undo: simulate first, install or remove only the exact set. | `pc pkg install <pkg…> [--auto <pkg>[,<pkg>…]] [--apply]` | — |
+| `pc search-index` | GNOME's file indexer (localsearch-3): its cost, crashes, busiest dirs, excludes. | `pc search-index status [-n N] [--json] [--under DIR [--depth N]]` | — |
+| `pc snap` | snapd's refresh window and its disabled revisions, ledgered. | `pc snap                              timer, minutes it shares with the fenced windows, disabled revisions` | — |
+| `pc stale` | services still running on replaced libraries (needrestart): restart the safe ones, hold network/access/fleet units for the reboot. | `pc stale [--apply]` | — |
+| `pc timers` | every system+user timer: next run, last start/end and CPU s from the journal; overlapping runs; the first free slot. | `pc timers [--since 7d] [--overlap] [--free 45m] [--json]` | — |
+| `pc tmp` | /tmp (tmpfs, RAM) leftovers: leaked test dirs, finished tickets' scratch, old build caches; dry run lists them. | `pc tmp [--apply] [--if-over <size>]` | — |
+| `pc units` | systemd units/timers (user+system), per-unit cost, journal tail, guarded restart and reset-failed. | `pc units [list\|timers\|fleet\|show\|cost\|log\|deps\|start\|stop\|restart\|reset-failed\|disable\|mask\|enable\|unmask] [args]` | 0.04 s |
 
 ## Safety net — the change ledger, docs, benchmarks, health
 
@@ -72,7 +79,7 @@ Regenerate: `pc help --md > ~/agents/KB/pc-cli.md`. Never hand-edit.
 | `pc bench` | wall, CPU and exec count for every read-only pc subcommand, warm and cold. | `pc bench [--cold] [--runs 3] [--save] [--compare] [--only <sub>…] [--json]` | — |
 | `pc doctor` | PASS/FAIL for the whole pc family without opening a window, making a sound or touching the TV. | `pc doctor [--quick] [--json] [--brief]` | 1.20 s |
 | `pc explain` | ranked KB lookup: heading > bold lead > exact quoted token > partial quote/backtick > word > substring. | `pc explain <thing…> [-n 3] [--json] [--files]` | — |
-| `pc failures` | every failure of the window on one screen: units, agent runs, CI, creative CI, crashes, audit, needs, checks. | `pc failures [--since 24h] [--json]` | — |
+| `pc failures` | every failure of the window on one screen: units, agent runs, CI, creative CI, crashes, audit, needs, checks. | `pc failures [--since 24h] [--json] [--all]` | — |
 | `pc need` | the dashboard "need you" pushes; resolve one as a ledgered, undoable ack. | `pc need [list] [--json]` | — |
 | `pc undo` | the change ledger and its rollbacks. | `pc undo list [-n N] [--json]` | 0.02 s |
 

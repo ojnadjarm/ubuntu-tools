@@ -7,23 +7,41 @@ BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 # Entries pc_apply drops after a unit mutation (tailscaled and the docker units feed these).
 export PC_CACHE_KEYS='docker tailscale ts_pair'
 
-pc_usage 'usage: pc units [list|timers|fleet|show|cost|log|deps|start|stop|restart|reset-failed] [args]
+pc_usage 'usage: pc units [list|timers|fleet|show|cost|log|deps|start|stop|restart|reset-failed|disable|mask|enable|unmask] [args]
        pc units list [--user|--system|--all] [--failed] [--json]
        pc units timers [--user|--system|--all] [--json]
        pc units fleet [--json]
        pc units show <u> [--user|--system] [--json]
        pc units cost <u> [--user|--system] [--json]
+       pc units cost --all [--since 24h] [--per-hour] [--by ticket] [--json]
        pc units log <u> [--user|--system] [-n 30] [--since 1h] [--json]
        pc units deps <u> [--user|--system] [--json]
        pc units start|stop|restart <u> [--user|--system] [--apply]
        pc units reset-failed <u> [--user|--system] [--apply]
+       pc units disable <u> [--user|--system] [--keep] [--apply]
+       pc units mask <u> [--user|--system] [--apply]
+       pc units enable|unmask <u> [--user|--system] [--now] [--apply]
        (no args) = failed + fleet + top 5 by cpu
 
 Manager is auto-detected (checked in --user first, then --system) unless --user/--system forces
 it. `start`/`stop`/`restart` are guarded (never ssh*/ufw/tailscaled, never dark-eye.service
 without PC_ORCHESTRATOR=1, never the orchestrator unit) and ledgered — without --apply they print
-the change they would make and exit 0. `reset-failed` clears a failed unit (a transient
+the change they would make and exit 0. `cost --all` merges journal `Consumed` records
+(finished runs in the window) with live CPUUsageNSec of running services/scopes (both managers)
+into CPU s and s/h per unit; transient instance names collapse to `*`, docker scopes show the
+container name (a removed one `<name> (gone)` from state/docker-names.tsv, docker events since boot or its scope line, else
+`<id> (gone, unknown)`), user@N.service (the user manager sum) is left out. `--by ticket` sums the transient
+scopes instead, per first `T<n>` in their `Started` description, else the ticket of the `heavy run` with the
+same command, end and wall (log/heavy.jsonl, ±3 s), else `untagged <command>`. `reset-failed` clears a failed unit (a transient
 `systemd-run` scope unloads); same guard and ledger, its rollback is a no-op (the journal keeps it).
+`disable`/`mask` also stop the unit (--now) and are ledgered; the rollback is `enable`/`unmask`
+(--now when it was running), restoring the old file state; `disable --keep` leaves it running
+(the rollback of enable on a running unit). A static unit (started by D-Bus, a socket or another unit)
+cannot be disabled: `disable` prints `cannot:`, exits 4 and points at `mask`; so does an
+enabled-runtime or linked unit (no exact rollback). Never disabled or masked: ssh*, ufw,
+tailscaled, docker*, containerd, dark-eye*, sentinel*, agent@*, the orchestrator unit, netdata,
+NetworkManager, gdm*, pipewire*, dbus*, systemd-*, polkit, gnome-shell*, user@*, wireplumber,
+accounts-daemon. System units go through sudo -n.
 
 Roster (KB/orchestrator.md): sentinel-check.timer, agent@moodle-keeper, agent@sentinel-digest,
 agent@maintenance, moodle-keep-weekly.timer, dark-eye(.service/-failed), agents-dashboard,
@@ -37,10 +55,10 @@ ROSTER_USER=(sentinel-check.timer agent@moodle-keeper.service agent@sentinel-dig
   dark-eye-failed.service agents-dashboard.service "$ORCHESTRATOR_UNIT")
 ROSTER_SYSTEM=(ydotoold.service)
 
-PC_SUB='pc units'; PC_EXTRA_FLAGS=(--user --system --all --failed -n: --since:)
+PC_SUB='pc units'; PC_EXTRA_FLAGS=(--user --system --all --failed --per-hour --now --keep -n: --since: --by:)
 pc_opt "$@"; ARGS=("${PC_ARGS[@]}")
-N=${PC_OPT[-n]-30}; SINCE=${PC_OPT[--since]-}; FAILED=${PC_OPT[--failed]-0}
-SCOPE=""; for f in ${PC_EXTRA[@]+"${PC_EXTRA[@]}"}; do case $f in --user|--system|--all) SCOPE=${f#--};; esac; done
+N=${PC_OPT[-n]-30}; SINCE=${PC_OPT[--since]-}; BY=${PC_OPT[--by]-}; FAILED=${PC_OPT[--failed]-0}
+SCOPE=""; NOW_FLAG=0; KEEP=0; for f in ${PC_EXTRA[@]+"${PC_EXTRA[@]}"}; do case $f in --user|--system|--all) SCOPE=${f#--};; --now) NOW_FLAG=1;; --keep) KEEP=1;; esac; done
 
 # scope_flag <scope> — the systemctl/journalctl flag for a resolved scope ("" for system).
 scope_flag() { [ "$1" = user ] && echo --user || echo ""; }
@@ -88,6 +106,152 @@ both() {
 # guard_unit <unit> — the bare-name check now lives in pclib (pc_guard_unit); kept as the
 # local name the verbs already call.
 guard_unit() { pc_guard_unit "$1" "${2:-}"; }
+
+# guard_off <unit> — exit 3 for a unit an agent box must never disable or mask (pc_unit_why plus the desktop core).
+guard_off() {
+  local base=${1%.*}
+  case $1 in *.service|*.socket|*.timer|*.target|*.path|*.mount) ;; *) base=$1;; esac
+  case $base in
+    ssh*|netdata|NetworkManager|gdm*|pipewire*|tailscaled|dark-eye*|dbus*|systemd-*|polkit|gnome-shell*|user@*|wireplumber|accounts-daemon)
+      printf 'pc: refused (%s is never disabled or masked) — %s\n' "$base" "$PC_FLEET_LINE" >&2; exit 3;;
+  esac
+  guard_unit "$1" "$2"
+}
+
+# file_state <flag> <unit> — "UnitFileState ActiveState" of a unit.
+file_state() {
+  local f u=$2; f=$(systemctl $1 show "$u" -p UnitFileState,ActiveState 2>/dev/null)
+  echo "$(sed -n 's/^UnitFileState=//p' <<<"$f" | grep . || echo static) $(sed -n 's/^ActiveState=//p' <<<"$f" | grep . || echo unknown)"
+}
+
+# job_bound <flag> <unit> <verb> — seconds a start/stop/restart job may take: TimeoutStartUSec and/or
+# TimeoutStopUSec (restart sums both) + 5 s, capped at 300 s; infinity counts as 300 s.
+job_bound() {
+  local p=TimeoutStartUSec,TimeoutStopUSec
+  case $3 in start) p=TimeoutStartUSec;; stop) p=TimeoutStopUSec;; esac
+  systemctl $1 show "$2" -p "$p" --value 2>/dev/null | awk '
+    { if ($0 ~ /infinity/) inf=1
+      for (i=1; i<=NF; i++) { v=$i+0; t=$i; sub(/^[0-9.]+/,"",t)
+        s += v * (t=="w"?604800 : t=="d"?86400 : t=="h"?3600 : t=="min"?60 : t=="s"?1 : t=="ms"?0.001 : 0) } }
+    END { b=(inf ? 300 : int(s+0.999)+5); if (b>300) b=300; if (b<5) b=5; print b }'
+}
+
+# unmask_start <unit> <systemctl…> — unmask, then start (systemctl has no `unmask --now`).
+unmask_start() { "${@:2}" unmask -- "$1" && "${@:2}" start -- "$1"; }
+
+# window_secs <since> — seconds covered by a `--since` value (Nd/Nh/Nmin/Nm/Ns, else `date -d`).
+window_secs() {
+  case "$1" in
+    *[0-9]d) echo $(( ${1%d} * 86400 ));;
+    *[0-9]h) echo $(( ${1%h} * 3600 ));;
+    *[0-9]min) echo $(( ${1%min} * 60 ));;
+    *[0-9]m) echo $(( ${1%m} * 60 ));;
+    *[0-9]s) echo "${1%s}";;
+    *) local t; t=$(date -d "$1" +%s) || return 2; echo $(( $(date +%s) - t ));;
+  esac
+}
+
+# cost_all — CPU s and s/h of every unit: journal `Consumed` records in the window plus the live
+# CPUUsageNSec of running units, each scaled to the window when it ran longer; tagged TSV into one awk.
+cost_all() {
+  local since=${SINCE:-24h} w jsince s flag sk=6 hl=${HEAVY_LOG:-$BIN/../log/heavy.jsonl} up now
+  local dn=${DOCKER_NAMES:-$BIN/../state/docker-names.tsv}
+  [ -n "$PC_FIXTURE" ] && hl=$PC_FIXTURE/heavy.jsonl && dn=$PC_FIXTURE/docker-names.tsv
+  w=$(window_secs "$since") && [ "$w" -gt 0 ] 2>/dev/null || { echo "pc units cost: bad --since '$since'" >&2; return 2; }
+  case "$BY" in ""|unit) BY="";; ticket) sk=4;; *) echo "pc units cost: --by takes ticket" >&2; return 2;; esac
+  case "$since" in *[0-9][dhms]|*[0-9]min) jsince="-$since";; *) jsince=$since;; esac
+  {
+    up=$(awk '{print $1}' "$PC_PROC/uptime"); printf -v now '%(%s)T' -1
+    printf 'U\t%s\n' "$up"
+    pc_cmd journalctl --since "$jsince" _COMM=systemd --grep 'Consumed .*CPU time|Started [^ ]+\.scope - ' -o short-unix --no-hostname --no-pager 2>/dev/null \
+      | awk '{ id=$2; sc=(id=="systemd[1]:") ? "system" : "user"
+               if ($3=="Started" && $4 ~ /\.scope$/) { d=$0; sub(/^[^ ]+ [^ ]+ Started [^ ]+ - /,"",d); sub(/\.$/,"",d); gsub(/\t/," ",d); printf "S\t%s\t%s\t%s\n", sc, $4, d; next }
+               u=$3; sub(/:$/,"",u); if ($4!="Consumed") next
+               ns=0; wall=0; for (i=5; i<=NF && $i!="wall"; i++) { if ($i=="over") { over=1; continue } v=$i+0; t=$i; sub(/^[0-9.]+/,"",t)
+                 x = v * (t=="d"?86400e9 : t=="h"?3600e9 : t=="min"?60e9 : t=="s"?1e9 : t=="ms"?1e6 : t=="us"||t=="μs"?1e3 : 0)
+                 if (over) wall += x; else ns += x }
+               over=0; printf "J\t%s\t%s\t%.0f\t%.0f\t%s\n", sc, u, ns, wall, $1 }'
+    for s in user system; do
+      flag=$(scope_flag "$s")
+      pc_cmd systemctl $flag show '*.service' '*.scope' -p Id,ActiveState,CPUUsageNSec,ActiveEnterTimestampMonotonic,Description 2>/dev/null \
+        | awk -v s="$s" -F= '/^Id=/{id=$2} /^ActiveState=/{st=$2} /^CPUUsageNSec=/{c=$2} /^ActiveEnterTimestampMonotonic=/{m=$2} /^Description=/{d=substr($0,13); gsub(/\t/," ",d)}
+            /^$/{ if (st=="active" && c ~ /^[0-9]+$/ && c>0 && id !~ /^user@[0-9]+\.service$/) printf "L\t%s\t%s\t%s\t%s\t%s\n", s, id, c, m, d; id=st=c=m=d="" }
+            END{ if (st=="active" && c ~ /^[0-9]+$/ && c>0 && id !~ /^user@[0-9]+\.service$/) printf "L\t%s\t%s\t%s\t%s\t%s\n", s, id, c, m, d }'
+    done
+    SCOPE=all both timers_json | jq -r '.[] | select(.activates) | "T\t\(.scope)\t\(.activates)"'
+    [ "$BY" = ticket ] && [ -r "$hl" ] && jq -rR 'fromjson? | select((.ticket|type)=="string" and (.ticket|test("^T[0-9]+$")) and (.ts|type)=="string")
+      | ["H", (.ts[0:19]+"Z"|fromdateiso8601) - ((.ts[19:20]+"1"|tonumber) * ((.ts[20:22]|tonumber)*3600 + (.ts[23:25]|tonumber)*60)),
+         .ticket, .wall_s, (.cmd[0]//""|sub(".*/";""))] | @tsv' "$hl" 2>/dev/null
+    pc_cmd docker ps -a --no-trunc --format '{{.ID}} {{.Names}}' 2>/dev/null | awk '{printf "D\t%s\t%s\n", $1, $2}'
+    [ -r "$dn" ] && awk -F'\t' '$1 ~ /^[0-9a-f]{12,}$/ && $2 != "" {printf "N\t%s\t%s\n", substr($1,1,12), $2}' "$dn"
+    pc_cmd docker events --since "$((now - ${up%.*}))" --until "$now" --filter type=container \
+      --format '{{.Actor.ID}} {{index .Actor.Attributes "name"}}' 2>/dev/null | awk 'NF==2{printf "E\t%s\t%s\n", $1, $2}'
+  } | awk -F'\t' -v W="$w" -v json="$JSON" -v by="$BY" '
+    $1=="U" { up=$2; next }
+    $1=="S" { sd[$2 SUBSEP $3]=$4; next }
+    $1=="D" { dk[$2]=$3; next }
+    $1=="E" { ev[$2]=$3; next }
+    $1=="N" { tv[$2]=$3; next }
+    $1=="T" { tm[$2 SUBSEP $3]=1; next }
+    $1=="H" { hn++; he[hn]=$2; ht[hn]=$3; hw[hn]=$4; hc[hn]=$5; hk[int($2)]=hk[int($2)] " " hn; next }
+    # key — sc SUBSEP display name; a docker scope by its live name, else the name docker-names.tsv, docker events or its Started line kept.
+    function key(sc, u,   id, n, d) {
+      if (u ~ /^docker-[0-9a-f]+\.scope$/) { id=substr(u,8,length(u)-13); d=sd[sc SUBSEP u]
+        n=(id in dk) ? dk[id] : (substr(id,1,12) in tv) ? tv[substr(id,1,12)] " (gone)" : (id in ev) ? ev[id] " (gone)" : (d != "" && d !~ /^libcontainer container /) ? d " (gone)" : substr(id,1,12) " (gone, unknown)"
+        kd[sc SUBSEP n]="docker"; return sc SUBSEP n }
+      n=u; gsub(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8,}|[0-9]{3,}/, "*", n)
+      if (n ~ /\.scope$/) gsub(/[0-9]+/, "*", n)
+      if (!((sc SUBSEP n) in kd)) kd[sc SUBSEP n] = ((sc SUBSEP u) in tm) ? "timer" : (n ~ /\.scope$/) ? "scope" : (n ~ /\.service$/) ? "service" : n
+      if ((sc SUBSEP u) in tm) kd[sc SUBSEP n]="timer"
+      return sc SUBSEP n
+    }
+    # ticket — first word-bounded T<n> of a scope description, else "untagged" + the command past wrappers.
+    function ticket(sc, u, d,   w, n, i, c, an, lk, p) {
+      if (match(d, /(^|[^A-Za-z0-9])T[0-9]+([^A-Za-z0-9]|$)/)) { c=substr(d, RSTART, RLENGTH); gsub(/[^T0-9]/, "", c); return c }
+      if (d ~ /^\[systemd-run\] /) { n=split(substr(d, 15), w, " ")
+        for (i=1; i<=n; i++) { c=w[i]
+          if (c ~ /^"/) { while (c !~ /.."$/ && i<n) c=c " " w[++i]; gsub(/^"|"$/, "", c) }
+          if (an) { an=0; continue }
+          if (c ~ /^-[ugCskw]$/) { an=1; continue }
+          if (c ~ /^-|^[A-Za-z_][A-Za-z0-9_]*=|%|^\047/) continue
+          sub(/.*\//, "", c)
+          if (c ~ /^(env|nice|ionice|taskset|timeout|time|stdbuf|chrt|sudo)$/ || c ~ /^[0-9.,-]+[a-z]?$/) continue
+          if (c=="flock") { lk=1; continue }
+          if (lk) { lk=0; continue }
+          return "untagged " c } }
+      split(key(sc, u), p, SUBSEP); return "untagged " p[2]
+    }
+    # heavy — ticket of the unused heavy.jsonl run with the same command whose end and wall match a finished scope (±3 s), else t.
+    function heavy(E, w, d, t,   c, q, s, m, j, k, b, e, be) {
+      c=""; if (d ~ /^\[systemd-run\] /) { split(substr(d, 15), q, " "); c=q[1]; sub(/.*\//, "", c) }
+      be=99; for (s=int(E)-3; s<=int(E)+3; s++) { if (!(s in hk)) continue; m=split(hk[s], q, " ")
+        for (j=1; j<=m; j++) { k=q[j]; if ((k in hu) || (c!="" && c!=hc[k]) || hw[k]-w>3 || w-hw[k]>3) continue
+          e=(he[k]>E ? he[k]-E : E-he[k]) + (hw[k]>w ? hw[k]-w : w-hw[k]); if (e<be) { be=e; b=k } } }
+      if (b=="") return t; hu[b]=1; return ht[b]
+    }
+    { rec[NR]=$0 }
+    END {
+      for (r=1; r<=NR; r++) { if (!(r in rec)) continue; split(rec[r], f, "\t")
+        if (by=="ticket") { if (f[3] !~ /\.scope$/ || f[3] ~ /^docker-/) continue
+          d=(f[1]=="L" && f[6]!="") ? f[6] : sd[f[2] SUBSEP f[3]]; t=ticket(f[2], f[3], d)
+          if (f[1]=="J" && t ~ /^untagged /) t=heavy(f[6]+0, f[5]/1e9, d, t)
+          if (f[1]=="J") { a=f[5]/1e9; c=f[4]/1e9 * (a>W ? W/a : 1) } else { a=up - f[5]/1e6; if (a<1) a=1; c=f[4]/1e9 * (a>W ? W/a : 1) }
+          tc[t]+=c; tr[t]++; continue }
+        if (f[1]=="J") { k=key(f[2], f[3]); a=f[5]/1e9; cpu[k]+=f[4]/1e9 * (a>W ? W/a : 1); runs[k]++ }
+        else if (f[1]=="L") { k=key(f[2], f[3]); a=up - f[5]/1e6; if (a<1) a=1
+          cpu[k]+=f[4]/1e9 * (a>W ? W/a : 1); runs[k]++ } }
+      if (by=="ticket") { for (t in tc) printf "%s\t%d\t%.1f\t%.1f\n", t, tr[t], tc[t], tc[t]*3600/W; exit }
+      for (k in cpu) { split(k, p, SUBSEP)
+        printf "%s\t%s\t%s\t%d\t%.1f\t%.1f\n", p[2], p[1], kd[k], runs[k], cpu[k], cpu[k]*3600/W }
+    }' | sort -t $'\t' -k$sk,${sk}gr -k1,1 | if [ "$BY" = ticket ]; then
+      if [ "$JSON" = 1 ]; then jq -Rn '[inputs | split("\t") | {ticket:.[0], runs:(.[1]|tonumber), cpu_s:(.[2]|tonumber + 0), s_per_h:(.[3]|tonumber + 0)}]'
+      else { printf 'TICKET\tRUNS\tCPU_S\tS/H\n'; cat; } | column -t -s $'\t'; fi
+    elif [ "$JSON" = 1 ]; then
+      jq -Rn '[inputs | split("\t") | {unit:.[0], scope:.[1], kind:.[2], runs:(.[3]|tonumber), cpu_s:(.[4]|tonumber + 0), s_per_h:(.[5]|tonumber + 0)}]'
+    else
+      { printf 'UNIT\tSCOPE\tKIND\tRUNS\tCPU_S\tS/H\n'; cat; } | column -t -s $'\t'
+    fi
+}
 
 case "${ARGS[0]:-}" in
   list)
@@ -146,6 +310,7 @@ case "${ARGS[0]:-}" in
     ;;
 
   cost)
+    [ "$SCOPE" = all ] && [ -z "${ARGS[1]:-}" ] && { cost_all; exit $?; }
     u=${ARGS[1]:-}; [ -n "$u" ] || { echo "pc units cost: need a unit" >&2; exit 2; }
     s=$(resolve_scope "$u") || exit $?; flag=$(scope_flag "$s")
     props=$(systemctl $flag show "$u" -p CPUUsageNSec,MemoryCurrent,MemoryPeak,TasksCurrent,ControlGroup 2>/dev/null)
@@ -196,20 +361,22 @@ case "${ARGS[0]:-}" in
     verb=${ARGS[0]}; u=${ARGS[1]:-}; [ -n "$u" ] || { echo "pc units $verb: need a unit" >&2; exit 2; }
     guard_unit "$u" "$verb"
     s=$(resolve_scope "$u") || exit $?; flag=$(scope_flag "$s")
+    run=(); [ "$s" = system ] && run=(pc_root)
     before=$(systemctl $flag show "$u" -p ActiveState --value 2>/dev/null); : "${before:=unknown}"
     case "$verb" in start|restart) after=active;; stop) after=inactive;; esac
     read_cmd="systemctl $flag show $(printf '%q' "$u") -p ActiveState --value 2>/dev/null"
+    BOUND=$(job_bound "$flag" "$u" "$verb"); PC_ROOT_TIMEOUT=$BOUND
     # A oneshot without RemainAfterExit ends inactive with Result=success, never active.
     if [ "$after" = active ] && [ "$(systemctl $flag show "$u" -p Type --value 2>/dev/null)" = oneshot ] &&
        [ "$(systemctl $flag show "$u" -p RemainAfterExit --value 2>/dev/null)" != yes ]; then
       after='inactive success'
       read_cmd="echo \$($read_cmd) \$(systemctl $flag show $(printf '%q' "$u") -p Result --value 2>/dev/null)"
-      # Re-read hook: wait out a oneshot still activating (≤ 10 s); a longer run is verified late by pc doctor.
+      # Re-read hook: wait out a oneshot still activating, up to the job bound; a failed end reads at once.
       pc_read() {
         local i
-        for i in $(seq 50); do
+        for i in $(seq $((BOUND * 2))); do
           [ "$(systemctl $flag show "$u" -p ActiveState --value 2>/dev/null)" = activating ] || break
-          sleep 0.2
+          sleep 0.5
         done
         eval "$PC_READ_CMD"
       }
@@ -221,17 +388,67 @@ case "${ARGS[0]:-}" in
     esac
     export PC_READ_CMD="$read_cmd"
     pc_apply "$u" "$before" "$after" "$rollback" \
-      systemctl $flag "$verb" -- "$u"
+      ${run[@]+"${run[@]}"} systemctl $flag "$verb" -- "$u"
+    ;;
+
+  disable|mask|enable|unmask)
+    verb=${ARGS[0]}; u=${ARGS[1]:-}; [ -n "$u" ] || { echo "pc units $verb: need a unit" >&2; exit 2; }
+    guard_off "$u" "$verb"
+    s=$(resolve_scope "$u") || exit $?; flag=$(scope_flag "$s")
+    run=(); [ "$s" = system ] && run=(pc_root)
+    before=$(file_state "$flag" "$u"); fs=${before% *}; as=${before#* }
+    qu=$(printf '%q' "$u"); sf=${flag:-"--system"}
+    read_cmd="echo \$(systemctl $flag show $qu -p UnitFileState --value 2>/dev/null) \$(systemctl $flag show $qu -p ActiveState --value 2>/dev/null)"
+    now=(); [ "$as" = active ] && now=(--now)
+    end=inactive; [ "$as" = failed ] && end=failed
+    case "$verb" in
+      disable)
+        case "$fs" in
+          disabled|masked) { [ "$as" = inactive ] || [ "$KEEP" = 1 ]; } && { echo "already: $u $before"; exit 0; };;
+          enabled) ;;
+          enabled-runtime|linked|linked-runtime) echo "cannot: $u is $fs; pc units enable cannot restore that — use systemctl by hand"; exit 4;;
+          *) echo "cannot: $u is $fs (already not enabled; started by D-Bus, a socket or another unit); disable cannot stop it — pc units mask $u $sf"; exit 4;;
+        esac
+        after="disabled $end"; rollback="pc units enable $qu $sf${now:+ --now} --apply"
+        cmd=(systemctl $flag disable --now -- "$u")
+        [ "$KEEP" = 1 ] && { after="disabled $as"; cmd=(systemctl $flag disable -- "$u"); };;
+      mask)
+        [ "$fs" = masked ] && [ "$as" = inactive ] && { echo "already: $u $before"; exit 0; }
+        after="masked $end"; rollback="pc units unmask $qu $sf${now:+ --now} --apply"
+        cmd=(systemctl $flag mask --now -- "$u");;
+      enable)
+        [ "$fs" = enabled ] && { [ "$NOW_FLAG" = 0 ] || [ "$as" = active ]; } && { echo "already: $u $before"; exit 0; }
+        after="enabled $as"; [ "$NOW_FLAG" = 1 ] && after='enabled active'
+        rollback="pc units disable $qu $sf --apply"; [ "$as" = active ] && rollback="pc units disable $qu $sf --keep --apply"
+        cmd=(systemctl $flag enable); [ "$NOW_FLAG" = 1 ] && cmd+=(--now); cmd+=(-- "$u");;
+      unmask)
+        [ "$fs" = masked ] || { [ "$NOW_FLAG" = 1 ] && [ "$as" != active ]; } || { echo "already: $u $before"; exit 0; }
+        after="unmasked $as"; [ "$NOW_FLAG" = 1 ] && after='unmasked active'
+        read_cmd="echo \$(systemctl $flag show $qu -p UnitFileState --value 2>/dev/null | sed '/^masked/!s/.*/unmasked/') \$(systemctl $flag show $qu -p ActiveState --value 2>/dev/null)"
+        rollback="pc units mask $qu $sf --apply"
+        cmd=(systemctl $flag unmask -- "$u");;
+    esac
+    case "$verb" in disable|mask)
+      tb=$(systemctl $flag show "$u" -p TriggeredBy --value 2>/dev/null)
+      [ -n "$tb" ] && echo "note: $u is also started by $tb — $verb that too";;
+    esac
+    export PC_READ_CMD="$read_cmd"
+    if [ "$verb" = unmask ] && [ "$NOW_FLAG" = 1 ]; then
+      pc_apply "$u" "$before" "$after" "$rollback" unmask_start "$u" ${run[@]+"${run[@]}"} systemctl $flag
+    else
+      pc_apply "$u" "$before" "$after" "$rollback" ${run[@]+"${run[@]}"} "${cmd[@]}"
+    fi
     ;;
 
   reset-failed)
     u=${ARGS[1]:-}; [ -n "$u" ] || { echo "pc units reset-failed: need a unit" >&2; exit 2; }
     guard_unit "$u" reset-failed
     s=$(resolve_scope "$u") || exit $?; flag=$(scope_flag "$s")
+    run=(); [ "$s" = system ] && run=(pc_root)
     before=$(systemctl $flag show "$u" -p ActiveState --value 2>/dev/null); : "${before:=unknown}"
     export PC_READ_CMD="systemctl $flag show $(printf '%q' "$u") -p ActiveState --value 2>/dev/null"
     pc_apply "$u" "$before" inactive ": none, a failed state cannot be restored (the journal keeps the record)" \
-      systemctl $flag reset-failed -- "$u"
+      ${run[@]+"${run[@]}"} systemctl $flag reset-failed -- "$u"
     ;;
 
   ""|default)

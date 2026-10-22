@@ -44,6 +44,9 @@ is 'cached writes into XDG_RUNTIME_DIR' "$(run 'echo $CACHE')" "$WORK/pc-status"
 mkdir -p "$WORK/sfx/bin"; printf '#!/bin/sh\n[ -f %s/s ] && echo "ok $(cat %s/s)"\n' "$WORK" "$WORK" >"$WORK/sfx/bin/smartctl"; chmod +x "$WORK/sfx/bin/smartctl"
 is 'pc_smart_json caches no empty result' \
   "$(PC_FIXTURE=$WORK/sfx run "pc_smart_json; echo 1 >$WORK/s; pc_smart_json; echo 2 >$WORK/s; pc_smart_json")" $'\nok 1\nok 1'
+# T1136: SMART moves in hours, so --fresh (FRESH=1) keeps its 1 h entry like pc-status's slow keys (T943).
+is 'pc_smart_json keeps its entry under FRESH=1' \
+  "$(PC_FIXTURE=$WORK/sfx run "echo 3 >$WORK/s; FRESH=1; pc_smart_json")" 'ok 1'
 
 # 6. the ledger path is overridable and defaults under ~/agents/log.
 is 'PC_LEDGER is overridable' "$(run 'echo $PC_LEDGER')" "$WORK/changes.jsonl"
@@ -121,6 +124,24 @@ is 'pc_timeout runs the chosen binary' \
   fake-gnutimeout
 is 'PC_TIMEOUT_BIN from the environment wins' \
   "$(PC_TIMEOUT_BIN=/bin/echo XDG_RUNTIME_DIR="$WORK" bash -c ". '$LIB'; echo \$PC_TIMEOUT_BIN")" /bin/echo
+
+# T1136: PC_TEST_ROOT_LOG records each pc_root call as `<test>\t<cmd>`; a stub sudo keeps it off real root.
+printf '#!/bin/sh\necho "stub-sudo $*"\n' >"$TBIN/sudo"; chmod +x "$TBIN/sudo"
+is 'pc_root logs the caller under PC_TEST_ROOT_LOG' \
+  "$(PC_TIMEOUT_BIN=timeout PATH="$TBIN:$PATH" PC_TEST_ROOT_LOG="$WORK/root.log" SUDO_SHIM_TEST=t1 run 'pc_root smartctl -j' >/dev/null; cat "$WORK/root.log")" \
+  $'t1\tsmartctl -j'
+n0=$(command find "$WORK" | wc -l); (cd "$WORK" && PC_TIMEOUT_BIN=timeout PATH="$TBIN:$PATH" run 'pc_root true' >/dev/null)
+is 'pc_root writes no log without PC_TEST_ROOT_LOG' "$(command find "$WORK" | wc -l)" "$n0"
+is 'pc_root still runs sudo -n' "$(PC_TIMEOUT_BIN=timeout PATH="$TBIN:$PATH" PC_TEST_ROOT_LOG="$WORK/root2.log" run 'pc_root id')" 'stub-sudo -n id'
+printf '. "$1"; pc_root true\n' >"$WORK/fake.test.sh"
+is 'pc_root without SUDO_SHIM_TEST logs the calling test file' \
+  "$(env -u SUDO_SHIM_TEST PC_TIMEOUT_BIN=timeout PATH="$TBIN:$PATH" XDG_RUNTIME_DIR="$WORK" PC_TEST_ROOT_LOG="$WORK/root3.log" bash "$WORK/fake.test.sh" "$LIB" >/dev/null; cut -f1 "$WORK/root3.log")" fake.test.sh
+# Two cold SMART readers at once: the lock lets one sudo run, the other serves its read.
+mkdir -p "$WORK/sm"; printf '#!/bin/sh\necho x >>"%s/sm/calls"; sleep 0.3; echo "{\\"ok\\":1}"\n' "$WORK" >"$TBIN/sudo"
+sm() { PC_TIMEOUT_BIN=timeout PATH="$TBIN:$PATH" XDG_RUNTIME_DIR="$WORK/sm" bash -c ". '$LIB'; pc_smart_json"; }
+sm >"$WORK/sm/a" & sm >"$WORK/sm/b"; wait
+is 'two cold SMART readers run one sudo' "$(wc -l <"$WORK/sm/calls")" 1
+is 'the waiting reader serves the same JSON' "$(cat "$WORK/sm/a" "$WORK/sm/b")" $'{"ok":1}\n{"ok":1}'
 
 [ $bad = 0 ] && echo 'PASS pclib' || echo 'FAIL pclib'
 exit $bad

@@ -1,5 +1,5 @@
 """The ~/drop file browser, drop files served with Range, and the published plan pages."""
-import html, json, os, re, subprocess, threading, urllib.parse
+import html, json, os, re, subprocess, sys, threading, urllib.parse
 from dash.cache import forget
 from dash.env import HERE, HOME, PUBLIC_HOST
 from dash.routes import route
@@ -145,9 +145,17 @@ def plans():
 _index_lock = threading.Lock()
 
 
-def trash(path):
-    """Move path (a link itself, not its target) to the freedesktop trash; the error text, or None."""
-    r = subprocess.run(["gio", "trash", path], capture_output=True, text=True, timeout=25)
+TRASH_CAP = 120
+MAX_BATCH = 2000
+
+
+def trash(*paths):
+    """Move paths (a link itself, not its target) to the freedesktop trash within TRASH_CAP s; the error text, or None."""
+    t = min(TRASH_CAP, 25 + 2 * len(paths))
+    try:
+        r = subprocess.run(["gio", "trash", "--", *paths], capture_output=True, text=True, timeout=t)
+    except subprocess.TimeoutExpired:
+        return "trash timed out after %d s" % t
     return (r.stderr.strip() or "trash failed") if r.returncode else None
 
 
@@ -166,6 +174,128 @@ def delete_drop(raw):
         return 500, {"error": err}
     forget("drop")
     return 200, {"ok": True, "trashed": hit[1]}
+
+
+PROTECTED = [os.path.join(HOME, p) for p in ("agent-work/owner", "Documents", "moodle-envs", "agents/backups", "agents/secrets")]
+
+
+def entry_path(raw):
+    """A drop-relative name as (rel, absolute path with the parent resolved, the link itself kept), or None."""
+    rel = raw.rstrip("/") if isinstance(raw, str) else ""
+    parts = rel.split("/")
+    if not rel or any(not p or p.startswith(".") or "\\" in p or "\x00" in p for p in parts):
+        return None
+    root = os.path.realpath(DROP)
+    parent = os.path.realpath(os.path.join(root, *parts[:-1]))
+    if parent != root and not parent.startswith(root + os.sep):
+        return None
+    return rel, os.path.join(parent, parts[-1])
+
+
+def drop_entry(raw):
+    """One requested drop entry as (rel, path to trash, None), or (raw, None, reason) when it is refused."""
+    hit = entry_path(raw)
+    if not hit:
+        return raw, None, "outside the drop or hidden"
+    rel, path = hit
+    if not os.path.lexists(path):
+        return rel, None, "missing"
+    real = os.path.realpath(path)
+    if os.path.islink(path) and not real.startswith(os.path.realpath(DROP) + os.sep):
+        return rel, None, "symlink out of the drop"
+    if any(real == p or real.startswith(p + os.sep) for p in map(os.path.realpath, PROTECTED)):
+        return rel, None, "owner data"
+    return rel, path, None
+
+
+def tree_bytes(path):
+    """Bytes under a drop entry, links not followed."""
+    if os.path.islink(path) or not os.path.isdir(path):
+        return os.lstat(path).st_size
+    total = 0
+    for d, _, names in os.walk(path):
+        for n in names:
+            try:
+                total += os.lstat(os.path.join(d, n)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def delete_many(paths, dry=False):
+    """Trash several drop entries, all validated first: (status, payload); 207 when only some went; dry only counts them."""
+    if not isinstance(paths, list) or not paths:
+        return 400, {"error": "paths: a non-empty list"}
+    if len(paths) > MAX_BATCH:
+        return 400, {"error": "too many: %d items, at most %d per request" % (len(paths), MAX_BATCH), "count": len(paths)}
+    picked = {}
+    for raw in paths:
+        rel, path, why = drop_entry(raw)
+        if why:
+            return 400, {"error": "refused %s: %s" % (rel, why), "path": rel}
+        picked[rel] = path
+    rels = [r for r in picked if not any(r.startswith(o + "/") for o in picked)]
+    if dry:
+        return 200, {"count": len(rels), "bytes": sum(tree_bytes(picked[r]) for r in rels)}
+    err = trash(*[picked[r] for r in rels])
+    done = [r for r in rels if not os.path.lexists(picked[r])]
+    forget("drop")
+    failed = [r for r in rels if r not in done]
+    if err or failed:
+        err = err or "trash left %d of %d in the drop" % (len(failed), len(rels))
+        return (207 if done else 500), {"error": err, "trashed": done, "failed": failed}
+    return 200, {"ok": True, "trashed": done}
+
+
+def trash_dir():
+    """The home trash that gio uses for drop entries (freedesktop spec)."""
+    data = os.environ.get("XDG_DATA_HOME") or os.path.join(os.environ.get("HOME", HOME), ".local", "share")
+    return os.path.join(data, "Trash")
+
+
+def restore_many(paths):
+    """Put trashed drop entries back where they were, newest trash entry per path: (status, payload)."""
+    if not isinstance(paths, list) or not paths:
+        return 400, {"error": "paths: a non-empty list"}
+    if len(paths) > MAX_BATCH:
+        return 400, {"error": "too many: %d items, at most %d per request" % (len(paths), MAX_BATCH), "count": len(paths)}
+    info, want = os.path.join(trash_dir(), "info"), {}
+    for raw in paths:
+        hit = entry_path(raw)
+        if not hit:
+            return 400, {"error": "refused %s: outside the drop or hidden" % raw, "path": raw}
+        want[hit[1]] = hit[0]
+    found = {}
+    for n in os.listdir(info) if os.path.isdir(info) else []:
+        if not n.endswith(".trashinfo"):
+            continue
+        try:
+            with open(os.path.join(info, n), encoding="utf-8") as f:
+                meta = dict(l.strip().split("=", 1) for l in f if "=" in l)
+        except (OSError, ValueError):
+            continue
+        orig = urllib.parse.unquote(meta.get("Path", ""))
+        if orig in want:
+            when = (meta.get("DeletionDate", ""), os.stat(os.path.join(info, n)).st_mtime_ns)
+            if orig not in found or when > found[orig][0]:
+                found[orig] = (when, n[:-10])
+    done, failed = [], []
+    for orig, rel in want.items():
+        if orig not in found or os.path.lexists(orig) or not os.path.isdir(os.path.dirname(orig)):
+            failed.append(rel)
+            continue
+        name = found[orig][1]
+        try:
+            os.rename(os.path.join(trash_dir(), "files", name), orig)
+        except OSError:
+            failed.append(rel)
+            continue
+        os.remove(os.path.join(info, name + ".trashinfo"))
+        done.append(rel)
+    forget("drop")
+    if not done:
+        return 409, {"error": "nothing to restore", "restored": [], "failed": failed}
+    return 200, {"restored": done, "failed": failed}
 
 
 def delete_doc(slug):
@@ -191,10 +321,42 @@ def delete_doc(slug):
     return 200, {"ok": True, "trashed": slug}
 
 
+def journal(h, verb, paths, done):
+    """One stderr (journal) line per delete or restore: count, first paths and who sent it."""
+    paths = paths if isinstance(paths, list) else [paths]
+    fwd = h.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+    print("files %s n=%d %s=%d first=%s ip=%s ua=%s ts-user=%s" % (
+        verb, len(paths), "restored" if verb == "restore" else "trashed", len(done), json.dumps(paths[:3])[:300],
+        json.dumps(fwd or h.client_address[0]), json.dumps(h.headers.get("User-Agent", "")[:80]),
+        json.dumps(h.headers.get("Tailscale-User-Login") or "-")), file=sys.stderr, flush=True)
+
+
 @route("POST", "/api/files/delete")
 def files_delete_route(h, path):
     body = h.body_json(4096, {})
-    code, out = delete_drop(body.get("path") if isinstance(body, dict) else None)
+    raw = body.get("path") if isinstance(body, dict) else None
+    code, out = delete_drop(raw)
+    if isinstance(raw, str):
+        journal(h, "delete", raw, [out["trashed"]] if code == 200 else [])
+    h.json(out, code)
+
+
+@route("POST", "/api/files/delete-many")
+def files_delete_many_route(h, path):
+    body = h.body_json(1 << 20, {})
+    body = body if isinstance(body, dict) else {}
+    code, out = delete_many(body.get("paths"), body.get("dry") is True)
+    if body.get("dry") is not True:
+        journal(h, "delete-many", body.get("paths"), out.get("trashed", []))
+    h.json(out, code)
+
+
+@route("POST", "/api/files/restore")
+def files_restore_route(h, path):
+    body = h.body_json(1 << 20, {})
+    raw = body.get("paths") if isinstance(body, dict) else None
+    code, out = restore_many(raw)
+    journal(h, "restore", raw, out.get("restored", []))
     h.json(out, code)
 
 

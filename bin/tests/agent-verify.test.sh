@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# agent-verify on a temp HOME and AGENT_WORK: a brief's CHECK verdict, and --recheck red→green, red→red, out-of-window, green and suite-runner skipped, verdicts load/drift/real, a private TMPDIR per CHECK, --ticket picks its own section's CHECK in a multi-CHECK file, which without a T<nn> name needs --ticket.
+# agent-verify on a temp HOME and AGENT_WORK: a brief's CHECK verdict, and --recheck red→green, red→red, out-of-window, green and suite-runner skipped, verdicts load/drift/real, a private TMPDIR per CHECK, --ticket picks its own section's CHECK in a multi-CHECK file, which without a T<nn> name needs --ticket, sbin dirs appended to a PATH that lacks them, a stub watchman on the CHECK's TMPDIR stopped while foreign and default ones stay.
 set -uo pipefail
 BIN="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 REAL_HOME=$HOME
-WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
+WORK=$(mktemp -d); trap '[ -s "$WORK/wm.pids" ] && kill $(cut -d" " -f1 "$WORK/wm.pids") 2>/dev/null; rm -rf "$WORK"' EXIT
 . "$HOME/agents/bin/tests/lib/assert.sh"
 
 export HOME="$WORK/home" AGENT_WORK="$WORK/aw" QUIET_LOADAVG="$WORK/loadavg" QUIET_NPROC=4 QUIET_EVERY=1
@@ -79,6 +79,24 @@ err=$("$BIN/agent-verify" "$B" 2>&1 >/dev/null); is 'mis-key: several CHECKs, no
 is 'mis-key: names the count and the headings' "$err" "agent-verify: $B has 2 CHECKs; pass --ticket T<n> (headings: T12 T13 T14)"
 [ ! -e "$E/BACKLOG" ] && ok 'mis-key: writes no evidence' || nok miskey 'evidence/BACKLOG written'
 "$BIN/agent-verify" "$WORK/T9-x.md" --ticket T16 >/dev/null; is 'single CHECK: unchanged with --ticket, no section key' "$? $(jq -r '"\(.ok) \(has("section"))"' "$E/T16/check.json")" '0 true false'
+mkdir -p "$WORK/sbin"; printf '#!/bin/sh\nexit 0\n' >"$WORK/sbin/t17-sbin-tool"; chmod +x "$WORK/sbin/t17-sbin-tool"
+printf '# T17\nCHECK: t17-sbin-tool\n' >"$WORK/T17-x.md"
+PATH=/usr/bin:/bin AGENT_VERIFY_SBIN="$WORK/sbin" "$BIN/agent-verify" "$WORK/T17-x.md" >/dev/null; is 'sbin: a CHECK finds a tool in an sbin dir missing from PATH' $? 0
+printf '# T18\nCHECK: case ":$PATH:" in *:/usr/sbin:/sbin:*) exit 0;; esac; exit 1\n' >"$WORK/T18-x.md"
+PATH=/usr/bin:/bin "$BIN/agent-verify" "$WORK/T18-x.md" >/dev/null; is 'sbin: /usr/sbin and /sbin appended by default' $? 0
+printf '# T19\nCHECK: test "$PATH" = "/usr/sbin:/usr/bin:/bin:/usr/local/sbin:/sbin"\n' >"$WORK/T19-x.md"
+PATH=/usr/sbin:/usr/bin:/bin "$BIN/agent-verify" "$WORK/T19-x.md" >/dev/null; is 'sbin: a dir already on PATH is not added twice' $? 0
+ST="$WORK/stub"; mkdir -p "$ST" "$WORK/foreign"; export WM_LOG="$WORK/wm.log" WM_PIDS="$WORK/wm.pids"; : >"$WM_PIDS"
+printf '#!/bin/bash\ncase " $* " in *" shutdown-server "*) echo "shutdown ${TMPDIR-}" >>"$WM_LOG"; exit 0;; esac\necho "$$ ${TMPDIR-}" >>"$WM_PIDS"; cd /; while :; do sleep 0.2; done\n' >"$ST/watchman"; chmod +x "$ST/watchman"
+w='setsid watchman </dev/null >/dev/null 2>&1 &'
+printf '# T20\nCHECK: %s TMPDIR=%s %s env -u TMPDIR %s for _ in $(seq 50); do [ "$(wc -l <"$WM_PIDS")" -ge 3 ] \&\& break; sleep 0.1; done\n' "$w" "$WORK/foreign" "$w" "$w" >"$WORK/T20-x.md"
+PATH="$ST:$PATH" "$BIN/agent-verify" "$WORK/T20-x.md" >/dev/null; is 'watchman: the CHECK started 3 stub daemons' "$? $(wc -l <"$WM_PIDS")" '0 3'
+alive() { local p; p=$(awk -v t="$1" '$2 == t {print $1}' "$WM_PIDS"); [ -n "$p" ] && [ -d "/proc/$p" ] && ! grep -q '^State:.*Z' "/proc/$p/status" 2>/dev/null; }
+own=$(awk '$2 ~ /agent-verify\./ {print $2}' "$WM_PIDS")
+[ -n "$own" ] && ! alive "$own" && ok 'watchman: the daemon on the private TMPDIR is stopped' || nok watchman "own $own still running"
+grep -qxF "shutdown $own" "$WM_LOG" 2>/dev/null && ok 'watchman: shutdown-server asked on the private TMPDIR' || nok shutdown "$(cat "$WM_LOG" 2>&1)"
+alive "$WORK/foreign" && ok 'watchman: a foreign TMPDIR daemon is kept' || nok foreign 'stopped'
+alive '' && ok 'watchman: the default daemon is kept' || nok default 'stopped'
 "$BIN/agent-verify" >/dev/null 2>&1; is 'no brief and no --recheck exits 2' $? 2
 "$BIN/agent-verify" --help | grep -q -- --recheck && ok '--help names --recheck' || nok help 'no --recheck'
 exit $bad

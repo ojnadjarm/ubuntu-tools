@@ -24,9 +24,10 @@ if [ "$sub" = help ] || [ "$sub" = --help ] || [ "$sub" = -h ]; then
     [scroll]=desktop [see]=desktop [selftest]=desktop [shot]=desktop [spotify]=desktop
     [status]=desktop [tree]=desktop [type]=desktop [wait]=desktop [wait-for]=desktop [win]=desktop
     [hw]=kernel [io]=kernel [kernel]=kernel [net]=kernel [power]=kernel [thermal]=kernel
-    [top]=kernel [trace]=kernel [idle]=kernel
+    [top]=kernel [trace]=kernel [idle]=kernel [mem]=kernel
     [audio]=session [bt]=session [dbus]=session [input]=session [lid]=session [mutter]=session
-    [crashes]=services [docker]=services [journal]=services [search-index]=services [tmp]=services [units]=services
+    [conf]=services [crashes]=services [disk]=services [docker]=services [journal]=services [search-index]=services [tmp]=services [units]=services
+    [pkg]=services [snap]=services [stale]=services [timers]=services
     [bench]=safety [doctor]=safety [explain]=safety [failures]=safety [need]=safety [undo]=safety
   )
   LAYERS=(desktop kernel session services safety)

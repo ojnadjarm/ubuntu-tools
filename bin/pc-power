@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pc power status|rapl|gpu|battery|profiles|profile|platform|epp|governor|turbo|charge-limit — watts, GPU, battery and the power profiles; mutations ledgered.
+# pc power status|rapl|gpu|battery|profiles|cstates|pl|runtime-pm|profile|platform|epp|governor|turbo|charge-limit — watts, GPU, battery, power limits and the power profiles; mutations ledgered.
 set -uo pipefail
 export LC_ALL=C
 BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -8,6 +8,9 @@ SELF="$(readlink -f "$0")"
 
 pc_usage 'usage: pc power [status] [--seconds 0.3] [--deep] [--json]
        pc power rapl|gpu|battery|profiles [--seconds N] [--json]
+       pc power cstates [--window 10]
+       pc power pl [<long W> [<short W>]] [--apply]
+       pc power runtime-pm [<usb|pci id> auto|on] [--owner-ok] [--apply]
        pc power profile power-saver|balanced|performance [--apply]
        pc power platform quiet|balanced|performance [--apply]
        pc power epp <default|performance|balance_performance|balance_power|power> [--apply]
@@ -16,12 +19,17 @@ pc_usage 'usage: pc power [status] [--seconds 0.3] [--deep] [--json]
        pc power charge-limit <40..100> [--apply]
 
 Watts come from the powercap RAPL counters sampled over --seconds (default 0.3, root read);
---deep adds one turbostat run. Mutations print `would: …` and change nothing without --apply;
+--deep adds one turbostat run. cstates prints package pc2..pc10 residency (pmc_core, root read),
+core idle-state residency (cpuidle) over --window seconds, and the PCI/USB devices with runtime PM `on`.
+pl reads the RAPL PL1/PL2 of the mmio and MSR zones; with watts it writes the mmio zone (long <= 35,
+short <= 45, no raise at package >= 85 C). runtime-pm lists the `on` devices or sets one; a network
+controller (the remote-access path) needs --owner-ok. Mutations print `would: …` and change nothing without --apply;
 with it they are recorded in the change ledger and undoable with `pc undo`. Fan control is
 refused (FLEET §5) — `pc thermal fan` reads it.' "$@"
 
 DEEP=0; ARGV=()
 for a in "$@"; do case $a in --deep) DEEP=1;; *) ARGV+=("$a");; esac; done
+PC_EXTRA_FLAGS=(--window: --owner-ok)
 pc_opt ${ARGV[@]+"${ARGV[@]}"}
 secs=$SECONDS_; [ "$secs" = 0 ] && secs=0.3
 # to_ms 0.3 -> 300; integer milliseconds keep the watt arithmetic in bash (no awk/bc fork).
@@ -103,6 +111,116 @@ one_of() { local v=$1 l=$2; case " $l " in *" $v "*) return 0;; esac; printf 'pc
 # write_all <value> <file…> — one root shell, one write per policy.
 write_all() { local v=$1; shift; pc_root sh -c 'v=$1; shift; for f do printf %s "$v" >"$f" || exit 1; done' _ "$v" "$@"; }
 
+## --- C-states ---------------------------------------------------------------
+PMC=kernel/debug/pmc_core/package_cstate_show
+# pkgc_sample <root> — the pmc_core counters (µs) as "C2 N" lines; a root read off the fixture.
+pkgc_sample() {
+  local f="$1/$PMC"
+  if [ -r "$f" ]; then cat "$f"; else pc_root cat "$f" 2>/dev/null; fi | awk -F' *: *' '/^Package C/{sub(/Package /,"",$1); print $1, $2}'
+}
+# idle_sample <root> — every cpu's cpuidle state times (µs), cpu-major, state-minor.
+idle_sample() { cat "$1"/devices/system/cpu/cpu[0-9]*/cpuidle/state[0-9]*/time 2>/dev/null; }
+# pct <delta-us> <elapsed-us> -> "12.3%"
+pct() { local m=$(( $1 * 1000 / $2 )); [ "$m" -lt 0 ] && m=0; printf '%d.%d%%' $(( m / 10 )) $(( m % 10 )); }
+rpm_on() {
+  local d names
+  names=$(pc_cmd lspci -D 2>/dev/null)
+  for d in "$PC_SYS"/bus/pci/devices/*; do
+    [ "$(pc_rd "$d/power/control")" = on ] || continue
+    printf 'rpm-on  pci %s  %s\n' "${d##*/}" "$(awk -v a="${d##*/}" '$1==a{$1=""; sub(/^ /,""); print; exit}' <<<"$names")"
+  done
+  for d in "$PC_SYS"/bus/usb/devices/*; do
+    [ "$(pc_rd "$d/power/control")" = on ] || continue
+    printf 'rpm-on  usb %s  %s\n' "${d##*/}" "$(pc_rd "$d/product" '?')"
+  done
+}
+cstates() {
+  local win=${PC_OPT[--window]:-10} t1 t2 el i n line ncpu nst sum
+  local -a p1 p2 i1 i2 names
+  mapfile -t p1 < <(pkgc_sample "$PC_SYS"); mapfile -t i1 < <(idle_sample "$PC_SYS"); t1=${EPOCHREALTIME/./}
+  sleep "$win"
+  mapfile -t p2 < <(pkgc_sample "$PC_SYS2"); mapfile -t i2 < <(idle_sample "$PC_SYS2"); t2=${EPOCHREALTIME/./}
+  el=$(( t2 - t1 )); [ -n "${PC_FIXTURE:-}" ] && [ -n "${PC_POWER_ELAPSED_US:-}" ] && el=$PC_POWER_ELAPSED_US
+  if [ "${#p1[@]}" -gt 0 ] && [ "${#p1[@]}" = "${#p2[@]}" ]; then
+    line=pkg
+    for i in "${!p1[@]}"; do
+      n=${p1[i]%% *}; line+="  pc${n#C} $(pct $(( ${p2[i]##* } - ${p1[i]##* } )) "$el")"
+    done
+    printf '%s   (%s s window)\n' "$line" "$(w $(( el / 1000 )))"
+  else
+    printf 'pkg     unavailable (pmc_core debugfs not readable: sudo -n cat /sys/%s)\n' "$PMC"
+  fi
+  mapfile -t names < <(cat "$PC_SYS"/devices/system/cpu/cpu0/cpuidle/state[0-9]*/name 2>/dev/null)
+  nst=${#names[@]}
+  if [ "$nst" -gt 0 ] && [ "${#i1[@]}" = "${#i2[@]}" ]; then
+    ncpu=$(( ${#i1[@]} / nst )); line=core
+    for n in "${!names[@]}"; do
+      sum=0; for (( i = n; i < ${#i1[@]}; i += nst )); do sum=$(( sum + i2[i] - i1[i] )); done
+      line+="  ${names[n]} $(pct "$sum" $(( el * ncpu )))"
+    done
+    printf '%s   (%s cpus)\n' "$line" "$ncpu"
+  fi
+  rpm_on
+}
+
+## --- power limits -----------------------------------------------------------
+MMIO="$PC_SYS/class/powercap/intel-rapl-mmio:0"
+# us_fmt <us> -> "27.98 s" or "2 ms"
+us_fmt() { if [ "${1:-0}" -ge 1000000 ]; then printf '%s s' "$(w $(( $1 / 1000 )))"; else printf '%d ms' $(( ${1:-0} / 1000 )); fi; }
+pkg_temp() { local z; for z in "$PC_SYS"/class/thermal/thermal_zone*; do
+  [ "$(pc_rd "$z/type")" = x86_pkg_temp ] && { printf '%d' $(( $(pc_rd "$z/temp" 0) / 1000 )); return; }; done; }
+pl_w() { printf '%d' $(( $(pc_rd "$1/constraint_$2_power_limit_uw" 0) / 1000000 )); }
+pl_show() {
+  local k d i line l1= l2= v
+  for k in mmio msr; do
+    d="$PC_SYS/class/powercap/intel-rapl:0"; [ $k = mmio ] && d=$MMIO
+    [ -f "$d/constraint_0_power_limit_uw" ] || continue
+    line="pl      $k "
+    for i in 0 1; do
+      line+="  $(pc_rd "$d/constraint_${i}_name") $(w $(( $(pc_rd "$d/constraint_${i}_power_limit_uw" 0) / 1000 ))) W ($(us_fmt "$(pc_rd "$d/constraint_${i}_time_window_us" 0)"))"
+    done
+    printf '%s\n' "$line"
+    v=$(pl_w "$d" 0); [ -z "$l1" ] || [ "$v" -lt "$l1" ] && l1=$v
+    v=$(pl_w "$d" 1); [ -z "$l2" ] || [ "$v" -lt "$l2" ] && l2=$v
+  done
+  printf 'pl      effective  PL1 %s W  PL2 %s W  pkg %s C\n' "${l1:-?}" "${l2:-?}" "$(pkg_temp)"
+}
+pl_set() {
+  local long=$1 cur_l cur_s short t f0="$MMIO/constraint_0_power_limit_uw" f1="$MMIO/constraint_1_power_limit_uw"
+  [ -f "$f0" ] || { echo 'pc power: no intel-rapl-mmio:0 zone' >&2; exit 2; }
+  cur_l=$(pl_w "$MMIO" 0); cur_s=$(pl_w "$MMIO" 1); short=${2:-$cur_s}
+  case "$long/$short" in *[!0-9/]*|/*|*/) echo 'pc power: pl takes whole watts' >&2; exit 2;; esac
+  long=$((10#$long)); short=$((10#$short))
+  [ "$long" -ge 5 ] && [ "$short" -ge 5 ] || { echo 'pc power: pl refuses a limit < 5 W' >&2; exit 2; }
+  [ "$long" -le 35 ] || { echo 'pc power: pl refuses long > 35 W (heat on a lid-closed laptop)' >&2; exit 2; }
+  [ "$short" -le 45 ] || { echo 'pc power: pl refuses short > 45 W' >&2; exit 2; }
+  if [ "$long" -gt "$cur_l" ] || [ "$short" -gt "$cur_s" ]; then
+    t=$(pkg_temp)
+    [ -n "$t" ] && [ "$t" -lt 85 ] || { printf 'pc power: refused: package %s C (a raise needs < 85 C)\n' "${t:-unreadable}" >&2; exit 3; }
+  fi
+  [ "$cur_l/$cur_s" = "$long/$short" ] && { printf 'already: rapl-mmio PL1/PL2 W %s\n' "$long/$short"; return 0; }
+  PC_READ_CMD="$(printf 'echo $(( $(cat %q) / 1000000 ))/$(( $(cat %q) / 1000000 ))' "$f0" "$f1")" \
+    pc_apply 'rapl-mmio PL1/PL2 W' "$cur_l/$cur_s" "$long/$short" "$(printf '%q %q %q %q --apply' "$SELF" pl "$cur_l" "$cur_s")" \
+    pc_root sh -c 'printf %s "$2" >"$1" && printf %s "$4" >"$3"' _ "$f0" $(( long * 1000000 )) "$f1" $(( short * 1000000 ))
+}
+# rpm_set <usb|pci id> <auto|on> — one device's power/control; a network controller needs --owner-ok.
+rpm_set() {
+  local id=$1 mode=$2 bus f before ok=()
+  need_arg "$mode" runtime-pm; one_of "$mode" 'auto on'
+  if [ -d "$PC_SYS/bus/usb/devices/$id" ]; then bus=usb
+  elif [ -d "$PC_SYS/bus/pci/devices/$id" ]; then bus=pci
+  elif [ -d "$PC_SYS/bus/pci/devices/0000:$id" ]; then bus=pci; id=0000:$id
+  else printf 'pc power: no usb or pci device %s\n' "$id" >&2; exit 2; fi
+  f="$PC_SYS/bus/$bus/devices/$id/power/control"
+  if [ $bus = pci ]; then case $(pc_rd "$PC_SYS/bus/pci/devices/$id/class") in 0x02*)
+    [ "${PC_OPT[--owner-ok]:-0}" = 1 ] || { printf 'pc power: refused: %s is a network controller (the remote-access path); the owner decides, then --owner-ok\n' "$id" >&2; exit 3; }
+    ok=(--owner-ok);; esac; fi
+  before=$(pc_rd "$f")
+  [ "$before" = "$mode" ] && { printf 'already: runtime-pm %s %s %s\n' "$bus" "$id" "$mode"; return 0; }
+  PC_READ_CMD="cat $(printf %q "$f")" pc_apply "runtime-pm $bus $id" "$before" "$mode" \
+    "$(printf '%q ' "$SELF" runtime-pm "$id" "$before" ${ok[@]+"${ok[@]}"})--apply" write_all "$mode" "$f"
+}
+
 sub="${PC_ARGS[0]:-status}"; arg="${PC_ARGS[1]:-}"
 case "$sub" in
   fan) pc_guard "pwm1_enable";;   # always refuses: fan control is read-only in v1
@@ -137,6 +255,9 @@ case "$sub" in
     f="$PC_BAT/charge_control_end_threshold"
     apply_change charge-limit "$(pc_rd "$f")" "$arg" charge-limit "cat $f" write_all "$arg" "$f"; exit $?;;
   status|rapl|gpu|battery|profiles) ;;
+  cstates) cstates; exit 0;;
+  pl) if [ -n "$arg" ]; then pl_set "$arg" "${PC_ARGS[2]:-}"; else pl_show; fi; exit $?;;
+  runtime-pm) if [ -n "$arg" ]; then rpm_set "$arg" "${PC_ARGS[2]:-}"; else rpm_on; fi; exit $?;;
   *) printf 'pc power: unknown verb %s (try -h)\n' "$sub" >&2; exit 2;;
 esac
 

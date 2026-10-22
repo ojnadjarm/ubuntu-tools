@@ -1,4 +1,4 @@
-/* Sites screen: the project tiles, then every web site on this machine, grouped mine / moodle / metrics. */
+/* Sites screen: the project tiles, then every web site on this machine, grouped mine / moodle / metrics / other units. */
 import {esc,pill,cell,table,stat,when,ago} from "../core/fmt.js";
 function link(u,label){var m=/^https?:\/\/([^.:\/]+)[^:\/]*(:\d+)?/.exec(u);return '<a href="'+esc(u)+'" target="_blank" rel="noopener">'+esc(label||(m?m[1]+(m[2]||""):u))+'</a>';}
 function project(p,i){
@@ -13,16 +13,16 @@ function project(p,i){
     '<div class="big"><b>'+esc(p.name)+'</b><em>'+esc(p.what)+'</em></div><div class="proj">'+st+'</div>',i);
 }
 export function render(grid,D){
-  var sites=D.sites||[],groups=[["mine","wide"],["moodle","half roomy"],["metrics","half roomy"]],i=0,h="";
+  var sites=D.sites||[],groups=[["mine","wide"],["moodle","half roomy"],["metrics","half roomy"],["other","wide","other units"]],i=0,h="";
   (D.projects||[]).forEach(function(p){h+=project(p,i++);});
   groups.forEach(function(g){
     var list=sites.filter(function(s){return s.group===g[0];});
     if(g[0]==="mine"&&D.voice_url){var dash=sites.filter(function(s){return s.port===19998;})[0]||{};list=list.concat([{name:"Voice training",what:"read prompts aloud so the Eye learns your voice · open the https link, the mic needs it",url:D.voice_url,state:dash.state||"up",uptime:"",tls:true}]);}
     var rows=list.map(function(s){
       var host=s.host||(s.url?s.url.replace(/^https?:\/\//,"").replace(/\/$/,""):"");
-      return '<tr><td class="n">'+(s.url?'<a href="'+esc(s.url)+'" target="_blank" rel="noopener">'+esc(s.name)+'</a>':esc(s.name))+'</td><td class="w">'+esc(s.what)+'</td><td class="u">'+(s.url?'<a href="'+esc(s.url)+'" target="_blank" rel="noopener">'+esc(host)+'</a>':"")+'</td><td>'+pill(s.state)+'</td><td class="a">'+(s.ms!=null?(s.ms<100?s.ms+" ms · ":(s.ms/1000).toFixed(1)+" s · "):"")+esc(s.uptime)+(s.tls?" · https":"")+'</td></tr>';}).join("");
+      return '<tr><td class="n">'+(s.url?'<a href="'+esc(s.url)+'" target="_blank" rel="noopener">'+esc(s.name)+'</a>':esc(s.name))+'</td><td class="w">'+esc(s.what)+'</td><td class="u">'+(s.url?'<a href="'+esc(s.url)+'" target="_blank" rel="noopener">'+esc(host)+'</a>':"")+'</td><td>'+pill(s.state)+(s.why?' <span class="k">'+esc(s.why)+'</span>':"")+'</td><td class="a">'+(s.ms!=null?(s.ms<100?s.ms+" ms · ":(s.ms/1000).toFixed(1)+" s · "):"")+esc(s.uptime)+(s.tls?" · https":"")+'</td></tr>';}).join("");
     var n=list.length;
-    h+=cell(g[1],"sites · "+g[0],"<s>"+n+(n===1?" site":" sites")+"</s>",table([["name"],["what","w"],["tailnet url","u"],["state"],["up","a"]],rows,"nothing listening"),i++);
+    h+=cell(g[1],"sites · "+(g[2]||g[0]),"<s>"+n+(n===1?" site":" sites")+"</s>",table([["name"],["what","w"],["tailnet url","u"],["state"],["up","a"]],rows,"nothing listening"),i++);
   });
   return h;
 }

@@ -35,6 +35,18 @@ const ROOT = path.join(__dirname, "..", "static"), NEXT = path.join(ROOT, "next"
   const two = verdict({ verdict: { needs: [{ kind: "ask", t: "2026-09-21T03:04:38+02:00", text: 'say "go TSP-019"' }, { kind: "agent", text: "agent digest exit 1" }] } });
   assert.ok(two.text === "2 need you" && two.items.length === 2 && two.keys.length === 2 && two.bad, "headline count, list and badge keys come from the same needs");
   assert.strictEqual(verdict({ verdict: { needs: [] }, errors: { sites: "timeout" } }).text, "unknown", "a failed collector reads unknown");
+  const ci = "fleet nightly ci failed (no time left for a re-run before the unit timeout): exit 1 · ✖ fleet ci red: skills/a.test.sh · ~/agents/state/ci-fix/2026-10-21.md";
+  const rows = verdict({ verdict: { needs: [{ kind: "push", t: "2026-10-21T03:51:22+02:00", text: ci }, { kind: "todo", todo: "27", text: "Commit the untracked files the fleet needs in ~/agents (one commit, 385 files)" }, { kind: "agent", text: "x".repeat(90) }] } }).rows;
+  assert.deepStrictEqual(rows.map((r) => r.head), ["fleet nightly ci failed", "Commit the untracked files the fleet needs in ~/agents", "x".repeat(59) + "…"], "each need is its first clause, at most 60 characters");
+  assert.ok(rows[0].full === ci && rows[0].t && rows[1].tag === "to do" && rows.every((r) => r.head.length <= 60), "the full server text and age ride along unchanged");
+  const { linked } = await import(pathToFileURL(path.join(NEXT, "js", "verdict.js")));
+  assert.strictEqual(linked('see ~/drop/T1/a&b "x".png, then (~/drop/T2/r.jpg).'), 'see <a href="/files/T1/a%26b" target="_blank" rel="noopener">~/drop/T1/a&amp;b</a> &quot;x&quot;.png, then (<a href="/files/T2/r.jpg" target="_blank" rel="noopener">~/drop/T2/r.jpg</a>).', "~/drop paths link with an encoded href, escaped text and trailing punctuation left outside");
+  assert.strictEqual(linked("<b> ~/agents/state/x.md"), "&lt;b&gt; ~/agents/state/x.md", "text without a ~/drop path is only escaped");
+  assert.strictEqual(linked("red · ~/agents/state/ci-fix/2026-10-21.md."), 'red · <a href="/report/agents/state/ci-fix/2026-10-21.md" target="_blank" rel="noopener">~/agents/state/ci-fix/2026-10-21.md</a>.', "a ci-fix note links into /report");
+  assert.ok(["~/agents/log/ailearning-ci.log", "~/agents/sentinel-digest/REPORT.md", "~/agents/sentinel/logs/x.log"].every((p) => linked(p).includes('href="/report/agents/' + p.slice(9) + '"')), "logs and REPORT.md link into /report");
+  assert.ok(["~/agents/log/m.md", "~/agents/.x/REPORT.md", "~/agents/secrets", "~/agents/secrets/REPORT.md", "~/agents/backups/REPORT.md"].every((p) => !linked(p).includes("<a")), "paths /report does not serve stay text");
+  const one = verdict({ verdict: { needs: [{ kind: "agent", text: "keepalive.claude exit 1" }] } }).rows[0];
+  assert.ok(one.head === one.full, "a one-clause need has head === full, so the overview renders it without an expand");
 
   const { EYE, fitEye, FACE, ORBIT } = await import(pathToFileURL(path.join(NEXT, "js", "gl", "eye.js")));
   assert.ok(EYE.name && typeof EYE.create === "function" && /void main\(\)/.test(EYE.fs) && /uRing/.test((EYE.vs || "") + EYE.fs), "the eye boundary exports one variant whose shaders read the data rings");

@@ -17,11 +17,38 @@ pw="$NVM_DIR/versions/node/v24.20.0/bin/playwright-mcp"
 find "$HOME/agents/browser/out" -type f -mtime +7 -delete 2>/dev/null
 
 profile="$HOME/agents/browser/profile-${PW_PROFILE:-default}"
-# Drop restored tabs; --restore-last-session (config) is only there to keep session cookies.
-rm -rf "$profile/Default/Sessions"
+run="${XDG_RUNTIME_DIR:-/tmp}"
+for d in "$run"/pw-*; do [ -d "$d" ] && ! kill -0 "${d##*-}" 2>/dev/null && rm -rf "$d"; done
+
+# Busy: a live Chrome holds SingletonLock (-> host-pid), or another playwright-mcp was started on it (it launches lazily).
+busy=
+lock=$(readlink "$profile/SingletonLock" 2>/dev/null)
+[ "${lock%-*}" = "$(uname -n)" ] && kill -0 "${lock##*-}" 2>/dev/null && busy="SingletonLock pid ${lock##*-}"
+# No Chrome on the profile: cap its disk caches (they regrow on demand; logins live elsewhere).
+cache=("$profile/Default/Cache" "$profile/Default/Code Cache")
+[ -z "$busy" ] && [ "$(du -smc --apparent-size "${cache[@]}" 2>/dev/null | tail -1 | cut -f1)" -gt 300 ] && rm -rf "${cache[@]}"
+[ -z "$busy" ] && for p in $(pgrep -f -- "--user-data-dir $profile( |\$)"); do
+  [ "$p" != $$ ] && { busy="playwright-mcp pid $p"; break; }; done
 
 args=()
 [ "${PW_HEADED:-0}" = "1" ] || args+=(--headless)
-args+=(--user-data-dir "$profile")
 
-exec "$pw" "${args[@]}" "$@"
+if [ -z "$busy" ]; then
+  # Drop restored tabs; --restore-last-session (config) is only there to keep session cookies.
+  rm -rf "$profile/Default/Sessions"
+  exec "$pw" "${args[@]}" --user-data-dir "$profile" "$@"
+fi
+
+# Chrome aborts (exit 21) on a profile another Chrome holds: run on a throwaway copy that keeps the logins.
+copy="$run/pw-$$"
+mkdir -p -m 700 "$copy/Default"
+cp -p "$profile/Local State" "$copy/" 2>/dev/null
+for f in Cookies "Login Data" Preferences; do cp -p "$profile/Default/$f" "$copy/Default/" 2>/dev/null; done
+echo "playwright-mcp: $profile busy ($busy); using copy $copy" >&2
+trap 'rm -rf "$copy"' EXIT
+trap '[ -n "$child" ] && kill -TERM "$child" 2>/dev/null' TERM INT HUP
+child=
+"$pw" "${args[@]}" --user-data-dir "$copy" "$@" <&0 & child=$!
+rc=0
+while kill -0 "$child" 2>/dev/null; do wait "$child"; rc=$?; done
+exit $rc

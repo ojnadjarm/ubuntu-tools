@@ -87,5 +87,35 @@ class Failures(unittest.TestCase):
         self.assertIn('class="dim"', js)
 
 
+class UnitMemory(unittest.TestCase):
+    """Services mem column: RSS of the main and settled processes in the unit's cgroup plus any scope it spawned, nested or not."""
+
+    def test_settled_rss_sum_and_nested_tmux_scopes_fold_into_their_unit(self):
+        import tempfile
+        root = tempfile.mkdtemp()
+        cgs = {"orch.service": [10, 11], "dash.service": [20, 21, 22], "tmux-spawn-x.scope": [30, 31],
+               "tmux-spawn-z.scope": [50], "app-gnome-y.scope": [40]}
+        for n, ps in cgs.items():
+            os.makedirs(os.path.join(root, n))
+            open(os.path.join(root, n, "cgroup.procs"), "w").write("\n".join(map(str, ps)))
+        listed = json.dumps([{"unit": n, "description": "D", "active": "active", "sub": "running"} for n in cgs])
+        show = "\n\n".join("Id=%s\nActiveEnterTimestamp=\nControlGroup=/%s\nMainPID=%d" % (n, n, ps[0]) for n, ps in cgs.items())
+        rss = {10: 3 << 20, 11: 500 << 20, 20: 50 << 20, 21: 20 << 20, 22: 40 << 20, 30: 700 << 20, 31: 5 << 20, 40: 9 << 20, 50: 2 << 20}
+        start = {11: 990.0, 20: 985.0, 22: 995.0}
+        ppid = {11: 10, 22: 20, 30: 10, 31: 30, 40: 1, 50: 31}
+        stat = lambda p: (ppid.get(p, 0), start.get(p, 100.0))
+        with mock.patch.object(system, "CGROUP", root), \
+             mock.patch.object(system, "run", side_effect=lambda cmd, t=25: listed if "list-units" in cmd else show), \
+             mock.patch.object(system, "proc_rss", side_effect=rss.get), \
+             mock.patch.object(system, "proc_stat", side_effect=stat), mock.patch.object(system, "uptime", return_value=1000.0):
+            got = {u["unit"]: u["rss"] for u in system.user_units()}
+        self.assertEqual(got, {"orch.service": 710 << 20, "dash.service": 70 << 20})
+
+    def test_header_says_mem_and_explains_it(self):
+        js = open(os.path.join(HERE, "static", "js", "screens", "services.js"), encoding="utf-8").read()
+        self.assertIn('title="resident memory', js)
+        self.assertNotIn('["rss","p"]', js)
+
+
 if __name__ == "__main__":
     unittest.main()

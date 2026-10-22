@@ -565,10 +565,11 @@ mark { background: var(--gold-w); color: var(--gold); padding: 0 2px; }
   .cell > h2 { flex-wrap: wrap; } .cell > h2 s { white-space: normal; overflow: visible; text-align: right; }
   .ev { grid-template-columns: 44px 56px 1fr; } .ev .x { white-space: normal; overflow-wrap: anywhere; }
   .today .tk { white-space: normal; }
+  .tw { overflow: visible; touch-action: pan-y; }
   .tw thead { display: none; }
   .tw table, .tw tbody { display: block; }
   .tw tr { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
-  .tw tr:last-child { border-bottom: 0; }
+  .tw tr:last-child { border-bottom: 0; padding-bottom: 12px; }
   .tw td { display: block; width: auto; max-width: none; padding: 0; border: 0; white-space: normal; overflow: visible; text-align: left; font-size: 10.5px; color: var(--mute); }
   .tw td.n { order: -1; flex: 1 1 100%; font-size: 12.5px; line-height: 1.4; color: var(--hi); overflow-wrap: anywhere; }
   .tw td.n a { min-height: 44px; margin-block: -13px; display: flex; align-items: center; }

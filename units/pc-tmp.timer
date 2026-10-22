@@ -1,8 +1,9 @@
 [Unit]
-Description=Daily pc tmp sweep (03:30, outside the 00:50-01:50 CI window)
+Description=pc tmp sweep: full at 03:00 and 03:30 (outside the 00:50-01:50 CI window), hourly when /tmp is over 2G
 
 [Timer]
 OnCalendar=*-*-* 03:30
+OnCalendar=hourly
 Persistent=true
 
 [Install]

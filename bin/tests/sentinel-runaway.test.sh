@@ -79,6 +79,21 @@ check_absent "rule1: unrelated old bash spared"           "would kill pid 103"
 check_absent "rule1: old scratchpad shell with no loop spared" "would kill pid 104"
 check_absent "rule1: loop under a live claude parent spared"   "would kill pid 105"
 check_absent "rule1: loop whose session a live claude names spared" "would kill pid 106"
+# T1038: a worker's loop whose Bash parent died is reparented to `systemd --user`; the session stays live.
+PROC="$WORK/proc1b"; TMP="$WORK/tmp1b"; mkdir -p "$PROC" "$TMP"
+BOOT=$(( $(date +%s) - UPTIME )); sync_uptime
+mkproc 120 systemd 999999 5 2000 /usr/lib/systemd/systemd --user
+mkproc 111 claude 999999 5 5000 claude --resume uuid6
+mkproc 121 bash 3700 5 2000 bash -c "cd /tmp/claude-1000/-home-x/uuid6/scratchpad/T598 && run"; setppid 121 111
+LOOP2='while :; do cat /sys/class/drm/card1/gt/gt0/rps_act_freq_mhz; sleep 0.1; done'
+mkproc 107 bash 3700 5 2000 bash -c "cd /tmp/claude-1000/-home-x/uuid6/scratchpad/T598 && ( $LOOP2 ) &"; setppid 107 120
+mkproc 108 bash 3700 5 2000 bash -c "cd /tmp/claude-1000/-home-x/uuid6/scratchpad/T598 && ( $LOOP2 ) &"; setppid 108 121
+mkproc 109 bash 1800 5 2000 bash -c "cd /tmp/claude-1000/-home-x/uuid6/scratchpad/T598 && ( $LOOP2 ) &"; setppid 109 120
+run
+check        "rule1: reparented loop in a live session killed" "would kill pid 107 (rule1: shell loop under a scratchpad, reparented to systemd pid 120"
+check_absent "rule1: same loop under a live bash parent spared" "would kill pid 108"
+check_absent "rule1: young reparented loop spared"             "would kill pid 109"
+check_absent "rule1: the user manager itself spared"           "would kill pid 120"
 
 # ---------- Rule 2: capture with stdout a pipe with no reader, or a deleted file ----------
 PROC="$WORK/proc2"; TMP="$WORK/tmp2"; mkdir -p "$PROC" "$TMP"

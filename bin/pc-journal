@@ -40,14 +40,15 @@ digest_rows() {
     | sort_by(-.count)'
 }
 size_line() {
-  local line human bytes
+  local line human bytes cap
   line=$(journalctl --disk-usage 2>/dev/null)
   human=$(sed -n 's/.*take up \([0-9.]*[KMGT]\) in.*/\1/p' <<<"$line"); : "${human:=0}"
   bytes=$(numfmt --from=iec "$human" 2>/dev/null); : "${bytes:=0}"
+  cap=$(systemd-analyze cat-config systemd/journald.conf 2>/dev/null | sed -n 's/^SystemMaxUse=//p' | tail -1); : "${cap:=default}"
   if [ "$JSON" = 1 ]; then
-    pc_json '{human:$h,bytes:($b|tonumber)}' --arg h "$human" --arg b "$bytes"
+    pc_json '{human:$h,bytes:($b|tonumber),cap:$c}' --arg h "$human" --arg b "$bytes" --arg c "$cap"
   else
-    printf '%s (%s bytes)\n' "$human" "$bytes"
+    printf '%s (%s bytes) · cap SystemMaxUse=%s\n' "$human" "$bytes" "$cap"
   fi
 }
 

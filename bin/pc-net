@@ -13,10 +13,17 @@ pc_usage 'usage: pc net [ifaces|listeners|tailscale] [--json]        default: if
        pc net tailscale [--json]                         self, peers, serve mappings
        pc net fw [--raw]                                 exposure summary (port -> allowed sources); --raw dumps `nft -j list ruleset`
        pc net wifi [--json]                              SSID, signal, bitrate (no rescan — EF09)
+       pc net wifi roams [--since 7d] [--json]           roams, ping-pongs, disconnects, regdom resets (default: this boot)
+       pc net wifi pin band a|bg|auto [--apply]          pin the active wifi connection to 5 GHz (a) or 2.4 GHz (bg)
+       pc net wifi pin bssid <mac>|auto [--apply]        pin it to one access point; refused unless visible with signal >= 60
+       pc net wifi pin --confirm                         keep the pin: pin in use + gateway ping + tailscale Running, then cancel the revert
        pc net dns [--json]                               resolver DNS servers
+       pc net dns --stats [--json]                       cache hit %, flushes, degraded-EDNS fallbacks, api lookup ms (this boot)
        pc net top [--seconds 3]                          per-process bandwidth (nethogs, needs root)
 
-Read-only: no wifi rescan, no nft/ufw/tailscale/nmcli mutation exists here. Bind scope is one of
+Read-only except `wifi pin`: a pin arms a 90 s user timer that sets it back to auto unless confirmed;
+the revert and its undo carry `--con <uuid>`, so they run while the wifi is down.
+No wifi rescan, no nft/ufw/tailscale mutation exists here. Bind scope is one of
 lo, lan, ts, all.' "$@"
 
 FILTER_PID=; FILTER_COMM=; RAW=0; ARGV=()
@@ -28,7 +35,9 @@ for a in "$@"; do case $a in
      elif [ "${NEXTCOMM:-0}" = 1 ]; then FILTER_COMM=$a; NEXTCOMM=0
      else ARGV+=("$a"); fi;;
 esac; done
+PC_EXTRA_FLAGS=(--since: --stats --confirm --con:)
 pc_opt ${ARGV[@]+"${ARGV[@]}"}
+SINCE=${PC_OPT[--since]-}
 sub="${PC_ARGS[0]:-}"
 arg="${PC_ARGS[1]:-}"
 secs=$SECONDS_; [ "$secs" = 0 ] && secs=3
@@ -263,6 +272,139 @@ do_wifi() {
     printf 'wifi %s  ssid=%s  signal=%s dBm  bitrate=%s Mbps\n' "$dev" "${ssid:-n/a}" "${sig:-n/a}" "${rate:-n/a}"
   fi
 }
+# wifi roams: wpa_supplicant journal -> one awk pass -> band per BSSID (journal freq, else nmcli CHAN).
+PINGPONG_SECS=600
+_wpa_journal() {
+  local w=(-b); [ -n "$SINCE" ] && { [[ $SINCE =~ ^[0-9]+(s|min|m|h|d|w)$ ]] && w=(--since "-$SINCE") || w=(--since "$SINCE"); }
+  pc_cmd journalctl -u wpa_supplicant "${w[@]}" -o short-unix -q --no-pager 2>/dev/null
+}
+# _wpa_parse — "E\tts\tfrom\tto\tfreq\tpingpong" per CONNECTED, then "S\troams\tpp\tdisc\treasons\tworld\tsteer".
+_wpa_parse() {
+  awk -v W="$PINGPONG_SECS" '
+    /Trying to (authenticate|associate) with / {
+      b=$0; sub(/.* with /,"",b); b=substr(b,1,17)
+      f=$0; if (sub(/.*freq=/,"",f)) { sub(/[^0-9].*/,"",f); freq[b]=f } }
+    /CTRL-EVENT-CONNECTED - Connection to / {
+      to=$0; sub(/.*Connection to /,"",to); to=substr(to,1,17); ts=int($1); n++
+      pp=(cur!="" && cur!=to && pfrom==to && ts-pts<=W) ? 1 : 0; ping+=pp
+      printf "E\t%d\t%s\t%s\t%d\t%d\n", ts, (cur==""?"-":cur), to, freq[to]+0, pp
+      pfrom=cur; pts=ts; cur=to }
+    /CTRL-EVENT-DISCONNECTED/ {
+      d++; r=$0; if (sub(/.*reason=/,"",r)) { sub(/[^0-9].*/,"",r); rs=rs (rs==""?"":",") r } }
+    /CTRL-EVENT-REGDOM-CHANGE .*type=WORLD/ { world++ }
+    /WNM: Disassociation Imminent/ { steer++ }
+    END { printf "S\t%d\t%d\t%d\t%s\t%d\t%d\n", n, ping, d, (rs==""?"-":rs), world, steer }'
+}
+# _band <freq|0> <bssid> — "5GHz ch52" from the MHz, else from nmcli's cached CHAN for that BSSID.
+declare -A NM_CHAN; NM_LOADED=0
+_band() {
+  local f=$1 b=$2 c k
+  if [ "$f" = 0 ]; then
+    [ $NM_LOADED = 0 ] && NM_LOADED=1 && while IFS=$'\t' read -r k c; do NM_CHAN[$k]=$c; done < <(
+      pc_cmd nmcli -t -f BSSID,CHAN dev wifi list --rescan no 2>/dev/null | sed 's/\\:/-/g' | awk -F: '{gsub(/-/,":",$1); print tolower($1)"\t"$2}')
+    c=${NM_CHAN[$b]-}; [ -n "$c" ] || { printf -- '-'; return; }
+    [ "$c" -le 14 ] && printf '2.4GHz ch%s' "$c" || printf '5GHz ch%s' "$c"; return
+  fi
+  if [ "$f" -lt 2500 ]; then [ "$f" = 2484 ] && c=14 || c=$(( (f - 2407) / 5 )); printf '2.4GHz ch%s' "$c"
+  elif [ "$f" -lt 5925 ]; then printf '5GHz ch%s' $(( (f - 5000) / 5 ))
+  else printf '6GHz ch%s' $(( (f - 5950) / 5 )); fi
+}
+do_wifi_roams() {
+  local out sum n pp d rs w st ts from to f p rows='' tsv=''
+  out=$(_wpa_journal | _wpa_parse)
+  sum=$(grep '^S' <<<"$out"); IFS=$'\t' read -r _ n pp d rs w st <<<"$sum"; [ "$rs" = - ] && rs=
+  while IFS=$'\t' read -r _ ts from to f p; do
+    [ -n "${ts:-}" ] || continue
+    tsv+="$ts"$'\t'"$from"$'\t'"$to"$'\t'"$(_band "$f" "$to")"$'\t'"$p"$'\n'
+  done < <(grep '^E' <<<"$out")
+  if [ "$JSON" = 1 ]; then
+    printf '%s' "$tsv" | jq -R -s -c --argjson n "$n" --argjson pp "$pp" --argjson d "$d" --arg rs "$rs" \
+      --argjson w "$w" --argjson st "$st" '{roams:$n, ping_pong:$pp, disconnects:$d,
+        disconnect_reasons:($rs | split(",") | map(select(length>0) | tonumber)), regdom_world_resets:$w,
+        ap_steer_requests:$st, events:(split("\n") | map(select(length>0) | split("\t")
+          | {ts:(.[0]|tonumber), from:.[1], to:.[2], band:.[3], ping_pong:(.[4]=="1")}))}'
+    return
+  fi
+  if [ "$n" = 0 ] && [ "$d" = 0 ]; then printf 'nothing: no wpa_supplicant connects or disconnects %s\n' "${SINCE:+in $SINCE}"; return; fi
+  printf 'roams %s · ping-pong %s (A→B→A within %s min) · disconnects %s%s · regdom WORLD resets %s · AP steer requests %s\n' \
+    "$n" "$pp" $((PINGPONG_SECS / 60)) "$d" "${rs:+ (reasons $rs)}" "$w" "$st"
+  printf '%s' "$tsv" | awk -F'\t' '{printf "%s  %s → %s  %s%s\n", strftime("%m-%d %H:%M", $1), $2, $3, $4, ($5=="1"?"  ping-pong":"")}'
+}
+# wifi pin (T1098): nmcli band/bssid pin on the active wifi connection, armed with a dead-man
+# user timer that sets the property back to auto unless `pin --confirm` sees gateway + tailscale.
+PIN_MIN_SIGNAL=60
+PIN_REVERT_SECS=90
+PIN_UNIT=pc-net-wifi-pin-revert
+_pin_con() { pc_cmd nmcli -t -f TYPE,STATE,CON-UUID dev status 2>/dev/null | awk -F: '$1=="wifi" && $2=="connected"{print $3; exit}'; }
+_pin_prop() { case $1 in band) echo 802-11-wireless.band;; bssid) echo 802-11-wireless.bssid;; esac; }
+# _pin_best <ssid> <kind> <value> — strongest signal of a visible BSSID matching the pin (cached scan, no rescan).
+_pin_best() {
+  pc_cmd nmcli -t -f BSSID,SSID,FREQ,SIGNAL dev wifi list --rescan no 2>/dev/null | sed 's/\\:/-/g' |
+    awk -F: -v s="$1" -v k="$2" -v v="$3" '{ b=$1; gsub(/-/,":",b); f=$3+0
+      if ($2 != s) next
+      if (k=="bssid" && toupper(b)!=v) next
+      if (k=="band" && v=="a" && (f<4900 || f>=5925)) next
+      if (k=="band" && v=="bg" && f>=2500) next
+      if ($4+0 > m) m=$4+0 } END { print m+0 }'
+}
+_pin_set() {
+  local uuid=$1 kind=$2 value=$3 nmv=$3
+  [ "$value" = auto ] && nmv=
+  if [ "$value" != auto ]; then
+    pc_cmd systemctl --user stop "$PIN_UNIT-$kind.timer" >/dev/null 2>&1
+    pc_cmd systemctl --user reset-failed "$PIN_UNIT-$kind.service" >/dev/null 2>&1
+    pc_cmd systemd-run --user --quiet --unit="$PIN_UNIT-$kind" --on-active="${PIN_REVERT_SECS}s" \
+      --timer-property=AccuracySec=1s --setenv=AGENT_NAME=wifi-pin-dead-man \
+      "$(readlink -f "$0")" wifi pin "$kind" auto --con "$uuid" --apply ||
+      { echo "refused: the dead-man timer $PIN_UNIT-$kind did not arm, nothing changed" >&2; return 1; }
+  fi
+  pc_cmd nmcli con modify "$uuid" "$(_pin_prop "$kind")" "$nmv" || return 1
+  pc_cmd nmcli -w 30 con up "$uuid" >/dev/null || {
+    [ "$value" = auto ] && echo 'nmcli con up failed: pin cleared, NetworkManager autoconnect retries' >&2 ||
+      echo "nmcli con up failed: the dead-man reverts within ${PIN_REVERT_SECS} s" >&2; return 1; }
+  [ "$value" = auto ] || echo "dead-man: reverts to auto in ${PIN_REVERT_SECS} s unless \`pc net wifi pin --confirm\`"
+}
+do_wifi_pin_confirm() {
+  local gw ts k uuid band bssid ab af armed=()
+  for k in band bssid; do pc_cmd systemctl --user is-active -q "$PIN_UNIT-$k.timer" 2>/dev/null && armed+=("$PIN_UNIT-$k.timer"); done
+  [ ${#armed[@]} -gt 0 ] || { echo 'nothing: no wifi pin dead-man timer armed'; return 0; }
+  uuid=$(_pin_con); [ -n "$uuid" ] || { echo 'refused: no connected wifi connection, dead-man stays armed'; return 1; }
+  { IFS= read -r band; IFS= read -r bssid; } < <(
+    pc_cmd nmcli --escape no -g 802-11-wireless.band,802-11-wireless.bssid con show "$uuid" 2>/dev/null)
+  IFS=' ' read -r ab af < <(pc_cmd nmcli -t -f ACTIVE,BSSID,FREQ dev wifi list --rescan no 2>/dev/null | sed 's/\\:/-/g' |
+    awk -F: '$1=="yes"{b=$2; gsub(/-/,":",b); print toupper(b), $3+0; exit}')
+  [ -z "$bssid" ] || [ "$bssid" = "$ab" ] || { echo "refused: in use ${ab:-no AP}, not pinned $bssid, dead-man stays armed"; return 1; }
+  case "$band" in
+    a) [ "${af:-0}" -ge 4900 ] && [ "$af" -lt 5925 ] || { echo "refused: in use ${af:-no} MHz, not band a, dead-man stays armed"; return 1; };;
+    bg) [ "${af:-0}" -gt 0 ] && [ "$af" -lt 2500 ] || { echo "refused: in use ${af:-no} MHz, not band bg, dead-man stays armed"; return 1; };;
+  esac
+  gw=$(pc_cmd ip -4 route show default 2>/dev/null | awk '{print $3; exit}')
+  [ -n "$gw" ] && pc_cmd ping -c 1 -W 2 "$gw" >/dev/null 2>&1 || { echo "refused: gateway ${gw:-none} no reply, dead-man stays armed"; return 1; }
+  ts=$(pc_cmd tailscale status --json 2>/dev/null | jq -r '.BackendState // "n/a"' 2>/dev/null)
+  [ "$ts" = Running ] || { echo "refused: tailscale ${ts:-n/a}, not Running, dead-man stays armed"; return 1; }
+  pc_cmd systemctl --user stop "${armed[@]}" || return 1
+  echo "confirmed: in use $ab $af MHz · gateway $gw ok · tailscale Running · cancelled ${armed[*]}"
+}
+do_wifi_pin() {
+  local kind=${PC_ARGS[2]:-} value=${PC_ARGS[3]:-} uuid ssid band bssid before sig
+  [ "${PC_OPT[--confirm]-}" = 1 ] && { do_wifi_pin_confirm; return; }
+  case "$kind:$value" in
+    band:a|band:bg|band:auto|bssid:auto) ;;
+    bssid:*) value=${value^^}; [[ $value =~ ^([0-9A-F]{2}:){5}[0-9A-F]{2}$ ]] || { echo "pc net wifi pin: bad BSSID $value" >&2; exit 2; };;
+    *) echo 'pc net wifi pin: band a|bg|auto, bssid <mac>|auto, or --confirm (see -h)' >&2; exit 2;;
+  esac
+  uuid=${PC_OPT[--con]:-$(_pin_con)}; [ -n "$uuid" ] || { echo 'refused: no connected wifi connection'; exit 1; }
+  { IFS= read -r ssid; IFS= read -r band; IFS= read -r bssid; } < <(
+    pc_cmd nmcli --escape no -g 802-11-wireless.ssid,802-11-wireless.band,802-11-wireless.bssid con show "$uuid" 2>/dev/null)
+  [ "$kind" = band ] && before=${band:-auto} || before=${bssid:-auto}
+  [ "$before" = "$value" ] && { echo "nothing: wifi $kind already $value"; return 0; }
+  if [ "$value" != auto ]; then
+    sig=$(_pin_best "$ssid" "$kind" "$value")
+    [ "$sig" -ge "$PIN_MIN_SIGNAL" ] || { echo "refused: no visible $ssid BSSID for $kind $value with signal >= $PIN_MIN_SIGNAL (best $sig)"; exit 1; }
+  fi
+  PC_READ_CMD="v=\$(pc_cmd nmcli --escape no -g $(_pin_prop "$kind") con show $uuid 2>/dev/null); echo \"\${v:-auto}\""
+  pc_apply "wifi $kind" "$before" "$value" "$(readlink -f "$0") wifi pin $kind $before --con $uuid --apply" _pin_set "$uuid" "$kind" "$value"
+}
 do_dns() {
   local out; out=$(pc_cmd resolvectl dns 2>/dev/null)
   local servers; servers=$(grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}|[0-9a-fA-F:]+:[0-9a-fA-F:]+' <<<"$out" | sort -u)
@@ -271,6 +413,44 @@ do_dns() {
   else
     printf 'dns: %s\n' "$(paste -sd', ' - <<<"${servers:-n/a}")"
   fi
+}
+
+# dns --stats: `resolvectl statistics` needs root (user call = polkit varlink timeout), so sudo -n.
+DNS_PROBE_HOST=api.anthropic.com
+_dns_stats_json() {
+  if [ -n "$PC_FIXTURE" ]; then pc_cmd resolvectl statistics --json=short 2>/dev/null
+  else pc_root resolvectl statistics --json=short 2>/dev/null; fi
+}
+# _resolved_counts — "flushes degraded grace servers" from systemd-resolved's journal this boot.
+_resolved_counts() {
+  pc_cmd journalctl -u systemd-resolved -b -o cat -q --no-pager 2>/dev/null | awk '
+    /Flushed all caches/ { f++ }
+    /Using degraded feature set/ { d++; s=$NF; sub(/\.$/,"",s); if (!(s in seen)) { seen[s]=1; l=l (l==""?"":",") s } }
+    /Grace period over/ { g++ }
+    END { printf "%d %d %d %s\n", f, d, g, (l==""?"-":l) }'
+}
+_api_lookup_ms() {
+  local t0=$EPOCHREALTIME
+  pc_cmd getent ahosts "$DNS_PROBE_HOST" >/dev/null 2>&1 || { printf -- '-1'; return; }
+  awk -v a="$t0" -v b="$EPOCHREALTIME" 'BEGIN{printf "%d", (b-a)*1000 + 0.5}'
+}
+do_dns_stats() {
+  local st f d g sv ms
+  st=$(_dns_stats_json)
+  jq -e '.cache.hits' >/dev/null 2>&1 <<<"$st" || { printf 'pc net dns --stats: sudo -n resolvectl statistics failed\n' >&2; exit 1; }
+  read -r f d g sv <<<"$(_resolved_counts)"; [ "$sv" = - ] && sv=
+  ms=$(_api_lookup_ms)
+  local j; j=$(jq -c --argjson f "$f" --argjson d "$d" --argjson g "$g" --arg sv "$sv" --argjson ms "$ms" --arg h "$DNS_PROBE_HOST" '
+    {cache_hit_pct: (if .cache.hits + .cache.misses > 0 then (.cache.hits * 100 / (.cache.hits + .cache.misses) | floor) else 0 end),
+     cache_hits: .cache.hits, cache_misses: .cache.misses, cache_size: .cache.size,
+     transactions: .transactions.totalTransactions, timeouts: .transactions.totalTimeouts,
+     failed_responses: .transactions.totalFailedResponses,
+     flushes: $f, degraded: $d, grace_recoveries: $g, degraded_servers: ($sv | split(",") | map(select(length>0))),
+     lookup_host: $h, lookup_ms: (if $ms < 0 then null else $ms end)}' <<<"$st")
+  if [ "$JSON" = 1 ]; then printf '%s\n' "$j"; return; fi
+  jq -r '"dns cache \(.cache_hit_pct) % hit · flushes \(.flushes) · degraded \(.degraded)"
+    + (if .degraded_servers|length > 0 then " (\(.degraded_servers|join(", ")))" else "" end)
+    + " · grace \(.grace_recoveries) · api lookup \(if .lookup_ms == null then "failed" else "\(.lookup_ms) ms" end)"' <<<"$j"
 }
 
 ## --- top (nethogs, needs root) ------------------------------------------
@@ -288,8 +468,8 @@ case "$sub" in
   who) do_who "$arg";;
   tailscale) do_tailscale;;
   fw) do_fw;;
-  wifi) do_wifi;;
-  dns) do_dns;;
+  wifi) case "$arg" in roams) do_wifi_roams;; pin) do_wifi_pin;; '') do_wifi;; *) printf 'pc net wifi: unknown verb %s (try -h)\n' "$arg" >&2; exit 2;; esac;;
+  dns) if [ -n "${PC_OPT[--stats]-}" ]; then do_dns_stats; else do_dns; fi;;
   top) do_top;;
   *) printf 'pc net: unknown verb %s (try -h)\n' "$sub" >&2; exit 2;;
 esac

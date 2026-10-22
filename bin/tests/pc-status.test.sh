@@ -11,6 +11,26 @@ has() { case "$2" in *"$3"*) ok "$1";; *) nok "$1" "'$3' not in: $2";; esac; }
 
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/bin" "$WORK/pc-status"
+# maintenance-run's dry run is a stub everywhere (T1072): FX_GATE picks its verdict, each call is logged.
+cat >"$WORK/maint-run" <<'S'
+#!/bin/sh
+echo "$* settle=${MAINT_GATE_SETTLE-unset}" >>"$MAINT_LOG"
+case "$FX_GATE" in
+  refused) echo "REBOOT REFUSED: pc-status-check(host.failed_units: 1: fx.service)";;
+  *) echo "REBOOT ALLOWED: all gates passed";;
+esac
+S
+chmod +x "$WORK/maint-run"
+export PC_MAINT_RUN="$WORK/maint-run" MAINT_LOG="$WORK/maint.log" FX_GATE=allowed
+# `pc kernel oom` is a stub everywhere (T1105): it prints $FX_OOM (or exits 1 without it) and logs its argv.
+cat >"$WORK/kernel" <<'S'
+#!/bin/sh
+echo "$*" >>"$KERNEL_LOG"
+[ -n "$FX_OOM" ] && [ -r "$FX_OOM" ] || exit 1
+cat "$FX_OOM"
+S
+chmod +x "$WORK/kernel"
+export PC_KERNEL="$WORK/kernel" KERNEL_LOG="$WORK/kernel.log" FX_OOM=
 
 # --- the fixture: stub binaries + a pre-seeded probe cache -------------------
 cat >"$WORK/bin/df" <<'S'
@@ -31,6 +51,8 @@ esac
 exit 0
 S
 printf '#!/bin/sh\nexit 1\n' >"$WORK/bin/ping"
+# A refusing sudo, like run.sh's shim (T1136): a direct run never reads SMART or oomctl as root.
+printf '#!/bin/sh\nexit 1\n' >"$WORK/bin/sudo"
 chmod +x "$WORK/bin"/*
 
 seed() { printf '%s\n%s\n' "$(date +%s)" "$2" >"$WORK/pc-status/$1"; }
@@ -47,7 +69,8 @@ seed mode agent
 seed keepalive "$(printf 'vass-frontend.service failed\nhttp-moodle45 502')"
 # Info probes no case asserts (pc idle, agents-log, claude, upower, …): one fixture read every run reuses.
 seed_info() { local k; for k in look_ratio: idle:5 players:none seat_logins:0 claude_sessions:0 time_to_empty: power_profile:balanced dns:; do
-  printf '%s\n%s\n' "$(date +%s)" "${k#*:}" >"$1/${k%%:*}"; done; }
+  printf '%s\n%s\n' "$(date +%s)" "${k#*:}" >"$1/${k%%:*}"; done
+  printf '%s\n%s\n' "$(date +%s)" "1 0" >"$1/oomd"; }
 seed_info "$WORK/pc-status"
 
 run_fixture() { env PATH="$WORK/bin:$PATH" XDG_RUNTIME_DIR="$WORK" "$PCS" "$@"; }
@@ -127,11 +150,13 @@ case "$*" in
   *Transient*run-fixture.scope*) echo "$*" >>"$SYSTEMCTL_LOG"; echo yes;;
   *Transient*) echo "$*" >>"$SYSTEMCTL_LOG"; echo no;;
   *--failed*--user*|*--user*--failed*) [ -z "$FX_FOREIGN" ] || echo "fx-foreign-cron.service loaded failed failed fixture"; [ "$FX_FOREIGN" = only ] && exit 0
+    [ -z "$FX_CI" ] || printf 'ailearning-ci-daily.service loaded failed failed fixture\nfleet-ci-daily.service loaded failed failed fixture\n'; [ "$FX_CI" = only ] && exit 0
     echo "fx-user.service loaded failed failed fixture"; [ -z "$FX_TRANSIENT" ] || echo "run-fixture.scope loaded failed failed fixture";;
-  *--failed*) [ "$FX_FOREIGN" = only ] && exit 0; echo "apport-autoreport.path loaded failed failed fixture"; echo "fx-sys.service loaded failed failed fixture"; [ -z "$FX_APPORT" ] || echo "apport-autoreport.service loaded failed failed fixture";;
+  *--failed*) [ "$FX_FOREIGN" = only ] || [ "$FX_CI" = only ] && exit 0; echo "apport-autoreport.path loaded failed failed fixture"; echo "fx-sys.service loaded failed failed fixture"; [ -z "$FX_APPORT" ] || echo "apport-autoreport.service loaded failed failed fixture";;
   *list-timers*json*) echo '[{"activates":"fx-cron.service"},{"activates":"fx-foreign-cron.service"}]';;
   *list-timers*) exit 0;;
   *list-unit-files*) echo "dark-eye-old.service enabled enabled";;
+  *NextElapseUSecRealtime*) echo "Sun 2026-10-25 04:00:00 CET";;
   *show*) printf 'Id=dark-eye-old.service\nActiveState=inactive\nSubState=dead\nType=simple\nResult=success\nUnitFileState=enabled\n';;
   *is-active*) for a in "$@"; do case "$a" in -*|is-active) ;; *) echo active;; esac; done;;
 esac
@@ -162,11 +187,11 @@ run_faults() {
   for f in io_smart ts_pair tailscale docker docker_expected wifi mode; do cp "$WORK/pc-status/$f" "$d/pc-status/"; done
   seed_v() { printf '%s\n%s\n' "$(date +%s)" "$2" >"$d/pc-status/$1"; }
   seed_v internet reachable; seed_v screenshot 102400; seed_v lock unlocked; seed_v keepalive ''; seed_info "$d/pc-status"
-  env PATH="$WORK/fbin:$WORK/bin:$PATH" XDG_RUNTIME_DIR="$d" HOME="$WORK/home" PC_PROC="$WORK/proc" \
+  env -u MAINT_GATE_VERDICT_UNITS PATH="$WORK/fbin:$WORK/bin:$PATH" XDG_RUNTIME_DIR="$d" HOME="$WORK/home" PC_PROC="$WORK/proc" \
     PC_REBOOT_FILE="${REBOOT_FILE:-$WORK/reboot-required}" ALARMS="${ALARMS:-$WORK/alarms-crit.json}" \
     FAILED_UNITS_IGNORE="apport-autoreport.path" KEEPALIVE_UNITS="" KEEPALIVE_HTTP="" \
     SYSTEMCTL_LOG="$WORK/systemctl.log" FX_TRANSIENT="${FX_TRANSIENT:-}" FX_APPORT="${FX_APPORT:-}" \
-    FX_FOREIGN="${FX_FOREIGN:-}" FX_FOREIGN_LOOP="${FX_FOREIGN_LOOP:-}" PC_NOT_OURS='^fx-foreign' \
+    FX_FOREIGN="${FX_FOREIGN:-}" FX_CI="${FX_CI:-}" FX_FOREIGN_LOOP="${FX_FOREIGN_LOOP:-}" PC_NOT_OURS='^fx-foreign' \
     PC_CRASH_DIR="${CRASH_DIR:-$WORK/crash-empty}" "$PCS" "$@"
 }
 st() { jq -r --arg s "$2" --arg k "$3" '.sections[$s][$k].state + " " + .sections[$s][$k].value' <<<"$1"; }
@@ -183,6 +208,19 @@ jo=$(FX_FOREIGN=only run_faults --json)
 has "only foreign failed: failed_units OK 0" "$(st "$jo" host failed_units)" "OK 0"
 c=$(FX_FOREIGN=only run_faults --check)
 case "$c" in *failed_units*|*failed_foreign*) nok "foreign not a --check FAIL" "$c";; *) ok "foreign not a --check FAIL";; esac
+# T1060: failed CI verdict units (MAINT_GATE_VERDICT_UNITS default) are a ci_verdict WARN, never failed_units.
+has "no CI verdict is ci_verdict OK none" "$(st "$j" host ci_verdict)" "OK none"
+jc=$(FX_CI=only run_faults --json)
+has "only CI units failed: failed_units OK 0" "$(st "$jc" host failed_units)" "OK 0"
+has "CI units are a ci_verdict WARN"         "$(st "$jc" host ci_verdict)" "WARN 2 red: ailearning-ci-daily, fleet-ci-daily"
+c=$(FX_CI=only run_faults --check)
+case "$c" in *failed_units*|*ci_verdict*) nok "CI verdict not a --check FAIL" "$c";; *) ok "CI verdict not a --check FAIL";; esac
+jc=$(FX_CI=1 run_faults --json)
+has "CI + other failed: FAIL names only the other" "$(st "$jc" host failed_units)" "FAIL 2: fx-sys.service, user:fx-user.service"
+mkdir -p "$WORK/mut"; ln -s "$HERE"/../*.sh "$WORK/mut/"
+grep -v 'h_verdict+=' "$PCS" >"$WORK/mut/pc-status"; chmod +x "$WORK/mut/pc-status"
+case "$(st "$(FX_CI=only PCS="$WORK/mut/pc-status" run_faults --json)" host failed_units)" in
+  FAIL*ci-daily*) ok "mutation: without the verdict branch CI units FAIL again";; *) nok "mutation red" "mutant did not FAIL";; esac
 # One run per fixture state: transient scope + apport report + no reboot flag share a run, as do
 # the brief, the check and the WARN band; each assert reads only its own rows.
 mkdir -p "$WORK/crash-empty" "$WORK/crash"
@@ -233,7 +271,7 @@ has "netdata WARNING only is WARN"        "$(st "$j" host netdata_alerts)" "WARN
 has "fresh sentinel tick is OK"           "$(st "$j" agents sentinel_age)" "OK 0 min"
 nf=$(jq '[.sections[][]|select(.state=="FAIL")]|length' <<<"$j")
 [ "$(jq .fails <<<"$j")" = "$nf" ] && ok "WARN rows are not counted as failures" || nok "WARN not counted" "fails=$(jq .fails <<<"$j") FAIL rows=$nf"
-has "no reboot-required file is OK"       "$(st "$jt" host reboot_required)" "OK no"
+has "no reboot-required file is OK none"  "$(st "$jt" host reboot_required)" "OK none"
 # T398: a reboot flag without its .pkgs list is read quietly. T466: a fresh box (no USER, no
 # KEEPALIVE_*) runs quietly and lists no keepalive row.
 mkdir -p "$WORK/rb"; printf '*** System restart required ***\n' >"$WORK/rb/reboot-required"
@@ -283,6 +321,7 @@ has "--fresh re-probes docker"          "$(st "$j" docker fx)" "FAIL 0/1 up"
 has "--fresh re-probes tailscale"       "$(st "$j" network tailscale)" "OK Running"
 has "--fresh serves look_ratio by TTL"  "$(jq -r .pc_look_ratio_24h <<<"$j")" "0.77"
 has "--fresh serves unit_loops by TTL"  "$(st "$j" agents unit_loops)" "FAIL fx-marker.service 99 fails/h"
+has "--fresh serves io_smart by TTL"    "$(st "$j" disk smart)" "FAIL FAILED"
 # docker_expected keeps its 24 h entry until a compose file is newer than it.
 mkdir -p "$WORK/cebin" "$WORK/envs/fx"; printf 'name: fx\n' >"$WORK/envs/fx/docker-compose.yml"
 cat >"$WORK/cebin/docker" <<S
@@ -296,6 +335,93 @@ touch -d '1 hour ago' "$WORK/envs/fx/docker-compose.yml"; fr docker_expected 'fx
 has "--fresh serves docker_expected by TTL"     "$(st "$(ce)" docker fx)" "FAIL 0/1 up"
 fr docker_expected 'fx|app '; touch "$WORK/envs/fx/docker-compose.yml"
 has "an edited compose file re-reads docker_expected" "$(st "$(ce)" docker fx)" "FAIL 0/2 up"
+
+# --- 12. T1046: systemd-oomd's monitored cgroups, WARN at 0 ---------------------
+has "oomd watching 1 cgroup is OK" "$(st "$(run_fixture --json)" host oomd_monitored)" "OK 1 (pressure 1, swap 0)"
+seed oomd "0 0"
+has "oomd watching nothing is WARN" "$(st "$(run_fixture --json)" host oomd_monitored)" "WARN 0 (pressure 0, swap 0)"
+case "$(run_fixture --brief)" in *oomd*) nok "oomd WARN stays out of brief FAIL" "listed";; *) ok "oomd WARN stays out of brief FAIL";; esac
+mkdir -p "$WORK/oobin"
+cat >"$WORK/oobin/sudo" <<'S'
+#!/bin/sh
+[ "$1 $2" = "-n oomctl" ] || exit 1
+printf 'Dry Run: no\nSwap Monitored CGroups:\n\tPath: /a.slice\nMemory Pressure Monitored CGroups:\n\tPath: /user.slice/user-%s.slice/user@%s.service\n\t\tMemory Pressure Limit: 50.00%%\n\tPath: /b.service\n' "$(id -u)" "$(id -u)"
+S
+chmod +x "$WORK/oobin/sudo"; rm -f "$WORK/pc-status/oomd"
+has "oomctl sections are counted apart" "$(st "$(env PATH="$WORK/oobin:$WORK/bin:$PATH" XDG_RUNTIME_DIR="$WORK" "$PCS" --json)" host oomd_monitored)" "OK 3 (pressure 2, swap 1)"
+printf '#!/bin/sh\nexit 1\n' >"$WORK/oobin/sudo"; rm -f "$WORK/pc-status/oomd"
+has "unreadable oomctl is n/a" "$(st "$(env PATH="$WORK/oobin:$WORK/bin:$PATH" XDG_RUNTIME_DIR="$WORK" "$PCS" --json)" host oomd_monitored)" "- n/a"
+[ ! -s "$WORK/pc-status/oomd" ] && ok "an unreadable oomctl is not cached" || nok "unreadable oomctl not cached" "$(cat "$WORK/pc-status/oomd")"
+seed oomd "1 0"
+
+# --- 13. T1072: the reboot row carries the next window's gate verdict --------
+: >"$MAINT_LOG"
+row() { awk '$1=="reboot_required"' <<<"$1"; }
+has "pending reboot: window allowed" "$(row "$(run_faults)")" "d (linux-image-7.0.0-38-generic linux-base) · window Sun 10-25 04:00 allowed"
+has "pending reboot: window refused names the gate" "$(row "$(FX_GATE=refused run_faults)")" "window Sun 10-25 04:00 refused: pc-status-check(host.failed_units: 1: fx.service)"
+has "no pending reboot: none" "$(row "$(REBOOT_FILE="$WORK/no-reboot-required" run_faults)")" "reboot_required  none"
+has "the gate is a dry run that ignores the hour" "$(head -1 "$MAINT_LOG")" "--dry-run --assume-reboot --dry-run-ignore-window"
+n=$(wc -l <"$MAINT_LOG"); run_faults --check >/dev/null; run_faults --brief >/dev/null
+[ "$(wc -l <"$MAINT_LOG")" = "$n" ] && ok "--check and --brief never run the gate" || nok "--check/--brief ran the gate" "$(cat "$MAINT_LOG")"
+: >"$MAINT_LOG"; rm -f "$WORK/pc-status/reboot_gate"
+for _ in 1 2; do PC_REBOOT_FILE="$WORK/reboot-required" run_fixture --json >/dev/null; done
+[ "$(wc -l <"$MAINT_LOG")" = 1 ] && ok "the gate verdict is cached (1 call for 2 runs)" || nok "gate cache" "$(wc -l <"$MAINT_LOG") calls"
+# T1144: a refused verdict is cached 300 s, an allowed one 3600 s; the dry run never settles.
+has "the gate dry run asks for no settle wait" "$(head -1 "$MAINT_LOG")" "settle=0"
+gate_calls() { # <verdict> <age s> [pc-status] -> maintenance-run calls of one run
+  printf '%s\n%s\n' "$(( $(date +%s) - $2 ))" "window Sun 10-25 04:00 $1" >"$WORK/pc-status/reboot_gate"; : >"$MAINT_LOG"
+  PCS="${3:-$PCS}" PC_REBOOT_FILE="$WORK/reboot-required" run_fixture --json >/dev/null; wc -l <"$MAINT_LOG"; }
+is "refused at 299 s: served from the cache" "$(gate_calls 'refused: pc-status-check(services.fx: deactivating)' 299)" 0
+is "refused at 301 s: re-run" "$(gate_calls 'refused: pc-status-check(services.fx: deactivating)' 301)" 1
+is "allowed at 301 s: served from the cache" "$(gate_calls allowed 301)" 0
+is "allowed at 3601 s: re-run" "$(gate_calls allowed 3601)" 1
+sed 's/_rbttl=300/_rbttl=3600/' "$PCS" >"$WORK/mut/pc-status"; chmod +x "$WORK/mut/pc-status"
+is "mutation: a refused verdict kept 3600 s is served at 301 s" "$(gate_calls 'refused: pc-status-check(services.fx: deactivating)' 301 "$WORK/mut/pc-status")" 0
+
+# --- 14. T1105: netdata's mem.oom_kill alarm ignores the deliberate memcg kills of run.sh tests
+printf '{"alarms":{"mem.oom_kill.oom_kill":{"status":"WARNING"}}}' >"$WORK/alarms-oom.json"
+printf '{"alarms":{"mem.oom_kill.oom_kill":{"status":"WARNING"},"system.post_update_reboot_status.x":{"status":"WARNING"}}}' >"$WORK/alarms-oom2.json"
+printf '{"count":{"test-cap":182},"kills":[{"class":"test-cap","cmd":"python3"}]}' >"$WORK/oom-test.json"
+printf '{"count":{"real":1,"test-cap":182},"kills":[{"class":"real","cmd":"chrome"},{"class":"test-cap","cmd":"python3"}]}' >"$WORK/oom-real.json"
+nd_row() { st "$(ALARMS="$WORK/$1" FX_OOM="${2:+$WORK/$2}" run_faults --json)" host netdata_alerts; }
+: >"$KERNEL_LOG"
+has "test-cap kills only: oom_kill is OK, ignored" "$(nd_row alarms-oom.json oom-test.json)" "OK none (oom_kill: 182 test-cap, ignored)"
+has "the classes come from pc kernel oom --since 40m" "$(head -1 "$KERNEL_LOG")" "oom --since 40m --json"
+has "one real kill keeps WARN and names it" "$(nd_row alarms-oom.json oom-real.json)" "WARN 1 WARNING: mem.oom_kill.oom_kill (oom_kill: 1 real (chrome), 182 test-cap)"
+has "another alarm + test-cap kills: WARN for the other" "$(nd_row alarms-oom2.json oom-test.json)" "WARN 1 WARNING: system.post_update_reboot_status.x (oom_kill: 182 test-cap, ignored)"
+has "pc kernel oom unreadable: oom_kill stays WARN" "$(nd_row alarms-oom.json)" "WARN 1 WARNING: mem.oom_kill.oom_kill"
+: >"$KERNEL_LOG"; nd_row alarms-warn.json oom-test.json >/dev/null
+[ ! -s "$KERNEL_LOG" ] && ok "no oom_kill alarm: pc kernel oom is not called" || nok "pc kernel oom called without the alarm" "$(cat "$KERNEL_LOG")"
+sed 's/\] && \[ -z "\$o_other" \]; then$/] \&\& false; then/' "$PCS" >"$WORK/mut/pc-status"; chmod +x "$WORK/mut/pc-status"
+case "$(PCS="$WORK/mut/pc-status" nd_row alarms-oom.json oom-test.json)" in
+  WARN*mem.oom_kill*) ok "mutation: without the test-cap branch oom_kill WARNs again";; *) nok "mutation red" "mutant did not WARN";; esac
+
+# --- 15. T1114: --timing names each reader; --fresh runs the slow readers side by side
+tl=$(run_fixture --timing 2>&1 >/dev/null)
+grep -qE '^timing wifi [0-9]+ cached$' <<<"$tl" && ok "--timing: a served entry is 'cached'" || nok "--timing cached line" "$tl"
+grep -qE '^timing total [0-9]+ cached$' <<<"$tl" && ok "--timing: a total line" || nok "--timing total line" "$tl"
+[ "$(run_fixture --check 2>/dev/null)" = "$(run_fixture --check --timing 2>/dev/null)" ] && ok "--timing leaves stdout alone" || nok "--timing stdout" "differs"
+[ -z "$(run_fixture 2>&1 >/dev/null)" ] && ok "no timing lines without --timing" || nok "timing without the flag" "printed"
+sed 's/_hit "\$1" "\$2" && s=cached/:/' "$PCS" >"$WORK/mut/pc-status"; chmod +x "$WORK/mut/pc-status"
+grep -qE '^timing wifi [0-9]+ cached$' <<<"$(PCS="$WORK/mut/pc-status" run_fixture --timing 2>&1 >/dev/null)" \
+  && nok "mutation red" "mutant still says cached" || ok "mutation: without _hit every reader reads 'fresh'"
+mkdir -p "$WORK/pbin" "$WORK/par/pc-status"
+for c in docker nmcli; do printf '#!/bin/sh\nsleep 0.8\necho "fx|running|fx-app-1||app"\n' >"$WORK/pbin/$c"; done
+printf '#!/bin/sh\nsleep 0.8\ncase "$*" in *alarms*) echo "{\\"alarms\\":{}}";; *) printf 200;; esac\n' >"$WORK/pbin/curl"
+chmod +x "$WORK/pbin"/*
+printf 'KEEPALIVE_UNITS=""\nKEEPALIVE_HTTP="fx=http://127.0.0.1:9/"\n' >"$WORK/par.env"
+par() { cp "$WORK/pc-status"/* "$WORK/par/pc-status/"; local t=${EPOCHREALTIME/./}
+  env PATH="$WORK/pbin:$WORK/bin:$PATH" XDG_RUNTIME_DIR="$WORK/par" HARNESS_CONFIG="$WORK/par.env" \
+    "${1:-$PCS}" --json --fresh --timing >"$WORK/par.json" 2>"$WORK/par.err"
+  echo $(( (${EPOCHREALTIME/./} - t) / 1000 )); }
+ms=$(par)
+[ "$ms" -lt 2400 ] && ok "--fresh: four 0.8 s readers take < 2.4 s together ($ms ms)" || nok "readers in parallel" "$ms ms"
+has "a parallel reader's value is served"   "$(st "$(cat "$WORK/par.json")" keepalive http-fx)" "OK 200"
+has "a parallel docker read is served"      "$(st "$(cat "$WORK/par.json")" docker fx)" "OK 1/1 up"
+grep -qE '^timing keepalive [0-9]{3,} fresh$' "$WORK/par.err" && ok "--timing: a parallel reader is timed 'fresh'" || nok "parallel timing line" "$(cat "$WORK/par.err")"
+sed 's/^_spawn() {$/_spawn() { return 0/' "$PCS" >"$WORK/mut/pc-status"; chmod +x "$WORK/mut/pc-status"
+ms=$(par "$WORK/mut/pc-status")
+[ "$ms" -ge 2400 ] && ok "mutation: without _spawn the readers run in series ($ms ms)" || nok "mutation red" "mutant took $ms ms"
 
 # --- 6. the fixture wrote only into its own cache dir ------------------------
 # The real timer may refresh the real entry mid-run; a leak would be the fixture's exact entry.

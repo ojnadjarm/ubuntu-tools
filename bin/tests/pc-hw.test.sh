@@ -78,8 +78,10 @@ is 'cached pci call forks no lspci' "$n2" 0
 
 # 12. live wall budget (real machine, not the fixture) — cold ≤ 1.5 s, warm ≤ 0.5 s.
 RT=$(mktemp -d); trap 'rm -rf "$WORK" "$RT"' EXIT
-cold=$(XDG_RUNTIME_DIR="$RT" /usr/bin/time -f '%e' "$BIN/pc-hw" summary --fresh 2>&1 >/dev/null | tail -1)
-warm=$(XDG_RUNTIME_DIR="$RT" /usr/bin/time -f '%e' "$BIN/pc-hw" summary 2>&1 >/dev/null | tail -1)
+# A refusing sudo, like run.sh's shim (T1136): no smartctl or dmidecode as root.
+mkdir -p "$RT/nosudo"; printf '#!/bin/sh\nexit 1\n' >"$RT/nosudo/sudo"; chmod +x "$RT/nosudo/sudo"
+cold=$(PATH="$RT/nosudo:$PATH" XDG_RUNTIME_DIR="$RT" /usr/bin/time -f '%e' "$BIN/pc-hw" summary --fresh 2>&1 >/dev/null | tail -1)
+warm=$(PATH="$RT/nosudo:$PATH" XDG_RUNTIME_DIR="$RT" /usr/bin/time -f '%e' "$BIN/pc-hw" summary 2>&1 >/dev/null | tail -1)
 bc=$(budget 1.5); bw=$(budget 0.5)
 awk -v c="$cold" -v b="$bc" 'BEGIN{exit !(c<=b)}' && ok "live cold <= $bc s budget ($cold)" || nok "live cold <= $bc s budget" "$cold"
 awk -v w="$warm" -v b="$bw" 'BEGIN{exit !(w<=b)}' && ok "live warm <= $bw s budget ($warm)" || nok "live warm <= $bw s budget" "$warm"

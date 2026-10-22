@@ -137,5 +137,58 @@ printf '%s\n' '{"ts":"2026-01-03T00:00:00+0000","id":"rotlive","cmd":"c","target
 is 'show finds an id in a rotated .gz' "$(PC_LEDGER="$RL" "$BIN/pc-undo" show rotold1 --json | jq -r '.after + " " + (.verified|tostring)')" 'c true'
 is 'list orders live then rotations, newest first' "$(PC_LEDGER="$RL" "$BIN/pc-undo" list --json | jq -r 'map(.id) | join(",")')" 'rotlive,rotold1,rotold2'
 
+# 12. drift: one row per target's latest entry, classed same|superseded|transient|acked|noread|drift; rc 1 only on drift (T1164).
+DL="$WORK/drift.jsonl"; D="$WORK/d"; mkdir -p "$D/bin"
+cat >"$D/bin/pc-conf" <<'EOF'
+#!/usr/bin/env bash
+[ -e "$2" ] && echo "sha:$(sha256sum "$2" | cut -c1-12)" || echo absent
+EOF
+cat >"$D/bin/systemctl" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in *"-p Type"*) echo oneshot;; *) echo failed;; esac
+EOF
+chmod +x "$D/bin/pc-conf" "$D/bin/systemctl"
+echo 0 >"$D/k1"; echo 5 >"$D/k2"; echo 1 >"$D/k3"; echo 500 >"$D/k4"; echo old >"$D/s.conf"
+sha_old=$("$D/bin/pc-conf" state "$D/s.conf"); echo new >"$D/s.conf"; sha_new=$("$D/bin/pc-conf" state "$D/s.conf")
+row() { jq -nc --arg id "$1" --arg t "$2" --arg a "$3" --arg r "$4" '{ts:"2026-01-01T00:00:00+0000",id:$id,cmd:"c",target:$t,before:"x",after:$a,rollback:"r",read:(if $r == "" then null else $r end)}'; }
+{ row dold   t.same  old  'echo b'
+  row dsame  t.same  b    'echo b'
+  row dk1    k.one   "0 file=$sha_old" "echo \"\$(cat $D/k1) file=\$(pc-conf state $D/s.conf)\""
+  row dk3    k.three "0 file=$sha_old" "echo \"\$(cat $D/k3) file=\$(pc-conf state $D/s.conf)\""
+  row dk2    k.two   "5 file=$sha_new" "echo \"\$(cat $D/k2) file=\$(pc-conf state $D/s.conf)\""
+  row dg1    g.one   '[a]'    "cat $D/g"
+  row dg2    g.two   '[a, b]' "cat $D/g"
+  row dswap  swap    '0 MB'   'echo 142 MB'
+  row dcont  container:x exited 'echo running'
+  row dshot  x.service inactive 'systemctl --user show x.service -p ActiveState --value'
+  row dsys   vm.k    1500    "cat $D/k4"
+  row dack   cups    active  'echo inactive'
+  row dnone  tmp     done    ''
+  row dsbin  k.ostype "$(cat /proc/sys/kernel/ostype)" 'sysctl -n kernel.ostype'
+  echo '{"id":"dack","ack":true,"why":"off by hand"}'; } >"$DL"
+echo '[a, b]' >"$D/g"
+dr() { env PATH="$D/bin:/usr/bin:/bin" PC_LEDGER="$DL" "$BIN/pc-undo" drift "$@"; }
+out=$(dr --json); rc=$?
+cls() { jq -r --arg t "$1" '.[] | select(.target == $t) | .class' <<<"$out"; }
+is 'drift --json is one row per target' "$(jq 'length' <<<"$out")" 13
+is 'drift takes the latest entry of a target' "$(jq -r '.[] | select(.target == "t.same") | .id' <<<"$out")" dsame
+is 'drift: read equals after → same'                   "$(cls t.same)" same
+is 'drift: file sha changed by a later entry → superseded' "$(cls k.one)" superseded
+is 'drift: later entry, live value changed → drift'    "$(cls k.three)" drift
+is 'drift: the later entry itself → same'              "$(cls k.two)" same
+is 'drift: same read rewritten later → superseded'     "$(cls g.one)" superseded
+is 'drift: swap → transient'                           "$(cls swap)" transient
+is 'drift: container:* → transient'                    "$(cls container:x)" transient
+is 'drift: oneshot run state → transient'              "$(cls x.service)" transient
+is 'drift: live sysctl changed → drift'                "$(cls vm.k)" drift
+is 'drift: drift row carries now'                      "$(jq -r '.[] | select(.target == "vm.k") | .now' <<<"$out")" 500
+is 'drift: acked id → acked'                           "$(cls cups)" acked
+is 'drift: no stored read → noread'                    "$(cls tmp)" noread
+is 'drift: reads get /usr/sbin on PATH'                "$(cls k.ostype)" same
+is 'drift exits 1 on drift' "$rc" 1
+txt=$(dr); is 'drift text ends with the counts' "$(tail -1 <<<"$txt")" '4 same, 2 superseded, 3 transient, 1 acked, 1 noread, 2 drift'
+echo 0 >"$D/k3"; echo 1500 >"$D/k4"
+dr >/dev/null; is 'drift exits 0 when nothing drifts' "$?" 0
+
 [ $bad = 0 ] && echo 'PASS pc-undo' || echo 'FAIL pc-undo'
 exit $bad

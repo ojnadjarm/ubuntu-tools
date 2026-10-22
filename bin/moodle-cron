@@ -1,24 +1,54 @@
 #!/usr/bin/env bash
-# moodle-cron <container> — one Moodle cron run; quiet when clean, one skip line and rc 0 while an upgrade is pending or running.
+# moodle-cron <container> — one Moodle cron run; quiet when clean, rc 0 while an upgrade is pending (one line per hour) or running (one line).
+# Idle site (no session or access-log activity for 30 min): runs only every MOODLE_CRON_IDLE_EVERY (default 10) minutes; 1 = every minute.
 set -uo pipefail
 case "${1:-}" in
   -h|--help) echo "usage: moodle-cron <container>"; exit 0 ;;
   ''|-*) echo "usage: moodle-cron <container>" >&2; exit 2 ;;
 esac
 c=$1
-mark="${MOODLE_CRON_STATE:-${HARNESS_HOME:-$HOME/agents}/state}/moodle-cron-$c.pending"
+st="${MOODLE_CRON_STATE:-${HARNESS_HOME:-$HOME/agents}/state}"
+mark="$st/moodle-cron-$c.pending"
+idle="$st/moodle-cron-$c.idle"
+every=${MOODLE_CRON_IDLE_EVERY:-10}
+
+active() {
+  local cache="$st/moodle-cron-$c.dataroot" root
+  root=$(cat "$cache" 2>/dev/null)
+  if [ ! -d "$root/sessions" ]; then
+    root=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/var/www/moodledata"}}{{.Source}}{{end}}{{end}}' "$c" 2>/dev/null)
+    [ -d "$root/sessions" ] && { mkdir -p "$st"; printf '%s\n' "$root" >"$cache"; }
+  fi
+  if [ -d "$root/sessions" ]; then
+    [ -n "$(find "$root/sessions" -maxdepth 1 -name 'sess_*' -mmin -30 -print -quit 2>/dev/null)" ]
+  else
+    [ -n "$(docker logs --since 30m --tail 1 "$c" 2>&1)" ]
+  fi
+}
+
+if [ "$every" -gt 1 ] && ! active; then
+  n=$(( $(cat "$idle" 2>/dev/null || echo 0) + 1 ))
+  if [ $(( 10#$(date +%M) % every )) -ne 0 ] && [ "$n" -lt "$every" ]; then
+    mkdir -p "$st"; echo "$n" >"$idle"
+    exit 0
+  fi
+fi
+rm -f "$idle"
 
 out=$(docker exec "$c" php /var/www/html/admin/cli/cron.php --keep-alive=0 2>&1); rc=$?
 if [ "$rc" -ne 0 ] && grep -q '^Moodle upgrade pending, cron execution suspended\.$' <<<"$out"; then
   [ -e "$mark" ] || { mkdir -p "${mark%/*}"; touch "$mark"; }
-  echo "skipped: upgrade pending since $(date -r "$mark" +%H:%M)"
+  if [ -z "$(find "$mark.said" -mmin -60 2>/dev/null)" ]; then
+    touch "$mark.said"
+    echo "moodle-cron: $c upgrade pending, skipped"
+  fi
   exit 0
 fi
 if [ "$rc" -ne 0 ] && grep -q '^Error code: upgraderunning$' <<<"$out"; then
   echo "skipped: upgrade running"
   exit 0
 fi
-rm -f "$mark"
+rm -f "$mark" "$mark.said"
 if [ "$rc" -ne 0 ] || grep -qiE 'task failed|exception|fatal|PHP (warning|error|notice)' <<<"$out"; then
   printf '%s\n' "$out"
 fi

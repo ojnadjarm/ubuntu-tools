@@ -1,5 +1,5 @@
 """Every listener worth a link: ss + docker ps + an HTTP probe per port."""
-import glob, ipaddress, os, re, time, urllib.error, urllib.request
+import glob, ipaddress, json, os, re, time, urllib.error, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlsplit
 from dash.env import HOME, PUBLIC_HOST, run
@@ -20,7 +20,6 @@ SITES = {
     8642: ("Eye bridge", "the body's local API", None, None, None),
     8643: ("Eye sandbox", "a hand-run body (body-sandbox)", None, None, None),
     4444: ("Selenium", "behat grid", "http", None, None),
-    7900: ("Selenium noVNC", "watch a behat run", "http", None, None),
     1025: ("MailHog SMTP", "mail sink", None, None, None),
     5452: ("Moodle 5.2 DB", "postgres", None, None, None),
     5453: ("Moodle 5.3 DB", "postgres", None, None, None),
@@ -72,21 +71,30 @@ def ss_lines():
 
 
 def listeners():
-    """port -> {pid, proc} for every IPv4/IPv6 TCP listener in this user's view."""
+    """port -> {pid, proc, loopback} for every IPv4/IPv6 TCP listener in this user's view; loopback = bound to loopback only."""
     out = {}
     for line in ss_lines().splitlines():
         f = line.split()
         if len(f) < 5 or f[0] != "tcp":
             continue
-        m = re.search(r":(\d+)$", f[4])
+        m = re.match(r"\[?([^\]%]*?)(?:%[^\]]*)?\]?:(\d+)$", f[4])
         if not m:
             continue
-        port = int(m.group(1))
+        port = int(m.group(2))
         pm = re.search(r'\("([^"]+)",pid=(\d+)', line)
-        cur = out.setdefault(port, {"port": port, "pid": None, "proc": ""})
+        cur = out.setdefault(port, {"port": port, "pid": None, "proc": "", "loopback": True})
+        cur["loopback"] = cur["loopback"] and is_loopback(m.group(1))
         if pm and not cur["pid"]:
             cur["pid"], cur["proc"] = int(pm.group(2)), pm.group(1)
     return out
+
+
+def is_loopback(host):
+    """True for a loopback bind address; the wildcard '*' and anything unparsable are not."""
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def proc_started(pid):
@@ -153,17 +161,38 @@ def http_code(url, method):
         return None
 
 
+def answer(url):
+    """HEAD, then GET when HEAD is refused: (state, why); down when nothing answers."""
+    for method in ("HEAD", "GET"):
+        code = http_code(url, method)
+        if code is None:
+            return "down", "no HTTP answer"
+        if code < 400 or method == "GET":
+            return ("up", None) if code < 400 else ("warn", "HTTP %d" % code)
+
+
 def probe(port, path="/"):
-    """HEAD, then GET when HEAD is refused, on the local port and path (v4 then v6): (state, ms); down when nothing answers."""
+    """answer() on the local port and path, v4 then v6: (state, ms, why)."""
     t0 = time.time()
     for host in ("127.0.0.1", "[::1]"):
-        for method in ("HEAD", "GET"):
-            code = http_code("http://%s:%d%s" % (host, port, path), method)
-            if code is None:
-                break
-            if code < 400 or method == "GET":
-                return ("up" if code < 400 else "warn"), int((time.time() - t0) * 1000)
-    return "down", int((time.time() - t0) * 1000)
+        state, why = answer("http://%s:%d%s" % (host, port, path))
+        if state != "down":
+            break
+    return state, int((time.time() - t0) * 1000), why and "%s on :%d%s" % (why, port, path)
+
+
+def serve_fronts():
+    """tailscale serve https front port -> the local port it proxies."""
+    try:
+        web = json.loads(run(["tailscale", "serve", "status", "--json"], 5) or "{}").get("Web") or {}
+    except ValueError:
+        return {}
+    out = {}
+    for hostport, conf in web.items():
+        m = re.search(r"https?://(?:127\.0\.0\.1|localhost|\[::1\]):(\d+)/?$", ((conf.get("Handlers") or {}).get("/") or {}).get("Proxy", ""))
+        if m and hostport.rpartition(":")[2].isdigit():
+            out[int(hostport.rpartition(":")[2])] = int(m.group(1))
+    return out
 
 
 def declared_ports():
@@ -229,48 +258,54 @@ def secret_rows():
     for path, (cmd, name, what) in SECRETS.items():
         link = secret_link(path)
         u = urlsplit(link)
-        code = http_code(link, "HEAD") if link else None
-        state = "down" if code is None else "up" if code < 400 else "warn"
+        state, why = answer(link) if link else ("down", "%s printed no link" % " ".join(cmd))
         rows.append({"port": u.port, "path": path, "name": name, "what": what, "url": path,
-                     "host": u.netloc, "group": "mine", "state": state,
+                     "host": u.netloc, "group": "mine", "state": state, "why": why,
                      "unit": "", "pid": None, "uptime": "", "proc": "", "tls": True, "ms": None})
     return rows
 
 
 def sites():
-    """Every listener worth a link, live from ss and probed over HTTP; unknown ones are flagged stray."""
+    """Every listener worth a link, live from ss and probed over HTTP; unknown ones go to "other" by unit, stray when unowned."""
     secret = secret_rows()
     hidden = {r["port"] for r in secret}
     rows = []
     live = listeners()
     owner = {p: c["name"] for c in docker_ps() for p in c["ports"]}
+    fronts = {f: b for f, b in serve_fronts().items() if f != b}
+    front_of = {b: f for f, b in fronts.items()}
+    hidden |= {fronts[p] for p in hidden if p in fronts}
     for port, info in sorted(live.items()):
-        if port in SKIP_PORTS or port in hidden or port > 30000:
+        if port in SKIP_PORTS or port in hidden or port in fronts or port > 30000:
             continue
         known = SITES.get(port)
-        name, what, scheme, ts, group = known or ("port %d" % port, info["proc"] or "unknown listener", "http", None, None)
+        name, what, scheme, ts, group = known or ("port %d" % port, info["proc"] or "unknown listener", "http", front_of.get(port), None)
         url = ""
         if scheme == "https" or ts:
             url = "https://%s:%d/" % (PUBLIC_HOST, ts or port)
-        elif scheme == "http":
+        elif scheme == "http" and not info.get("loopback"):
             url = "http://%s:%d/" % (PUBLIC_HOST, port)
         unit = owner.get(port) or (proc_unit(info["pid"]) if info["pid"] else "")
+        if not known and unit:
+            name, group = re.sub(r"\.service$", "", unit), "other"
         for r in rows_for(port, name, what, url, group):
-            r.update({"state": "up" if known else "stray", "unit": unit, "pid": info["pid"],
+            r.update({"state": "up" if known or unit else "stray", "unit": unit, "why": None, "pid": info["pid"],
                       "uptime": human_age(proc_started(info["pid"])) if info["pid"] else "",
                       "proc": info["proc"], "tls": bool(ts or scheme == "https"), "ms": None})
             rows.append(r)
     with ThreadPoolExecutor(8) as pool:
-        probed = list(pool.map(lambda r: probe(r["port"], r["path"]) if r["url"] else (None, None), rows))
-    for r, (state, ms) in zip(rows, probed):
+        probed = list(pool.map(lambda r: probe(r["port"], r["path"]) if r["url"] else (None, None, None), rows))
+    for r, (state, ms, why) in zip(rows, probed):
         r["ms"] = ms
-        if state and r["state"] == "up":
-            r["state"] = state
+        if r["group"] == "other" and state in ("down", "warn"):
+            r["url"], r["tls"] = "", False
+        elif state and r["state"] == "up":
+            r["state"], r["why"] = state, why
     declared = declared_ports()
     for port, (name, what, scheme, ts, group) in sorted(SITES.items()):
         if port not in live and port not in SKIP_PORTS and scheme and port in declared:
             for r in rows_for(port, name, what, "", group):
-                r.update({"ms": None, "state": "down", "unit": "", "pid": None, "uptime": "", "proc": "", "tls": False})
+                r.update({"ms": None, "state": "down", "why": "nothing listening on :%d" % port, "unit": "", "pid": None, "uptime": "", "proc": "", "tls": False})
                 rows.append(r)
     rows += secret
     order = list(SITES)

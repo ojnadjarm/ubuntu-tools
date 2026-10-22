@@ -1,9 +1,23 @@
 """Transport: gzip, ETag/304, Range and the keep-alive stall, on a throwaway server and drop fixture."""
-import gzip, http.client, json, os, socket, subprocess, sys, tempfile, threading, time, unittest
+import gzip, http.client, json, os, re, socket, subprocess, sys, tempfile, threading, time, unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import server
+from dash.http import STATIC_CACHE
 
 BUDGET = os.path.expanduser("~/agents/bin/tests/lib/budget.sh")
+
+
+IMPORT = re.compile(r'^\s*(?:import|export)\s[^;]*?from\s*["\']([^"\']+)["\']|^\s*import\s*["\']([^"\']+)["\']', re.M)
+
+
+def static_imports(root, url, seen):
+    """Add url and every module it statically imports (not import()) to seen."""
+    if url in seen:
+        return
+    seen.add(url)
+    for m in IMPORT.finditer(open(os.path.join(root, url.lstrip("/"))).read()):
+        spec = m.group(1) or m.group(2)
+        static_imports(root, spec if spec.startswith("/") else os.path.normpath(os.path.join(os.path.dirname(url), spec)), seen)
 
 
 class Http(unittest.TestCase):
@@ -57,11 +71,36 @@ class Http(unittest.TestCase):
             r, _ = self.get(path, **{"Accept-Encoding": enc})
             tag = r.getheader("ETag")
             self.assertTrue(tag, path)
-            self.assertEqual(r.getheader("Cache-Control"), "no-cache")
+            cache = STATIC_CACHE if path.startswith("/static/") else "no-cache"
+            self.assertEqual(r.getheader("Cache-Control"), cache, path)
             r, body = self.get(path, **{"Accept-Encoding": enc, "If-None-Match": tag})
-            self.assertEqual((r.status, body), (304, b""), path)
+            self.assertEqual((r.status, body, r.getheader("Cache-Control")), (304, b"", cache), path)
             r, _ = self.get(path, **{"Accept-Encoding": enc, "If-None-Match": '"stale"'})
             self.assertEqual(r.status, 200, path)
+
+    def test_pages_revalidate_every_load(self):
+        for path in ("/", "/static/next/index.html", "/static/machine.html"):
+            r, _ = self.get(path)
+            self.assertEqual((r.status, r.getheader("Cache-Control")), (200, "no-cache"), path)
+
+    def test_first_screen_modules_preloaded(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        page = open(os.path.join(root, "static/next/index.html")).read()
+        preload = set(re.findall(r'<link rel="modulepreload" href="([^"]+)">', page))
+        first = re.search(r'load: "\./([^"]+)"', open(os.path.join(root, "static/next/js/screens.js")).read()).group(1)
+        need = set()
+        for entry in ("/static/next/js/app.js", "/static/next/js/" + first):
+            static_imports(root, entry, need)
+        self.assertEqual(sorted(need - preload), [], "first-screen modules missing from modulepreload in index.html")
+
+    def test_boot_api_preloaded(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        page = open(os.path.join(root, "static/next/index.html")).read()
+        preload = set(re.findall(r'<link rel="preload" href="([^"]+)" as="fetch" crossorigin>', page))
+        self.assertEqual(preload, {"/api/status", "/api/agents", "/api/seen"})
+
+    def test_static_cache_has_no_stale_window(self):
+        self.assertNotIn("stale-while-revalidate", STATIC_CACHE, "a stale window outlives max-age, so a deploy can miss the minute")
 
     def test_gzip_and_identity_tags_differ(self):
         a, _ = self.get("/api/ls", **{"Accept-Encoding": "gzip"})

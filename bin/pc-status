@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
-# pc status — live health snapshot of this machine (text, --json, --check, --brief, --facts [--apply], --fresh).
+# pc status — live health snapshot of this machine (text, --json, --check, --brief, --facts [--apply], --fresh, --timing).
 set -uo pipefail
+T0=${EPOCHREALTIME/./}
 export LC_ALL=C
 BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 
 MODE=text
 FRESH=0
 APPLY=0
+TIMING=0
 for a in "$@"; do case "$a" in
   --json) MODE=json;; --check) MODE=check;; --brief) MODE=brief;; --facts) MODE=facts;;
-  --fresh) FRESH=1;; --apply) APPLY=1;;
-  -h|--help) echo "usage: pc status [--json|--check|--brief|--facts [--apply]] [--fresh]"; exit 0;;
+  --fresh) FRESH=1;; --apply) APPLY=1;; --timing) TIMING=1;;
+  -h|--help) echo "usage: pc status [--json|--check|--brief|--facts [--apply]] [--fresh] [--timing]"; exit 0;;
   *) echo "pc status: unknown option $a" >&2; exit 2;;
 esac; done
 
-REC="$(mktemp)"; trap 'rm -f "$REC"' EXIT
+# _total — the `timing total` line of --timing.
+_total() { [ "$TIMING" = 1 ] && printf 'timing total %d %s\n' $(( (${EPOCHREALTIME/./} - T0) / 1000 )) "$([ "$FRESH" = 1 ] && echo fresh || echo cached)" >&2; }
+REC="$(mktemp)"; PFD=; trap '_total; rm -rf "$REC" ${PFD:+"$PFD"}' EXIT
 fails=0
 # add <section> <key> <value> [OK|FAIL|-]; counts failures.
 add() {
@@ -37,6 +41,149 @@ first() {
 # slow <name> <ttl> <cmd…> — `cached`, but --fresh keeps the entry: probes that move in minutes or hours and
 # that the sentinel never repairs (T943). --fresh still re-reads services, docker, tailscale and the rest.
 slow() { FRESH=0 cached "$@"; }
+# --timing (T1114): each reader prints `timing <name> <ms> <cached|fresh>` to stderr.
+eval "_pclib_cached() $(declare -f cached | sed 1d)"
+_hit() { local ts; [ "$FRESH" = 0 ] && [ -r "$CACHE/$1" ] && read -r ts <"$CACHE/$1" && [ "$ts" -le "$NOW" ] 2>/dev/null && [ $((NOW - ts)) -lt "$2" ]; }
+cached() {
+  [ -n "${PF[$1]:-}" ] && [ -r "$PFD/$1" ] && { printf '%s\n' "$(<"$PFD/$1")"; return 0; }
+  [ "$TIMING" = 1 ] || { _pclib_cached "$@"; return; }
+  local t=${EPOCHREALTIME/./} s=fresh
+  _hit "$1" "$2" && s=cached
+  _pclib_cached "$@"
+  printf 'timing %s %d %s\n' "$1" $(( (${EPOCHREALTIME/./} - t) / 1000 )) "$s" >&2
+}
+
+## --- readers ----------------------------------------------------------------
+# No AP scan (`dev wifi` needs one to list the active SSID) — read it off the connected
+# wifi device instead, which is instant and does not trigger a rescan.
+_wifi() {
+  nmcli -t -f DEVICE,TYPE,STATE,CONNECTION dev status 2>/dev/null |
+    awk -F: '$2=="wifi" && $3=="connected"{print $4; exit}'
+}
+_ts() { tailscale status --peers=false --json 2>/dev/null; }
+_dline() {
+  docker ps -a --format '{{.Label "com.docker.compose.project"}}|{{.State}}|{{.Names}}|{{.Ports}}|{{.Label "com.docker.compose.service"}}' \
+    2>/dev/null | awk 'NF{sub(/^\|/,"(no project)|"); print}'
+}
+: "${USER:=$(id -un)}"
+sess=$(loginctl show-user "$USER" -p Display --value 2>/dev/null)
+[ -n "$sess" ] || sess=$(loginctl list-sessions --no-legend 2>/dev/null | awk -v u="$USER" '$3==u{print $1;exit}')
+_lockstate() {
+  loginctl show-session "$sess" -p LockedHint --value 2>/dev/null | sed 's/^yes$/locked/;s/^no$/unlocked/'
+}
+# 60 s, the TTL of everything the sentinel repairs: two systemd round-trips are ~15 ms, and
+# --brief now needs them too.
+SERVICES="docker tailscaled ssh ydotoold cron netdata dashboard"
+_svc() {
+  systemctl is-active ${SERVICES% dashboard} 2>/dev/null
+  systemctl --user is-active agents-dashboard.service 2>/dev/null
+  systemctl is-active ssh.socket 2>/dev/null
+}
+# Keepalive (T269): user units that must be active and local sites that must answer 200.
+KEEPALIVE_UNITS=${KEEPALIVE_UNITS:-}
+KEEPALIVE_HTTP=${KEEPALIVE_HTTP:-}
+_keepalive() {
+  local u h i=0 st=()
+  [ -n "$KEEPALIVE_UNITS" ] && mapfile -t st < <(systemctl --user is-active $KEEPALIVE_UNITS 2>/dev/null)
+  for u in $KEEPALIVE_UNITS; do printf '%s %s\n' "$u" "${st[i]:-}"; i=$((i+1)); done
+  for h in $KEEPALIVE_HTTP; do
+    printf 'http-%s %s\n' "${h%%=*}" "$(curl -s -o /dev/null -m 5 -w '%{http_code}' "${h#*=}" 2>/dev/null)"
+  done
+}
+_internet() { ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 && echo reachable || echo unreachable; }
+# A cheap portal-liveness dbus call replaces a real screenshot (0.81 s wall + ~15 python3
+# forks every 15 min for a value that rarely regresses); measured cheaper than a real
+# screenshot even under --fresh, so it is used unconditionally, and still fails when the
+# portal is dead.
+_shotkb() {
+  if busctl --user call org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop \
+       org.freedesktop.DBus.Properties Get ss org.freedesktop.portal.Screenshot version >/dev/null 2>&1; then
+    echo 102400
+  else
+    echo 0
+  fi
+}
+# One line per failed unit, `[t:][user:]<unit>`; `t:` marks a transient unit (a systemd-run scope).
+_failed() {
+  local u
+  for u in $(systemctl --failed --no-legend --plain 2>/dev/null | awk '{print $1}'); do
+    [ "$(systemctl show -p Transient --value "$u" 2>/dev/null)" = yes ] && echo "t:$u" || echo "$u"
+  done
+  for u in $(systemctl --user --failed --no-legend --plain 2>/dev/null | awk '{print $1}'); do
+    [ "$(systemctl --user show -p Transient --value "$u" 2>/dev/null)" = yes ] && echo "t:user:$u" || echo "user:$u"
+  done
+}
+# One line per active alarm, "STATUS chart.alarm", or "none"; empty when netdata does not answer.
+_netdata() {
+  curl -s -m 2 "${NETDATA_URL:-http://127.0.0.1:19999}/api/v1/alarms?active" 2>/dev/null |
+    jq -r '(.alarms // {} | to_entries | map("\(.value.status) \(.key)") | .[]), "none"' 2>/dev/null
+}
+# "<test-cap kills>\t<other classes>\t<their cmds>" from `pc kernel oom` over the alarm's 30 min window (T1105).
+_oomk() {
+  "${PC_KERNEL:-$BIN/pc-kernel}" oom --since 40m --json 2>/dev/null | jq -r '"\(.count["test-cap"] // 0)\t"
+    + ([.count | to_entries[] | select(.key != "test-cap") | "\(.value) \(.key)"] | join(", ")) + "\t"
+    + ([.kills[]? | select(.class != "test-cap") | .cmd] | unique | join(", "))' 2>/dev/null
+}
+_fleet() {
+  local u; mapfile -t u < <(pc_fleet_enabled)
+  pc_fleet_states "${u[@]}" | awk -F'\t' '$4=="FAIL"{print $1 " " $2}'
+}
+_tte() { upower -i /org/freedesktop/UPower/devices/battery_BAT0 2>/dev/null | sed -n 's/.*time to empty: *//p' | head -1; }
+_idle() { "$BIN/pc-mutter" idle --json 2>/dev/null | jq -r '.idle_s // empty' 2>/dev/null; }
+_players() {
+  local ps p st r=""
+  ps=$(playerctl -l 2>/dev/null) || true
+  [ -n "$ps" ] || { echo none; return 0; }
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    st=$(playerctl -p "$p" status 2>/dev/null); r="$r ${p}:${st:-Unknown}"
+  done <<<"$ps"
+  printf '%s\n' "${r# }"
+}
+_seatlogins() {
+  local n=0 id
+  while read -r id; do
+    [ -n "$id" ] || continue
+    [ "$(loginctl show-session "$id" -p Type --value 2>/dev/null)" = tty ] && n=$((n+1))
+  done < <(loginctl list-sessions --no-legend 2>/dev/null | awk '$4=="seat0" && $7 ~ /^tty/ {print $1}')
+  printf '%s\n' "$n"
+}
+
+# Readers whose entry would not be served start side by side here (T1114): --fresh waits for the
+# slowest one instead of their sum. `cached` serves each one's output from $PFD.
+declare -A PF=() PID=()
+# _spawn <name…> -- <ttl> <cmd…> — run `cached <name> <ttl> <cmd…>` in the background (one job may fill
+# several names, e.g. netdata then oom_kills).
+_spawn() {
+  local n=$1 ttl=$2; shift 2
+  _hit "$n" "$ttl" && return 0
+  [ -n "$PFD" ] || PFD=$(mktemp -d)
+  "$@" &
+  PID[$n]=$!; PF[$n]=1
+}
+# _await <name…> — wait for those readers' background runs (a no-op for a served or unstarted one).
+_await() { local n p=(); for n; do [ -n "${PID[$n]:-}" ] && p+=("${PID[$n]}"); done; [ ${#p[@]} -eq 0 ] || wait "${p[@]}"; }
+_pf() { cached "$@" >"$PFD/$1"; }
+_pf_netdata() {
+  _pf netdata_alerts 60 _netdata
+  grep -q '^[A-Z]* mem\.oom_kill\.' "$PFD/netdata_alerts" && _pf oom_kills 60 _oomk
+}
+_spawn keepalive 60 _pf keepalive 60 _keepalive
+_spawn netdata_alerts 60 _pf_netdata && [ -n "${PF[netdata_alerts]:-}" ] && PF[oom_kills]=1 PID[oom_kills]=${PID[netdata_alerts]}
+_spawn docker 60 _pf docker 60 _dline
+_spawn failed_transient 60 _pf failed_transient 60 _failed
+FRESH=0 _spawn io_smart 3600 _pf io_smart 3600 _pc_smart  # slow key: SMART moves in hours (T1136)
+_spawn wifi 900 _pf wifi 900 _wifi
+_spawn fleet 60 _pf fleet 60 _fleet
+_spawn services 60 _pf services 60 _svc
+_spawn internet 60 _pf internet 60 _internet
+_spawn tailscale 60 _pf tailscale 60 _ts
+case $MODE in text|json|check)
+  _spawn idle 30 _pf idle 30 _idle
+  _spawn time_to_empty 60 _pf time_to_empty 60 _tte
+  _spawn seat_logins 60 _pf seat_logins 60 _seatlogins
+  _spawn players 30 _pf players 30 _players;;
+esac
 
 ## --- cheap probes (also used by --brief) ------------------------------------
 p_ac=$(first /sys/class/power_supply/A[CD]*/online)
@@ -54,6 +201,22 @@ read -r r_load l5 l15 _ </proc/loadavg
 r_temp=$(sensors -j 2>/dev/null | jq -r '[..|objects|to_entries[]|select(.key|test("^temp[0-9]+_input$"))|.value]|max // 0' 2>/dev/null)
 r_temp=${r_temp%%.*}; : "${r_temp:=0}"
 
+tmux has-session -t "$ORCHESTRATOR_TMUX_SESSION" 2>/dev/null && a_tmux=alive || a_tmux=down
+# Orchestrator pane: the session existing is not the same as Claude serving in it.
+_orch_state() {
+  local s=$ORCHESTRATOR_TMUX_SESSION info dead tty
+  [ "$(systemctl --user is-enabled "$ORCHESTRATOR_UNIT" 2>/dev/null)" = enabled ] || { echo off; return; }
+  info=$(tmux display-message -pt "$s" '#{pane_dead} #{pane_tty}' 2>/dev/null) || { echo dead; return; }
+  read -r dead tty <<<"$info"
+  { [ "$dead" = 1 ] || [ -z "$tty" ]; } && { echo dead; return; }
+  case "$(tmux capture-pane -pt "$s" 2>/dev/null)" in *"Yes, I trust this folder"*) echo trust-prompt; return;; esac
+  ps -o comm= -t "$tty" 2>/dev/null | grep -qx claude && echo ok || echo shell
+}
+a_orch=$(_orch_state)
+timers=$(systemctl --user list-timers --no-legend 2>/dev/null)
+a_timers=0
+while IFS= read -r _l; do [ -n "$_l" ] && a_timers=$((a_timers + 1)); done <<<"$timers"
+_await io_smart
 # SMART (NVMe, pc_smart_json: root, cached 1 h) and battery wear.
 IFS=$'\t' read -r s_health s_used s_spare s_err < <(pc_smart_json | jq -r '
   .nvme_smart_health_information_log as $h
@@ -66,24 +229,15 @@ b_design=$(first /sys/class/power_supply/BAT*/energy_full_design)
 b_cycles=$(first /sys/class/power_supply/BAT*/cycle_count); : "${b_cycles:=n/a}"
 b_health=$(awk -v n="${b_full:-0}" -v d="${b_design:-0}" 'BEGIN{if(d>0)printf "%.0f",100*n/d;else print -1}')
 
-# No AP scan (`dev wifi` needs one to list the active SSID) — read it off the connected
-# wifi device instead, which is instant and does not trigger a rescan.
-_wifi() {
-  nmcli -t -f DEVICE,TYPE,STATE,CONNECTION dev status 2>/dev/null |
-    awk -F: '$2=="wifi" && $3=="connected"{print $4; exit}'
-}
+_await wifi
 n_ssid=$(cached wifi 900 _wifi); : "${n_ssid:=none}"
 n_lan=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<NF;i++)if($i=="src")print $(i+1);exit}'); : "${n_lan:=n/a}"
-_ts() { tailscale status --peers=false --json 2>/dev/null; }
+_await tailscale
 n_ts_json=$(cached tailscale 60 _ts)
 _ts_pair() { jq -r '[(.BackendState // "n/a"), (.TailscaleIPs[0] // "n/a")]|@tsv' <<<"${n_ts_json:-null}"; }
 IFS=$'\t' read -r n_ts_state n_ts_ip < <(cached ts_pair 60 _ts_pair)
 : "${n_ts_state:=n/a}"; : "${n_ts_ip:=n/a}"
-
-_dline() {
-  docker ps -a --format '{{.Label "com.docker.compose.project"}}|{{.State}}|{{.Names}}|{{.Ports}}|{{.Label "com.docker.compose.service"}}' \
-    2>/dev/null | awk 'NF{sub(/^\|/,"(no project)|"); print}'
-}
+_await docker
 d_line=$(cached docker 60 _dline)
 # Expected services per project (compose-services: profile-aware), from the compose files and the
 # containers seen, so a whole stack that was `down`ed is still missed.
@@ -133,32 +287,11 @@ while IFS='|' read -r _p _r _t _; do
   [ -n "$_p" ] || continue; d_run=$((d_run + _r)); d_tot=$((d_tot + _t))
 done <<<"$d_stat"
 
-: "${USER:=$(id -un)}"
-sess=$(loginctl show-user "$USER" -p Display --value 2>/dev/null)
-[ -n "$sess" ] || sess=$(loginctl list-sessions --no-legend 2>/dev/null | awk -v u="$USER" '$3==u{print $1;exit}')
-_lockstate() {
-  loginctl show-session "$sess" -p LockedHint --value 2>/dev/null | sed 's/^yes$/locked/;s/^no$/unlocked/'
-}
 k_lock=$(cached lock 900 _lockstate); : "${k_lock:=n/a}"
 
 _pcmode() { . "$BIN/pc-mode" status; }
 k_mode=$(slow mode 900 _pcmode); : "${k_mode:=unknown}"
 
-tmux has-session -t "$ORCHESTRATOR_TMUX_SESSION" 2>/dev/null && a_tmux=alive || a_tmux=down
-# Orchestrator pane: the session existing is not the same as Claude serving in it.
-_orch_state() {
-  local s=$ORCHESTRATOR_TMUX_SESSION info dead tty
-  [ "$(systemctl --user is-enabled "$ORCHESTRATOR_UNIT" 2>/dev/null)" = enabled ] || { echo off; return; }
-  info=$(tmux display-message -pt "$s" '#{pane_dead} #{pane_tty}' 2>/dev/null) || { echo dead; return; }
-  read -r dead tty <<<"$info"
-  { [ "$dead" = 1 ] || [ -z "$tty" ]; } && { echo dead; return; }
-  case "$(tmux capture-pane -pt "$s" 2>/dev/null)" in *"Yes, I trust this folder"*) echo trust-prompt; return;; esac
-  ps -o comm= -t "$tty" 2>/dev/null | grep -qx claude && echo ok || echo shell
-}
-a_orch=$(_orch_state)
-timers=$(systemctl --user list-timers --no-legend 2>/dev/null)
-a_timers=0
-while IFS= read -r _l; do [ -n "$_l" ] && a_timers=$((a_timers + 1)); done <<<"$timers"
 
 ## --- verdicts ---------------------------------------------------------------
 # Every threshold is judged once, here: --brief lists the tags that came out FAIL, the full
@@ -183,14 +316,7 @@ gate smart _smart_bad
 
 # Everything else that can come out FAIL is judged here too, so --brief and the full
 # collection share one table instead of a separate tag list.
-# 60 s, the TTL of everything the sentinel repairs: two systemd round-trips are ~15 ms, and
-# --brief now needs them too.
-SERVICES="docker tailscaled ssh ydotoold cron netdata dashboard"
-_svc() {
-  systemctl is-active ${SERVICES% dashboard} 2>/dev/null
-  systemctl --user is-active agents-dashboard.service 2>/dev/null
-  systemctl is-active ssh.socket 2>/dev/null
-}
+_await services
 mapfile -t _svst < <(cached services 60 _svc)
 # ssh.socket starts sshd on demand, so SSH is up while either unit is active (T350).
 [ "${_svst[2]:-}" != active ] && [ "${_svst[7]:-}" = active ] && _svst[2]="active (socket)"
@@ -199,36 +325,9 @@ for _s in $SERVICES; do
   SV[$_s]="${_svst[_i]:-}"; _i=$((_i+1)); : "${SV[$_s]:=unknown}"
   gate "svc_$_s" [ "${SV[$_s]%% *}" != active ]
 done
-# Keepalive (T269): user units that must be active and local sites that must answer 200.
-KEEPALIVE_UNITS=${KEEPALIVE_UNITS:-}
-KEEPALIVE_HTTP=${KEEPALIVE_HTTP:-}
-_keepalive() {
-  local u h
-  for u in $KEEPALIVE_UNITS; do printf '%s %s\n' "$u" "$(systemctl --user is-active "$u" 2>/dev/null)"; done
-  for h in $KEEPALIVE_HTTP; do
-    printf 'http-%s %s\n' "${h%%=*}" "$(curl -s -o /dev/null -m 5 -w '%{http_code}' "${h#*=}" 2>/dev/null)"
-  done
-}
-declare -A KA=()
-while read -r _k _v; do [ -n "$_k" ] && KA[$_k]=${_v:-unknown}; done < <(cached keepalive 60 _keepalive)
-for _k in "${!KA[@]}"; do
-  case $_k in http-*) gate "ka_$_k" [ "${KA[$_k]}" != 200 ];; *) gate "ka_$_k" [ "${KA[$_k]}" != active ];; esac
-done
-_internet() { ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 && echo reachable || echo unreachable; }
+_await internet
 n_inet=$(cached internet 60 _internet); : "${n_inet:=unreachable}"
 gate internet [ "$n_inet" != reachable ]
-# A cheap portal-liveness dbus call replaces a real screenshot (0.81 s wall + ~15 python3
-# forks every 15 min for a value that rarely regresses); measured cheaper than a real
-# screenshot even under --fresh, so it is used unconditionally, and still fails when the
-# portal is dead.
-_shotkb() {
-  if busctl --user call org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop \
-       org.freedesktop.DBus.Properties Get ss org.freedesktop.portal.Screenshot version >/dev/null 2>&1; then
-    echo 102400
-  else
-    echo 0
-  fi
-}
 sz=$(cached screenshot 900 _shotkb); : "${sz:=0}"
 gate screenshot [ "$sz" -le 10240 ]
 _orch_bad() { [ "$a_orch" != ok ] && [ "$a_orch" != off ]; }
@@ -241,22 +340,16 @@ band() { if [ "$2" -ge "$4" ]; then V[$1]=FAIL; elif [ "$2" -ge "$3" ]; then V[$
 if [ "$r_swpct" -lt 0 ]; then V[swap]=-; else band swap "$r_swpct" 80 95; fi
 # Failed units that are known harmless and stay failed by design; space-separated, empty by default.
 FAILED_UNITS_IGNORE=${FAILED_UNITS_IGNORE:-}
-# One line per failed unit, `[t:][user:]<unit>`; `t:` marks a transient unit (a systemd-run scope).
-_failed() {
-  local u
-  for u in $(systemctl --failed --no-legend --plain 2>/dev/null | awk '{print $1}'); do
-    [ "$(systemctl show -p Transient --value "$u" 2>/dev/null)" = yes ] && echo "t:$u" || echo "$u"
-  done
-  for u in $(systemctl --user --failed --no-legend --plain 2>/dev/null | awk '{print $1}'); do
-    [ "$(systemctl --user show -p Transient --value "$u" 2>/dev/null)" = yes ] && echo "t:user:$u" || echo "user:$u"
-  done
-}
-h_failed=(); h_failed_transient=(); h_apport=(); h_foreign=()
+# CI verdict units (same default as maintenance-run, T1039): a red night is a ci_verdict WARN, not a host fault.
+VERDICT_UNITS=${MAINT_GATE_VERDICT_UNITS-fleet-ci-daily.service ailearning-ci-daily.service}
+_await failed_transient
+h_failed=(); h_failed_transient=(); h_apport=(); h_foreign=(); h_verdict=()
 while read -r _u; do
   _n=${_u#t:}
   [ -n "$_n" ] && [[ " $FAILED_UNITS_IGNORE " != *" ${_n#user:} "* ]] || continue
   if [ "$_n" != "$_u" ]; then h_failed_transient+=("$_n")
   elif [[ $_n = apport-autoreport.service || $_n = apport-autoreport.path ]]; then h_apport+=("$_n")
+  elif [[ " $VERDICT_UNITS " = *" ${_n#user:} "* ]]; then _v=${_n#user:}; h_verdict+=("${_v%.service}")
   elif [[ ${_n#user:} =~ $PC_NOT_OURS ]]; then h_foreign+=("$_n")
   else h_failed+=("$_n"); fi
 done < <(cached failed_transient 60 _failed)
@@ -264,6 +357,7 @@ gate failed_units [ "${#h_failed[@]}" -gt 0 ]
 V[failed_transient]=OK; [ "${#h_failed_transient[@]}" -gt 0 ] && V[failed_transient]=WARN
 # A failed unit that is not ours (PC_NOT_OURS, Vass) is information: a WARN, never a host FAIL (T721).
 V[failed_foreign]=OK; [ "${#h_foreign[@]}" -gt 0 ] && V[failed_foreign]=WARN
+V[ci_verdict]=OK; [ "${#h_verdict[@]}" -gt 0 ] && V[ci_verdict]=WARN
 # A failed crash-report upload (T442) is a WARN naming each /var/crash report, never a host FAIL.
 h_crash=()
 if [ "${#h_apport[@]}" -gt 0 ]; then
@@ -274,30 +368,47 @@ if [ "${#h_apport[@]}" -gt 0 ]; then
 fi
 V[crash_report]=OK; [ "${#h_crash[@]}" -gt 0 ] && V[crash_report]=WARN
 REBOOT_FILE=${PC_REBOOT_FILE:-/run/reboot-required}
-h_reboot=no; h_rbdays=-1
+# The next maintenance window's reboot verdict, from maintenance-run's dry run (T1072).
+_rbgate() {
+  local nx v
+  nx=$(systemctl --user show agent@maintenance.timer -p NextElapseUSecRealtime --value 2>/dev/null)
+  { [ -n "$nx" ] && nx=$(date -d "$nx" '+%a %m-%d %H:%M' 2>/dev/null); } || nx=n/a
+  v=$(MAINT_GATE_SETTLE=0 "${PC_MAINT_RUN:-$BIN/maintenance-run}" --dry-run --assume-reboot --dry-run-ignore-window 2>/dev/null |
+      sed -n 's/^REBOOT ALLOWED.*/allowed/p; s/^REBOOT REFUSED: /refused: /p')
+  echo "window $nx ${v:-n/a}"
+}
+h_reboot=none; h_rbdays=-1
 if [ -e "$REBOOT_FILE" ]; then
   h_rbdays=$(( (NOW - $(stat -c %Y "$REBOOT_FILE")) / 86400 ))
   mapfile -t _pk 2>/dev/null <"$REBOOT_FILE.pkgs"
   h_reboot="$h_rbdays d${_pk[0]:+ (${_pk[*]})}"
+  # Not in --check: maintenance-run's gate calls `pc status --check`.
+  # A refusal is re-asked after 300 s: a unit mid-restart must not hold the row for an hour (T1144).
+  _rbttl=3600; [ -r "$CACHE/reboot_gate" ] && [[ $(<"$CACHE/reboot_gate") == *" refused: "* ]] && _rbttl=300
+  case $MODE in text|json) h_reboot+=" · $(slow reboot_gate "$_rbttl" _rbgate)";; esac
 fi
 if [ "$h_rbdays" -lt 0 ]; then V[reboot]=OK; else band reboot "$h_rbdays" 1 7; fi
-# One line per active alarm, "STATUS chart.alarm", or "none"; empty when netdata does not answer.
-_netdata() {
-  curl -s -m 2 "${NETDATA_URL:-http://127.0.0.1:19999}/api/v1/alarms?active" 2>/dev/null |
-    jq -r '(.alarms // {} | to_entries | map("\(.value.status) \(.key)") | .[]), "none"' 2>/dev/null
-}
-h_nd_crit=(); h_nd_warn=(); h_nd_ok=0
+_await netdata_alerts
+h_nd_crit=(); h_nd_warn=(); h_nd_ok=0; h_nd_oomk=(); h_nd_oom=
 while read -r _s _a; do
+  [[ $_a = mem.oom_kill.* ]] && { h_nd_oomk=("$_s" "$_a"); continue; }
   case $_s in CRITICAL) h_nd_crit+=("$_a");; WARNING) h_nd_warn+=("$_a");; none) h_nd_ok=1;; esac
 done < <(cached netdata_alerts 60 _netdata)
+# The oom_kill alarm cannot tell a run.sh fixture's memcg kill from a real one; `pc kernel oom` can.
+if [ ${#h_nd_oomk[@]} -gt 0 ]; then
+  IFS=$'\t' read -r o_tc o_other o_cmds < <(cached oom_kills 60 _oomk)
+  if [ "${o_tc:-0}" -gt 0 ] && [ -z "$o_other" ]; then
+    h_nd_oom="oom_kill: $o_tc test-cap, ignored"
+  else
+    [ "${h_nd_oomk[0]}" = CRITICAL ] && h_nd_crit+=("${h_nd_oomk[1]}") || h_nd_warn+=("${h_nd_oomk[1]}")
+    [ -n "$o_other" ] && h_nd_oom="oom_kill: $o_other${o_cmds:+ ($o_cmds)}$([ "${o_tc:-0}" -gt 0 ] && echo ", $o_tc test-cap")"
+  fi
+fi
 if [ "$h_nd_ok" = 0 ]; then V[netdata]=-
 elif [ ${#h_nd_crit[@]} -gt 0 ]; then V[netdata]=FAIL
 elif [ ${#h_nd_warn[@]} -gt 0 ]; then V[netdata]=WARN
 else V[netdata]=OK; fi
-_fleet() {
-  local u; mapfile -t u < <(pc_fleet_enabled)
-  pc_fleet_states "${u[@]}" | awk -F'\t' '$4=="FAIL"{print $1 " " $2}'
-}
+_await fleet
 mapfile -t a_fleet < <(cached fleet 60 _fleet)
 [ -n "${a_fleet[0]:-}" ] || a_fleet=()
 gate fleet [ "${#a_fleet[@]}" -gt 0 ]
@@ -317,6 +428,22 @@ for _m in "$HOME/agents/state"/moodle-cron-*.pending; do
   _c=${_m##*/moodle-cron-}; a_mup+=("${_c%.pending} since $(date -r "$_m" +%H:%M)")
 done
 V[moodle_upgrade]=OK; [ "${#a_mup[@]}" -gt 0 ] && V[moodle_upgrade]=WARN
+# systemd-oomd's monitored cgroups as "<pressure> <swap>" (T1046); 0 means the userspace OOM guard is off.
+_oomd() {
+  pc_root oomctl 2>/dev/null | awk '/^Swap Monitored/{s=1; next} /^Memory Pressure Monitored/{s=2; next}
+    /Path:/{n[s]++} END{if (NR) print n[2]+0, n[1]+0}'
+}
+read -r h_oom_p h_oom_s < <(slow oomd 300 _oomd)
+[ -n "${h_oom_p:-}" ] || rm -f "$CACHE/oomd"
+if [ -z "${h_oom_p:-}" ]; then V[oomd]=-; elif [ $((h_oom_p + h_oom_s)) -eq 0 ]; then V[oomd]=WARN; else V[oomd]=OK; fi
+
+# Keepalive is read last: its curl is the slowest reader (T1114).
+_await keepalive
+declare -A KA=()
+while read -r _k _v; do [ -n "$_k" ] && KA[$_k]=${_v:-unknown}; done < <(cached keepalive 60 _keepalive)
+for _k in "${!KA[@]}"; do
+  case $_k in http-*) gate "ka_$_k" [ "${KA[$_k]}" != 200 ];; *) gate "ka_$_k" [ "${KA[$_k]}" != active ];; esac
+done
 
 ## --- brief ------------------------------------------------------------------
 if [ "$MODE" = brief ]; then
@@ -483,7 +610,7 @@ EOF
 }
 
 if [ "$MODE" = facts ]; then
-  blk=$(mktemp); trap 'rm -f "$REC" "$blk"' EXIT
+  blk=$(mktemp); trap '_total; rm -rf "$REC" "$blk" ${PFD:+"$PFD"}' EXIT
   { echo "$FACTS_BEGIN"; facts_body; echo "$FACTS_END"; } >"$blk"
   if [ "$APPLY" = 0 ]; then cat "$blk"; exit 0; fi
   f=${PC_FACTS_FILE:-$HOME/agents/KB/machine.md}
@@ -494,6 +621,7 @@ if [ "$MODE" = facts ]; then
 fi
 
 ## --- full collection --------------------------------------------------------
+_await time_to_empty idle players seat_logins
 read -r _hostname </proc/sys/kernel/hostname
 read -r _kernel </proc/sys/kernel/osrelease
 add host hostname "$_hostname"
@@ -506,20 +634,22 @@ joined() { local -n _a=$1; local o; printf -v o '%s, ' "${_a[@]}"; printf '%s' "
 add host failed_units "${#h_failed[@]}$([ ${#h_failed[@]} -gt 0 ] && echo ": $(joined h_failed)")" "${V[failed_units]}"
 add host failed_transient "${#h_failed_transient[@]}$([ ${#h_failed_transient[@]} -gt 0 ] && echo ": $(joined h_failed_transient)")" "${V[failed_transient]}"
 add host failed_foreign "${#h_foreign[@]}$([ ${#h_foreign[@]} -gt 0 ] && echo ": $(joined h_foreign) (not ours)")" "${V[failed_foreign]}"
+add host ci_verdict "$([ ${#h_verdict[@]} -gt 0 ] && echo "${#h_verdict[@]} red: $(joined h_verdict)" || echo none)" "${V[ci_verdict]}"
 add host crash_report "$([ ${#h_crash[@]} -gt 0 ] && joined h_crash || echo none)" "${V[crash_report]}"
 add host reboot_required "$h_reboot" "${V[reboot]}"
+add host oomd_monitored "$([ -n "${h_oom_p:-}" ] && echo "$((h_oom_p + h_oom_s)) (pressure $h_oom_p, swap $h_oom_s)" || echo n/a)" "${V[oomd]}"
 nd=(); [ ${#h_nd_crit[@]} -gt 0 ] && nd+=("${#h_nd_crit[@]} CRITICAL"); [ ${#h_nd_warn[@]} -gt 0 ] && nd+=("${#h_nd_warn[@]} WARNING")
 if [ "$h_nd_ok" = 0 ]; then nd_v="n/a (netdata did not answer)"
 elif [ ${#nd[@]} = 0 ]; then nd_v=none
 elif [ ${#h_nd_crit[@]} -gt 0 ]; then nd_v="$(joined nd): $(joined h_nd_crit)"
 else nd_v="$(joined nd): $(joined h_nd_warn)"; fi
+[ -n "$h_nd_oom" ] && nd_v+=" ($h_nd_oom)"
 add host netdata_alerts "$nd_v" "${V[netdata]}"
 
 add power source "$p_src"
 add power battery "$p_pct%" "${V[battery]}"
 add power battery_health "$([ "$b_health" -ge 0 ] 2>/dev/null && echo "$b_health% of design, $b_cycles cycles" || echo n/a)"
 add power battery_limit "$(first /sys/class/power_supply/BAT*/charge_control_end_threshold)%"
-_tte() { upower -i /org/freedesktop/UPower/devices/battery_BAT0 2>/dev/null | sed -n 's/.*time to empty: *//p' | head -1; }
 add power time_to_empty "$(cached time_to_empty 60 _tte)"
 # One D-Bus read (~5 ms) instead of powerprofilesctl's Python start-up (~0.3 s).
 _profile() {
@@ -570,28 +700,9 @@ st=-; [ "$k_mode" = agent ] && st=OK
 add desktop mode "$k_mode" "$st"
 # Presence signals (PB09): seconds since the last input, the MPRIS players and their state,
 # and any text-console login on seat0 — what the "nobody home" gate reads.
-_idle() { "$BIN/pc-mutter" idle --json 2>/dev/null | jq -r '.idle_s // empty' 2>/dev/null; }
 i_s=$(cached idle 30 _idle); : "${i_s:=n/a}"
 add desktop idle "$i_s s"
-_players() {
-  local ps p st r=""
-  ps=$(playerctl -l 2>/dev/null) || true
-  [ -n "$ps" ] || { echo none; return 0; }
-  while IFS= read -r p; do
-    [ -n "$p" ] || continue
-    st=$(playerctl -p "$p" status 2>/dev/null); r="$r ${p}:${st:-Unknown}"
-  done <<<"$ps"
-  printf '%s\n' "${r# }"
-}
 add desktop players "$(cached players 30 _players)"
-_seatlogins() {
-  local n=0 id
-  while read -r id; do
-    [ -n "$id" ] || continue
-    [ "$(loginctl show-session "$id" -p Type --value 2>/dev/null)" = tty ] && n=$((n+1))
-  done < <(loginctl list-sessions --no-legend 2>/dev/null | awk '$4=="seat0" && $7 ~ /^tty/ {print $1}')
-  printf '%s\n' "$n"
-}
 add desktop seat_logins "$(cached seat_logins 60 _seatlogins)"
 fw=$(gdbus call --session -d org.gnome.Shell -o /org/gnome/Shell/Extensions/Windows \
       -m org.gnome.Shell.Extensions.Windows.List 2>/dev/null \

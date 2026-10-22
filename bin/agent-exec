@@ -42,7 +42,23 @@ export PROMPT_FILE="$prompt" SYSTEM_FILE="$system" MODEL="$model" AGENT_NAME="$n
        AGENT_TIMEOUT="$tmo" RAW_OUT="$raw" META_OUT="$meta"
 
 cd "$cwd" || exit 1
-"$adapter" </dev/null &
+# scope_ok — a user-bus scope can start; a positive probe is cached per boot in $XDG_RUNTIME_DIR/pc-status/scope-ok (T1138).
+scope_ok() {
+  local f=${XDG_RUNTIME_DIR:+$XDG_RUNTIME_DIR/pc-status/scope-ok} b
+  b=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
+  [ -n "$f" ] && [ -n "$b" ] && [ "$(cat "$f" 2>/dev/null)" = "$b" ] && return 0
+  systemd-run --user --scope -q true >/dev/null 2>&1 || return 1
+  [ -n "$f" ] && [ -n "$b" ] && mkdir -p "${f%/*}" 2>/dev/null && printf '%s\n' "$b" >"$f" 2>/dev/null
+  return 0
+}
+# The adapter yields CPU in agents.slice (idle weight), bound to the caller's user unit: its stop and MemoryMax still apply.
+place=(); cg=$(sed -n 's/^0:://p' /proc/self/cgroup); u=${cg##*/}; m=$(cat "/sys/fs/cgroup$cg/memory.max" 2>/dev/null)
+if [[ $cg == */user@"$UID".service/* && $cg != */agents.slice/* && ( $u == *.service || $u == *.scope ) ]] &&
+   scope_ok; then
+  place=(systemd-run --user --scope --quiet --slice=agents.slice -p "BindsTo=$u"
+         -p "MemoryMax=${m/#max/infinity}")
+fi
+"${place[@]}" "$adapter" </dev/null &
 child=$!
 [ -n "$pidfile" ] && printf '%s\n' "$child" >"$pidfile"
 trap 'kill "$child" 2>/dev/null' TERM INT
