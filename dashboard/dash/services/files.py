@@ -1,5 +1,5 @@
 """The ~/drop file browser, drop files served with Range, and the published plan pages."""
-import html, json, os, re, subprocess, sys, threading, urllib.parse
+import html, json, os, re, subprocess, sys, threading, urllib.parse, zipfile
 from dash.cache import forget
 from dash.env import HERE, HOME, PUBLIC_HOST
 from dash.routes import route
@@ -385,6 +385,71 @@ def md_html(text):
             import markdown
             _md = markdown.Markdown(extensions=["extra", "sane_lists"], output_format="html5")
         return _md.reset().convert(text)
+
+
+def zip_members(raws):
+    """(archive name, absolute file) pairs under the requested drop entries, or None when one is refused by fs_path."""
+    hits = [fs_path(urllib.parse.quote(r)) for r in raws if isinstance(r, str)]
+    if not hits or len(hits) != len(raws) or any(not h or not h[1] or not os.path.exists(h[0]) for h in hits):
+        return None
+    rels = sorted({h[1] for h in hits})
+    rels = [r for r in rels if not any(r.startswith(o + "/") for o in rels)]
+    base = os.path.dirname(rels[0]) if len(rels) == 1 else os.path.commonpath(rels)
+    root = os.path.realpath(DROP) + os.sep
+    out = []
+    for rel in rels:
+        full = fs_path(urllib.parse.quote(rel))[0]
+        arc = os.path.relpath(os.path.join(DROP, rel), os.path.join(DROP, base))
+        if os.path.isfile(full):
+            out.append((arc, full))
+            continue
+        for d, dirs, names in os.walk(full):
+            dirs[:] = sorted(n for n in dirs if not n.startswith(".") and not os.path.islink(os.path.join(d, n)))
+            for n in sorted(names):
+                p = os.path.join(d, n)
+                if n.startswith(".") or not os.path.isfile(p) or not os.path.realpath(p).startswith(root):
+                    continue
+                out.append((os.path.join(arc, os.path.relpath(p, full)), p))
+    return out
+
+
+def zip_name(raws):
+    """`<folder>.zip` for one entry, `<parent>-selection.zip` for several."""
+    rels = [r.strip("/") for r in raws]
+    if len(rels) == 1:
+        return os.path.splitext(os.path.basename(rels[0]))[0] + ".zip"
+    parent = os.path.basename(os.path.commonpath(rels)) or "drop"
+    return parent + "-selection.zip"
+
+
+def write_zip(stream, members):
+    """Stream a stored zip64 archive of members to a write-only stream; unreadable files are skipped."""
+    with zipfile.ZipFile(stream, "w", zipfile.ZIP_STORED, allowZip64=True) as zf:
+        for arc, full in members:
+            try:
+                zf.write(full, arc)
+            except OSError:
+                continue
+
+
+@route("GET", "/api/files/zip")
+def files_zip_route(h, path):
+    raws = urllib.parse.parse_qs(h.path.partition("?")[2]).get("p", [])
+    members = zip_members(raws) if 0 < len(raws) <= MAX_BATCH else None
+    if members is None:
+        return h.send(400, b"bad path\n", "text/plain")
+    name = zip_name(raws)
+    ascii_name = re.sub(r"[^ -~]+", "_", name.replace('"', ""))
+    h.send_response(200)
+    h.send_header("Content-Type", "application/zip")
+    h.send_header("Content-Disposition", "attachment; filename=\"%s\"; filename*=UTF-8''%s"
+                  % (ascii_name, urllib.parse.quote(name, safe="")))
+    h.send_header("Cache-Control", "no-store")
+    h.send_header("Connection", "close")
+    h.end_headers()
+    h.close_connection = True
+    if not getattr(h, "head_only", False):
+        write_zip(h.wfile, members)
 
 
 @route("GET", "/files/", prefix=True)
