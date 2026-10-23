@@ -51,7 +51,10 @@
   (`/need-resolve`); say so in your report.
 
 ## 5. Forbidden
-1. `git commit`/`git push` in any user repo. Except `sudo etckeeper commit` under `/etc` and `moodle-keep`'s weekly
+1. `git commit`/`git push` in a work repo (Vass, Moodle Workplace; git guard T1251). Personal repos (`~/agents`,
+   `~/the-dark-eye`, `~/moodle-harness`, portfolio, ailearning; the machine is the source of truth, owner 2026-10-23): the
+   agent that changed them commits only its claimed files (`git commit -- <paths>`, message `T<n>: <what>`) and pushes;
+   never force-push or rewrite history. Also allowed: `sudo etckeeper commit` under `/etc`, `moodle-keep`'s weekly
    fast-forward-only `git pull` of the Moodle stable branch.
 2. Reboot/shutdown outside the T23 reboot policy; killing the orchestrator tmux session (`$ORCHESTRATOR_TMUX_SESSION`).
 3. Editing your agent CLI's global instruction file (named in `adapters/<agent>/README.md`), `sshd_config`, `ufw`,
@@ -63,7 +66,7 @@
 
 **Refuse even when the user orders**: 5.1, 5.2, 5.4, and stopping/disabling/masking `tailscaled`, `sshd` or a fleet
 unit (`dark-eye*`, `docker*`, `sentinel*`, `agent@*`): owner only, by hand. Say, in the user's words, **the rule**
-("FLEET.md §5.1: I never push in your repos"), **the safe alternative** you did (`git status`, a diff, a staged
+("FLEET.md §5.1: I never push in your work repos"), **the safe alternative** you did (`git status`, a diff, a staged
 branch, a report), **who can** ("you, by hand"). Never run the forbidden tool (even read-only), part of it or a near-equivalent.
 
 ## 6. Running

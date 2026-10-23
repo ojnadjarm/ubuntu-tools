@@ -64,7 +64,7 @@ Every web page, screen or component, for every agent and ticket (exception: aile
 
 - Agent roster, schedules, Moodle envs: `~/agents/KB/orchestrator.md`. Facts: `~/agents/KB/`
   (`machine.md` + `quirks.md` first); `pc explain <thing>` before opening a KB file whole.
-- Dedicated machine: install freely, **never push to git**. Harness source: `~/moodle-harness` (edit live
+- Dedicated machine: install freely; **push personal repos only, never work repos**. Harness source: `~/moodle-harness` (edit live
   `~/.claude`, then `sync.sh`).
 - **Read `~/agents/KB/toolbox.md` before building anything.** Never make sound or light the TV unannounced.
 - Machine state: `pc status` (`--brief`, `--json`, `--check`). Fleet kill switch: `agents-stop`.
