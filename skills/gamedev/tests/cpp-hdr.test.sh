@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cpp-vulkan HDR post chain on a throwaway copy of the template (real build, Iris Xe under headless weston): 0 validation errors (sync + best practices), --exposure +2 EV brighter than -2 EV, post_ms_p50 <= 0.6 ms at 1920x1080 when the machine is quiet and the GPU holds >= 90 % of its max clock (T674: B10G11R11 bloom, measured 0.49-0.54 ms at 1300 MHz).
+# cpp-vulkan HDR post chain on a throwaway copy of the template (real build, Iris Xe under headless weston): 0 validation errors (sync + best practices), --exposure +2 EV brighter than -2 EV, post_ms_p50 <= 0.6 ms at 1920x1080 with --aa off when the machine is quiet and the GPU holds >= 90 % of its max clock (T674: B10G11R11 bloom, measured 0.49-0.54 ms at 1300 MHz before T688 put FXAA in the post zone; FXAA's cost is cpp-aa.test's fxaa_post_delta_ms guard).
 set -u
 G=$(cd "$(dirname "$0")/.." && pwd)
 # shellcheck source=SCRIPTDIR/../scripts/gpu-gate.sh
@@ -28,8 +28,8 @@ print(" ".join(f"{ImageStat.Stat(Image.open(p).convert("L")).mean[0]:.1f}" for p
 ' "$T/dark.png" "$T/bright.png" 2>&1)
 awk -v a="${lum% *}" -v b="${lum#* }" 'BEGIN {exit !(b > a + 40)}' && ok "mean luma -2 EV ${lum% *} < +2 EV ${lum#* }" \
 	|| bad "exposure: luma '$lum' want +2 EV > -2 EV + 40"
-if gpu_timed cpp-hdr post_ms_p50 -- "$G/scripts/cpp-vk-run.sh" --no-validate --frames 600 "$P/build/ci-release/game" --size 1920x1080; then
-	awk -v m="${gpu_value:-99}" 'BEGIN {exit !(m <= 0.6)}' && ok "post_ms_p50=$gpu_value <= 0.6 at 1080p ($gpu_mhz MHz)" || bad "post_ms_p50='$gpu_value' want <= 0.6 ($gpu_mhz MHz)"
+if gpu_timed cpp-hdr post_ms_p50 -- "$G/scripts/cpp-vk-run.sh" --no-validate --frames 600 "$P/build/ci-release/game" --size 1920x1080 --aa off; then
+	awk -v m="${gpu_value:-99}" 'BEGIN {exit !(m <= 0.6)}' && ok "post_ms_p50=$gpu_value <= 0.6 at 1080p, aa off ($gpu_mhz MHz)" || bad "post_ms_p50='$gpu_value' want <= 0.6 ($gpu_mhz MHz)"
 fi
 echo "cpp-hdr.test: $fails failed"
 exit $((fails > 0))

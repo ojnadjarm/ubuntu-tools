@@ -40,12 +40,18 @@ vec3 tonemap(vec3 color, vec3 glow) { return agx(mix(color, glow, pc.bloom_mix) 
 vec3 tonemap(vec2 uv) { return tonemap(texture(hdr, uv).rgb, glow_at(uv)); }
 
 // FXAA 3.11 (Lottes) quality preset 12 (subpix 0.75, edge threshold 0.166, min 0.0833) in the tonemap pass.
-// Neighbour luma is the tonemap of the HDR texel with the centre's glow (bloom is smooth over the 20 px walk);
+// Neighbour luma takes the HDR texel with the centre's glow (bloom is smooth over the 20 px walk);
 // walk samples tonemap the bilinear HDR, so lumaNN is sampled the same way at the edge midpoint.
 // The final bilinear fetch, (1 - o) * M + o * neighbour, mixes the neighbour's full tonemap at o.
 const float kSteps[5] = float[](1.0, 1.5, 2.0, 4.0, 12.0);
 
-float luma_of(vec3 color, vec3 glow) { return dot(tonemap(color, glow), vec3(0.299, 0.587, 0.114)); }
+// Edge luma: the AgX curve on the pre-tonemap luminance (one log2 + polynomial, not three channels).
+float luma_of(vec3 color, vec3 glow) {
+    const float l = dot(mix(color, glow, pc.bloom_mix) * pc.exposure, vec3(0.2126, 0.7152, 0.0722));
+    const float x = (clamp(log2(max(l, 1e-10)), kMinEv, kMaxEv) - kMinEv) / (kMaxEv - kMinEv);
+    return clamp((((((45.7297 * x - 128.345) * x + 125.225) * x - 49.7831) * x + 8.77823) * x - 0.591192) * x + 0.00868597,
+                 0.0, 1.0);
+}
 
 float luma_at(vec2 uv, vec3 glow) { return luma_of(textureLod(hdr, uv, 0.0).rgb, glow); }
 
@@ -55,7 +61,7 @@ vec3 fxaa(vec2 pos, vec3 colorM, vec3 glow) {
     const vec4 rSE = textureGather(hdr, pos, 0), gSE = textureGather(hdr, pos, 1), bSE = textureGather(hdr, pos, 2);
     const vec4 rNW = textureGatherOffset(hdr, pos, ivec2(-1), 0), gNW = textureGatherOffset(hdr, pos, ivec2(-1), 1),
                bNW = textureGatherOffset(hdr, pos, ivec2(-1), 2);
-    const float lumaM = dot(colorM, vec3(0.299, 0.587, 0.114));
+    const float lumaM = luma_of(textureLod(hdr, pos, 0.0).rgb, glow);
     float lumaS = luma_of(vec3(rSE.x, gSE.x, bSE.x), glow), lumaE = luma_of(vec3(rSE.z, gSE.z, bSE.z), glow);
     float lumaN = luma_of(vec3(rNW.z, gNW.z, bNW.z), glow), lumaW = luma_of(vec3(rNW.x, gNW.x, bNW.x), glow);
     const float rangeMax = max(max(lumaN, lumaW), max(lumaE, max(lumaS, lumaM)));
