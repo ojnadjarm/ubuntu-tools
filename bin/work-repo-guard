@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# work-repo-guard [status|install|uninstall] [--apply] — global-gitconfig includeIf that points work repos at the fleet guard hooks (T1251).
+set -uo pipefail
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/env.sh"
+usage='usage: work-repo-guard [status|install|uninstall] [--apply]
+
+status     per WORK_REPO_ROOTS root (config.env): is the includeIf line in the global gitconfig, and per repo
+           under it (depth 3) does core.hooksPath come from the guard include (a repo-local override, e.g. husky,
+           wins over it and is flagged). Exit 1 on any gap.
+install    add `includeIf "gitdir:<root>/".path = <include>` per root to the global gitconfig ($GIT_CONFIG_GLOBAL or
+           ~/.gitconfig) and write <include> (~/.config/pc-harness/work-repo-guard.gitconfig, core.hooksPath =
+           '"$HARNESS_HOME"'/git-guard/hooks). Without --apply prints would: lines; with it backs the gitconfig up
+           once to $HARNESS_HOME/backups/gitconfig.T1251.bak, writes, then runs status.
+uninstall  remove those lines and the include file (same --apply rule).
+Hooks: under an agent marker (CLAUDECODE, HARNESS_AGENT, OPENCODE, GEMINI_CLI, CODEX_SANDBOX, CODEX_THREAD_ID)
+refuse commit, push, merge, rebase and branch/HEAD ref updates; every hook then runs the repo'"'"'s own .git/hooks/<name>.'
+cmd=status apply=0
+for a in "$@"; do
+  case $a in
+    -h|--help) echo "$usage"; exit 0 ;;
+    --apply) apply=1 ;;
+    status|install|uninstall) cmd=$a ;;
+    *) echo "work-repo-guard: unknown argument $a" >&2; echo "$usage" >&2; exit 2 ;;
+  esac
+done
+HOOKS="$(cd "$BIN/../git-guard/hooks" && pwd)"
+INC="$HOME/.config/pc-harness/work-repo-guard.gitconfig"
+GCFG="${GIT_CONFIG_GLOBAL:-$HOME/.gitconfig}"
+BAK="$HARNESS_HOME/backups/gitconfig.T1251.bak"
+roots=()
+for r in ${WORK_REPO_ROOTS:-}; do roots+=("$(readlink -m "${r/#\~/$HOME}")"); done
+[ ${#roots[@]} -gt 0 ] || { echo "work-repo-guard: WORK_REPO_ROOTS is empty in config.env" >&2; exit 2; }
+key() { printf 'includeIf.gitdir:%s/.path' "$1"; }
+
+status() {
+  local bad=0 r g o
+  for r in "${roots[@]}"; do
+    if [ "$(git config --global --get "$(key "$r")")" = "$INC" ]; then echo "ok    include $r/"
+    else echo "MISS  include $r/"; bad=1; fi
+    while IFS= read -r g; do
+      o=$(git -C "${g%/.git}" config --show-origin --get core.hooksPath 2>/dev/null)
+      if [ "$o" = "file:$INC	$HOOKS" ]; then echo "ok    hooks   ${g%/.git}"
+      else echo "BAD   hooks   ${g%/.git}: ${o:-unset}"; bad=1; fi
+    done < <(find "$r" -maxdepth 3 -name node_modules -prune -o -name .git -print 2>/dev/null)
+  done
+  return $bad
+}
+
+case $cmd in
+  status) status; exit $? ;;
+  install)
+    want=$(printf '[core]\n\thooksPath = %s\n' "$HOOKS")
+    [ "$(cat "$INC" 2>/dev/null)" = "$want" ] || echo "would: write $INC (core.hooksPath = $HOOKS)"
+    for r in "${roots[@]}"; do
+      [ "$(git config --global --get "$(key "$r")")" = "$INC" ] || echo "would: $GCFG += includeIf \"gitdir:$r/\".path = $INC"
+    done
+    [ $apply = 1 ] || exit 0
+    mkdir -p "${INC%/*}" "${BAK%/*}"
+    [ -e "$BAK" ] || [ ! -e "$GCFG" ] || cp -p "$GCFG" "$BAK"
+    printf '%s\n' "$want" > "$INC"
+    for r in "${roots[@]}"; do git config --global --replace-all "$(key "$r")" "$INC"; done
+    status; exit $? ;;
+  uninstall)
+    for r in "${roots[@]}"; do
+      git config --global --get "$(key "$r")" >/dev/null && echo "would: $GCFG -= includeIf \"gitdir:$r/\".path"
+      [ $apply = 1 ] && git config --global --unset-all "$(key "$r")"
+    done
+    [ -e "$INC" ] && echo "would: remove $INC"
+    [ $apply = 1 ] && rm -f "$INC"
+    exit 0 ;;
+esac

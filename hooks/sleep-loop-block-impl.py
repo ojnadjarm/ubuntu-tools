@@ -1,5 +1,5 @@
 #!/usr/bin/python3 -IS
-"""Body of the sleep-loop-block.py PreToolUse hook: deny a hand-written Bash wait loop or a self-matching `pkill -f` and name the fix (TSP-040, T536, T735); hint the pc verb for a raw state change (T1047)."""
+"""Body of the sleep-loop-block.py PreToolUse hook: deny a hand-written Bash wait loop, a self-matching `pkill -f` or a git commit/push in a work repo and name the fix (TSP-040, T536, T735, T1251); hint the pc verb for a raw state change (T1047)."""
 import sys
 
 RAW = sys.stdin.buffer.read()
@@ -10,7 +10,8 @@ SHADOWT = b'grep' in RAW and b'{' in RAW or b'-newer' in RAW
 APTT = b'apt' in RAW and (b'install' in RAW or b'remove' in RAW or b'purge' in RAW)
 CDRMT = b'cd ' in RAW and b'rm ' in RAW
 SUDOT = b'sudo' in RAW and (b' do' in RAW or b';do' in RAW or b'\\ndo' in RAW or b'xargs' in RAW)
-if not (LOOP or KILL or RAWT or SHADOWT or APTT or CDRMT or SUDOT or b'"cwd"' in RAW):
+GITT = b'git' in RAW and (b'commit' in RAW or b'push' in RAW)
+if not (LOOP or KILL or RAWT or SHADOWT or APTT or CDRMT or SUDOT or GITT or b'"cwd"' in RAW):
     sys.exit(0)
 
 import json, os, re
@@ -57,6 +58,9 @@ SUDO_HINT = ('sudo-loop nudge (T1147): `sudo` in a loop body or after xargs runs
              '`sudo -n find … -exec du -sk {} +`')
 XARGS_ARG = {'-I', '-n', '-P', '-d', '-L', '-s', '-E', '-a', '--max-args', '--max-procs', '--delimiter', '--arg-file'}
 ASSIGN = re.compile(r'^\w+=\S*$')
+GIT_OPT_ARG = {'-c', '--exec-path', '--namespace', '--config-env', '--super-prefix', '--list-cmds', '--attr-source'}
+WORK_REASON = ('work-repo guard (T1251, decisions/vass.md): `git {}` targets work repo {}; agents never commit or push '
+               'there, the owner does it by hand. Read-only git (status, diff, log) is fine.')
 ISO = re.compile(r'^(\d{4}-\d\d-\d\d|@\d+$)')
 EFFECT = {'pkill': 'which then dies with exit 144 and loses the rest of the command',
           'pgrep': 'which pgrep then reports as a false hit'}
@@ -358,6 +362,82 @@ def sudo_loop(toks):
     return False
 
 
+def work_roots():
+    """Work repo roots from $WORK_REPO_ROOTS, else from config.env (space separated, ~ and $HOME expanded)."""
+    raw = os.environ.get('WORK_REPO_ROOTS')
+    if raw is None:
+        try:
+            with open(os.environ.get('HARNESS_CONFIG') or os.path.expanduser('~/.config/pc-harness/config.env')) as f:
+                for line in f:
+                    m = re.match(r'\s*(?:export\s+)?WORK_REPO_ROOTS=(.*)', line)
+                    if m:
+                        raw = m.group(1).split(' #')[0].strip().strip('"\'')
+        except OSError:
+            pass
+    return [os.path.realpath(os.path.expanduser(os.path.expandvars(r))) for r in (raw or '').split()]
+
+
+def resolve(base, p, env):
+    """Absolute real path of p from dir base with $HOME and env's plain assignments expanded, None when unresolvable."""
+    if p == '-':
+        return None
+    p = os.path.expanduser(re.sub(r'\$\{?(\w+)\}?', lambda m: env.get(m.group(1), m.group(0)), p))
+    if '$' in p or '`' in p or base is None and not p.startswith('/'):
+        return None
+    return os.path.realpath(os.path.join(base or '/', p))
+
+
+def git_writes(toks, cwd, env, depth=0):
+    """(subcommand, target dir or None) of each git commit/push in toks, following cd, x=dir, -C, --git-dir, GIT_DIR= and bash -c strings."""
+    out, cur = [], cwd
+    for i, t in enumerate(toks):
+        if depth < 3 and 'git' in t and any(c in t for c in ' \n;&|'):
+            out += git_writes(shell_words(t) or [], cur, env, depth + 1)
+            continue
+        if not at_command(toks, i, PREFIX):
+            continue
+        if ASSIGN.match(t):
+            k, v = t.split('=', 1)
+            env[k] = os.path.expanduser(v) if v.startswith('~') else v
+            continue
+        args = args_of(toks, i)
+        if t == 'cd':
+            cur = resolve(cur, args[0], env) if args else os.path.expanduser('~')
+            continue
+        if os.path.basename(t) != 'git':
+            continue
+        d, k = cur, i - 1
+        while k >= 0 and ASSIGN.match(toks[k]):
+            if toks[k].startswith(('GIT_DIR=', 'GIT_WORK_TREE=')):
+                d = resolve(cur, toks[k].split('=', 1)[1], env)
+            k -= 1
+        j = 0
+        while j < len(args) and args[j].startswith('-'):
+            a = args[j]
+            if a == '-C' and j + 1 < len(args):
+                d, j = resolve(d, args[j + 1], env), j + 2
+            elif a in ('--git-dir', '--work-tree') and j + 1 < len(args):
+                d, j = resolve(cur, args[j + 1], env), j + 2
+            elif a.startswith(('--git-dir=', '--work-tree=')):
+                d, j = resolve(cur, a.split('=', 1)[1], env), j + 1
+            else:
+                j += 2 if a in GIT_OPT_ARG else 1
+        if j < len(args) and args[j] in ('commit', 'push'):
+            out.append((args[j], d))
+    return out
+
+
+def work_repo_git(cmd, cwd):
+    """Deny reason when a git commit/push in cmd targets a dir under a work root, else None (unresolvable dirs are the git hooks' to judge)."""
+    cwd = os.path.realpath(cwd if isinstance(cwd, str) and cwd else os.getcwd())
+    writes = [w for w in git_writes(shell_words(cmd) or [], cwd, {'HOME': os.path.expanduser('~')}) if w[1]]
+    roots = work_roots() if writes else []
+    for sub, d in writes:
+        if any(d == r or d.startswith(r + '/') for r in roots):
+            return WORK_REASON.format(sub, d)
+    return None
+
+
 try:
     d = json.loads(RAW)
     cmd = str((d.get('tool_input') or {}).get('command', '')) if d.get('tool_name') == 'Bash' else ''
@@ -383,6 +463,8 @@ try:
             why = CWD_REASON.format(cwd)
         elif CDRMT:
             why = cd_then_rm(toks)
+        if not why and GITT and cmd:
+            why = work_repo_git(cmd, cwd)
         if why:
             print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny',
                                                      'permissionDecisionReason': why}}))
