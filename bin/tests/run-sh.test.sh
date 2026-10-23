@@ -202,8 +202,8 @@ printf 'd=$(mktemp -d) && touch "$d/x" && echo "$d" >%q\n' "$P/leave.out" >"$P/r
 printf 'd=$(mktemp -d) && touch "$d/x" && echo "$d" >%q && %s\n' "$P/killed.out" "$hang" >"$P/root/bin/tests/killed.test.sh"
 out=$(TMPDIR="$P/base" RUN_TESTS_ROOT="$P/root" RUN_TESTS_TIMEOUT=2 bash "$RUN" -j 2 2>&1)
 has 'tmpdir: the killed test is cut by the timeout' "$out" '^FAIL bin/tests/killed\.test\.sh [0-9.]+ timeout$'
-has 'tmpdir: mktemp lands in a per-file dir under the run root' "$(cat "$P/leave.out" 2>/dev/null)" '/tmpres/base/fleet-tmp\.[A-Za-z0-9]{6}/leaveit\.[A-Za-z0-9]{4}/tmp\.'
-has 'tmpdir: each file gets its own dir' "$(cat "$P/killed.out" 2>/dev/null)" '/killed\.[A-Za-z0-9]{4}/tmp\.'
+has 'tmpdir: mktemp lands in a per-file dir under the run root' "$(cat "$P/leave.out" 2>/dev/null)" '/tmpres/base/fleet-tmp\.[A-Za-z0-9]{6}/t\.[A-Za-z0-9]{4}/tmp\.'
+is  'tmpdir: each file gets its own dir' "$([ "$(dirname "$(cat "$P/killed.out")")" != "$(dirname "$(cat "$P/leave.out")")" ] && echo own || echo shared)" own
 has 'tmpdir: residue line reads 0' "$out" '^tmp residue: 0 dirs$'
 is  'tmpdir: left and killed dirs are removed' "$(test -e "$(cat "$P/leave.out")" || test -e "$(cat "$P/killed.out")" && echo left || echo gone)" gone
 is  'tmpdir: nothing left in the base TMPDIR' "$(ls -A "$P/base" | wc -l)" 0

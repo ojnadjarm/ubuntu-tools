@@ -208,9 +208,8 @@ run_one() {
     *.py) cmd=(python3 "$path") ;;
     *.js) cmd=(node "$path") ;;
   esac
-  # The slug is the file stem without punctuation: test greps for words like `push` must not match the TMPDIR path.
-  s=${rel##*/} s=${s%%.*}
-  grep -qF -- '--tmpfs /tmp' "$path" || tmp=$(mktemp -d "$runroot/${s//[^[:alnum:]]/}.XXXX")
+  # A neutral dir name, not the file stem: test greps for words like `push` or `composer` must not match the TMPDIR path.
+  grep -qF -- '--tmpfs /tmp' "$path" || tmp=$(mktemp -d "$runroot/t.XXXX")
   # Empty CI_UNITS: ci-window inside a test never sees the live CI units (its own scope sits outside the CI's cgroup).
   cmd=(env "PATH=$p" "SUDO_SHIM_TEST=$rel" CI_UNITS= ${tmp:+"TMPDIR=$tmp"} ${rlog:+"PC_TEST_ROOT_LOG=$rlog"} "${cmd[@]}")
   # Own scope per file: the cgroup OOM killer hits only this file; the wrapper marks an oom_kill for the report.

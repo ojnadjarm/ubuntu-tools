@@ -1,6 +1,6 @@
 # ci-fix — one fix attempt for a red fleet nightly CI run (launched by ci-autofix, T402)
-The CI failed. Failure note (cluster line + log tail): ~/agents/state/ci-fix/2026-10-22.md · full log: ~/agents/log/fleet-ci/2026-10-22.txt
-Cluster: exit 1 · test FAIL · ✖ fleet ci red: bin/tests/deps-manifest.test.sh skills/moodle-install/tests/composer.test.sh bin/tests/no-person-hardcoded.test.sh bin/tests/memory-index-cap.te
+The CI failed. Failure note (cluster line + log tail): ~/agents/state/ci-fix/2026-10-23.md · full log: ~/agents/log/fleet-ci/2026-10-23.txt
+Cluster: exit 1 · test FAIL · ✖ fleet ci red: skills/moodle-install/tests/composer.test.sh
 
 1. Read the note and the log; `guide <words of the error>`; read `$AGENT_WORK/decisions/<project>.md` if it exists. Declare files in `~/agents/FILE-CLAIMS.md` (`claims add`) before editing; release them when done.
 2. Find the cause in ~/agents. Work only inside ~/agents: no edits anywhere else, never `git commit`/`git push`/`reset`/`checkout`/`stash`; leave the change unstaged for the owner.
