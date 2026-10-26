@@ -37,6 +37,8 @@ Triggers: real desktop, pc CLI.
 - Call `browser_close` when the task ends: an open page keeps rendering (a WebGL page burned 1-1.6 cores for 2.5 days,
   2026-09-26). `sentinel-runaway` rule 6 closes a hot browser only after 30 min without a Playwright call.
 - Moodle UI work: load `/moodle-web` (env URLs, admin login, admin-page table, when to use the CLI instead).
+- Playwright Firefox (library, under Xvfb) still opens on the real screen while `WAYLAND_DISPLAY` is set: run it with
+  `env -u WAYLAND_DISPLAY` (T1402: 3 windows of ~2 s on the owner's screen; quirks.md).
 
 ## Claude in Chrome (T14) — the owner's real browser — NOT AVAILABLE
 - **Status: pending owner sign-in to the Claude extension.** The extension is installed but is not
