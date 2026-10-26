@@ -50,5 +50,16 @@ kill "$job"
 
 "$WF" --file x >/dev/null 2>&1; eq "usage: --file needs --match" 2 $?
 
+# T1372 self-match: an unbracketed `pgrep -f X` matches the waiter's own argv, so `! pgrep -f X` never holds.
+name="t1406zz$$"
+out=$(timeout 3 "$WF" --label pg --until "! pgrep -f $name" --every 0.2 2>&1); rc=$?
+eq "until: unbracketed pgrep -f is refused, not run (exit 2)" 2 "$rc"
+eq "  with a one-line bracket hint" yes "$(case "$out" in *"[n]pm"*) [ "$(wc -l <<<"$out")" = 1 ] && echo yes || echo "no: $out";; *) echo "no: $out";; esac)"
+timeout 3 "$WF" --until "pgrep -of $name >/dev/null && false" --every 0.2 >/dev/null 2>&1; eq "until: combined -of flags refused too" 2 $?
+timeout 3 "$WF" --until "! pkill -f $name" --every 0.2 >/dev/null 2>&1; eq "until: unbracketed pkill -f refused" 2 $?
+timeout 3 "$WF" --until "! pgrep -f '[${name:0:1}]${name:1}'" --every 0.2 >/dev/null 2>&1; eq "until: bracketed pattern runs and holds at once" 0 $?
+timeout 3 "$WF" --until "! pgrep -A -f $name" --every 0.2 >/dev/null 2>&1; eq "until: pgrep -A (ignore ancestors) runs" 0 $?
+timeout 3 "$WF" --until "! pgrep -x $name" --every 0.2 >/dev/null 2>&1; eq "until: pgrep without -f runs" 0 $?
+
 [ "$bad" = 0 ] && echo "all wait-for fixtures pass"
 exit $bad

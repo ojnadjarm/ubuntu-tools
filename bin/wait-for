@@ -56,6 +56,22 @@ done
 [ "$kind" = file ] && target=$(realpath -m -- "$target")
 label=${label:-$kind $target}
 
+# True when a pgrep/pkill -f in the condition has no [x] bracket and no -A: it matches this wait's own argv (T1372).
+selfmatch() {
+  local seg
+  while IFS= read -r seg; do
+    [[ $seg =~ (^|[[:space:]/])p(grep|kill)[[:space:]](.*) ]] || continue
+    seg=" ${BASH_REMATCH[3]}"
+    [[ $seg =~ [[:space:]](-[[:alnum:]]*f|--full) ]] || continue
+    [[ $seg =~ [[:space:]](-[[:alnum:]]*A|--ignore-ancestors) || $seg == *\[* ]] || return 0
+  done < <(tr ';|&()' '\n\n\n\n\n' <<<"$1")
+  return 1
+}
+if [ "$kind" = until ] && selfmatch "$target"; then
+  echo "wait-for: --until has an unbracketed pgrep/pkill -f, which matches this wait's own shell and never ends; bracket the first letter (pgrep -f '[n]pm') or add -A (exit 2)" >&2
+  exit 2
+fi
+
 met() {
   case "$kind" in
     pid) ! alive "$target" ;;

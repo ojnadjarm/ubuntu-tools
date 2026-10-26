@@ -224,6 +224,13 @@ eq "each kill in the audit log" 4 "$(grep -c '"op": "sentinel kill ' "$HARNESS_H
 "$SW"
 eq "second tick: no new lines" 5 "$(grep -c stuck-wait "$LOG")"
 
+# T1372: a registered wait older than 6 h is flagged once as stale and left running.
+regf=$(grep -l '"reg2"' "$WAIT_FOR_DIR"/*.json)
+jq '.start -= 25200' "$regf" >"$WORK/r.json" && cat "$WORK/r.json" >"$regf"
+"$SW"; "$SW"
+eq "registered wait over 6 h: flagged stale once" 1 "$(grep -c "stale-wait pid $reg2 (reg2, 7 h" "$LOG")"
+eq "  and kept" alive "$(isalive "$reg2")"
+
 kill "$(cat "$WORK/pid.busy")" "$(cat "$WORK/pid.live")" "$(cat "$WORK/pid.seen")" "$reg2" "$sess1" "$writer" "$livejob" 2>/dev/null
 rm -rf "$WORK"
 [ "$bad" = 0 ] && echo "all sentinel-waits fixtures pass"

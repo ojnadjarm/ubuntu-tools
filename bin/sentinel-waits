@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stuck-wait reaper: kills wait loops (wait-for or hand-written) whose job or owner agent is gone.
+"""Stuck-wait reaper: kills wait loops (wait-for or hand-written) whose job or owner agent is gone; flags waits over 6 h.
 
 usage: sentinel-waits [--dry-run]    (called by sentinel-check every 15 min; design: $AGENT_WORK/research/2026-09-23/T67/design.md)
 """
@@ -20,6 +20,7 @@ STALL = int(os.environ.get("WAITS_STALL") or 900)
 OWNER_IDLE = 1800
 WAITING_IDLE = 10800
 HANDBACK_IDLE = 120
+STALE_AGE = int(os.environ.get("WAITS_STALE") or 21600)
 REG = os.environ.get("WAIT_FOR_DIR") or os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "agent-waits")
 PROJECTS = os.environ.get("CLAUDE_PROJECTS_DIR") or os.path.join(HOME, ".claude", "projects")
 ST = os.environ.get("SENTINEL_STATE_DIR") or os.path.join(HOME, "agents", "sentinel", "state")
@@ -273,6 +274,12 @@ def main():
     except (OSError, ValueError):
         OWNERS = {}
     procs = snapshot()
+    seen_path = os.path.join(ST, "waits-seen.tsv")
+    try:
+        seen = set(open(seen_path).read().split())
+    except OSError:
+        seen = set()
+    now_seen = set()
     registered = set()
     for f in glob.glob(os.path.join(REG, "*.json")):
         pid = int(os.path.basename(f)[:-5]) if os.path.basename(f)[:-5].isdigit() else -1
@@ -284,13 +291,17 @@ def main():
         own = owner(procs, pid, waiting=True)
         if own and own[0]:
             reap(procs, pid, f"registered wait, owner {own[1]} ended")
-
-    seen_path = os.path.join(ST, "waits-seen.tsv")
-    try:
-        seen = set(open(seen_path).read().split())
-    except OSError:
-        seen = set()
-    now_seen = set()
+            continue
+        try:
+            w = json.load(open(f))
+        except (OSError, ValueError):
+            continue
+        age = time.time() - w.get("start", time.time())
+        if age >= STALE_AGE:
+            key = f"stale:{pid}:{procs[pid]['start']}"
+            now_seen.add(key)
+            if key not in seen:
+                log(f"stale-wait pid {pid} ({w.get('label', '')}, {int(age / 3600)} h, over {STALE_AGE // 3600} h; left alone): {w.get('kind', '')} {w.get('target', '')}"[:300])
     for pid in sorted(procs):
         if not is_loop(procs, pid, registered):
             continue

@@ -1,6 +1,6 @@
 # Wait on a background job, and how the sentinel catches stuck wait loops
 
-Ticket: T67, T408, T438, T449 · Last verified: 2026-10-20 (T947: dash front read from code, miss/hit timed); before: 2026-10-20 by T846 audit (`wait-for`/`sentinel-waits --help`, MIN_AGE 1200 / STALL 900 / WAITING_IDLE 10800 / HANDBACK_IDLE 120, 15-min timer, hook registration; suites not run); before: 2026-10-19 (T449: `wait-for.test.sh` 18, `sentinel-waits.test.sh` 29, `wait-nudge.test.py` 29, the 4 pgrep forms below re-measured; T438: 2 handback-schema checks, replay of the T429 transcript; T408: `wait-for.test.sh` 18, `sentinel-waits.test.sh` 4 new owner checks, replay of the T407 transcript); before: 2026-09-24 by both fixture suites (12 + 17 checks pass; the 2 workflow-owner fixtures added 2026-09-24 by code-review F04 not yet run under bwrap) and `sentinel-waits --dry-run`
+Ticket: T67, T408, T438, T449, T1406 · Last verified: 2026-10-27 (T1406: `wait-for.test.sh` 25, `sentinel-waits.test.sh` 33); before: 2026-10-20 (T947: dash front read from code, miss/hit timed); before: 2026-10-20 by T846 audit (`wait-for`/`sentinel-waits --help`, MIN_AGE 1200 / STALL 900 / WAITING_IDLE 10800 / HANDBACK_IDLE 120, 15-min timer, hook registration; suites not run); before: 2026-10-19 (T449: `wait-for.test.sh` 18, `sentinel-waits.test.sh` 29, `wait-nudge.test.py` 29, the 4 pgrep forms below re-measured; T438: 2 handback-schema checks, replay of the T429 transcript; T408: `wait-for.test.sh` 18, `sentinel-waits.test.sh` 4 new owner checks, replay of the T407 transcript); before: 2026-09-24 by both fixture suites (12 + 17 checks pass; the 2 workflow-owner fixtures added 2026-09-24 by code-review F04 not yet run under bwrap) and `sentinel-waits --dry-run`
 
 ## When to use
 - You started something long (a build, a benchmark, a render, a subagent's log) and need to be told when it ends: use `wait-for`.
@@ -37,9 +37,9 @@ p=$(pgrep -o -f '[f]rames-ab.sh') && wait-for --label ab --pid "$p"   # wait on 
 wait-for --label ab --until "! pgrep -f '[f]rames-ab.sh'" --every 30  # same, as a condition: bracket the first letter
 wait-for --list            # live waits: pid, age, label, target (--json for the dashboard)
 sentinel-waits --dry-run   # what the reaper would kill now, kills nothing
-bash ~/agents/bin/tests/wait-for.test.sh        # 18 checks, own child processes only, 11 s
+bash ~/agents/bin/tests/wait-for.test.sh        # 25 checks, own child processes only, 11 s
 python3 ~/agents/bin/tests/wait-nudge.test.py   # 29 checks, temp HARNESS_HOME
-bash ~/agents/bin/tests/sentinel-waits.test.sh  # 29 checks: stubbed owner() and reap-log checks, then the rest inside a bwrap PID namespace
+bash ~/agents/bin/tests/sentinel-waits.test.sh  # 33 checks: stubbed owner() and reap-log checks, then the rest inside a bwrap PID namespace
 ```
 Exit codes: 0 condition met · 3 job died, or `--file` without `--job` stalled · 143 killed · 2 usage.
 The last line always says why: `done after N s`, `done at once, the condition already held at start`, `job P died before the
@@ -62,6 +62,11 @@ condition held (exit 3)`, `stalled: … (exit 3)`, `killed by SIGTERM after N s,
   the audit log shows frames-ab, t146-end and quiet-gpu waits re-armed for this reason. Re-measured 2026-10-19 (T449): bare, job gone →
   caller's pid, rc 124; bracketed, job gone, bare name elsewhere in the same command → caller's pid, hung 128 s;
   bracketed, clean command → no pid, rc 1; bracketed, job live → `done after 3 s`. If you started X, use `X & p=$!`.
+- T1406 (2026-10-27, after T1372's wait ran 39 h): `wait-for --until` now refuses (exit 2, one-line hint) a `pgrep -f`/`pkill -f`
+  with no `[x]` bracket and no `-A`/`--ignore-ancestors` (procps-ng 4, skips the waiter's own shells). Refuse, not auto-exclude: the
+  matching argv is the caller's tool shell, outside wait-for's pids. Measured pre-fix: `! pgrep -f X` hung (rc 124); `! pkill -f X`
+  killed wait-for itself (rc 143). `sentinel-waits` logs a registered wait older than 6 h (`WAITS_STALE`) once as `stale-wait`
+  in `sentinel.log`; it does not kill it (no timeout, owner 2026-09-23).
 - T408 (2026-10-19): two T407 waits "returned early" with no `wait-for:` line: `sentinel-waits` killed them (sentinel.log 02:34:57,
   02:49:57) because a subagent's last line was `end_turn` 3–6 min idle. A subagent that ends its turn with a background wait running
   is waiting for that wait's notification, not done. Now a registered wait's owner ends only on `SubagentHandback`/StructuredOutput
