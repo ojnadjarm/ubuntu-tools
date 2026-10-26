@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""change-class — map a git diff to its highest-risk change class and the checks that class needs (T1399).
+
+usage: change-class [--base REF] [--repo DIR] [--at-least CLASS]
+  Diff: DIR's subtree vs REF (default HEAD) plus untracked files. Prints `class: <name>`, `checks: <text>`,
+  `decided by: <files>` and `files: <n> (<class> <n>, ...)`.
+  Rules: the first `.change-classes` from DIR up to the repo top, else a built-in Moodle default when DIR is a plugin
+  (version.php names $plugin->component), else a docs-only default. Rule lines: `<glob> <class>` (first match wins per
+  file; `*` crosses `/`; a glob without `/` also matches the basename), `diff:<regex> <class>` (any added/removed
+  line), `checks <class> <text>`. A file no glob matches is class full; the highest class of all files wins.
+  --at-least CLASS raises the result to CLASS (a brief's declared `Class:`), never lowers it.
+Classes, low to high: none docs ui content logic schema engine security full.
+Exit: 0; 2 usage.
+"""
+import fnmatch, os, re, subprocess, sys
+
+RANK = ['none', 'docs', 'ui', 'content', 'logic', 'schema', 'engine', 'security', 'full']
+MOODLE = r'''
+classes/privacy/* security
+classes/external/* security
+db/access.php security
+db/services.php security
+externallib.php security
+db/* schema
+version.php schema
+lang/* docs
+*.md docs
+README* docs
+CHANGES* docs
+*.txt docs
+templates/* ui
+*.mustache ui
+*.css ui
+*.scss ui
+pix/* content
+*.svg content
+*.png content
+classes/* logic
+tests/* logic
+amd/* logic
+*.php logic
+*.js logic
+*.feature logic
+diff:\b(require_capability|has_capability|require_login|external_api)\b security
+checks none nothing changed
+checks docs mci auto: codechecker, phpcs-delta, lang
+checks ui mci auto: codechecker, phpcs-delta, lang, mustache; screenshots at 400, 768, 1366, 1920, 2560
+checks content mci auto: codechecker, phpcs-delta, lang
+checks logic mci auto: the quick steps, PHPUnit on the changed classes' tests (mtest --changed)
+checks schema mci auto: the quick steps, savepoints, privacy; mupgrade
+checks security mci full (privacy, validate) + Behat on the touched feature
+checks full mci full (class unknown)
+'''
+GENERIC = r'''
+*.md docs
+README* docs
+*.txt docs
+checks none nothing changed
+checks docs none beyond a read-back
+checks full the repo's full test suite (class unknown)
+'''
+
+
+def git(d, *a):
+    p = subprocess.run(['git', '-C', d, *a], capture_output=True, text=True)
+    return p.stdout if p.returncode == 0 else None
+
+
+def rules_for(d, top):
+    """(rules text, the dir its paths are relative to, source name): DIR's file, the Moodle default, then a parent's file."""
+    if os.path.isfile(os.path.join(d, '.change-classes')):
+        return _read(os.path.join(d, '.change-classes')), d, os.path.join(d, '.change-classes')
+    if re.search(r"\$plugin->component", _read(os.path.join(d, 'version.php'))):
+        return MOODLE, d, 'moodle default'
+    cur = d
+    while cur != top and cur != '/':
+        cur = os.path.dirname(cur)
+        f = os.path.join(cur, '.change-classes')
+        if os.path.isfile(f):
+            return _read(f), cur, f
+    return GENERIC, d, 'generic default'
+
+
+def _read(p):
+    try:
+        return open(p, encoding='utf-8', errors='replace').read()
+    except OSError:
+        return ''
+
+
+def parse(text):
+    globs, diffs, checks = [], [], {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        if line.startswith('checks '):
+            _, cls, *rest = line.split(None, 2)
+            checks[cls] = rest[0] if rest else ''
+            continue
+        pat, _, cls = line.rpartition(' ')
+        if cls not in RANK:
+            sys.exit(f'change-class: unknown class {cls!r} in rule {line!r}')
+        if pat.startswith('diff:'):
+            diffs.append((re.compile(pat[5:]), cls))
+        else:
+            globs.append((pat.strip(), cls))
+    return globs, diffs, checks
+
+
+def classify(path, globs):
+    for pat, cls in globs:
+        if fnmatch.fnmatchcase(path, pat) or ('/' not in pat and fnmatch.fnmatchcase(os.path.basename(path), pat)):
+            return cls
+    return 'full'
+
+
+def main(argv):
+    base, repo, least = 'HEAD', os.getcwd(), 'none'
+    while argv:
+        a = argv.pop(0)
+        if a in ('-h', '--help'):
+            print(__doc__.strip())
+            return 0
+        if a in ('--base', '--repo', '--at-least') and argv:
+            v = argv.pop(0)
+            if a == '--base':
+                base = v
+            elif a == '--repo':
+                repo = v
+            else:
+                least = v
+        else:
+            print(f'change-class: bad argument {a!r} (see --help)', file=sys.stderr)
+            return 2
+    if least not in RANK:
+        print(f'change-class: --at-least needs one of {" ".join(RANK)}', file=sys.stderr)
+        return 2
+    d = os.path.realpath(repo)
+    top = git(d, 'rev-parse', '--show-toplevel') if os.path.isdir(d) else None
+    if top is None:
+        print(f'class: full\nchecks: the full suite (not a git repo: {d})\ndecided by: -\nfiles: 0')
+        return 0
+    text, rel, src = rules_for(d, top.strip())
+    globs, diffs, checks = parse(text)
+    if base == 'HEAD' and git(rel, 'rev-parse', '-q', '--verify', 'HEAD') is None:
+        base = git(rel, 'hash-object', '-t', 'tree', '/dev/null').strip()
+    names = git(rel, 'diff', '--name-only', '--relative', base, '--', d)
+    if names is None:
+        print(f'class: full\nchecks: {checks.get("full", "the full suite")} (git diff vs {base} failed)\ndecided by: -\nfiles: 0')
+        return 0
+    files = sorted(set(names.split('\n') + (git(rel, 'ls-files', '-o', '--exclude-standard', '--', d) or '').split('\n')) - {''})
+    per = {f: classify(f, globs) for f in files}
+    if diffs and files:
+        body = (git(rel, 'diff', '--relative', base, '--', d) or '').splitlines()
+        cur = None
+        for line in body:
+            if line.startswith('diff --git '):
+                cur = line.split(' b/', 1)[-1]
+            elif line[:1] in '+-' and not line.startswith('--- ') and cur in per:
+                for rx, cls in diffs:
+                    if RANK.index(cls) > RANK.index(per[cur]) and rx.search(line[1:]):
+                        per[cur] = cls
+    cls = max([least] + list(per.values()), key=RANK.index)
+    deciders = [f for f in files if per[f] == cls] or ([f'--at-least {least}'] if least != 'none' else ['-'])
+    count = {}
+    for c in per.values():
+        count[c] = count.get(c, 0) + 1
+    print(f'class: {cls}')
+    print(f'checks: {checks.get(cls, "see " + src)}')
+    print(f'decided by: {", ".join(deciders[:5])}' + (f' (+{len(deciders) - 5})' if len(deciders) > 5 else ''))
+    print(f'files: {len(files)}' + (' (' + ', '.join(f'{c} {count[c]}' for c in RANK if c in count) + ')' if count else '') + f'; rules: {src}')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

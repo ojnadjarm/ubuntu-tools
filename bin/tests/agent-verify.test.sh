@@ -16,8 +16,16 @@ rec() { jq -n --arg t "$1" --arg c "$2" --arg s "$(iso "$3")" --argjson ok "$4" 
   '{ticket:$t, brief:"/x", check:$c, cwd:$cwd, rc:(if $ok then 0 else 1 end), ok:$ok, started:$s, seconds:0}' >"$E/$1/check.json"; }
 
 printf '# T9\nCHECK: `test -e "$AGENT_WORK/flag"`\n' >"$WORK/T9-x.md"
-"$BIN/agent-verify" "$WORK/T9-x.md" >/dev/null; is 'brief: red verdict exits 1' $? 1
+(cd "$WORK/cwd" && "$BIN/agent-verify" "$WORK/T9-x.md" >/dev/null); is 'brief: red verdict exits 1' $? 1
 is 'brief: check.json written' "$(jq -r '"\(.ticket) \(.ok) \(.rc)"' "$E/T9/check.json")" 'T9 false 1'
+is 'class: none outside git, nothing declared' "$(jq -r '.class // "none"' "$E/T9/check.json")" none
+git init -q "$WORK/repo" && echo a >"$WORK/repo/x.md"
+printf '# T10\nClass: logic\nCHECK: true\n' >"$WORK/T10-x.md"
+(cd "$WORK/repo" && "$BIN/agent-verify" "$WORK/T10-x.md" >/dev/null)
+is 'class: change-class on the cwd diff, raised by the declared Class (T1399)' "$(jq -r '"\(.class) \(.class_declared)"' "$E/T10/check.json")" 'logic logic'
+printf '# T11\nCHECK: true\n' >"$WORK/T11-x.md"; (cd "$WORK/repo" && "$BIN/agent-verify" "$WORK/T11-x.md" >/dev/null)
+is 'class: an untracked .md is docs' "$(jq -r .class "$E/T11/check.json")" docs
+rm -rf "$E/T10" "$E/T11"
 
 rec T1 'test -e "$AGENT_WORK/flag" && test "$PWD" = "'"$WORK/cwd"'"' 3600 false
 rec T2 'exit 3' 7200 false

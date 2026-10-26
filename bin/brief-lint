@@ -12,6 +12,8 @@ RULES = [
     ('report-cap', re.compile(r'report:?\s*(?:at most|max\.?|≤)\s*\d+\s*lines?', re.I)),
 ]
 INCLUDE = re.compile(r'(_common[\w-]*\.md)')
+FULLRUN = re.compile(r'\b(test:perf|test:all)\b|\btests/run\.sh\b(?![^;&|]*--only)')
+ENGINE = re.compile(r'^\s*(?:[-*]\s*)?Class:\s*(?:engine|full)\b', re.M)
 DEVZERO = re.compile(r'\b(?:script|tmux)\b[^\n;&|]*<\s*/dev/zero|/dev/zero[^\n;]*\|\s*(?:script|tmux)\b')
 TESTS = os.path.expanduser('~/agents/bin/tests')
 TICKET = re.compile(r'^##[ \t]+(?:(\d+)\.[ \t]*)?T(\d+)\b.*$', re.M)
@@ -135,6 +137,17 @@ def missing(path):
     return [name for name, rx in RULES if not rx.search(text)]
 
 
+def tier_warn(text):
+    """What a CHECK runs at the full tier (perf gate, whole suite) when the brief declares no `Class: engine` (T1399), else None."""
+    if ENGINE.search(text):
+        return None
+    for cmd in CHECK_LINE.findall(text):
+        m = FULLRUN.search(cmd)
+        if m:
+            return m.group(1) or 'tests/run.sh without --only'
+    return None
+
+
 def devzero_hits(path):
     """Line numbers where /dev/zero feeds script or tmux (T399: 34 GB OOM)."""
     with open(path, encoding='utf-8', errors='replace') as f:
@@ -184,6 +197,9 @@ def main():
                 print(f"WARN {p}: names {name} but not its decisions ledger {decisions.path(name)}")
             for n in devzero_hits(p):
                 print(f"WARN {p}:{n}: /dev/zero feeds script/tmux; use </dev/null or `sleep inf |`")
+            full = tier_warn(text_of(p))
+            if full:
+                print(f"WARN {p}: CHECK runs {full} but the brief has no `Class: engine` line; test at the change's tier (change-class)")
     n = len(a.briefs)
     if a.summary:
         print(f"pass {passed}/{n} · " + ' · '.join(f"{k} {v}/{n}" for k, v in rule_ok.items()))

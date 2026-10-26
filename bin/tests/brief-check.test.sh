@@ -58,6 +58,14 @@ out=$("$BIN/brief-lint" --tests "$WORK/tests"); rc=$?
   && ok 'lint --tests warns once, rc 0' || nok 'devzero tests' "rc=$rc $out"
 out=$("$BIN/brief-lint" --tests); [ -z "$out" ] && ok 'bin/tests has no /dev/zero feed' || nok 'bin/tests devzero' "$out"
 
+# 6b. change tiers (T1399): a CHECK at the full tier (perf gate, whole run.sh) without `Class: engine` warns, rc stays 0.
+tb() { printf '# %s\nFILE-CLAIMS, time box 1 h. Report: max 5 lines.\n%sCHECK: %s\n' "$1" "$2" "$3" >"$WORK/$1.md"; "$BIN/brief-lint" "$WORK/$1.md"; }
+out=$(tb T1 '' 'cd ~/m/client && npm run test:perf'); rc=$?
+[ "$rc" = 0 ] && grep -q "^WARN .*T1.md: CHECK runs test:perf but the brief has no \`Class: engine\` line" <<<"$out" && ok 'tier: test:perf without Class warns' || nok 'tier perf' "rc=$rc $out"
+out=$(tb T2 '' 'bash ~/agents/bin/tests/run.sh -j 8'); grep -q 'CHECK runs tests/run.sh without --only' <<<"$out" && ok 'tier: full run.sh warns' || nok 'tier run.sh' "$out"
+out=$(tb T3 '' 'bash ~/agents/bin/tests/run.sh --only x.test.sh'); ! grep -q 'CHECK runs' <<<"$out" && ok 'tier: run.sh --only is quiet' || nok 'tier only' "$out"
+out=$(tb T4 $'Class: engine\n' 'npm run test:all'); ! grep -q 'CHECK runs' <<<"$out" && ok 'tier: Class: engine is quiet' || nok 'tier engine' "$out"
+
 # 7. --backlog (T913): fields, one CHECK each, consecutive ids, --min CHECKs, top-K Files disjoint, heavy calls niced.
 bl() {  # bl FILE: five clean tickets T801..T805; a grep naming make.sh is not a call
   for k in 1 2 3 4 5; do

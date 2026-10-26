@@ -1,0 +1,15 @@
+# change-class rules for ~/agents (T1399): <glob> <class>, first match wins; unmatched files are class full.
+*.md docs
+.change-classes docs
+KB/* docs
+bin/tests/* logic
+bin/* logic
+lib/* logic
+units/* logic
+dashboard/* logic
+adapters/* logic
+skills/* logic
+checks none nothing changed
+checks docs none beyond a read-back
+checks logic bash bin/tests/run.sh --only <the changed tests>; the full suite runs nightly (fleet-ci-daily 02:10)
+checks full bash bin/tests/run.sh (class unknown)

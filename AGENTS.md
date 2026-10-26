@@ -37,8 +37,9 @@
   - 10-07 machine values (hosts, tailnet names, IPs, MACs, home paths, users, emails, dev passwords) only in `config.env` (keys: `config.example.env`) or `private-values`; tracked files use the variable or placeholders (`<tailnet-fqdn>`, `<lan-ip>`, `~`); `bin/tests/no-machine-values.test.sh` passes.
 - Moodle work ends with `/moodle-ci`.
 - **Browsers and tests (T111):** headless or Xvfb, `--mute-audio`, never headed. Iterate on one case, ≤ 2 min a run; a
-  full test file once; at 2× the size target, report and stop. Detail: explainer-engine `reference/testing.md`,
-  make-lesson `reference/process.md`.
+  full test file once; at 2× the size target, report and stop. Test at the change's tier (`change-class`); the full suite
+  runs nightly and before a release; never shorten agents' time to compensate. Detail: explainer-engine
+  `reference/testing.md`, make-lesson `reference/process.md`, `guide change-tiers`.
 
 ## 4. Notify the owner
 - `notify-owner [-p high] "…"` only for an unresolved failure, a decision only the owner can take, or your scheduled

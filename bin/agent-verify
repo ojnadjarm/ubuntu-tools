@@ -11,6 +11,7 @@ SUITE = re.compile(r'tests/run\.sh(?![^;&|]*--only)')
 GREP = re.compile(r"""\bgrep(?:\s+-\w+)*\s+(['"])(\^.*?)\1\s+("[^"]+"|'[^']+'|[^\s|;&)<>]+)""")
 QUIET_WAIT = 300
 SBIN = os.environ.get('AGENT_VERIFY_SBIN', '/usr/local/sbin:/usr/sbin:/sbin')
+CLASS = re.compile(r'^\s*(?:[-*]\s*)?Class:\s*(\w+)', re.M)
 
 
 def check_cmd(text):
@@ -120,6 +121,23 @@ def run(cmd, timeout, cwd=None):
     left = sum(len(d) + len(f) for _, d, f in os.walk(tmp))
     return {'check': cmd, 'cwd': cwd or os.getcwd(), 'rc': rc, 'ok': rc == 0, 'started': started.isoformat(timespec='seconds'),
             'seconds': round(time.monotonic() - t0, 2), 'tmp_left': left, 'stdout_tail': tail(out), 'stderr_tail': tail(err)}
+
+
+def change_class(text, cwd):
+    """{'class': …, 'class_declared': …} for check.json (informational, T1399): change-class on CWD's git diff raised by the brief's `Class:`."""
+    declared = (CLASS.search(text) or [None, None])[1]
+    out = {'class_declared': declared} if declared else {}
+    cc = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'change-class')
+    try:
+        p = subprocess.run([cc, '--repo', cwd] + (['--at-least', declared] if declared else []), capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return out
+    m = re.search(r'^class: (\w+)', p.stdout, re.M)
+    if p.returncode == 0 and m and 'not a git repo' not in p.stdout:
+        out['class'] = m.group(1)
+    elif declared:
+        out['class'] = declared
+    return out
 
 
 def evidence_dir():
@@ -254,7 +272,8 @@ def main():
         print(f'agent-verify: no CHECK: line in {a.brief}', file=sys.stderr)
         sys.exit(2)
     ticket = a.ticket or ticket_of(a.brief)
-    rec = {'ticket': ticket, 'brief': os.path.abspath(a.brief), **({'section': section} if section else {}), **run(cmd, a.timeout)}
+    rec = {'ticket': ticket, 'brief': os.path.abspath(a.brief), **({'section': section} if section else {}), **run(cmd, a.timeout),
+           **change_class(text, os.getcwd())}
     write(os.path.join(evidence_dir(), ticket, 'check.json'), rec)
     sys.exit(0 if rec['ok'] else 1)
 

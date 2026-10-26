@@ -1,0 +1,9 @@
+[Unit]
+Description=Change-tier safety net (T1399): Mooblox vitest + perf gate on HEAD, mci full on the day's Moodle plugins; failed = a red row
+
+[Service]
+Type=oneshot
+TimeoutStartSec=5400
+Slice=fleet-heavy.slice
+Environment=CI_QUIET_CAP=3600
+ExecStart=/bin/bash -lc 'exec %h/agents/bin/tier-nightly'

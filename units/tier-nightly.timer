@@ -1,0 +1,9 @@
+[Unit]
+Description=Change-tier safety net (03:30, after fleet-ci-daily 02:10; ci-window waits for a quiet machine)
+
+[Timer]
+OnCalendar=*-*-* 03:30
+Persistent=true
+
+[Install]
+WantedBy=timers.target
