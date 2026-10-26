@@ -8,6 +8,9 @@ usage: change-class [--base REF] [--repo DIR] [--at-least CLASS]
   (version.php names $plugin->component), else a docs-only default. Rule lines: `<glob> <class>` (first match wins per
   file; `*` crosses `/`; a glob without `/` also matches the basename), `diff:<regex> <class>` (any added/removed
   line), `checks <class> <text>`. A file no glob matches is class full; the highest class of all files wins.
+  Class `deps` (package.json): engine when dependencies, devDependencies, peerDependencies, optionalDependencies,
+  overrides or engines changed, else docs (a scripts-only edit). version.php is docs in the Moodle default: the
+  db/ files of the same diff carry schema, a bump alone runs no PHPUnit.
   --at-least CLASS raises the result to CLASS (a brief's declared `Class:`), never lowers it.
 Classes, low to high: none docs ui content logic schema engine security full.
 Exit: 0; 2 usage.
@@ -22,7 +25,7 @@ db/access.php security
 db/services.php security
 externallib.php security
 db/* schema
-version.php schema
+version.php docs
 lang/* docs
 *.md docs
 README* docs
@@ -99,13 +102,27 @@ def parse(text):
             checks[cls] = rest[0] if rest else ''
             continue
         pat, _, cls = line.rpartition(' ')
-        if cls not in RANK:
+        if cls not in RANK + ['deps']:
             sys.exit(f'change-class: unknown class {cls!r} in rule {line!r}')
         if pat.startswith('diff:'):
             diffs.append((re.compile(pat[5:]), cls))
         else:
             globs.append((pat.strip(), cls))
     return globs, diffs, checks
+
+
+DEPKEYS = ('dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies', 'overrides', 'engines')
+
+
+def deps_class(rel, base, path):
+    """engine when PATH's dependency blocks differ from BASE's (or either side is not JSON), else docs."""
+    import json
+    try:
+        new = json.loads(_read(os.path.join(rel, path)) or '{}')
+        old = json.loads(git(rel, 'show', f'{base}:./{path}') or '{}')
+    except ValueError:
+        return 'engine'
+    return 'engine' if any(old.get(k) != new.get(k) for k in DEPKEYS) else 'docs'
 
 
 def classify(path, globs):
@@ -151,6 +168,7 @@ def main(argv):
         return 0
     files = sorted(set(names.split('\n') + (git(rel, 'ls-files', '-o', '--exclude-standard', '--', d) or '').split('\n')) - {''})
     per = {f: classify(f, globs) for f in files}
+    per = {f: deps_class(rel, base, f) if c == 'deps' else c for f, c in per.items()}
     if diffs and files:
         body = (git(rel, 'diff', '--relative', base, '--', d) or '').splitlines()
         cur = None

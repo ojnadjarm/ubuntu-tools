@@ -41,6 +41,14 @@ out=$("$BIN/change-class" --repo "$P")
 is 'moodle mixed lang + CSS + lib.php: the highest, logic' "$(sed -n 's/^class: //p' <<<"$out")" logic
 is 'moodle mixed: decided by lib.php' "$(sed -n 's/^decided by: //p' <<<"$out")" lib.php
 is 'moodle mixed: per-class counts' "$(grep -c '^files: 3 (docs 1, ui 1, logic 1)' <<<"$out")" 1
+reset "$P"; sed -i 's/version = 1;/version = 2;/' "$P/version.php"
+is 'moodle version.php bump alone: docs, no PHPUnit' "$(cls --repo "$P")" docs
+echo '<?php // x' >"$P/lib.php"
+is 'moodle bump + lib.php: the rest of the diff, logic' "$(cls --repo "$P")" logic
+reset "$P"; sed -i 's/version = 1;/version = 2;/' "$P/version.php"; echo '<?php // step' >"$P/db/upgrade.php"
+is 'moodle bump + db/upgrade.php: schema' "$(cls --repo "$P")" schema
+reset "$P"; sed -i 's/version = 1;/version = 2;/' "$P/version.php"; echo '<?php $tasks = [];' >"$P/db/tasks.php"
+is 'moodle bump + db/tasks.php: schema' "$(cls --repo "$P")" schema
 reset "$P"; echo x >"$P/notes.bin"
 is 'moodle untracked unknown file: full' "$(cls --repo "$P")" full
 reset "$P"; echo "<?php \$string['b'] = 'Ok';" >"$P/lang/en/local_x.php"
@@ -71,7 +79,17 @@ is 'mooblox streamer: engine' "$(cls --repo "$M")" engine
 echo 'export const a = 3;' >"$M/client/src/world/props/bench.ts"; echo '# M2' >"$M/README.md"
 is 'mooblox mixed prop + docs + streamer: engine' "$(cls --repo "$M")" engine
 reset "$M"; echo '{"scripts":{"t":"x"}}' >"$M/client/package.json"
-is 'mooblox package.json: engine (deps)' "$(cls --repo "$M")" engine
+is 'mooblox package.json scripts only: docs' "$(cls --repo "$M")" docs
+echo '{"scripts":{},"dependencies":{"three":"0.186.1"}}' >"$M/client/package.json"
+is 'mooblox package.json new dependency: engine' "$(cls --repo "$M")" engine
+git -C "$M" commit -qam deps; echo '{"scripts":{},"dependencies":{"three":"0.187.0"}}' >"$M/client/package.json"
+is 'mooblox package.json version range: engine' "$(cls --repo "$M")" engine
+reset "$M"; echo 'not json' >"$M/client/package.json"
+is 'mooblox package.json unparsable: engine' "$(cls --repo "$M")" engine
+reset "$M"; echo "<?php \$plugin->component = 'local_mooblox'; \$plugin->version = 2;" >"$M/moodle/local/mooblox/version.php"
+is 'mooblox deploy bump alone: docs' "$(cls --repo "$M")" docs
+echo 'export const a = 9;' >"$M/client/src/world/props/bench.ts"
+is 'mooblox bump + prop: content' "$(cls --repo "$M")" content
 reset "$M"; echo "<?php \$string['go'] = 'Play';" >"$M/moodle/local/mooblox/lang/en/local_mooblox.php"
 is 'mooblox Moodle lang string from the repo root: docs' "$(cls --repo "$M")" docs
 is 'mooblox plugin dir uses the Moodle default: docs' "$("$BIN/change-class" --repo "$M/moodle/local/mooblox" | grep -c '^class: docs$\|rules: moodle default' )" 2

@@ -44,8 +44,8 @@ tier-nightly --help; systemctl --user start tier-nightly.service; tail -8 ~/agen
 - `vitest related` and the tsc check fail in a copy without `moodle/local/mooblox` (the client imports `character.json` from it):
   archive the whole repo, not only `client/`.
 - A copy without the repo's `.gitignore` classifies `node_modules/` as 7,189 unknown files → `full`.
-- `version.php` is schema: every Mooblox ticket that bumps it runs the full PHPUnit suite on the Moodle side (by design, T1398 §3).
-- `client/package.json` is engine (deps): adding a script line there triggers the perf gate tier.
+- `version.php` is docs (orchestrator, 2026-10-26): every Mooblox deploy bumps it, and as schema it put most tickets back on full PHPUnit; the db/ files of the same diff (install.xml, upgrade.php, tasks.php, …) carry schema, access.php/services.php security.
+- `package.json` is class `deps`: engine only when dependencies/devDependencies/peerDependencies/optionalDependencies/overrides/engines differ from the base (or the JSON does not parse); a scripts-only edit is docs.
 - The phpcs stub in `mci.test.sh` must not read stdin: phpcs-delta runs phpcs on a path without input, and a stub `cat` hung the test.
 - `tier-nightly` covers only plugins run through `mci` (the `.plugin` side file); a plugin tested with `mtest` alone waits for the next mci run.
 - New CLIs need `~/agents/install.sh --links` (change-class, tier-nightly: "command not found" until linked).
