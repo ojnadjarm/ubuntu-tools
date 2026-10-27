@@ -1,6 +1,6 @@
 # Discord liaison: the agent that answers the #foro forum and @agents in #general, and turns requests into PRs
 
-Ticket: T1409, T1411, T1413, T1414, T1415, T1416 · Last verified: 2026-10-27 by 57 liaison fixture tests (T1416: 8 routing tests, job vs escalate); before: 49 (T1415: job media + reply); before: 47 liaison fixture tests (T1414: 7 job tests, a transient-unit probe, a live tick) and eval 57 fixtures on opus (T1413: old brief 45/57 twice, new brief + context 55/57 twice); before: 25 liaison fixture tests + 25 orchestrator-pulse checks + 31 discord-bot tests, live ticks on #foro and #general
+Ticket: T1409, T1411, T1413, T1414, T1415, T1416, T1421 · Last verified: 2026-10-27 by 63 liaison fixture tests (T1421: 6 batch/supersede/stale tests) + a live nudge → wake run; before: 57 (T1416: 8 routing tests, job vs escalate); before: 49 (T1415: job media + reply); before: 47 liaison fixture tests (T1414: 7 job tests, a transient-unit probe, a live tick) and eval 57 fixtures on opus (T1413: old brief 45/57 twice, new brief + context 55/57 twice); before: 25 liaison fixture tests + 25 orchestrator-pulse checks + 31 discord-bot tests, live ticks on #foro and #general
 
 ## When to use
 Run, check, change or debug discord-liaison: the persistent agent that owns the conversation in the forum #foro
@@ -64,6 +64,19 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
   logs `logs/jobs/<id>.*`), then starts the next queued job. The worker posts the result and ✅ itself; a non-zero exit,
   a failed launch or a lost runner (no lock, > 120 s after start; reaped by every `tick`) gets a Spanish note in the
   thread + an escalation. `tick` dispatches before the run lock, which guards the triage run only.
+- One job per conversation (owner, T1421: "cada mensaje crea un nuevo agente… hace una petición de un mensaje
+  anterior"): a conversation is a forum thread, or one author in #general (`liaison/threads.py` `key`). `inbox` prints
+  each conversation oldest -> newest, `newest="true"` on the one that counts, plus its `<live-job …/>`. `job <id>`
+  anchors on the conversation's newest message, `JobQueue.supersede` marks the live job `superseded` and stops its unit
+  (`systemctl --user stop`, `LIAISON_JOB_STOP` in tests), the new job carries every message (`messages`) and images.
+  `done` records `through` on a kept live job and takes 👀 off messages no job or escalation covers. A worker's `post`
+  (`LIAISON_JOB` set by `job-run`) re-reads the thread: a newer requester/owner message after `through` waits up to
+  `LIAISON_STALE_WAIT` (90 s) for the triage, then refuses (exit 4, job ends `stale`); `job-run` ✅ all covered messages.
+- Wake on arrival (T1421): the bot (liaison mode) writes `discord-bot/state/liaison.nudge` on every guild message (its
+  only writable dir); `discord-liaison-wake.path` (PathModified) starts `discord-liaison-wake.service` = `wake`:
+  `check` (inbox + 👀 on every new human message at once) per nudge, one `tick --wait` once the file is
+  `LIAISON_DEBOUNCE` (20) s old, again if nudged during the tick (`liaison/wake.py`). The 3-min timer stays as fallback.
+  Design: `$AGENT_WORK/research/2026-10-27/T1421/architecture.md`.
 - Eval (`discord-liaison/eval/`): `run_eval.py <brief> --model opus --context liaison|none --out r.jsonl` (tool-less
   `claude -p`, one JSON decision per fixture, ~$0.04 and ~5 s per opus call, `--show` prints prompts) and
   `score.py r.jsonl` (deterministic regex/field checks, per-class %). Change the brief → run both, twice each.
@@ -74,6 +87,7 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
 ```bash
 discord-liaison status              # inbox, mapped threads, runs/PRs used today, projects and their route
 discord-liaison tick --dry-run      # read #foro, write REPORT.md, post nothing, keep state
+discord-liaison wake                # what the path unit runs on a bot nudge (check + 👀, 20 s debounce, tick)
 discord-liaison inbox | done        # what the LLM run sees; done clears only what inbox showed
 discord-liaison post <thread> [--image <file>] [--reply <msg>] <texto…>   # forum threads or #general, sanitized; LIAISON_DRY_RUN=1 prints
 discord-liaison react <thread> <message-id> 👀|✅       # ack on receipt, done when the result is posted
@@ -133,10 +147,17 @@ Caps: `LIAISON_RUNS_PER_DAY` (30), `LIAISON_PRS_PER_DAY` (3), `LIAISON_IMAGES_PE
 
 - Before T1416 any request beyond the triage run went to the orchestrator, whose pulse fires only when its prompt is
   idle and empty (pulse.log "input line not empty"): the 09:46 art request waited 30 min. Workers have the same tools.
+- Before T1421 every message became its own job: 15 jobs on 2026-10-27, 181936 "replaces" 181600 in REPORT.md while
+  181600 kept running (nothing stopped it). Supersede now stops the unit; agent-exec's scope is `BindsTo` the job unit,
+  so the worker dies with it.
+- A triage `job` on an older message used to act on it; `job` now moves to the newest message of the conversation.
+- A path unit does not restart a running service: `wake` loops itself while the nudge file keeps changing.
+- `LIAISON_RUNS_PER_DAY` (30) was used up by 18:35 UTC on 2026-10-27 with one triage per message: 4 owner messages
+  waited for the UTC day. The debounce batches a burst into one run.
 - A retry of a crashed worker runs inline: requeuing it would launch a transient unit with the running unit's name.
 
 ## Links
 - Code: `~/agents/discord-liaison/` (`liaison/`, `projects.json`, `BRIEF.md`, `JOB.md`, `agent.env`), CLI `~/agents/bin/discord-liaison`,
-  units `~/agents/units/discord-liaison-check.{service,timer}`
-- Tests: `~/agents/discord-liaison/tests/` via `discord-liaison test` (`test_context.py`, `test_manage.py` T1413, `test_jobs.py` T1414, `test_routing.py` T1416); eval `discord-liaison/eval/` (57 fixtures, 7 held out)
+  units `~/agents/units/discord-liaison-check.{service,timer}`, `discord-liaison-wake.{path,service}` (T1421)
+- Tests: `~/agents/discord-liaison/tests/` via `discord-liaison test` (`test_context.py`, `test_manage.py` T1413, `test_jobs.py` T1414, `test_routing.py` T1416, `test_threads.py` T1421); eval `discord-liaison/eval/` (57 fixtures, 7 held out)
 - Design: `$AGENT_WORK/research/2026-10-27/T1409/architecture.md`; bot: guide `discord-bot`

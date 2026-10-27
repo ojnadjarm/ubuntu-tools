@@ -158,6 +158,7 @@ class TestForumBot(Base):
         self.assertEqual(self.fake.sent('400'), [])
         await self.bot.dispatch('MESSAGE_CREATE', ev('MESSAGE_CREATE_STARTER'))
         self.assertEqual(self.pending(), [])
+        self.assertTrue(os.path.exists(os.path.join(self.bot.store.dir, 'liaison.nudge')))
 
     async def test_empty_content_flags_intent(self):
         await self.bot.dispatch('THREAD_CREATE', ev('THREAD_CREATE'))

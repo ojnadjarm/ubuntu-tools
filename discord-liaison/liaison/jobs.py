@@ -10,8 +10,10 @@ import time
 from discordbot.store import save_json
 
 from .routing import after_failure
+from .threads import key
 
 GRACE = 120
+LIVE = ('queued', 'running')
 
 
 class JobQueue:
@@ -32,8 +34,8 @@ class JobQueue:
     def save(self, job):
         save_json(self._p(job['id']), job)
 
-    def create(self, message, task, files=()):
-        """Queue one job for an inbox message; copy its images and the run's context into the job dir."""
+    def create(self, message, task, files=(), messages=()):
+        """Queue one job for the newest message of a conversation (`messages`, oldest first); copy its files in."""
         jid = time.strftime('%Y%m%dT%H%M%S', time.gmtime(self.clock())) + f'-{message["id"]}'
         os.makedirs(os.path.join(self.dir, jid))
         kept = []
@@ -41,7 +43,8 @@ class JobQueue:
             dest = os.path.join(self.dir, jid, os.path.basename(src))
             shutil.copy(src, dest)
             kept.append(dest)
-        job = {'id': jid, 'message': message, 'task': task, 'files': kept, 'status': 'queued', 'created': self.clock()}
+        job = {'id': jid, 'message': message, 'messages': list(messages) or [message], 'task': task, 'files': kept,
+               'status': 'queued', 'created': self.clock()}
         self.save(job)
         return job
 
@@ -49,6 +52,29 @@ class JobQueue:
         paths = glob.glob(os.path.join(glob.escape(self.dir), '*', 'job.json'))
         jobs = [self.get(os.path.basename(os.path.dirname(p))) for p in paths]
         return sorted((j for j in jobs if j and (not status or j['status'] in status)), key=lambda j: j['id'])
+
+    def live(self, k):
+        """Queued or running jobs of conversation `k`."""
+        return [j for j in self.list(*LIVE) if key(j['message']) == k]
+
+    def supersede(self, k, stop):
+        """Mark the live jobs of conversation `k` superseded and stop the running ones' units; returns them."""
+        with self._queue_lock():
+            old = self.live(k)
+            for j in old:
+                was, j['status'] = j['status'], 'superseded'
+                self.save(j)
+                if was == 'running':
+                    stop(j['id'])
+            return old
+
+    def seen(self, k, mid):
+        """Triage saw message `mid` of conversation `k` and kept its live job: newer than that is not stale."""
+        with self._queue_lock():
+            for j in self.live(k):
+                if int(mid) > int(j.get('through', j['message']['id'])):
+                    j['through'] = mid
+                    self.save(j)
 
     def locked(self, jid):
         """True while a runner holds the job's lock."""

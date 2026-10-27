@@ -1,4 +1,4 @@
-"""discord-liaison tick|check|inbox|done|post|map|pr|job|status: the liaison's tools for #foro and #general (T1409, T1411, T1414)."""
+"""discord-liaison tick|wake|check|inbox|done|post|map|pr|job|status: the liaison's tools for #foro and #general (T1409, T1411, T1414, T1421)."""
 import asyncio
 import glob
 import json
@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import time
+from urllib.parse import quote
 
 import aiohttp
 from discordbot.cli import write_config
@@ -25,13 +26,17 @@ from .routing import BLOCKERS, MAX_ATTEMPTS, after_failure, route
 from .registry import Registry
 from .runlock import run_lock
 from .state import State
+from .threads import batch, key, merge, newer
+from .wake import debounce
 from .watch import CDN, MAX_ATTACHMENT, Watcher
 
 GENERAL = '#general'
 ME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-USAGE = ('usage: discord-liaison tick [--dry-run]|check|inbox|done|post <thread> [--image <file>] [--reply <message>] <text…>|'
+USAGE = ('usage: discord-liaison tick [--dry-run]|wake|check|inbox|done|post <thread> [--image <file>] [--reply <message>] <text…>|'
          'react <thread> <message> <emoji>|art <prompt…>|escalate <message> <blocker> <what…>|map <thread> <project>|pr <project>|'
          'job <message> <task…>|job-run <id>|status')
+STALE = ('refused: stale: a newer message from the requester or the owner is waiting in this conversation; do not post '
+         'or react. The triage run handles it (it may replace this job). End with `stale: <what you made>`.')
 FAILED = '{author}, no he podido terminarlo. Lo paso al orquestador y te respondo aquí.'
 IMAGE_MAGIC = (b'\x89PNG\r\n\x1a\n', b'\xff\xd8\xff')
 SEEN_MAGIC = IMAGE_MAGIC + (b'GIF87a', b'GIF89a')
@@ -103,6 +108,14 @@ class App:
         self.cdn = tuple(env.get('LIAISON_CDN_PREFIXES', ' '.join(CDN)).split())
         self.jobs = JobQueue(os.path.join(self.home, 'state', 'jobs'))
         self.job_cap = int(env.get('LIAISON_JOBS_MAX', '3'))
+        self.nudge_file = env.get('LIAISON_NUDGE', os.path.join(os.path.dirname(ME), 'discord-bot', 'state', 'liaison.nudge'))
+
+    def locked(self):
+        """The state lock: `check`, `inbox` and `done` read-modify-write inbox.json one at a time."""
+        return run_lock(os.path.join(self.home, 'state', 'state.lock'), wait=True)
+
+    def reload(self):
+        self.state = State(os.path.join(self.home, 'state'))
 
     async def general_id(self, save):
         """#general's id: DISCORD_GENERAL_ID, else the guild's text channel named general, stored in config.env."""
@@ -114,6 +127,21 @@ class App:
         return self.general
 
     async def check(self, save=True):
+        """Poll; with `save`, store new messages in the inbox and ack each human one with 👀 at once (T1421)."""
+        if not save:
+            return await self.poll(False)
+        with self.locked():
+            self.reload()
+            msgs, cur = await self.poll(True)
+        for m in msgs:
+            if not m['bot']:
+                try:
+                    await self.rest.react(m['thread_id'], m['id'], '👀')
+                except RestError:
+                    pass
+        return msgs, cur
+
+    async def poll(self, save):
         w = Watcher(self.rest, self.guild, self.forum, self.cdn)
         msgs, cur = await w.poll(self.state.cursor)
         gid = await self.general_id(save)
@@ -148,11 +176,19 @@ class App:
             print(f'dry run: threads {threads}, #general mentions {mentions}, {len(msgs)} new')
             return 0
         await self.dispatch()
-        with run_lock(os.path.join(self.home, 'state', 'tick.lock')) as held:
+        with run_lock(os.path.join(self.home, 'state', 'tick.lock'), wait=args == ['--wait']) as held:
             if not held:
                 print('run in flight: this tick does nothing')
                 return 0
             return await self.run_tick()
+
+    async def wake(self):
+        """The bot's nudge: check (inbox + 👀) on every nudge, one tick once nudges are LIAISON_DEBOUNCE s quiet."""
+        async def ack():
+            msgs, _ = await self.check()
+            print(f'{len(msgs)} new, inbox {len(self.state.inbox)}')
+        await debounce(self.nudge_file, float(self.env.get('LIAISON_DEBOUNCE', '20')), ack, lambda: self.tick(['--wait']))
+        return 0
 
     async def run_tick(self):
         msgs, _ = await self.check()
@@ -223,30 +259,57 @@ class App:
             return ''
 
     def inbox(self):
-        self.state.mark_shown()
+        with self.locked():
+            self.reload()
+            self.state.mark_shown()
         try:
             with open(os.path.join(self.work, 'context.txt')) as f:
                 print(f.read(), end='')
         except OSError:
             print('<context kind="data">historial no disponible</context>')
-        for m in self.state.inbox:
-            pid = (self.state.thread(m['thread_id']) or {}).get('project', '')
-            route = self.registry.route(pid) if pid else ''
-            body = m['content'].replace('</message', '<\\/message')
-            imgs = self.images(m['id'])
-            images = f' images="{" ".join(imgs)}"' if imgs else ''
-            notes = ''.join(f'\n[{p}: {self.note(p)}]' for p in imgs if self.note(p))
-            owner = str(bool(self.owner) and m.get('author_id') == self.owner).lower()
-            print(f'<message channel="{m.get("channel", "foro")}" thread="{m["thread_id"]}" title="{m["thread"]}" '
-                  f'tags="{",".join(m["tags"])}" project="{pid}" route="{route}" author="{m["author"]}" '
-                  f'bot="{str(m["bot"]).lower()}" owner="{owner}" id="{m["id"]}"{images}>\n'
-                  f'{body}{notes}\n</message>')
-        print(f'{len(self.state.inbox)} message(s); run `discord-liaison done` after answering them')
+        convs = batch(self.state.inbox)
+        for conv in convs:
+            for j in self.jobs.live(key(conv[-1])):
+                task = j['task'].replace('"', '&quot;')
+                print(f'<live-job id="{j["id"]}" status="{j["status"]}" message="{j["message"]["id"]}" task="{task}"/>')
+            for m in conv:
+                self.print_message(m, m is conv[-1])
+        print(f'{len(self.state.inbox)} message(s) in {len(convs)} conversation(s); run `discord-liaison done` after '
+              'answering them')
         return 0
 
-    def done(self):
-        n = len(self.state.shown)
-        self.state.drop_shown()
+    def print_message(self, m, newest):
+        pid = (self.state.thread(m['thread_id']) or {}).get('project', '')
+        route = self.registry.route(pid) if pid else ''
+        body = m['content'].replace('</message', '<\\/message')
+        imgs = self.images(m['id'])
+        images = f' images="{" ".join(imgs)}"' if imgs else ''
+        notes = ''.join(f'\n[{p}: {self.note(p)}]' for p in imgs if self.note(p))
+        owner = str(bool(self.owner) and m.get('author_id') == self.owner).lower()
+        print(f'<message channel="{m.get("channel", "foro")}" thread="{m["thread_id"]}" title="{m["thread"]}" '
+              f'tags="{",".join(m["tags"])}" project="{pid}" route="{route}" author="{m["author"]}" '
+              f'bot="{str(m["bot"]).lower()}" owner="{owner}" id="{m["id"]}" newest="{str(newest).lower()}"{images}>\n'
+              f'{body}{notes}\n</message>')
+
+    async def done(self):
+        """Clear what `inbox` showed; a live job keeps its conversation's newer messages as seen; a message no job covers
+        and no escalation names drops its 👀."""
+        with self.locked():
+            self.reload()
+            shown = [m for m in self.state.inbox if m['id'] in set(self.state.shown)]
+            n = len(self.state.shown)
+            self.state.drop_shown()
+        for conv in batch(shown):
+            self.jobs.seen(key(conv[-1]), conv[-1]['id'])
+        kept = {x['id'] for j in self.jobs.list() for x in j.get('messages', [j['message']])}
+        esc = os.path.join(self.home, 'state', 'escalations')
+        for m in shown:
+            if m['bot'] or m['id'] in kept or glob.glob(os.path.join(glob.escape(esc), f'*-{m["id"]}.md')):
+                continue
+            try:
+                await self.rest.call('DELETE', f'/channels/{m["thread_id"]}/messages/{m["id"]}/reactions/{quote("👀")}/@me')
+            except RestError:
+                pass
         print(f'done: {n} cleared, {len(self.state.inbox)} still in the inbox')
         return 0
 
@@ -286,6 +349,9 @@ class App:
         if not await self.allowed(tid):
             print(f'refused: {tid} is neither a thread of the forum nor #general')
             return 3
+        if await self.stale(tid):
+            print(STALE)
+            return 4
         if image and not self.image_ok(image):
             print('refused: --image takes a PNG/JPEG made by `discord-liaison art` (max 10 MB) '
                   'or a PNG/JPEG/GIF/WebP/MP4 in your job folder (max 25 MB)')
@@ -302,6 +368,33 @@ class App:
                 await self.rest.send(tid, part, reply=ref)
         print(f'posted {len(parts)} message(s){" with the image" if image else ""}')
         return 0
+
+    async def stale(self, tid):
+        """From a job (LIAISON_JOB) posting in its own thread: a newer message from the requester (or the owner, in the
+        forum) not yet triaged makes the result stale; wait up to LIAISON_STALE_WAIT s for the triage, then True."""
+        jid = self.env.get('LIAISON_JOB', '')
+        job = self.jobs.get(jid) if jid else None
+        if job is None or job['message']['thread_id'] != tid:
+            return False
+        m, general = job['message'], job['message'].get('channel') == 'general'
+        authors = {m.get('author_id')} | (set() if general else {self.owner})
+        me, role = await Watcher(self.rest, self.guild, self.forum).ident() if general else ('', '')
+        deadline = time.time() + float(self.env.get('LIAISON_STALE_WAIT', '90'))
+        while True:
+            job = self.jobs.get(jid)
+            if job['status'] == 'superseded':
+                break
+            raw = await self.rest.messages(tid, 50)
+            if not newer(raw, job.get('through', m['id']), authors - {''}, general, me, role):
+                if job.pop('stale', None):
+                    self.jobs.save(job)
+                return False
+            if time.time() >= deadline:
+                break
+            await asyncio.sleep(5)
+        job['stale'] = True
+        self.jobs.save(job)
+        return True
 
     async def react(self, args):
         if len(args) != 3:
@@ -392,22 +485,43 @@ class App:
         return path
 
     def job(self, args):
-        """Turn an inbox message into a background job (its images and the run's context copied), then dispatch."""
+        """Hand a conversation to one background worker: anchored on its newest message, all its messages and images
+        carried, a live job of the same conversation stopped and replaced (T1421)."""
         m = next((m for m in self.state.inbox if args and m['id'] == args[0]), None)
         if len(args) < 2 or m is None:
             print('usage: discord-liaison job <message-id from the inbox> "<task: deliverable, project, skills>"')
             return 2
+        conv = [x for x in merge(self.state.inbox) if key(x) == key(m)]
+        if conv[-1]['id'] != m['id']:
+            print(f'note: {m["id"]} is not the newest message of its conversation; the job answers {conv[-1]["id"]}')
+            m = conv[-1]
         if any(j['message']['id'] == m['id'] for j in self.jobs.list()):
             print(f'refused: message {m["id"]} already has a job')
             return 3
+        old = self.jobs.supersede(key(m), self.stop)
         pid = (self.state.thread(m['thread_id']) or {}).get('project', '')
-        msg = dict(m, project=pid, route=self.registry.route(pid) if pid else '', owner=bool(self.owner) and m.get('author_id') == self.owner)
+        extra = {'project': pid, 'route': self.registry.route(pid) if pid else ''}
+        msgs = [dict(x, **extra, owner=bool(self.owner) and x.get('author_id') == self.owner)
+                for x in merge(*[j.get('messages', [j['message']]) for j in old], conv)]
         ctx = os.path.join(self.work, 'context.txt')
-        job = self.jobs.create(msg, ' '.join(args[1:]), self.images(m['id']) + ([ctx] if os.path.exists(ctx) else []))
+        files = [f for x in conv for f in self.images(x['id'])] + [
+            f for j in old for f in j.get('files', []) if os.path.exists(f) and not f.endswith('.txt')]
+        job = self.jobs.create(msgs[-1], ' '.join(args[1:]), files + ([ctx] if os.path.exists(ctx) else []), msgs)
+        for j in old:
+            self.jobs.finish(j, 'superseded', f'replaced by {job["id"]}')
         started, failed = self.jobs.dispatch(self.job_cap, self.launch)
         print(f'job {job["id"]} {"started" if job["id"] in started else "failed to start" if failed else "queued"}'
-              f' ({len(self.jobs.list("running"))}/{self.job_cap} running)')
+              f' ({len(self.jobs.list("running"))}/{self.job_cap} running)'
+              + (f'; it replaces {", ".join(j["id"] for j in old)}' if old else ''))
         return 0
+
+    def stop(self, jid):
+        """Stop a superseded job's transient unit and wait for it (LIAISON_JOB_STOP overrides)."""
+        tmpl = self.env.get('LIAISON_JOB_STOP')
+        if tmpl:
+            return subprocess.call(tmpl.format(id=shlex.quote(jid)), shell=True, stdin=subprocess.DEVNULL)
+        return subprocess.call(['systemctl', '--user', 'stop', f'discord-liaison-job-{jid}.service'],
+                               stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def launch(self, jid):
         """Start `discord-liaison job-run <id>` outside this run: a transient user unit (LIAISON_JOB_LAUNCH overrides)."""
@@ -452,15 +566,20 @@ class App:
             with open(ctx) as f:
                 context = f.read()
         imgs = [p for p in job['files'] if not p.endswith(('.txt', '.note'))]
-        images = f' images="{" ".join(imgs)}"' if imgs else ''
-        body = m['content'].replace('</message', '<\\/message')
+        msgs = []
+        for x in job.get('messages', [m]):
+            mine = [p for p in imgs if os.path.basename(p).startswith(f'{x["id"]}-')]
+            images = f' images="{" ".join(mine)}"' if mine else ''
+            body = x['content'].replace('</message', '<\\/message')
+            msgs.append(f'<message channel="{x.get("channel", "foro")}" thread="{x["thread_id"]}" title="{x["thread"]}" '
+                        f'project="{x.get("project", "")}" route="{x.get("route", "")}" author="{x["author"]}" '
+                        f'owner="{str(x.get("owner", False)).lower()}" id="{x["id"]}" '
+                        f'newest="{str(x["id"] == m["id"]).lower()}"{images}>\n{body}\n</message>\n')
         text = (f'{head}\n{rules}\n## Your job\n\njob: {job["id"]}\nattempt: {job.get("attempt", 1)} of {MAX_ATTEMPTS}\n'
-                f'task (from the triage run): {job["task"]}\nrequest: the <message> below, verbatim\n'
-                f'must: reply in Spanish only; anything audiovisual is AAA, shocking and breathtaking; '
-                f'post the result and react ✅ yourself\n\n{context}'
-                f'<message channel="{m.get("channel", "foro")}" thread="{m["thread_id"]}" title="{m["thread"]}" '
-                f'project="{m.get("project", "")}" route="{m.get("route", "")}" author="{m["author"]}" '
-                f'owner="{str(m.get("owner", False)).lower()}" id="{m["id"]}"{images}>\n{body}\n</message>\n')
+                f'task (from the triage run): {job["task"]}\nrequest: the <message newest="true"> below, verbatim; the '
+                f'messages before it are the same conversation, oldest first: the newest wins, a correction replaces '
+                f'what it corrects\nmust: reply in Spanish only; anything audiovisual is AAA, shocking and breathtaking; '
+                f'post the result and react ✅ yourself\n\n{context}' + ''.join(msgs))
         path = os.path.join(d, 'prompt.md')
         with open(path, 'w') as f:
             f.write(text)
@@ -489,13 +608,26 @@ class App:
                     'agent-exec --prompt-file {prompt} --system-file {preamble} --model {model} --cwd {home} '
                     '--name discord-liaison-job --timeout {timeout} --raw-out {logs}/{id}.json --meta-out {logs}/{id}.meta.json '
                     '>>{logs}/{id}.log 2>&1')).format(**q)
-                rc = subprocess.call(cmd, shell=True, stdin=subprocess.DEVNULL)
-                if rc == 0 or after_failure(job.get('attempt', 1)) == 'escalate':
+                rc = subprocess.call(cmd, shell=True, stdin=subprocess.DEVNULL, env=dict(os.environ, LIAISON_JOB=job['id']))
+                job = self.jobs.get(job['id'])
+                if job['status'] == 'superseded':
+                    print(f'job {job["id"]} superseded')
+                    return 0
+                if rc == 0 or job.get('stale') or after_failure(job.get('attempt', 1)) == 'escalate':
                     break
                 job['attempt'] = job.get('attempt', 1) + 1
                 self.jobs.save(job)
-            self.jobs.finish(job, 'done' if rc == 0 else 'failed', f'exit {rc}')
-            if rc != 0:
+            if job.get('stale'):
+                self.jobs.finish(job, 'stale', 'a newer message came; result not posted')
+            else:
+                self.jobs.finish(job, 'done' if rc == 0 else 'failed', f'exit {rc}')
+            if rc == 0 and not job.get('stale'):
+                for x in job.get('messages', [job['message']]):
+                    try:
+                        await self.rest.react(x['thread_id'], x['id'], '✅')
+                    except RestError:
+                        pass
+            elif rc != 0 and not job.get('stale'):
                 await self.notify_failure(job, f'worker exit {rc}')
         await self.dispatch()
         print(f'job {job["id"]} {job["status"]} (exit {rc})')
@@ -547,11 +679,13 @@ async def amain(argv, env=None, rest=None):
             return await getattr(app, cmd)(args)
         if cmd == 'job-run':
             return await app.job_run(args)
+        if cmd in ('wake', 'done'):
+            return await getattr(app, cmd)()
         if cmd == 'check':
             msgs, _ = await app.check()
             print(f'{len(msgs)} new, inbox {len(app.state.inbox)}')
             return 0
-        if cmd in ('inbox', 'done', 'status'):
+        if cmd in ('inbox', 'status'):
             return getattr(app, cmd)()
         if cmd in ('map', 'pr', 'art', 'job'):
             return getattr(app, cmd)(args)

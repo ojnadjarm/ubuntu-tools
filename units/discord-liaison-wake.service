@@ -1,0 +1,11 @@
+[Unit]
+Description=Discord liaison wake (bot nudge: ack 👀 at once, one tick after 20 s without new messages, T1421)
+
+[Service]
+Type=oneshot
+Environment=PATH=%h/.local/bin:%h/agents/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus
+Nice=5
+TimeoutStartSec=2100
+ExecStart=%h/agents/bin/discord-liaison wake

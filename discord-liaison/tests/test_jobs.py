@@ -80,10 +80,18 @@ class JobBase(Base):
         await self.run_cli('inbox')
         return ids
 
+    async def other(self, text):
+        """One message in a second forum thread (another conversation)."""
+        mid = self.fake.say('450', '3', text)
+        await self.run_cli('check')
+        await self.run_cli('inbox')
+        return mid
+
 
 class TestJobCli(JobBase):
     async def test_job_from_inbox_starts_then_queues_over_the_cap(self):
-        a, b = await self.inbox('haz un PR con la voz', 'y una imagen del héroe')
+        (a,) = await self.inbox('haz un PR con la voz')
+        b = await self.other('y una imagen del héroe')
         rc, out = await self.run_cli('job', a, 'PR on ten: narrator voice')
         self.assertEqual(rc, 0, out)
         self.assertIn('started', out)
@@ -99,7 +107,8 @@ class TestJobCli(JobBase):
         self.assertIn('jobs running 1/1 queued 1', out)
 
     async def test_job_run_runs_worker_with_rules_then_starts_the_next(self):
-        a, b = await self.inbox('haz un PR', 'otra cosa')
+        (a,) = await self.inbox('haz un PR')
+        b = await self.other('otra cosa')
         await self.run_cli('job', a, 'PR on ten')
         await self.run_cli('job', b, 'second')
         first = self.launches()[0]

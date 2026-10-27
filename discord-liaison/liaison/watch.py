@@ -29,6 +29,15 @@ class Watcher:
         self.rest, self.guild_id, self.forum_id, self.cdn = rest, guild_id, forum_id, cdn
         self.me, self.role = '', None
 
+    async def ident(self):
+        """The bot's user id and its managed role id."""
+        if not self.me:
+            self.me = (await self.rest.me())['id']
+        if self.role is None:
+            roles = await self.rest.call('GET', f'/guilds/{self.guild_id}/roles')
+            self.role = next((r['id'] for r in roles if (r.get('tags') or {}).get('bot_id') == self.me), '')
+        return self.me, self.role
+
     async def threads(self):
         act = await self.rest.call('GET', f'/guilds/{self.guild_id}/threads/active')
         return [t for t in act.get('threads', []) if t.get('parent_id') == self.forum_id]
@@ -59,11 +68,7 @@ class Watcher:
 
     async def general(self, channel_id, last):
         """Return (mentions, cursor): messages after `last` addressed to the bot (`addressed`); no `last` only seeds."""
-        if not self.me:
-            self.me = (await self.rest.me())['id']
-        if self.role is None:
-            roles = await self.rest.call('GET', f'/guilds/{self.guild_id}/roles')
-            self.role = next((r['id'] for r in roles if (r.get('tags') or {}).get('bot_id') == self.me), '')
+        await self.ident()
         if not last:
             latest = await self.rest.call('GET', f'/channels/{channel_id}/messages', params={'limit': '1'})
             return [], latest[0]['id'] if latest else '0'

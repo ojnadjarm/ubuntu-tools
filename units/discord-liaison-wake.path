@@ -1,0 +1,9 @@
+[Unit]
+Description=Wake the Discord liaison when the bot sees a new message (T1421)
+
+[Path]
+PathModified=%h/agents/discord-bot/state/liaison.nudge
+Unit=discord-liaison-wake.service
+
+[Install]
+WantedBy=paths.target

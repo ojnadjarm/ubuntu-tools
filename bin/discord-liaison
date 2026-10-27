@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# discord-liaison tick [--dry-run]|check|inbox|done|post|react|art|escalate|map|pr|job|job-run|status|test — the Discord liaison's tools (T1409, T1411);
+# discord-liaison tick [--dry-run]|wake|check|inbox|done|post|react|art|escalate|map|pr|job|job-run|status|test — the Discord liaison's tools (T1409, T1411);
 # `job` hands a request to a background worker (`job-run`, a transient user unit; LIAISON_JOBS_MAX at once, T1414);
+# one live job per conversation, `wake` runs on the bot's nudge (discord-liaison-wake.path, T1421);
 # a project with a `po` in projects.json: its messages go to that PO (po-ask), its outbox/discord/ replies are posted (T1412).
-U='usage: discord-liaison tick [--dry-run]|check|inbox|done|post <thread> [--image <file>] [--reply <message>] <text…>|react <thread> <message> <emoji>|art <prompt…>|escalate <message> <blocker> <what…>|map <thread> <project>|pr <project>|job <message> <task…>|job-run <id>|status|test'
+U='usage: discord-liaison tick [--dry-run]|wake|check|inbox|done|post <thread> [--image <file>] [--reply <message>] <text…>|react <thread> <message> <emoji>|art <prompt…>|escalate <message> <blocker> <what…>|map <thread> <project>|pr <project>|job <message> <task…>|job-run <id>|status|test'
 case "${1:-}" in
   -h|--help) echo "$U"; exit 0 ;;
   -*) echo "discord-liaison: unknown option: $1" >&2; echo "$U" >&2; exit 2 ;;
@@ -19,7 +20,7 @@ export PYTHONPATH="$D:$B"
 py="$B/.venv/bin/python"
 # T1412 P5: PO replies are posted before each tick; PO-routed messages go to their PO when the LLM reads the inbox or maps a thread.
 case "${1:-} ${2:-}" in
-  'tick '|tick\ [!-]*) "$py" -m liaison.po relay ;;
+  'tick '|tick\ [!-]*|'wake ') "$py" -m liaison.po relay ;;
   'inbox '*) "$py" -m liaison.po handoff ;;
   'map '*) "$py" -m liaison "$@"; rc=$?; [ $rc -ne 0 ] || "$py" -m liaison.po handoff; exit $rc ;;
 esac

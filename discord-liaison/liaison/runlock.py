@@ -5,12 +5,12 @@ import os
 
 
 @contextlib.contextmanager
-def run_lock(path):
-    """Yield True when this process holds the lock, False when another tick does."""
+def run_lock(path, wait=False):
+    """Yield True when this process holds the lock, False when another tick does; `wait` blocks until it is free."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'a') as f:
         try:
-            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(f, fcntl.LOCK_EX if wait else fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             yield False
             return

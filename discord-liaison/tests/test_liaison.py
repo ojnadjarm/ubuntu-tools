@@ -47,6 +47,7 @@ class Fake(FakeDiscord):
         a = super().app()
         a.router.add_get('/users/@me', lambda q: web.json_response({'id': '900', 'username': 'agents'}))
         a.router.add_get('/cdn/{name}', self.cdn)
+        a.router.add_delete('/channels/{c}/messages/{m}/reactions/{e}/@me', self.unreact)
         a.router.add_get('/guilds/{g}/roles', lambda q: web.json_response([
             {'id': '100', 'name': '@everyone'}, {'id': '950', 'name': 'agents', 'managed': True, 'tags': {'bot_id': '900'}},
             {'id': '951', 'name': 'otros'}]))
@@ -58,6 +59,13 @@ class Fake(FakeDiscord):
 
     files = {}
     cdn_headers = []
+
+    async def unreact(self, q):
+        self.my_emojis.get((q.match_info['c'], q.match_info['m']), []).remove(q.match_info['e'])
+        return web.Response(status=204)
+
+    def acks(self, tid, mid):
+        return self.my_emojis.get((tid, mid), [])
 
     async def cdn(self, q):
         self.cdn_headers.append(dict(q.headers))

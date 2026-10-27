@@ -1,5 +1,6 @@
 """Forum logic: tag posts, acknowledge, queue answers, gate real work on the owner's approval, deliver results."""
 import logging
+import os
 import time
 
 from .approval import tag_added_by
@@ -136,6 +137,8 @@ class ForumBot:
 
     async def on_message_create(self, d):
         author = d.get('author', {})
+        if self.cfg.forum_replies == 'liaison' and author.get('id') != self.me_id and d.get('type', 0) in (0, 19):
+            self.nudge()
         if self.cfg.forum_replies == 'liaison' or author.get('id') == self.me_id or d.get('type', 0) not in (0, 19):
             return
         tid = d['channel_id']
@@ -155,6 +158,11 @@ class ForumBot:
         th = self.store.thread(tid) or {}
         self.spool.put({'kind': 'answer', 'thread_id': tid, 'requester_id': th.get('requester') or uid,
                         'title': th.get('title', ''), 'messages': await self.history(tid)})
+
+    def nudge(self):
+        """Wake discord-liaison: its path unit watches this file (T1421)."""
+        with open(os.path.join(self.store.dir, 'liaison.nudge'), 'w') as f:
+            f.write(f'{self.clock():.3f}\n')
 
     async def history(self, tid):
         msgs = await self.rest.messages(tid, 20)

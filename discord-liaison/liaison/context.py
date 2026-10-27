@@ -9,7 +9,8 @@ def self_line(images_left):
     """Current capabilities, built by code so the model never guesses them from old replies."""
     return (f'You can: see attached images with Read (a GIF/WebP arrives as a numbered contact sheet of up to 12 frames); '
             f'make images (`art` + `post --image`, {images_left} left today); react 👀/✅; escalate to the orchestrator. '
-            f'New messages are checked every {POLL}. This line overrides anything you said earlier in <history>.')
+            f'New messages wake you about 20 s after they arrive (a poll every {POLL} is the fallback). '
+            f'This line overrides anything you said earlier in <history>.')
 
 
 def _esc(text):
