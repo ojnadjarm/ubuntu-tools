@@ -1,6 +1,8 @@
 """discord-liaison tick|check|inbox|done|post|map|pr|status: the liaison's tools for #foro and #general (T1409, T1411)."""
 import asyncio
 import glob
+import json
+import math
 import os
 import shlex
 import shutil
@@ -23,23 +25,56 @@ from .watch import CDN, MAX_ATTACHMENT, Watcher
 GENERAL = '#general'
 ME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 USAGE = ('usage: discord-liaison tick [--dry-run]|check|inbox|done|post <thread> [--image <png>] <text…>|'
-         'react <thread> <message> <emoji>|art <prompt…>|map <thread> <project>|pr <project>|status')
+         'react <thread> <message> <emoji>|art <prompt…>|escalate <message> <what…>|map <thread> <project>|pr <project>|status')
 IMAGE_MAGIC = (b'\x89PNG\r\n\x1a\n', b'\xff\xd8\xff')
 SEEN_MAGIC = IMAGE_MAGIC + (b'GIF87a', b'GIF89a')
 MAX_IMAGE = 10 * 1024 * 1024
+SHEET_FRAMES, SHEET_PX = 12, 2048
+
+
+def _probe(path):
+    """(frames, seconds) of an animation, by decoding it with ffprobe."""
+    r = subprocess.run(['ffprobe', '-v', 'error', '-count_frames', '-select_streams', 'v:0', '-show_entries',
+                        'stream=nb_read_frames:format=duration', '-of', 'json', path],
+                       capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+    d = json.loads(r.stdout or '{}')
+    frames = int((d.get('streams') or [{}])[0].get('nb_read_frames') or 0)
+    try:
+        secs = float(d.get('format', {}).get('duration'))
+    except (TypeError, ValueError):
+        secs = 0.0
+    return frames, secs
 
 
 def still(path):
-    """Replace a GIF/WebP with a PNG of its first frame (Read takes stills only); drop it when ffmpeg cannot."""
-    png = os.path.splitext(path)[0] + '.png'
+    """Replace a GIF/WebP with one PNG contact sheet (up to 12 evenly sampled frames, numbered, in order); return a note.
+
+    Read takes stills only. The file is dropped when ffmpeg cannot decode it."""
+    png, kind = os.path.splitext(path)[0] + '.png', os.path.splitext(path)[1][1:].upper()
+    note = ''
     try:
-        rc = subprocess.call(['ffmpeg', '-v', 'error', '-nostdin', '-y', '-i', path, '-frames:v', '1', png],
-                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
-    except subprocess.TimeoutExpired:
-        rc = 1
+        frames, secs = _probe(path)
+        if frames:
+            k = min(SHEET_FRAMES, frames)
+            pick = sorted({round(i * (frames - 1) / max(k - 1, 1)) for i in range(k)})
+            cols = min(4, len(pick))
+            rows = math.ceil(len(pick) / cols)
+            cell = SHEET_PX // cols
+            vf = (f"drawtext=text='%{{eif\\:n+1\\:d}}':x=6:y=6:fontsize=24:fontcolor=white:box=1:boxcolor=black@0.7,"
+                  f"select='{'+'.join(f'eq(n\\,{n})' for n in pick)}',"
+                  f"scale='min({cell},iw)':'min({cell},ih)':force_original_aspect_ratio=decrease,tile={cols}x{rows}")
+            rc = subprocess.call(['ffmpeg', '-v', 'error', '-nostdin', '-y', '-i', path, '-vf', vf, '-frames:v', '1',
+                                  '-fps_mode', 'passthrough', png], stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
+            if rc == 0:
+                note = (f'{kind}, {frames} frames, {secs:.1f} s: contact sheet of {len(pick)} frames sampled evenly, '
+                        'numbered, in order')
+    except (subprocess.TimeoutExpired, ValueError):
+        pass
     os.unlink(path)
-    if rc != 0 and os.path.exists(png):
+    if not note and os.path.exists(png):
         os.unlink(png)
+    return note
 
 
 class App:
@@ -48,6 +83,7 @@ class App:
         self.home = env.get('LIAISON_HOME', ME)
         self.forum, self.guild = env.get('DISCORD_FORUM_ID', ''), env.get('DISCORD_GUILD_ID', '')
         self.general = env.get('DISCORD_GENERAL_ID', '')
+        self.owner = env.get('DISCORD_OWNER_ID', '')
         self.state = State(os.path.join(self.home, 'state'))
         self.registry = Registry(env.get('LIAISON_REGISTRY', os.path.join(ME, 'projects.json')))
         os.makedirs(os.path.join(self.home, 'logs'), exist_ok=True)
@@ -134,10 +170,20 @@ class App:
                         with open(dest, 'wb') as f:
                             f.write(data)
                         if ext in ('.gif', '.webp'):
-                            still(dest)
+                            note = still(dest)
+                            if note:
+                                with open(os.path.splitext(dest)[0] + '.note', 'w') as f:
+                                    f.write(note)
 
     def images(self, mid):
-        return sorted(glob.glob(os.path.join(glob.escape(self.work), f'{mid}-*')))
+        return sorted(p for p in glob.glob(os.path.join(glob.escape(self.work), f'{mid}-*')) if not p.endswith('.note'))
+
+    def note(self, image):
+        try:
+            with open(os.path.splitext(image)[0] + '.note') as f:
+                return f.read().strip()
+        except OSError:
+            return ''
 
     def inbox(self):
         self.state.mark_shown()
@@ -147,10 +193,12 @@ class App:
             body = m['content'].replace('</message', '<\\/message')
             imgs = self.images(m['id'])
             images = f' images="{" ".join(imgs)}"' if imgs else ''
-            print(f'<message channel="{m.get("channel", "foro")}" thread="{m["thread_id"]}" title="{m["thread"]}" tags="{",".join(m["tags"])}" '
-                  f'project="{pid}" route="{route}" author="{m["author"]}" bot="{str(m["bot"]).lower()}" id="{m["id"]}"'
-                  f'{images}>\n'
-                  f'{body}\n</message>')
+            notes = ''.join(f'\n[{p}: {self.note(p)}]' for p in imgs if self.note(p))
+            owner = str(bool(self.owner) and m.get('author_id') == self.owner).lower()
+            print(f'<message channel="{m.get("channel", "foro")}" thread="{m["thread_id"]}" title="{m["thread"]}" '
+                  f'tags="{",".join(m["tags"])}" project="{pid}" route="{route}" author="{m["author"]}" '
+                  f'bot="{str(m["bot"]).lower()}" owner="{owner}" id="{m["id"]}"{images}>\n'
+                  f'{body}{notes}\n</message>')
         print(f'{len(self.state.inbox)} message(s); run `discord-liaison done` after answering them')
         return 0
 
@@ -238,6 +286,30 @@ class App:
         print(out)
         return 0
 
+    def escalate(self, args):
+        """Hand a request beyond the liaison's tools or rules to the orchestrator: state/escalations/<utc>-<msg>.md."""
+        m = next((m for m in self.state.inbox if args and m['id'] == args[0]), None)
+        if len(args) < 2 or m is None:
+            print('usage: discord-liaison escalate <message-id from the inbox> "<what is asked; what you tried>"')
+            return 2
+        d = os.path.join(self.home, 'state', 'escalations')
+        if glob.glob(os.path.join(glob.escape(d), f'*-{m["id"]}.md')) + glob.glob(
+                os.path.join(glob.escape(d), 'done', f'*-{m["id"]}.md')):
+            print(f'refused: message {m["id"]} is already escalated (open or done)')
+            return 3
+        os.makedirs(d, exist_ok=True)
+        path = os.path.join(d, f'{time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())}-{m["id"]}.md')
+        who = ' (owner)' if self.owner and m.get('author_id') == self.owner else ''
+        with open(path, 'w') as f:
+            f.write(f'# Discord escalation\n\nchannel: {m.get("channel", "foro")} ({m["thread_id"]})\nmessage: {m["id"]}\n'
+                    f'author: {m["author"]}{who}\n\n## Request\n\n{m["content"]}\n\n## What the liaison tried\n\n'
+                    f'{" ".join(args[1:])}\n\nAnswer in the channel, then move this file to done/.\n')
+        cmd = self.env.get('LIAISON_PULSE_CMD', 'orchestrator-pulse')
+        subprocess.call(cmd, shell=True, stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f'escalated to the orchestrator: {path}')
+        return 0
+
     def map(self, args):
         if len(args) != 2 or self.registry.get(args[1]) is None:
             print(f'refused: unknown project; known: {", ".join(self.registry.projects)}')
@@ -289,6 +361,8 @@ async def amain(argv, env=None, rest=None):
             return getattr(app, cmd)()
         if cmd in ('map', 'pr', 'art'):
             return getattr(app, cmd)(args)
+        if cmd == 'escalate':
+            return app.escalate(args)
         print(USAGE)
         return 2
     except RestError as e:

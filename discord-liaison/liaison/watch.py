@@ -40,7 +40,8 @@ class Watcher:
                     continue
                 out.append({'id': m['id'], 'thread_id': tid, 'thread': t.get('name', ''),
                             'tags': [names[i] for i in t.get('applied_tags', []) if i in names],
-                            'author': a.get('global_name') or a.get('username', '?'), 'bot': bool(a.get('bot')),
+                            'author': a.get('global_name') or a.get('username', '?'), 'author_id': a.get('id', ''),
+                            'bot': bool(a.get('bot')),
                             'content': m.get('content', '')[:1500],
                             'attachments': images(m, self.cdn)})
             cur.setdefault(tid, '0')
@@ -68,6 +69,7 @@ class Watcher:
             if self.role:
                 text = text.replace(f'<@&{self.role}>', '@agents')
             out.append({'id': m['id'], 'channel': 'general', 'thread_id': channel_id, 'thread': '#general', 'tags': [],
-                        'author': a.get('global_name') or a.get('username', '?'), 'bot': bool(a.get('bot')),
+                        'author': a.get('global_name') or a.get('username', '?'), 'author_id': a.get('id', ''),
+                        'bot': bool(a.get('bot')),
                         'content': text[:1500], 'attachments': images(m, self.cdn)})
         return out, last

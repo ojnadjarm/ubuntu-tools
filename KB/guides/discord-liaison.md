@@ -1,6 +1,6 @@
 # Discord liaison: the agent that answers the #foro forum and @agents in #general, and turns requests into PRs
 
-Ticket: T1409, T1411 · Last verified: 2026-10-27 by 21 liaison fixture tests + 31 discord-bot tests, live ticks on #foro and #general
+Ticket: T1409, T1411 · Last verified: 2026-10-27 by 24 liaison fixture tests + 31 discord-bot tests, live ticks on #foro and #general
 
 ## When to use
 Run, check, change or debug discord-liaison: the persistent agent that owns the conversation in the forum #foro
@@ -29,6 +29,12 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
   (`LIAISON_CDN_PREFIXES`), ≤ 8 MB, ≤ 4 per message. Before a run, `tick` downloads them with a token-less session
   (no redirects, magic bytes checked) into `state/work/<msg>-<n>.<ext>`; `inbox` lists them as `images="…"`, the model
   reads them with Read; `tick` deletes `state/work/` when the run ends.
+- The owner (T1411): `inbox` marks `owner="true"` when the author id equals `DISCORD_OWNER_ID` (the guild owner,
+  stored by `discord-bot setup`); his requests are the owner's decisions.
+- Escalations (owner, T1411): never "no puedo" / "lo decide el owner". Beyond its tools or rules the liaison reacts 👀,
+  acks in Spanish and runs `escalate`, which writes `state/escalations/<utc>-<msg>.md` (channel, message, author,
+  request, what it tried) and triggers `orchestrator-pulse`. The orchestrator answers, then moves the file to
+  `escalations/done/`; an open or done escalation of the same message is refused.
 - Ask first, then work (owner, T1411): a request that takes more than a quick answer gets a 👀 reaction (`react`) on
   receipt, a short Spanish text only when the wait is long, the result, then ✅ on the same message.
 - Images: `art` runs `concept-img` (OpenRouter, `LIAISON_ART_MODEL`, default seedream-5-0-flash 1K) into
@@ -45,6 +51,7 @@ discord-liaison inbox | done        # what the LLM run sees; done clears only wh
 discord-liaison post <thread> [--image <png>] <texto…>   # forum threads or #general, sanitized; LIAISON_DRY_RUN=1 prints
 discord-liaison react <thread> <message-id> 👀|✅       # ack on receipt, done when the result is posted
 discord-liaison art "<prompt>"     # concept-img into state/art/, prints the path; daily image cap
+discord-liaison escalate <message-id> "<asked; tried>"   # -> state/escalations/, pulses the orchestrator
 discord-liaison map <thread> <project> | pr <project>   # pr = registry + route + daily PR cap gate
 discord-liaison test                # fixture tests (also bin/tests/discord-liaison.test.sh)
 journalctl --user -u discord-liaison-check -n 20; tail ~/agents/discord-liaison/logs/caps.log
@@ -60,8 +67,11 @@ Caps: `LIAISON_RUNS_PER_DAY` (30), `LIAISON_PRS_PER_DAY` (3), `LIAISON_IMAGES_PE
   answered (2026-10-27: the 08:25 joke mention was answered by hand before the deploy).
 - Discord renders a mention as `<@bot-id>` or `<@&role-id>`; `@agents` typed by a member is usually the bot's
   managed role, not the user, so both count. The watcher rewrites both to `@agents` before the LLM sees them.
-- Read rejects animated GIFs (live 2026-10-27, an owner GIF of 3.7 MB): `tick` turns GIF/WebP into a PNG of the
-  first frame with ffmpeg (30 s timeout) and drops the file when ffmpeg fails (animated WebP: ffmpeg cannot decode).
+- Read rejects animated GIFs (live 2026-10-27, an owner GIF of 3.7 MB), and one frame tells nothing of the motion
+  (owner): `tick` turns a GIF/WebP into one contact sheet: ffprobe counts frames, ffmpeg `drawtext` numbers each frame
+  by its source index before `select` picks up to 12 evenly, cells ≤ 512 px, `tile` 4 wide (≤ 2048 px), note
+  "GIF, N frames, X s" in `inbox`. ffmpeg cannot decode animated WebP: such a file is dropped.
+- Before T1411 the liaison did not know the owner: at 09:00 it told him "eso lo decide el owner"; `owner="true"` fixes it.
 - The CDN download must not reuse the bot's REST session: it carries `Authorization: Bot <token>`; a test checks
   that the fake CDN never sees that header.
 - Before T1411 the liaison could post text only: the 08:38 concept-art mention got a written self-portrait and a
