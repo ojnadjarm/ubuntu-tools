@@ -1,8 +1,10 @@
 """discord-liaison tick|check|inbox|done|post|map|pr|status: the liaison's tools for #foro and #general (T1409, T1411)."""
 import asyncio
 import os
+import shlex
 import subprocess
 import sys
+import time
 
 from discordbot.cli import write_config
 from discordbot.config import Config
@@ -17,7 +19,10 @@ from .watch import Watcher
 
 GENERAL = '#general'
 ME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-USAGE = 'usage: discord-liaison tick [--dry-run]|check|inbox|done|post <thread> <text…>|map <thread> <project>|pr <project>|status'
+USAGE = ('usage: discord-liaison tick [--dry-run]|check|inbox|done|post <thread> [--image <png>] <text…>|'
+         'react <thread> <message> <emoji>|art <prompt…>|map <thread> <project>|pr <project>|status')
+IMAGE_MAGIC = (b'\x89PNG\r\n\x1a\n', b'\xff\xd8\xff')
+MAX_IMAGE = 10 * 1024 * 1024
 
 
 class App:
@@ -30,7 +35,9 @@ class App:
         self.registry = Registry(env.get('LIAISON_REGISTRY', os.path.join(ME, 'projects.json')))
         os.makedirs(os.path.join(self.home, 'logs'), exist_ok=True)
         self.caps = Caps(os.path.join(self.home, 'state', 'caps.json'), os.path.join(self.home, 'logs', 'caps.log'),
-                         {'run': int(env.get('LIAISON_RUNS_PER_DAY', '30')), 'pr': int(env.get('LIAISON_PRS_PER_DAY', '3'))})
+                         {'run': int(env.get('LIAISON_RUNS_PER_DAY', '30')), 'pr': int(env.get('LIAISON_PRS_PER_DAY', '3')),
+                          'img': int(env.get('LIAISON_IMAGES_PER_DAY', '5'))})
+        self.art_dir = os.path.join(self.home, 'state', 'art')
 
     async def general_id(self, save):
         """#general's id: DISCORD_GENERAL_ID, else the guild's text channel named general, stored in config.env."""
@@ -102,25 +109,82 @@ class App:
         print(f'done: {n} cleared, {len(self.state.inbox)} still in the inbox')
         return 0
 
+    async def allowed(self, tid):
+        """True for a thread of the forum or #general: the only places the liaison may post or react."""
+        if self.general and tid == self.general:
+            return True
+        try:
+            ch = await self.rest.channel(tid)
+        except RestError:
+            return False
+        return bool(self.forum) and ch.get('parent_id') == self.forum
+
+    def image_ok(self, path):
+        """Only a PNG or JPEG made by `art`, under the size limit, may be attached."""
+        real = os.path.realpath(path)
+        if os.path.dirname(real) != os.path.realpath(self.art_dir) or not os.path.isfile(real):
+            return False
+        with open(real, 'rb') as f:
+            head = f.read(8)
+        return any(head.startswith(m) for m in IMAGE_MAGIC) and os.path.getsize(real) <= MAX_IMAGE
+
     async def post(self, args):
+        image = ''
+        if args[1:2] == ['--image'] and len(args) > 2:
+            image, args = args[2], args[:1] + args[3:]
         if len(args) < 2:
             print(USAGE)
             return 2
         tid, text = args[0], ' '.join(args[1:])
-        try:
-            ch = await self.rest.channel(tid)
-        except RestError:
-            ch = {}
-        if not (self.forum and ch.get('parent_id') == self.forum or self.general and tid == self.general):
+        if not await self.allowed(tid):
             print(f'refused: {tid} is neither a thread of the forum nor #general')
+            return 3
+        if image and not self.image_ok(image):
+            print('refused: --image takes only a PNG/JPEG made by `discord-liaison art` (max 10 MB)')
             return 3
         parts = chunks(clean(text, [self.env.get(k, '') for k in SECRET_KEYS]))
         if self.env.get('LIAISON_DRY_RUN'):
-            print(f'would post {len(parts)} message(s) to {tid}:\n' + '\n'.join(parts))
+            print(f'would post {len(parts)} message(s) to {tid}{" with " + image if image else ""}:\n' + '\n'.join(parts))
             return 0
-        for part in parts:
-            await self.rest.send(tid, part)
-        print(f'posted {len(parts)} message(s)')
+        for i, part in enumerate(parts):
+            if image and i == len(parts) - 1:
+                await self.rest.send_file(tid, part, image)
+            else:
+                await self.rest.send(tid, part)
+        print(f'posted {len(parts)} message(s){" with the image" if image else ""}')
+        return 0
+
+    async def react(self, args):
+        if len(args) != 3:
+            print(USAGE)
+            return 2
+        if not await self.allowed(args[0]):
+            print(f'refused: {args[0]} is neither a thread of the forum nor #general')
+            return 3
+        await self.rest.react(*args)
+        print(f'reacted {args[2]}')
+        return 0
+
+    def art(self, args):
+        if not args:
+            print(USAGE)
+            return 2
+        if not self.caps.take('img'):
+            print(f'refused: image cap reached ({self.caps.limits["img"]} per day); say so in the thread')
+            return 3
+        os.makedirs(self.art_dir, exist_ok=True)
+        out = os.path.join(self.art_dir, time.strftime('%Y%m%d-%H%M%S') + '.png')
+        with open(out + '.prompt', 'w') as f:
+            f.write(' '.join(args) + '\n')
+        cmd = shlex.split(self.env.get('LIAISON_ART_CMD', 'concept-img')) + [
+            '--model', self.env.get('LIAISON_ART_MODEL', 'bytedance-seed/seedream-5-0-flash'),
+            '--prompt-file', out + '.prompt', '--resolution', '1K', '--out', out,
+            '--log', os.path.join(self.art_dir, 'spend.tsv'), '--start', '0']
+        rc = subprocess.call(cmd, stdin=subprocess.DEVNULL)
+        if rc != 0 or not os.path.exists(out):
+            print(f'art failed (concept-img exit {rc})')
+            return 1
+        print(out)
         return 0
 
     def map(self, args):
@@ -148,7 +212,8 @@ class App:
 
     def status(self):
         print(f'inbox {len(self.state.inbox)}  threads mapped {sum(1 for t in self.state.threads.values() if t.get("project"))}'
-              f'  runs {self.caps.used("run")}/{self.caps.limits["run"]}  PRs {self.caps.used("pr")}/{self.caps.limits["pr"]}')
+              f'  runs {self.caps.used("run")}/{self.caps.limits["run"]}  PRs {self.caps.used("pr")}/{self.caps.limits["pr"]}'
+              f'  images {self.caps.used("img")}/{self.caps.limits["img"]}')
         for p in self.registry.projects.values():
             print(f'project {p["id"]}  {p["repo"]}  route {self.registry.route(p["id"])}')
         return 0
@@ -163,7 +228,7 @@ async def amain(argv, env=None, rest=None):
         rest = Rest(cfg.api_base, cfg.token())
     app = App(env, rest)
     try:
-        if cmd in ('tick', 'post'):
+        if cmd in ('tick', 'post', 'react'):
             return await getattr(app, cmd)(args)
         if cmd == 'check':
             msgs, _ = await app.check()
@@ -171,7 +236,7 @@ async def amain(argv, env=None, rest=None):
             return 0
         if cmd in ('inbox', 'done', 'status'):
             return getattr(app, cmd)()
-        if cmd in ('map', 'pr'):
+        if cmd in ('map', 'pr', 'art'):
             return getattr(app, cmd)(args)
         print(USAGE)
         return 2

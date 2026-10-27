@@ -13,7 +13,7 @@ from .sanitize import chunks, clean
 
 ME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONTENT_FLAGS = (1 << 18) | (1 << 19)
-PERMS = 1024 | 2048 | 64 | 65536 | 16 | 128 | (1 << 34) | (1 << 35) | (1 << 38)
+PERMS = 1024 | 2048 | 64 | 32768 | 65536 | 16 | 128 | (1 << 34) | (1 << 35) | (1 << 38)
 FORUM = 15
 
 

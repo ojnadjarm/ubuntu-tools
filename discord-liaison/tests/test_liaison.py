@@ -74,7 +74,8 @@ class Base(unittest.IsolatedAsyncioTestCase):
         self.env = {'DISCORD_GUILD_ID': '100', 'DISCORD_FORUM_ID': '300', 'LIAISON_HOME': self.tmp.name,
                     'HARNESS_CONFIG': self.conf,
                     'LIAISON_REGISTRY': reg, 'LIAISON_RUNS_PER_DAY': '2', 'LIAISON_PRS_PER_DAY': '1',
-                    'LIAISON_AGENT_CMD': 'true'}
+                    'LIAISON_AGENT_CMD': 'true', 'LIAISON_IMAGES_PER_DAY': '1',
+                    'LIAISON_ART_CMD': f'{sys.executable} {HERE}/tests/fake_art.py'}
 
     async def asyncTearDown(self):
         await self.rest.close()
@@ -167,6 +168,61 @@ class TestGeneral(Base):
         self.assertNotIn('10.1.2.3', self.fake.sent('999')[0])
         rc, _ = await self.run_cli('post', '998', 'hola', env=env)
         self.assertEqual((rc, self.fake.sent('998')), (3, []))
+
+
+class TestImages(Base):
+    PNG = b'\x89PNG\r\n\x1a\n' + b'0' * 64
+
+    async def test_art_makes_image_in_art_dir_under_daily_cap(self):
+        rc, out = await self.run_cli('art', 'un', 'robot', 'amable')
+        self.assertEqual(rc, 0)
+        path = out.strip().splitlines()[-1]
+        self.assertTrue(path.startswith(os.path.join(self.tmp.name, 'state', 'art') + os.sep))
+        self.assertEqual(open(path, 'rb').read(8), self.PNG[:8])
+        self.assertIn('un robot amable', open(path + '.prompt').read())
+        rc, out = await self.run_cli('art', 'otro')
+        self.assertEqual(rc, 3)
+        self.assertIn('cap', out)
+
+    async def test_post_image_to_general_multipart_sanitized(self):
+        _, out = await self.run_cli('art', 'robot')
+        path = out.strip().splitlines()[-1]
+        rc, out = await self.run_cli('post', '999', '--image', path, '¡Aquí está!', 'ver', '/home/x/y.png',
+                                     env={'DISCORD_GENERAL_ID': '999'})
+        self.assertEqual(rc, 0, out)
+        m = self.fake.messages['999'][-1]
+        self.assertEqual(m['author']['id'], '900')
+        self.assertIn('¡Aquí está!', m['content'])
+        self.assertNotIn('/home/x', m['content'])
+        self.assertEqual(m['attachments'], [{'filename': os.path.basename(path), 'size': len(self.PNG)}])
+        self.assertEqual(m['allowed_mentions'], {'parse': []})
+
+    async def test_post_image_refuses_files_outside_art_dir_or_not_images(self):
+        art = os.path.join(self.tmp.name, 'state', 'art')
+        os.makedirs(art)
+        secret = os.path.join(self.tmp.name, 'token.png')
+        fake_png = os.path.join(art, 'x.png')
+        for p, data in ((secret, self.PNG), (fake_png, b'TOKEN=abc')):
+            with open(p, 'wb') as f:
+                f.write(data)
+        for p in (secret, fake_png, os.path.join(art, '..', 'token.png')):
+            rc, out = await self.run_cli('post', '400', '--image', p, 'hola')
+            self.assertEqual(rc, 3, p)
+        self.assertEqual(self.fake.sent('400'), [])
+
+
+class TestReact(Base):
+    async def test_react_on_general_or_forum_only(self):
+        env = {'DISCORD_GENERAL_ID': '999'}
+        mid = self.fake.say('999', '2', '<@900> haz arte', users=['900'])
+        rc, _ = await self.run_cli('react', '999', mid, '👀', env=env)
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.fake.reactions[('999', mid)], ['900'])
+        self.assertEqual(self.fake.my_emojis[('999', mid)], ['👀'])
+        self.fake.channels['998'] = {'id': '998', 'type': 0, 'guild_id': '100', 'name': 'juegos'}
+        rc, _ = await self.run_cli('react', '998', mid, '✅', env=env)
+        self.assertEqual(rc, 3)
+        self.assertNotIn(('998', mid), self.fake.reactions)
 
 
 class TestRegistry(unittest.TestCase):

@@ -1,5 +1,7 @@
 """Discord REST adapter: the few endpoints the bot and runner use, with 429 retry."""
 import asyncio
+import json as jsonlib
+import os
 from urllib.parse import quote
 
 import aiohttp
@@ -21,12 +23,13 @@ class Rest:
         if self._session:
             await self._session.close()
 
-    async def call(self, method, path, json=None, params=None):
+    async def call(self, method, path, json=None, params=None, form=None):
+        """One request with 429 retry; `form` is a callable that builds a fresh FormData per attempt."""
         if self._session is None:
             self._session = aiohttp.ClientSession(headers=self._headers)
         for _ in range(5):
             async with self._session.request(method, self.base + path, json=json, params=params,
-                                             proxy=self.proxy) as r:
+                                             data=form() if form else None, proxy=self.proxy) as r:
                 if r.status == 429:
                     body = await r.json(content_type=None)
                     await asyncio.sleep(float(body.get('retry_after', 1)))
@@ -61,6 +64,19 @@ class Rest:
     async def send(self, cid, content):
         return await self.call('POST', f'/channels/{cid}/messages',
                                json={'content': content, 'allowed_mentions': {'parse': []}})
+
+    async def send_file(self, cid, content, path):
+        """One message with one file attachment (multipart upload), mentions disabled."""
+        def form():
+            f = aiohttp.FormData()
+            f.add_field('payload_json', jsonlib.dumps({'content': content, 'allowed_mentions': {'parse': []}}),
+                        content_type='application/json')
+            f.add_field('files[0]', open(path, 'rb').read(), filename=os.path.basename(path))
+            return f
+        return await self.call('POST', f'/channels/{cid}/messages', form=form)
+
+    async def react(self, cid, mid, emoji):
+        return await self.call('PUT', f'/channels/{cid}/messages/{mid}/reactions/{quote(emoji)}/@me')
 
     async def create_post(self, forum_id, name, content, tag_ids):
         return await self.call('POST', f'/channels/{forum_id}/threads', json={

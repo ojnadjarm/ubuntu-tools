@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# discord-liaison tick [--dry-run]|check|inbox|done|post|map|pr|status|test — the Discord forum liaison's tools (T1409).
-U='usage: discord-liaison tick [--dry-run]|check|inbox|done|post <thread> <text…>|map <thread> <project>|pr <project>|status|test'
+# discord-liaison tick [--dry-run]|check|inbox|done|post|react|art|map|pr|status|test — the Discord liaison's tools (T1409, T1411).
+U='usage: discord-liaison tick [--dry-run]|check|inbox|done|post <thread> [--image <png>] <text…>|react <thread> <message> <emoji>|art <prompt…>|map <thread> <project>|pr <project>|status|test'
 case "${1:-}" in
   -h|--help) echo "$U"; exit 0 ;;
   -*) echo "discord-liaison: unknown option: $1" >&2; echo "$U" >&2; exit 2 ;;
@@ -12,5 +12,5 @@ if [ "${1:-}" = test ]; then
 fi
 # shellcheck source=/dev/null
 . "$D/agent.env"
-export LIAISON_RUNS_PER_DAY LIAISON_PRS_PER_DAY
+export LIAISON_RUNS_PER_DAY LIAISON_PRS_PER_DAY LIAISON_IMAGES_PER_DAY
 PYTHONPATH="$D:$B" exec "$B/.venv/bin/python" -m liaison "$@"

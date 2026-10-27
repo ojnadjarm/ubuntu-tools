@@ -1,6 +1,6 @@
 # Discord liaison: the agent that answers the #foro forum and @agents in #general, and turns requests into PRs
 
-Ticket: T1409, T1411 · Last verified: 2026-10-27 by 15 liaison fixture tests + 31 discord-bot tests, a live tick on #foro and #general
+Ticket: T1409, T1411 · Last verified: 2026-10-27 by 19 liaison fixture tests + 31 discord-bot tests, live ticks on #foro and #general
 
 ## When to use
 Run, check, change or debug discord-liaison: the persistent agent that owns the conversation in the forum #foro
@@ -22,8 +22,14 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
 - Registry `discord-liaison/projects.json`: one entry per project (repo, clone, match tags/title, rules, skills, `po`).
   `Registry.route()` is the one routing seam: `po` set → that project's threads go to its PO agent (T1410), else the
   liaison does the work. A repo not in the registry: reply "pendiente", `notify-owner`, nothing starts.
-- #general (owner, T1411): answer general questions on any topic, in Spanish; send people to #foro only for
-  coordination with other agents or follow-up on a project; never start work from #general (`BRIEF.md`).
+- #general (owner, T1411): answer general questions on any topic, in Spanish, and do small creative requests there
+  (concept art via `art` + `post --image`, short texts); send people to #foro only for coordination with other agents
+  or follow-up on a project; never `map`/`pr` from #general (`BRIEF.md`).
+- Ask first, then work (owner, T1411): a request that takes more than a quick answer gets a 👀 reaction (`react`) on
+  receipt, a short Spanish text only when the wait is long, the result, then ✅ on the same message.
+- Images: `art` runs `concept-img` (OpenRouter, `LIAISON_ART_MODEL`, default seedream-5-0-flash 1K) into
+  `state/art/` under `LIAISON_IMAGES_PER_DAY` (5); `post --image` attaches only a PNG/JPEG from that directory
+  (realpath + magic bytes, ≤ 10 MB) as one multipart upload (`Rest.send_file`), so no other file can leave.
 - Split with discord-bot: `DISCORD_FORUM_REPLIES=liaison` in config.env. The bot still tags posts and runs the owner's
   approved jobs; it no longer sends its English ACK or tool-less answers. Its sandbox is unchanged.
 
@@ -32,12 +38,14 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
 discord-liaison status              # inbox, mapped threads, runs/PRs used today, projects and their route
 discord-liaison tick --dry-run      # read #foro, write REPORT.md, post nothing, keep state
 discord-liaison inbox | done        # what the LLM run sees; done clears only what inbox showed
-discord-liaison post <thread> <texto…>   # forum threads or #general, sanitized; LIAISON_DRY_RUN=1 prints instead
+discord-liaison post <thread> [--image <png>] <texto…>   # forum threads or #general, sanitized; LIAISON_DRY_RUN=1 prints
+discord-liaison react <thread> <message-id> 👀|✅       # ack on receipt, done when the result is posted
+discord-liaison art "<prompt>"     # concept-img into state/art/, prints the path; daily image cap
 discord-liaison map <thread> <project> | pr <project>   # pr = registry + route + daily PR cap gate
 discord-liaison test                # fixture tests (also bin/tests/discord-liaison.test.sh)
 journalctl --user -u discord-liaison-check -n 20; tail ~/agents/discord-liaison/logs/caps.log
 ```
-Caps: `LIAISON_RUNS_PER_DAY` (30), `LIAISON_PRS_PER_DAY` (3) in `discord-liaison/agent.env`.
+Caps: `LIAISON_RUNS_PER_DAY` (30), `LIAISON_PRS_PER_DAY` (3), `LIAISON_IMAGES_PER_DAY` (5) in `discord-liaison/agent.env`.
 
 ## Pitfalls (measured)
 - The first tick with an empty cursor only seeds it: old history never wakes the LLM (#foro had 2 threads of old
@@ -48,6 +56,8 @@ Caps: `LIAISON_RUNS_PER_DAY` (30), `LIAISON_PRS_PER_DAY` (3) in `discord-liaison
   answered (2026-10-27: the 08:25 joke mention was answered by hand before the deploy).
 - Discord renders a mention as `<@bot-id>` or `<@&role-id>`; `@agents` typed by a member is usually the bot's
   managed role, not the user, so both count. The watcher rewrites both to `@agents` before the LLM sees them.
+- Before T1411 the liaison could post text only: the 08:38 concept-art mention got a written self-portrait and a
+  pointer to #foro. Uploads need Attach Files (32768), now in `discord-bot invite` PERMS; the guild granted it already.
 - discord-bot's approved-job messages are Spanish since T1411 (bot texts and the worker's final report); its
   sandbox and approval checks did not change. The bot reads code ro at start: restart its unit after a change.
 
