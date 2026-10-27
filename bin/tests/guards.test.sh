@@ -27,6 +27,46 @@ out=$(cd "$repo" && git push origin main 2>&1); is 'git push exits 3' "$?" 3
 out=$(git -C "$repo" commit -m x 2>&1); is 'git -C … commit exits 3' "$?" 3
 out=$(git -c user.name=x -C "$repo" push 2>&1); is 'git -c … push exits 3' "$?" 3
 
+# 1b. T1420: commit/push pass in personal repos (target resolved like git does), collab pushes only to a
+#     feature branch, force-push refused everywhere; work and unknown repos stay refused. Fixture HOME only.
+FH="$WORK/home"; export GIT_CONFIG_GLOBAL="$WORK/gitconfig" GIT_CONFIG_NOSYSTEM=1
+export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+: >"$GIT_CONFIG_GLOBAL"
+mk() { /usr/bin/git init -q -b main "$1" && /usr/bin/git -C "$1" commit -q --allow-empty -m init \
+       && /usr/bin/git init -q --bare "$1.remote.git" && /usr/bin/git -C "$1" remote add origin "$1.remote.git" \
+       && /usr/bin/git -C "$1" push -q -u origin main 2>/dev/null; }
+for r in agents the-dark-eye moodle-harness projects/personal/p projects/collab/c moodle-envs/vass other agents/nested; do mk "$FH/$r"; done
+case "$FH" in "$WORK"/*) ;; *) echo "FAIL fixture HOME outside the temp dir"; exit 1 ;; esac
+[ "$(readlink -f "$FH")" != "$(readlink -f "$HOME")" ] && [ -z "$(/usr/bin/git -C "$FH/agents" remote get-url origin | grep -v "^$WORK/")" ] \
+  && ok 'selftest: fixture HOME and remotes under the temp dir' || { nok 'selftest: fixture HOME and remotes' "$FH"; exit 1; }
+g() { HOME="$FH" git "$@" >/dev/null 2>&1; echo $?; }
+rc() { /usr/bin/git -C "$1.remote.git" rev-list --count main; }
+is 'personal ~/agents: git -C … commit passes' "$(g -C "$FH/agents" commit -q --allow-empty -m a)" 0
+is 'personal ~/agents: git -C … push passes' "$(g -C "$FH/agents" push -q)$(rc "$FH/agents")" 02
+mkdir -p "$FH/moodle-harness/sub"
+is 'personal ~/moodle-harness: commit from a subdir cwd passes' "$(cd "$FH/moodle-harness/sub" && g commit -q --allow-empty -m a)" 0
+is 'personal ~/the-dark-eye: --git-dir/--work-tree commit + push pass' \
+   "$(g --git-dir="$FH/the-dark-eye/.git" --work-tree "$FH/the-dark-eye" commit -q --allow-empty -m a)$(g --git-dir="$FH/the-dark-eye/.git" --work-tree="$FH/the-dark-eye" push -q origin main)" 00
+is 'personal ~/projects/personal/p: commit + push pass' "$(g -C "$FH/projects/personal/p" commit -q --allow-empty -m a)$(g -C "$FH/projects/personal/p" push -q origin main)" 00
+is 'work repo: commit and push refused' "$(g -C "$FH/moodle-envs/vass" commit -q --allow-empty -m a)$(g -C "$FH/moodle-envs/vass" push -q)" 33
+is 'unknown repo under HOME: commit refused' "$(g -C "$FH/other" commit -q --allow-empty -m a)" 3
+is 'nested repo inside ~/agents: commit refused' "$(g -C "$FH/agents/nested" commit -q --allow-empty -m a)" 3
+is 'sudo git commit in a work repo refused' "$(g -c x.y=1 -C "$FH/moodle-envs/vass" commit -m a; HOME="$FH" sudo git -C "$FH/moodle-envs/vass" commit -m a >/dev/null 2>&1; echo $?)" "$(printf '3\n3')"
+for f in --force -f -fu -uf --force-with-lease --force-with-lease=main:abc +main --mirror; do
+  is "personal push $f refused" "$(g -C "$FH/agents" push "$f" origin main)" 3
+done
+is 'force-pushes changed no remote' "$(rc "$FH/agents")" 2
+C="$FH/projects/collab/c"
+is 'collab: commit passes' "$(g -C "$C" commit -q --allow-empty -m a)" 0
+is 'collab: push with no refspec on main refused' "$(g -C "$C" push -q)" 3
+is 'collab: push origin main / HEAD on main / feat:main / --all refused' \
+   "$(g -C "$C" push origin main)$(g -C "$C" push origin HEAD)$(g -C "$C" push origin feat:refs/heads/main)$(g -C "$C" push --all origin)" 3333
+/usr/bin/git -C "$C" switch -q -c feat
+is 'collab: push -u origin feat and push origin HEAD on feat pass' "$(g -C "$C" push -q -u origin feat)$(g -C "$C" commit -q --allow-empty -m b)$(g -C "$C" push -q origin HEAD)" 000
+is 'collab: plain push on a tracked feature branch passes' "$(g -C "$C" commit -q --allow-empty -m c)$(g -C "$C" push -q)" 00
+is 'collab: remote main untouched' "$(rc "$C")" 1
+is 'collab: push -f to a feature branch refused' "$(g -C "$C" push -f origin feat)" 3
+
 # 2. every other git verb still works.
 out=$(git -C "$repo" status --porcelain 2>&1); is 'git status forwards' "$?" 0
 grep -q '^A  f' <<<"$out" && ok 'git status is the real answer' || nok 'git status is the real answer' "$out"

@@ -45,24 +45,62 @@ power_check() {
   fi
 }
 
+# git_check <commit|push> [args…] — commit/push only in personal repos, collab pushes only to a feature branch, never force.
+git_check() {
+  local verb=$1 h top kind a d skip=0 all= g; local -a pos=() refs; shift
+  g=$(real git); h=$(readlink -f "$HOME")
+  top=$("$g" "${git_pre[@]}" rev-parse --show-toplevel 2>/dev/null)
+  case "$top" in
+    "$h/agents"|"$h/the-dark-eye"|"$h/moodle-harness"|"$h/projects/personal/"?*) kind=personal ;;
+    "$h/projects/collab/"?*) kind=collab ;;
+    *) refuse "FLEET.md §5.1 — no \`git $verb\` in a user repo" \
+              "left the work in the tree; \`git status\`/\`git diff\` show it" \
+              "the owner, by hand" ;;
+  esac
+  [ "$verb" = push ] || return 0
+  for a in "$@"; do
+    [ "$skip" = 1 ] && { skip=0; continue; }
+    case "$a" in
+      --force|--force-with-lease*|--mirror|+*|-f*|-[!-]*f*)
+        refuse "FLEET.md §5.1 — no force-push (\`git push $a\`)" "left the commits local; a plain push or a new branch keeps history" \
+               "the owner, by hand" ;;
+      -o|--push-option|--repo|--receive-pack|--exec) skip=1 ;;
+      --all|--branches) all=$a ;;
+      -*) ;;
+      *) pos+=("$a") ;;
+    esac
+  done
+  [ "$kind" = collab ] || return 0
+  refs=("${pos[@]:1}"); [ -n "$all" ] && refs+=(main)
+  if [ "${#refs[@]}" = 0 ]; then
+    d=$("$g" "${git_pre[@]}" rev-parse --abbrev-ref '@{push}' 2>/dev/null) && d=${d#*/} \
+      || d=$("$g" "${git_pre[@]}" symbolic-ref --short HEAD 2>/dev/null)
+    refs=("$d")
+  fi
+  for a in "${refs[@]}"; do
+    d=${a#*:}; [ "$d" = HEAD ] && d=$("$g" "${git_pre[@]}" symbolic-ref --short HEAD 2>/dev/null)
+    case "${d#refs/heads/}" in main|master|'')
+      refuse "FLEET.md §5.1 — collab repos are feature-branch only: no push to \`${d:-?}\`" \
+             "kept the work on a feature branch for a PR" "the owner, by hand" ;;
+    esac
+  done
+}
+
 # guard_check <name> [args…] — the refusal rules for one command name.
 guard_check() {
   local me verb skip a n i sub unit
   me=$1; shift
   case "$me" in
   git)
-    verb=; skip=0
+    verb=; skip=0; n=0
     for a in "$@"; do
+      n=$((n+1))
       [ "$skip" = 1 ] && { skip=0; continue; }
       case "$a" in -C|-c|--git-dir|--work-tree|--namespace) skip=1; continue ;;
                    -*) continue ;; esac
       verb=$a; break
     done
-    case "$verb" in commit|push)
-      refuse "FLEET.md §5.1 — no \`git $verb\` in a user repo" \
-             "left the work in the tree; \`git status\`/\`git diff\` show it" \
-             "the owner, by hand" ;;
-    esac ;;
+    case "$verb" in commit|push) git_pre=("${@:1:n-1}"); git_check "$verb" "${@:n+1}" ;; esac ;;
   reboot|poweroff|halt|shutdown)
     power_check "$me" ;;
   tailscale)
