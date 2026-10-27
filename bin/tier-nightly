@@ -14,7 +14,7 @@ case "${1:-}" in
   -h|--help) cat <<EOF
 usage: tier-nightly    one pass, after ci-window --quiet (load < 4, no fleet CI unit active):
   1. Mooblox HEAD ($REPO, a git archive in a temp dir, npm ci): npm test, then the perf gate under
-     flock $LOCK timeout 900 (npm run test:perf)
+     flock $LOCK timeout 1500 (npm run test:perf; T1407 measured 1000 s with one core busy)
   2. mci full on every Moodle plugin with an mci log (<log>.plugin) newer than the last pass (first pass: 24 h);
      never under: $NEVER
 The fleet suite is fleet-ci-daily's (02:10). Output: $OUTDIR/<date>.txt; exit 1 when any row is red, so the
@@ -39,7 +39,7 @@ if git -C "$REPO" rev-parse --verify -q HEAD >/dev/null 2>&1; then
   git -C "$REPO" archive HEAD | tar -x -C "$tmp"
   if timed "mooblox $head npm ci" bash -c "cd '$tmp/client' && nice -n 19 npm ci --prefer-offline --no-audit --no-fund >/dev/null"; then
     timed "mooblox $head npm test" bash -c "set -o pipefail; cd '$tmp/client' && nice -n 19 npm test 2>&1 | tail -5"
-    timed "mooblox $head perf gate" flock "$LOCK" timeout 900 bash -c "set -o pipefail; cd '$tmp/client' && npm run test:perf 2>&1 | tail -15"
+    timed "mooblox $head perf gate" flock "$LOCK" timeout 1500 bash -c "set -o pipefail; cd '$tmp/client' && npm run test:perf 2>&1 | tail -15"
   fi
   rm -rf "$tmp"
 else
