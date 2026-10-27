@@ -162,7 +162,12 @@ class App:
                     dest = os.path.join(self.work, f'{m["id"]}-{i}{ext}')
                     try:
                         async with http.get(a['url'], allow_redirects=False) as r:
-                            data = await r.content.read(MAX_ATTACHMENT + 1) if r.status == 200 else b''
+                            data = b''
+                            if r.status == 200:
+                                async for chunk in r.content.iter_chunked(65536):
+                                    data += chunk
+                                    if len(data) > MAX_ATTACHMENT:
+                                        break
                     except aiohttp.ClientError:
                         data = b''
                     webp = data[:4] == b'RIFF' and data[8:12] == b'WEBP'

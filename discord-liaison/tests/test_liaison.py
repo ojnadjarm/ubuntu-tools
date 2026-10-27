@@ -1,4 +1,5 @@
 """Fixture tests: the liaison's watcher, registry, caps and CLI verbs against discord-bot's fake Discord REST."""
+import asyncio
 import importlib.util
 import io
 import json
@@ -60,7 +61,14 @@ class Fake(FakeDiscord):
 
     async def cdn(self, q):
         self.cdn_headers.append(dict(q.headers))
-        return web.Response(body=self.files[q.match_info['name']])
+        body = self.files[q.match_info['name']]
+        r = web.StreamResponse()
+        await r.prepare(q)
+        for i in range(0, len(body), 4096):
+            await r.write(body[i:i + 4096])
+            await asyncio.sleep(0.001)
+        await r.write_eof()
+        return r
 
     def say(self, tid, uid, text, bot=False, mid=None, users=(), roles=(), attachments=()):
         m = {'id': mid or str(next(self.ids)), 'author': {'id': uid, 'username': f'u{uid}', 'bot': bot}, 'content': text,
@@ -249,7 +257,8 @@ class TestAttachments(Base):
         await super().asyncSetUp()
         self.cdn = str(self.server.make_url('/cdn'))
         self.env['LIAISON_CDN_PREFIXES'] = self.cdn + '/'
-        self.fake.files = {'a.png': PNG, 'b.gif': GIF, 'fake.png': b'#!/bin/sh\nrm -rf ~\n' + b'0' * 30}
+        self.fake.files = {'a.png': PNG, 'b.gif': GIF, 'fake.png': b'#!/bin/sh\nrm -rf ~\n' + b'0' * 30,
+                           'anim.gif': gif(37, '320x240')}
 
     async def test_watcher_keeps_only_small_cdn_images_max_four(self):
         w = Watcher(self.rest, '100', '300', cdn=(self.cdn + '/',))
@@ -265,7 +274,8 @@ class TestAttachments(Base):
         env = {'DISCORD_GENERAL_ID': '999'}
         await self.run_cli('tick', env=env)
         self.fake.say('999', '2', '<@900> ves esta imagen?', users=['900'],
-                      attachments=[self.att('a.png'), self.att('b.gif'), self.att('fake.png')])
+                      attachments=[self.att('a.png'), self.att('b.gif'), self.att('fake.png'),
+                                   self.att('anim.gif', size=len(self.fake.files['anim.gif']))])
         seen = os.path.join(self.tmp.name, 'seen.txt')
         tok = os.path.join(self.tmp.name, 'token')
         open(tok, 'w').write('fake-token')
@@ -278,9 +288,10 @@ class TestAttachments(Base):
         work = os.path.join(self.tmp.name, 'state', 'work')
         self.assertIn(f'images="{work}/', out)
         paths = out.split('images="')[1].split('"')[0].split()
-        self.assertEqual([os.path.basename(p).split('-', 1)[1] for p in paths], ['0.png', '1.png'])
-        self.assertEqual(open(seen + '.magic').read().split(), ['png', 'png'])
+        self.assertEqual([os.path.basename(p).split('-', 1)[1] for p in paths], ['0.png', '1.png', '3.png'])
+        self.assertEqual(open(seen + '.magic').read().split(), ['png', 'png', 'png'])
         self.assertIn(f'[{paths[1]}: GIF, 1 frames', out)
+        self.assertIn(f'[{paths[2]}: GIF, 37 frames, 3.7 s: contact sheet of 12 frames', out)
         self.assertFalse(os.path.exists(work))
         self.assertTrue(self.fake.cdn_headers)
         self.assertFalse(any('Authorization' in h for h in self.fake.cdn_headers))
