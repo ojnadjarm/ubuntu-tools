@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# discord-liaison tick [--dry-run]|check|inbox|done|post|react|art|escalate|map|pr|status|test — the Discord liaison's tools (T1409, T1411).
+# discord-liaison tick [--dry-run]|check|inbox|done|post|react|art|escalate|map|pr|status|test — the Discord liaison's tools (T1409, T1411);
+# a project with a `po` in projects.json: its messages go to that PO (po-ask), its outbox/discord/ replies are posted (T1412).
 U='usage: discord-liaison tick [--dry-run]|check|inbox|done|post <thread> [--image <png>] <text…>|react <thread> <message> <emoji>|art <prompt…>|escalate <message> <what…>|map <thread> <project>|pr <project>|status|test'
 case "${1:-}" in
   -h|--help) echo "$U"; exit 0 ;;
@@ -13,4 +14,12 @@ fi
 # shellcheck source=/dev/null
 . "$D/agent.env"
 export LIAISON_RUNS_PER_DAY LIAISON_PRS_PER_DAY LIAISON_IMAGES_PER_DAY
-PYTHONPATH="$D:$B" exec "$B/.venv/bin/python" -m liaison "$@"
+export PYTHONPATH="$D:$B"
+py="$B/.venv/bin/python"
+# T1412 P5: PO replies are posted before each tick; PO-routed messages go to their PO when the LLM reads the inbox or maps a thread.
+case "${1:-} ${2:-}" in
+  'tick '|tick\ [!-]*) "$py" -m liaison.po relay ;;
+  'inbox '*) "$py" -m liaison.po handoff ;;
+  'map '*) "$py" -m liaison "$@"; rc=$?; [ $rc -ne 0 ] || "$py" -m liaison.po handoff; exit $rc ;;
+esac
+exec "$py" -m liaison "$@"
