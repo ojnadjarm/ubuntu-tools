@@ -23,7 +23,7 @@ cat >"$WORK/stubs/agent-run" <<'STUB'
 #!/usr/bin/env bash
 d="$HARNESS_HOME/$1"
 mkdir "$WORK/running" 2>/dev/null || echo overlap >>"$WORK/runs.log"
-echo "start $(ls "$d/current" | wc -l)" >>"$WORK/runs.log"
+echo "start $(ls "$d/current" | wc -l)" >>"$WORK/runs.log"; echo "$PO_BUDGET" >>"$WORK/budget.log"
 [ -e "$WORK/drop" ] && { rm -f "$WORK/drop"; po-ask fx "arrived mid-run" >/dev/null; }
 [ -e "$WORK/hold" ] && while [ -e "$WORK/hold" ]; do sleep 0.05; done
 if [ ! -e "$WORK/leave" ]; then
@@ -32,7 +32,8 @@ fi
 echo "ESCALATE: fx decision" >"$d/REPORT.md"
 rmdir "$WORK/running"; echo end >>"$WORK/runs.log"
 STUB
-chmod +x "$WORK/stubs/agent-run"
+printf '#!/bin/sh\nexit $(cat "$WORK/plan.rc" 2>/dev/null || echo 0)\n' >"$WORK/stubs/plan-usage"
+chmod +x "$WORK/stubs/agent-run" "$WORK/stubs/plan-usage"
 export PATH="$WORK/stubs:$BIN:$PATH" WORK
 
 python3 - "$WORK/port" "$WORK/got.jsonl" "$WORK/stream.jsonl" <<'PY' &
@@ -67,6 +68,7 @@ export NTFY_ENV_FILE="$WORK/ntfy.env" NTFY_LOG_FILE="$WORK/notify.log" NTFY_KEYS
 if curl -sS -m 3 -o /dev/null https://ntfy.sh 2>/dev/null; then echo 'FAIL selftest: sandbox reaches the network'; exit 1; fi
 ok 'selftest: no route to ntfy.sh'
 is 'selftest: agent-run is the fake' "$(command -v agent-run)" "$WORK/stubs/agent-run"
+is 'selftest: plan-usage is the fake' "$(command -v plan-usage)" "$WORK/stubs/plan-usage"
 case "$HARNESS_HOME" in "$WORK"/*) ok 'selftest: HARNESS_HOME is the fixture';; *) nok 'selftest: HARNESS_HOME' "$HARNESS_HOME";; esac
 
 # po-new
@@ -102,6 +104,10 @@ is 'po-run: 4 requests in done/' "$(ls "$P/done" | wc -l)" 4
 touch "$WORK/leave"; po-ask fx "unfiled" >/dev/null; po-run fx >/dev/null 2>&1; rm -f "$WORK/leave"
 ev 'po-run: a request the run left gets an outcome line' 'grep -l unfiled "$P"/done/*.md | xargs grep -q "^outcome: left in current/"'
 is 'po-run: current/ empty after' "$(ls "$P/current" | wc -l)" 0
+# review focus 4: week >= 95 % -> the run gets PO_BUDGET=stop (the brief then spawns no worker)
+is 'po-run: PO_BUDGET=ok under 95 %' "$(sort -u "$WORK/budget.log")" ok
+echo 1 >"$WORK/plan.rc"; po-ask fx "work at 96 %" >/dev/null; po-run fx >/dev/null 2>&1; rm -f "$WORK/plan.rc"
+is 'po-run: PO_BUDGET=stop at >= 95 %' "$(tail -1 "$WORK/budget.log")" stop
 
 # po-status
 printf '| F1 | fx | t | open |\n| F2 | fx | t | done |\n| F3 | fx | t | doing |\n' >>"$P/state/BACKLOG.md"

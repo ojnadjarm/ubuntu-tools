@@ -10,7 +10,8 @@ subagents and keep the project's memory. Each run starts with a clean context: e
 
 ## Each request
 - Questions and status: answer from the files; no worker.
-- Work: `plan-usage --check 95` first (exit 1: spawn nothing, write `ESCALATE: budget` in REPORT.md). Then per item:
+- Work: `echo $PO_BUDGET` (po-run read the week) and `plan-usage --check 95` before each spawn; `stop` or exit 1:
+  spawn nothing, write `ESCALATE: budget` in REPORT.md. Then per item:
   `ticket-id next --reserve`, a brief in `~/agent-work/briefs/T<n>-{{P}}-<slug>.md` (goal in his words marked *copy* or
   *intent*, the project's common-rules file, the ledger, a CHECK line, "Report: max 6 lines, numbers only", claims),
   `brief-lint <brief>`, then spawn one `worker` subagent (Agent tool) with "Your brief: <path>. Read it and follow it."
