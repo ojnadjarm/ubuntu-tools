@@ -213,13 +213,17 @@ run_one() {
   # Empty CI_UNITS: ci-window inside a test never sees the live CI units (its own scope sits outside the CI's cgroup).
   cmd=(env "PATH=$p" "SUDO_SHIM_TEST=$rel" CI_UNITS= ${tmp:+"TMPDIR=$tmp"} ${rlog:+"PC_TEST_ROOT_LOG=$rlog"} "${cmd[@]}")
   # Own scope per file: the cgroup OOM killer hits only this file; the wrapper marks an oom_kill for the report.
-  [[ -n $scoped ]] && cmd=(systemd-run --user --scope -q --slice=agents.slice --expand-environment=no -p "MemoryMax=$mem" -p MemorySwapMax=0 -p OOMPolicy=continue
+  local unit=rt-$BASHPID-$RANDOM.scope
+  [[ -n $scoped ]] && cmd=(systemd-run --user --scope -q --unit="$unit" --slice=agents.slice --expand-environment=no -p "MemoryMax=$mem" -p MemorySwapMax=0 -p OOMPolicy=continue
     bash -c '"${@:3}"; rc=$?; c=/sys/fs/cgroup$(sed -n "s/^0:://p" /proc/self/cgroup); [ -e "$c/memory.events" ] && grep -qE "^oom_kill [1-9]" "$c/memory.events" && : >"$1"; awk "/^usage_usec/ { print \$2 / 1e6 }" "$c/cpu.stat" >"$2" 2>/dev/null; exit $rc'
     _ "$logs/${rel//\//__}.oom" "$logs/${rel//\//__}.cpu" "${cmd[@]}")
   t0=$(date +%s.%N)
   (cd "$(dirname "$path")" && nice -n "$n" timeout -k 5 "${file_timeout:-$tmo}" "${cmd[@]}"; rc=$?; times >"$logs/${rel//\//__}.times"; exit $rc) \
     </dev/null >"$logs/${rel//\//__}.log" 2>&1
   rc=$?
+  # A child that outlived its file (ignored the timeout's SIGTERM, T1407) dies with the scope.
+  local ck=/sys/fs/cgroup/user.slice/user-$UID.slice/user@$UID.service/agents.slice/$unit/cgroup.kill
+  [[ -n $scoped && -w $ck ]] && echo 1 >"$ck" 2>/dev/null
   [[ -n $tmp ]] && rm -rf "$tmp"
   s=$(awk -v a="$t0" -v b="$(date +%s.%N)" 'BEGIN{printf "%.1f", b-a}')
   # cpu_s: user+sys of the file's scope (cgroup cpu.stat), else of the waited children (`times`; a timed-out scope lands here).

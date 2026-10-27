@@ -85,8 +85,15 @@ if systemd-run --user --scope -q bash -c 'test -e "/sys/fs/cgroup$(sed -n "s/^0:
   has 'over-cap file is reported oom' "$out" '^FAIL bin/tests/oom\.test\.sh [0-9.]+ oom$'
   has 'only the allocating child is killed' "$out" '^  \| survived$'
   has 'runner survives to its summary' "$(tail -1 <<<"$out")" '^FAIL 0/1 files in [0-9]+ s$'
+  # T1407: a child that ignores SIGTERM (a spinning ffmpeg) dies with its timed-out file's scope.
+  deaf="sleep 302.$$"
+  printf "bash -c 'trap \"\" TERM; exec %s' &\n%s\n" "$deaf" "$hang" >"$W/bin/tests/deaf.test.sh"
+  out=$(RUN_TESTS_ROOT="$W" RUN_TESTS_TIMEOUT=2 bash "$RUN" --only '*deaf*' 2>&1)
+  has 'deaf child: its file is cut by the timeout' "$out" '^FAIL bin/tests/deaf\.test\.sh [0-9.]+ timeout$'
+  is  'deaf child: no TERM-ignoring child outlives its file' "$(pgrep -fx "$deaf" | wc -l)" 0
+  pkill -KILL -fx "$deaf" 2>/dev/null; rm -f "$W/bin/tests/deaf.test.sh"
 else
-  echo 'SKIP needs a memory controller in user scopes: 4 over-cap oom cases (fresh container)'
+  echo 'SKIP needs a memory controller in user scopes: 6 over-cap oom and deaf-child cases (fresh container)'
 fi
 
 # cpu_s (T648): a stub burning ~1 CPU s reads 0.7-1.5, a sleep 1 stub < 0.2; scoped (cgroup cpu.stat) and no-bus (`times`) paths.

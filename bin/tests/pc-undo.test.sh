@@ -145,7 +145,7 @@ cat >"$D/bin/pc-conf" <<'EOF'
 EOF
 cat >"$D/bin/systemctl" <<'EOF'
 #!/usr/bin/env bash
-case "$*" in *"-p Type"*) echo oneshot;; *) echo failed;; esac
+case "$*" in *".timer -p Type"*) echo;; *"-p Type"*) echo oneshot;; *"z.timer -p UnitFileState"*) cat "${0%/bin/*}/zufs";; *"-p UnitFileState"*) echo enabled;; *".timer -p ActiveState"*) echo active;; *) echo failed;; esac
 EOF
 chmod +x "$D/bin/pc-conf" "$D/bin/systemctl"
 echo 0 >"$D/k1"; echo 5 >"$D/k2"; echo 1 >"$D/k3"; echo 500 >"$D/k4"; echo old >"$D/s.conf"
@@ -161,16 +161,20 @@ row() { jq -nc --arg id "$1" --arg t "$2" --arg a "$3" --arg r "$4" '{ts:"2026-0
   row dswap  swap    '0 MB'   'echo 142 MB'
   row dcont  container:x exited 'echo running'
   row dshot  x.service inactive 'systemctl --user show x.service -p ActiveState --value'
+  row dshot2 x2      inactive 'systemctl --user show x2 -p ActiveState --value'
+  row dtimer y.timer "enabled inactive" 'echo $(systemctl --user show y.timer -p UnitFileState --value) $(systemctl --user show y.timer -p ActiveState --value)'
+  row dtimz  z.timer "disabled inactive" 'echo $(systemctl --user show z.timer -p UnitFileState --value) $(systemctl --user show z.timer -p ActiveState --value)'
+  row dlink  /f/cache.bin linked 'echo copy'
   row dsys   vm.k    1500    "cat $D/k4"
   row dack   cups    active  'echo inactive'
   row dnone  tmp     done    ''
   row dsbin  k.ostype "$(cat /proc/sys/kernel/ostype)" 'sysctl -n kernel.ostype'
   echo '{"id":"dack","ack":true,"why":"off by hand"}'; } >"$DL"
-echo '[a, b]' >"$D/g"
+echo '[a, b]' >"$D/g"; echo enabled >"$D/zufs"
 dr() { env PATH="$D/bin:/usr/bin:/bin" PC_LEDGER="$DL" "$BIN/pc-undo" drift "$@"; }
 out=$(dr --json); rc=$?
 cls() { jq -r --arg t "$1" '.[] | select(.target == $t) | .class' <<<"$out"; }
-is 'drift --json is one row per target' "$(jq 'length' <<<"$out")" 13
+is 'drift --json is one row per target' "$(jq 'length' <<<"$out")" 17
 is 'drift takes the latest entry of a target' "$(jq -r '.[] | select(.target == "t.same") | .id' <<<"$out")" dsame
 is 'drift: read equals after → same'                   "$(cls t.same)" same
 is 'drift: file sha changed by a later entry → superseded' "$(cls k.one)" superseded
@@ -180,14 +184,18 @@ is 'drift: same read rewritten later → superseded'     "$(cls g.one)" supersed
 is 'drift: swap → transient'                           "$(cls swap)" transient
 is 'drift: container:* → transient'                    "$(cls container:x)" transient
 is 'drift: oneshot run state → transient'              "$(cls x.service)" transient
+is 'drift: oneshot named without .service → transient' "$(cls x2)" transient
+is 'drift: timer waiting, same unit file state → transient' "$(cls y.timer)" transient
+is 'drift: timer unit file state changed → drift'      "$(cls z.timer)" drift
+is 'drift: reclaimed hardlink rewritten by its owner → transient' "$(cls /f/cache.bin)" transient
 is 'drift: live sysctl changed → drift'                "$(cls vm.k)" drift
 is 'drift: drift row carries now'                      "$(jq -r '.[] | select(.target == "vm.k") | .now' <<<"$out")" 500
 is 'drift: acked id → acked'                           "$(cls cups)" acked
 is 'drift: no stored read → noread'                    "$(cls tmp)" noread
 is 'drift: reads get /usr/sbin on PATH'                "$(cls k.ostype)" same
 is 'drift exits 1 on drift' "$rc" 1
-txt=$(dr); is 'drift text ends with the counts' "$(tail -1 <<<"$txt")" '4 same, 2 superseded, 3 transient, 1 acked, 1 noread, 2 drift'
-echo 0 >"$D/k3"; echo 1500 >"$D/k4"
+txt=$(dr); is 'drift text ends with the counts' "$(tail -1 <<<"$txt")" '4 same, 2 superseded, 6 transient, 1 acked, 1 noread, 3 drift'
+echo 0 >"$D/k3"; echo 1500 >"$D/k4"; echo disabled >"$D/zufs"
 dr >/dev/null; is 'drift exits 0 when nothing drifts' "$?" 0
 
 [ $bad = 0 ] && echo 'PASS pc-undo' || echo 'FAIL pc-undo'
