@@ -29,6 +29,19 @@ SEEN_MAGIC = IMAGE_MAGIC + (b'GIF87a', b'GIF89a')
 MAX_IMAGE = 10 * 1024 * 1024
 
 
+def still(path):
+    """Replace a GIF/WebP with a PNG of its first frame (Read takes stills only); drop it when ffmpeg cannot."""
+    png = os.path.splitext(path)[0] + '.png'
+    try:
+        rc = subprocess.call(['ffmpeg', '-v', 'error', '-nostdin', '-y', '-i', path, '-frames:v', '1', png],
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+    except subprocess.TimeoutExpired:
+        rc = 1
+    os.unlink(path)
+    if rc != 0 and os.path.exists(png):
+        os.unlink(png)
+
+
 class App:
     def __init__(self, env, rest):
         self.env, self.rest = env, rest
@@ -120,6 +133,8 @@ class App:
                     if 0 < len(data) <= MAX_ATTACHMENT and (data.startswith(SEEN_MAGIC) or webp):
                         with open(dest, 'wb') as f:
                             f.write(data)
+                        if ext in ('.gif', '.webp'):
+                            still(dest)
 
     def images(self, mid):
         return sorted(glob.glob(os.path.join(glob.escape(self.work), f'{mid}-*')))

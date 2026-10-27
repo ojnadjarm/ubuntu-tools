@@ -234,7 +234,8 @@ class TestReact(Base):
 
 
 PNG = b'\x89PNG\r\n\x1a\n' + b'1' * 32
-GIF = b'GIF89a' + b'2' * 32
+GIF = (b'GIF89a\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00!\xf9\x04\x01\x00\x00\x00\x00'
+       b',\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;')
 
 
 class TestAttachments(Base):
@@ -265,7 +266,8 @@ class TestAttachments(Base):
         seen = os.path.join(self.tmp.name, 'seen.txt')
         tok = os.path.join(self.tmp.name, 'token')
         open(tok, 'w').write('fake-token')
-        run = f'DISCORD_TOKEN_FILE={tok} {sys.executable} -m liaison inbox > {seen}'
+        run = (f'DISCORD_TOKEN_FILE={tok} {sys.executable} -m liaison inbox > {seen}; for f in {self.tmp.name}/state/work/*; '
+               f'do head -c 4 "$f" | grep -q PNG && echo png || echo other; done > {seen}.magic')
         rc, _ = await self.run_cli('tick', env=dict(env, LIAISON_AGENT_CMD=f'cd {HERE} && PYTHONPATH={HERE}:{BOT} '
                                                     f'LIAISON_HOME={self.tmp.name} {run}'))
         self.assertEqual(rc, 0)
@@ -273,7 +275,8 @@ class TestAttachments(Base):
         work = os.path.join(self.tmp.name, 'state', 'work')
         self.assertIn(f'images="{work}/', out)
         paths = out.split('images="')[1].split('"')[0].split()
-        self.assertEqual([os.path.basename(p).split('-', 1)[1] for p in paths], ['0.png', '1.gif'])
+        self.assertEqual([os.path.basename(p).split('-', 1)[1] for p in paths], ['0.png', '1.png'])
+        self.assertEqual(open(seen + '.magic').read().split(), ['png', 'png'])
         self.assertFalse(os.path.exists(work))
         self.assertTrue(self.fake.cdn_headers)
         self.assertFalse(any('Authorization' in h for h in self.fake.cdn_headers))

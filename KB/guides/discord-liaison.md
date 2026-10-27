@@ -60,6 +60,8 @@ Caps: `LIAISON_RUNS_PER_DAY` (30), `LIAISON_PRS_PER_DAY` (3), `LIAISON_IMAGES_PE
   answered (2026-10-27: the 08:25 joke mention was answered by hand before the deploy).
 - Discord renders a mention as `<@bot-id>` or `<@&role-id>`; `@agents` typed by a member is usually the bot's
   managed role, not the user, so both count. The watcher rewrites both to `@agents` before the LLM sees them.
+- Read rejects animated GIFs (live 2026-10-27, an owner GIF of 3.7 MB): `tick` turns GIF/WebP into a PNG of the
+  first frame with ffmpeg (30 s timeout) and drops the file when ffmpeg fails (animated WebP: ffmpeg cannot decode).
 - The CDN download must not reuse the bot's REST session: it carries `Authorization: Bot <token>`; a test checks
   that the fake CDN never sees that header.
 - Before T1411 the liaison could post text only: the 08:38 concept-art mention got a written self-portrait and a
