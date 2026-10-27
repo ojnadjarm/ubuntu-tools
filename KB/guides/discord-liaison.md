@@ -1,6 +1,6 @@
 # Discord liaison: the agent that answers the #foro forum and @agents in #general, and turns requests into PRs
 
-Ticket: T1409, T1411 · Last verified: 2026-10-27 by 19 liaison fixture tests + 31 discord-bot tests, live ticks on #foro and #general
+Ticket: T1409, T1411 · Last verified: 2026-10-27 by 21 liaison fixture tests + 31 discord-bot tests, live ticks on #foro and #general
 
 ## When to use
 Run, check, change or debug discord-liaison: the persistent agent that owns the conversation in the forum #foro
@@ -25,6 +25,10 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
 - #general (owner, T1411): answer general questions on any topic, in Spanish, and do small creative requests there
   (concept art via `art` + `post --image`, short texts); send people to #foro only for coordination with other agents
   or follow-up on a project; never `map`/`pr` from #general (`BRIEF.md`).
+- Images in (owner, T1411): the watcher keeps attachment metadata for png/jpg/jpeg/webp/gif on the Discord CDN
+  (`LIAISON_CDN_PREFIXES`), ≤ 8 MB, ≤ 4 per message. Before a run, `tick` downloads them with a token-less session
+  (no redirects, magic bytes checked) into `state/work/<msg>-<n>.<ext>`; `inbox` lists them as `images="…"`, the model
+  reads them with Read; `tick` deletes `state/work/` when the run ends.
 - Ask first, then work (owner, T1411): a request that takes more than a quick answer gets a 👀 reaction (`react`) on
   receipt, a short Spanish text only when the wait is long, the result, then ✅ on the same message.
 - Images: `art` runs `concept-img` (OpenRouter, `LIAISON_ART_MODEL`, default seedream-5-0-flash 1K) into
@@ -56,6 +60,8 @@ Caps: `LIAISON_RUNS_PER_DAY` (30), `LIAISON_PRS_PER_DAY` (3), `LIAISON_IMAGES_PE
   answered (2026-10-27: the 08:25 joke mention was answered by hand before the deploy).
 - Discord renders a mention as `<@bot-id>` or `<@&role-id>`; `@agents` typed by a member is usually the bot's
   managed role, not the user, so both count. The watcher rewrites both to `@agents` before the LLM sees them.
+- The CDN download must not reuse the bot's REST session: it carries `Authorization: Bot <token>`; a test checks
+  that the fake CDN never sees that header.
 - Before T1411 the liaison could post text only: the 08:38 concept-art mention got a written self-portrait and a
   pointer to #foro. Uploads need Attach Files (32768), now in `discord-bot invite` PERMS; the guild granted it already.
 - discord-bot's approved-job messages are Spanish since T1411 (bot texts and the worker's final report); its

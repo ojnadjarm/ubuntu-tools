@@ -44,6 +44,7 @@ class Fake(FakeDiscord):
     def app(self):
         a = super().app()
         a.router.add_get('/users/@me', lambda q: web.json_response({'id': '900', 'username': 'agents'}))
+        a.router.add_get('/cdn/{name}', self.cdn)
         a.router.add_get('/guilds/{g}/roles', lambda q: web.json_response([
             {'id': '100', 'name': '@everyone'}, {'id': '950', 'name': 'agents', 'managed': True, 'tags': {'bot_id': '900'}},
             {'id': '951', 'name': 'otros'}]))
@@ -53,9 +54,16 @@ class Fake(FakeDiscord):
             c for c in self.channels.values() if c.get('type') == 11]}))
         return a
 
-    def say(self, tid, uid, text, bot=False, mid=None, users=(), roles=()):
+    files = {}
+    cdn_headers = []
+
+    async def cdn(self, q):
+        self.cdn_headers.append(dict(q.headers))
+        return web.Response(body=self.files[q.match_info['name']])
+
+    def say(self, tid, uid, text, bot=False, mid=None, users=(), roles=(), attachments=()):
         m = {'id': mid or str(next(self.ids)), 'author': {'id': uid, 'username': f'u{uid}', 'bot': bot}, 'content': text,
-             'mentions': [{'id': u} for u in users], 'mention_roles': list(roles)}
+             'mentions': [{'id': u} for u in users], 'mention_roles': list(roles), 'attachments': list(attachments)}
         self.messages.setdefault(tid, []).append(m)
         return m['id']
 
@@ -223,6 +231,52 @@ class TestReact(Base):
         rc, _ = await self.run_cli('react', '998', mid, '✅', env=env)
         self.assertEqual(rc, 3)
         self.assertNotIn(('998', mid), self.fake.reactions)
+
+
+PNG = b'\x89PNG\r\n\x1a\n' + b'1' * 32
+GIF = b'GIF89a' + b'2' * 32
+
+
+class TestAttachments(Base):
+    def att(self, name, size=None, url=None):
+        return {'filename': name, 'size': size or 40, 'url': url or f'{self.cdn}/{name}'}
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self.cdn = str(self.server.make_url('/cdn'))
+        self.env['LIAISON_CDN_PREFIXES'] = self.cdn + '/'
+        self.fake.files = {'a.png': PNG, 'b.gif': GIF, 'fake.png': b'#!/bin/sh\nrm -rf ~\n' + b'0' * 30}
+
+    async def test_watcher_keeps_only_small_cdn_images_max_four(self):
+        w = Watcher(self.rest, '100', '300', cdn=(self.cdn + '/',))
+        _, cur = await w.poll({})
+        atts = [self.att('a.png'), self.att('notes.txt'), self.att('big.png', size=9 * 1024 * 1024),
+                self.att('evil.png', url='https://evil.example/a.png'), self.att('b.gif'), self.att('c.webp'),
+                self.att('d.jpg'), self.att('e.jpeg')]
+        self.fake.say('400', '2', 'mira', attachments=atts)
+        msgs, _ = await w.poll(cur)
+        self.assertEqual([a['filename'] for a in msgs[0]['attachments']], ['a.png', 'b.gif', 'c.webp', 'd.jpg'])
+
+    async def test_tick_downloads_images_for_the_run_then_deletes_them(self):
+        env = {'DISCORD_GENERAL_ID': '999'}
+        await self.run_cli('tick', env=env)
+        self.fake.say('999', '2', '<@900> ves esta imagen?', users=['900'],
+                      attachments=[self.att('a.png'), self.att('b.gif'), self.att('fake.png')])
+        seen = os.path.join(self.tmp.name, 'seen.txt')
+        tok = os.path.join(self.tmp.name, 'token')
+        open(tok, 'w').write('fake-token')
+        run = f'DISCORD_TOKEN_FILE={tok} {sys.executable} -m liaison inbox > {seen}'
+        rc, _ = await self.run_cli('tick', env=dict(env, LIAISON_AGENT_CMD=f'cd {HERE} && PYTHONPATH={HERE}:{BOT} '
+                                                    f'LIAISON_HOME={self.tmp.name} {run}'))
+        self.assertEqual(rc, 0)
+        out = open(seen).read()
+        work = os.path.join(self.tmp.name, 'state', 'work')
+        self.assertIn(f'images="{work}/', out)
+        paths = out.split('images="')[1].split('"')[0].split()
+        self.assertEqual([os.path.basename(p).split('-', 1)[1] for p in paths], ['0.png', '1.gif'])
+        self.assertFalse(os.path.exists(work))
+        self.assertTrue(self.fake.cdn_headers)
+        self.assertFalse(any('Authorization' in h for h in self.fake.cdn_headers))
 
 
 class TestRegistry(unittest.TestCase):

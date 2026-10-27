@@ -1,9 +1,22 @@
 """Read-only polls: new messages in the forum's active threads, and #general messages that mention the bot."""
+import os
+
+CDN = ('https://cdn.discordapp.com/', 'https://media.discordapp.net/')
+IMAGE_EXT = ('.png', '.jpg', '.jpeg', '.webp', '.gif')
+MAX_ATTACHMENT, MAX_ATTACHMENTS = 8 * 1024 * 1024, 4
+
+
+def images(m, cdn=CDN):
+    """The message's image attachments worth downloading: Discord CDN, image extension, <= 8 MB, at most 4."""
+    out = [{'filename': a['filename'], 'url': a['url'], 'size': a.get('size', 0)} for a in m.get('attachments', [])
+           if a.get('url', '').startswith(tuple(cdn)) and a.get('size', 0) <= MAX_ATTACHMENT
+           and os.path.splitext(a.get('filename', ''))[1].lower() in IMAGE_EXT]
+    return out[:MAX_ATTACHMENTS]
 
 
 class Watcher:
-    def __init__(self, rest, guild_id, forum_id):
-        self.rest, self.guild_id, self.forum_id = rest, guild_id, forum_id
+    def __init__(self, rest, guild_id, forum_id, cdn=CDN):
+        self.rest, self.guild_id, self.forum_id, self.cdn = rest, guild_id, forum_id, cdn
         self.me, self.role = '', None
 
     async def threads(self):
@@ -28,7 +41,8 @@ class Watcher:
                 out.append({'id': m['id'], 'thread_id': tid, 'thread': t.get('name', ''),
                             'tags': [names[i] for i in t.get('applied_tags', []) if i in names],
                             'author': a.get('global_name') or a.get('username', '?'), 'bot': bool(a.get('bot')),
-                            'content': m.get('content', '')[:1500]})
+                            'content': m.get('content', '')[:1500],
+                            'attachments': images(m, self.cdn)})
             cur.setdefault(tid, '0')
         return out, cur
 
@@ -55,5 +69,5 @@ class Watcher:
                 text = text.replace(f'<@&{self.role}>', '@agents')
             out.append({'id': m['id'], 'channel': 'general', 'thread_id': channel_id, 'thread': '#general', 'tags': [],
                         'author': a.get('global_name') or a.get('username', '?'), 'bot': bool(a.get('bot')),
-                        'content': text[:1500]})
+                        'content': text[:1500], 'attachments': images(m, self.cdn)})
         return out, last

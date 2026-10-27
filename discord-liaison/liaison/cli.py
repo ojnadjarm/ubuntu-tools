@@ -1,11 +1,14 @@
 """discord-liaison tick|check|inbox|done|post|map|pr|status: the liaison's tools for #foro and #general (T1409, T1411)."""
 import asyncio
+import glob
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import time
 
+import aiohttp
 from discordbot.cli import write_config
 from discordbot.config import Config
 from discordbot.rest import Rest, RestError
@@ -15,13 +18,14 @@ from discordbot.sanitize import chunks, clean
 from .caps import Caps
 from .registry import Registry
 from .state import State
-from .watch import Watcher
+from .watch import CDN, MAX_ATTACHMENT, Watcher
 
 GENERAL = '#general'
 ME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 USAGE = ('usage: discord-liaison tick [--dry-run]|check|inbox|done|post <thread> [--image <png>] <text…>|'
          'react <thread> <message> <emoji>|art <prompt…>|map <thread> <project>|pr <project>|status')
 IMAGE_MAGIC = (b'\x89PNG\r\n\x1a\n', b'\xff\xd8\xff')
+SEEN_MAGIC = IMAGE_MAGIC + (b'GIF87a', b'GIF89a')
 MAX_IMAGE = 10 * 1024 * 1024
 
 
@@ -38,6 +42,8 @@ class App:
                          {'run': int(env.get('LIAISON_RUNS_PER_DAY', '30')), 'pr': int(env.get('LIAISON_PRS_PER_DAY', '3')),
                           'img': int(env.get('LIAISON_IMAGES_PER_DAY', '5'))})
         self.art_dir = os.path.join(self.home, 'state', 'art')
+        self.work = os.path.join(self.home, 'state', 'work')
+        self.cdn = tuple(env.get('LIAISON_CDN_PREFIXES', ' '.join(CDN)).split())
 
     async def general_id(self, save):
         """#general's id: DISCORD_GENERAL_ID, else the guild's text channel named general, stored in config.env."""
@@ -49,7 +55,7 @@ class App:
         return self.general
 
     async def check(self, save=True):
-        w = Watcher(self.rest, self.guild, self.forum)
+        w = Watcher(self.rest, self.guild, self.forum, self.cdn)
         msgs, cur = await w.poll(self.state.cursor)
         gid = await self.general_id(save)
         if gid:
@@ -88,8 +94,35 @@ class App:
             return 0
         if not self.caps.take('run'):
             return 0
+        await self.fetch_images()
         cmd = self.env.get('LIAISON_AGENT_CMD', 'agent-run discord-liaison')
-        return subprocess.call(cmd, shell=True, stdin=subprocess.DEVNULL)
+        try:
+            return subprocess.call(cmd, shell=True, stdin=subprocess.DEVNULL)
+        finally:
+            shutil.rmtree(self.work, ignore_errors=True)
+
+    async def fetch_images(self):
+        """Download the inbox's images into state/work for this run: CDN only, no token, <= 8 MB, magic checked."""
+        os.makedirs(self.work, exist_ok=True)
+        async with aiohttp.ClientSession() as http:
+            for m in self.state.inbox:
+                for i, a in enumerate(m.get('attachments', [])):
+                    if not a['url'].startswith(self.cdn):
+                        continue
+                    ext = os.path.splitext(a['filename'])[1].lower()
+                    dest = os.path.join(self.work, f'{m["id"]}-{i}{ext}')
+                    try:
+                        async with http.get(a['url'], allow_redirects=False) as r:
+                            data = await r.content.read(MAX_ATTACHMENT + 1) if r.status == 200 else b''
+                    except aiohttp.ClientError:
+                        data = b''
+                    webp = data[:4] == b'RIFF' and data[8:12] == b'WEBP'
+                    if 0 < len(data) <= MAX_ATTACHMENT and (data.startswith(SEEN_MAGIC) or webp):
+                        with open(dest, 'wb') as f:
+                            f.write(data)
+
+    def images(self, mid):
+        return sorted(glob.glob(os.path.join(glob.escape(self.work), f'{mid}-*')))
 
     def inbox(self):
         self.state.mark_shown()
@@ -97,8 +130,11 @@ class App:
             pid = (self.state.thread(m['thread_id']) or {}).get('project', '')
             route = self.registry.route(pid) if pid else ''
             body = m['content'].replace('</message', '<\\/message')
+            imgs = self.images(m['id'])
+            images = f' images="{" ".join(imgs)}"' if imgs else ''
             print(f'<message channel="{m.get("channel", "foro")}" thread="{m["thread_id"]}" title="{m["thread"]}" tags="{",".join(m["tags"])}" '
-                  f'project="{pid}" route="{route}" author="{m["author"]}" bot="{str(m["bot"]).lower()}" id="{m["id"]}">\n'
+                  f'project="{pid}" route="{route}" author="{m["author"]}" bot="{str(m["bot"]).lower()}" id="{m["id"]}"'
+                  f'{images}>\n'
                   f'{body}\n</message>')
         print(f'{len(self.state.inbox)} message(s); run `discord-liaison done` after answering them')
         return 0
