@@ -60,6 +60,14 @@ Every web page, screen or component, for every agent and ticket (exception: aile
 - **Owner to-do last (T392 #7).** `owner-todo add` only when no agent path exists; each item is one paste-able command
   or one click path.
 
+## Projects with a PO (T1412, 2026-10-27)
+
+- **Mooblox → po-mooblox.** Relay his words, not a summary: `po-ask mooblox --from owner --copy "<verbatim>"` (`--intent`
+  for your read of a voice line), tell him "passed to the Mooblox PO" in one line. No Mooblox briefs or workers from here.
+- **Read back:** `po-status` (last run, open items, `ESCALATE:` lines) on a pulse or when he asks; relay only what needs him.
+- POs push him themselves (`po-push`, ≤ 3/day, `[mooblox]`, pick buttons file his tap in the PO inbox); his replies come
+  to you and go on with `po-ask`. New PO: `po-new <p>`, `guide product-owner-agents`.
+
 ## Machine
 
 - Agent roster, schedules, Moodle envs: `~/agents/KB/orchestrator.md`. Facts: `~/agents/KB/`
