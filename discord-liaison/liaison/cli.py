@@ -139,6 +139,7 @@ class App:
             return 0
         msgs, _ = await self.check()
         print(f'{len(msgs)} new, inbox {len(self.state.inbox)}')
+        self.nudge()
         if not self.state.inbox:
             return 0
         if not self.caps.take('run'):
@@ -291,6 +292,22 @@ class App:
         print(out)
         return 0
 
+    def pulse(self):
+        subprocess.call(self.env.get('LIAISON_PULSE_CMD', 'orchestrator-pulse'), shell=True, stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def nudge(self):
+        """Pulse again while an open escalation is missing from the pulse's last-fire snapshot (it skips when busy)."""
+        open_ = set(glob.glob(os.path.join(glob.escape(self.home), 'state', 'escalations', '*.md')))
+        snap = self.env.get('PULSE_QUEUE', os.path.expanduser('~/agents/log/pulse-queue.json'))
+        try:
+            with open(snap) as f:
+                sent = set(json.load(f).get('escalations', []))
+        except (OSError, ValueError):
+            sent = set()
+        if open_ - sent:
+            self.pulse()
+
     def escalate(self, args):
         """Hand a request beyond the liaison's tools or rules to the orchestrator: state/escalations/<utc>-<msg>.md."""
         m = next((m for m in self.state.inbox if args and m['id'] == args[0]), None)
@@ -309,9 +326,7 @@ class App:
             f.write(f'# Discord escalation\n\nchannel: {m.get("channel", "foro")} ({m["thread_id"]})\nmessage: {m["id"]}\n'
                     f'author: {m["author"]}{who}\n\n## Request\n\n{m["content"]}\n\n## What the liaison tried\n\n'
                     f'{" ".join(args[1:])}\n\nAnswer in the channel, then move this file to done/.\n')
-        cmd = self.env.get('LIAISON_PULSE_CMD', 'orchestrator-pulse')
-        subprocess.call(cmd, shell=True, stdin=subprocess.DEVNULL,
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.pulse()
         print(f'escalated to the orchestrator: {path}')
         return 0
 

@@ -1,6 +1,6 @@
 # Discord liaison: the agent that answers the #foro forum and @agents in #general, and turns requests into PRs
 
-Ticket: T1409, T1411 · Last verified: 2026-10-27 by 24 liaison fixture tests + 31 discord-bot tests, live ticks on #foro and #general
+Ticket: T1409, T1411 · Last verified: 2026-10-27 by 25 liaison fixture tests + 25 orchestrator-pulse checks + 31 discord-bot tests, live ticks on #foro and #general
 
 ## When to use
 Run, check, change or debug discord-liaison: the persistent agent that owns the conversation in the forum #foro
@@ -33,8 +33,10 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
   stored by `discord-bot setup`); his requests are the owner's decisions.
 - Escalations (owner, T1411): never "no puedo" / "lo decide el owner". Beyond its tools or rules the liaison reacts 👀,
   acks in Spanish and runs `escalate`, which writes `state/escalations/<utc>-<msg>.md` (channel, message, author,
-  request, what it tried) and triggers `orchestrator-pulse`. The orchestrator answers, then moves the file to
-  `escalations/done/`; an open or done escalation of the same message is refused.
+  request, what it tried) and starts `orchestrator-pulse`; every `tick` starts it again while an open file is missing
+  from the pulse snapshot (`~/agents/log/pulse-queue.json` key `escalations`). The pulse stays idle-only and logged; its
+  turn begins `Discord escalation: <file>`. The orchestrator answers, then moves the file to `escalations/done/`; an
+  open or done escalation of the same message is refused (KB/orchestrator.md "Pulse").
 - Ask first, then work (owner, T1411): a request that takes more than a quick answer gets a 👀 reaction (`react`) on
   receipt, a short Spanish text only when the wait is long, the result, then ✅ on the same message.
 - Images: `art` runs `concept-img` (OpenRouter, `LIAISON_ART_MODEL`, default seedream-5-0-flash 1K) into
@@ -72,6 +74,8 @@ Caps: `LIAISON_RUNS_PER_DAY` (30), `LIAISON_PRS_PER_DAY` (3), `LIAISON_IMAGES_PE
   by its source index before `select` picks up to 12 evenly, cells ≤ 512 px, `tile` 4 wide (≤ 2048 px), note
   "GIF, N frames, X s" in `inbox`. ffmpeg cannot decode animated WebP: such a file is dropped.
 - Before T1411 the liaison did not know the owner: at 09:00 it told him "eso lo decide el owner"; `owner="true"` fixes it.
+- `StreamReader.read(n)` returns only what is buffered, not n bytes: the first live GIF arrived as 1 truncated
+  frame. The download loops over `iter_chunked` to EOF; the fake CDN streams 4 KB chunks to catch it.
 - The CDN download must not reuse the bot's REST session: it carries `Authorization: Bot <token>`; a test checks
   that the fake CDN never sees that header.
 - Before T1411 the liaison could post text only: the 08:38 concept-art mention got a written self-portrait and a

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Hourly pulse: types one prompt into the orchestrator's tmux session, only when it sits idle at an empty prompt
-# and the standing queue changed since the last fire (a new need id, a new failed unit not in PC_NOT_OURS, a new HEALTH.md) or the last fire
+# and the standing queue changed since the last fire (a new need id, a new failed unit not in PC_NOT_OURS, a new HEALTH.md,
+# a new open Discord escalation in PULSE_ESCALATIONS, named in the turn as "Discord escalation: <file>") or the last fire
 # is PULSE_FLOOR_H old; the queue at each fire is kept in PULSE_QUEUE (default pulse-queue.json beside the log).
 # Fires only into the exact session's pane when it runs the orchestrator claude (--append-system-prompt-file …ORCHESTRATOR.md) and
 # ~/.claude/sessions/<pid>.json confirms that pane and an idle status; anything unverifiable is a logged skip.
@@ -14,6 +15,7 @@ SETTLE=${PULSE_SETTLE:-3}
 FLOOR_H=${PULSE_FLOOR_H:-6}
 CLAUDE_DIR=${PULSE_CLAUDE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}
 MARK=${PULSE_ORCH_MARK:-ORCHESTRATOR.md}
+ESC_DIR=${PULSE_ESCALATIONS:-$HOME/agents/discord-liaison/state/escalations}
 TURN=${PULSE_TURN:-'Pulse: run plan-usage, then continue the standing queue (see ~/agents/KB/orchestrator.md "Pulse") or report nothing.'}
 tm() { if [ -n "${PULSE_TMUX_SOCKET:-}" ]; then tmux -L "$PULSE_TMUX_SOCKET" "$@"; else tmux "$@"; fi; }
 log() { mkdir -p "$(dirname "$LOG")"; printf '%s %s session=%s %s\n' "$(date -Is)" "$1" "$SESSION" "$2" >>"$LOG"; echo "orchestrator-pulse: $1 $2"; }
@@ -75,22 +77,24 @@ rest=$(printf '%s' "$line" | sed -e 's/^❯//' -e 's/^>//' | tr -d ' \302\240')
 plan-usage --check 80 >/dev/null 2>&1; [ $? -ne 1 ] || { log skip "plan >= 80%"; exit 0; }
 need_ids=$(pc need list --json 2>/dev/null | jq -r '.[].id' 2>/dev/null | sort -u)
 failed_units=$(systemctl --user list-units --state=failed --plain --no-legend 2>/dev/null | awk 'NF{print $1}' | grep -vE "$PC_NOT_OURS" | sort -u)
-needs=$(printf '%s' "$need_ids" | grep -c .); failed=$(printf '%s' "$failed_units" | grep -c .)
+esc_files=$(find "$ESC_DIR" -maxdepth 1 -name '*.md' 2>/dev/null | sort)
+needs=$(printf '%s' "$need_ids" | grep -c .); failed=$(printf '%s' "$failed_units" | grep -c .); escs=$(printf '%s' "$esc_files" | grep -c .)
 # Ids in $1 (newline list) absent from snapshot key $2.
 fresh() { comm -23 <(printf '%s\n' "$1" | grep .) <(jq -r ".$2[]?" "$SNAP" 2>/dev/null | sort -u) | paste -sd' ' -; }
-new_needs=$(fresh "$need_ids" needs); new_failed=$(fresh "$failed_units" failed)
+new_needs=$(fresh "$need_ids" needs); new_failed=$(fresh "$failed_units" failed); new_escs=$(fresh "$esc_files" escalations)
 last=$(grep ' fired ' "$LOG" 2>/dev/null | tail -n1 | cut -d' ' -f1)
 health=new; age=$((FLOOR_H * 3600))
 if [ -n "$last" ]; then
   age=$(( $(date +%s) - $(date -d "$last" +%s) ))
   find "${AGENT_WORK:-$HOME/agent-work}"/research/*/*/HEALTH.md -newermt "$last" 2>/dev/null | grep -q . || health=unchanged
 fi
-queue="needs $needs, failed $failed, health $health"
-new=$(printf '%s' "${new_needs:+need $new_needs; }${new_failed:+failed $new_failed; }" | sed 's/; $//'); new=${new:-none}
+queue="needs $needs, failed $failed, health $health, escalations $escs"
+new=$(printf '%s' "${new_needs:+need $new_needs; }${new_failed:+failed $new_failed; }${new_escs:+escalation $new_escs; }" | sed 's/; $//'); new=${new:-none}
 if [ "$new" = none ] && [ "$health" = unchanged ] && [ "$age" -lt $((FLOOR_H * 3600)) ]; then
-  if [ "$needs" = 0 ] && [ "$failed" = 0 ]; then log skip "queue empty ($queue)"; else log skip "queue unchanged ($queue)"; fi
+  if [ "$needs" = 0 ] && [ "$failed" = 0 ] && [ "$escs" = 0 ]; then log skip "queue empty ($queue)"; else log skip "queue unchanged ($queue)"; fi
   exit 0
 fi
+[ "$escs" = 0 ] || TURN="Discord escalation: $(printf '%s' "$esc_files" | paste -sd' ' -) (answer in its channel, then move the file to done/). $TURN"
 TURN="$TURN (queue: $queue; new: $new)"
 sleep "$SETTLE"
 [ "$(pane)" = "$a" ] || { log skip "pane changing"; exit 0; }
@@ -99,7 +103,8 @@ tm send-keys -t "$PANE" -l "$TURN" || { log skip "send-keys failed"; exit 0; }
 for _ in 1 2 3 4 5; do
   sleep 1
   if box_text | grep -qF "$(printf '%s' "$TURN" | squash)"; then tm send-keys -t "$PANE" Enter
-    jq -n --arg n "$need_ids" --arg f "$failed_units" '{needs: ($n | split("\n") | map(select(. != ""))), failed: ($f | split("\n") | map(select(. != "")))}' >"$SNAP"
+    jq -n --arg n "$need_ids" --arg f "$failed_units" --arg e "$esc_files" '{needs: ($n | split("\n") | map(select(. != ""))),
+      failed: ($f | split("\n") | map(select(. != ""))), escalations: ($e | split("\n") | map(select(. != "")))}' >"$SNAP"
     log fired "prompt submitted (queue: $queue; new: $new)"; exit 0; fi
 done
 tm send-keys -t "$PANE" C-u

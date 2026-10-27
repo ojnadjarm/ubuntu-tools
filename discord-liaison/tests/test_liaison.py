@@ -361,6 +361,25 @@ class TestOwner(Base):
         self.assertEqual((rc, len(os.listdir(d))), (0, 2))
 
 
+class TestPulseRetry(Base):
+    async def test_tick_pulses_until_the_pulse_snapshot_holds_every_open_escalation(self):
+        d = os.path.join(self.tmp.name, 'state', 'escalations')
+        os.makedirs(os.path.join(d, 'done'))
+        snap = os.path.join(self.tmp.name, 'pulse-queue.json')
+        env = {'PULSE_QUEUE': snap}
+        open(os.path.join(d, 'done', '1-5.md'), 'w').close()
+        await self.run_cli('tick', env=env)
+        self.assertFalse(os.path.exists(self.pulse_log))
+        esc = os.path.join(d, '2-6.md')
+        open(esc, 'w').close()
+        await self.run_cli('tick', env=env)
+        self.assertEqual(open(self.pulse_log).read().split(), ['pulse'])
+        with open(snap, 'w') as f:
+            json.dump({'needs': [], 'escalations': [esc]}, f)
+        await self.run_cli('tick', env=env)
+        self.assertEqual(open(self.pulse_log).read().split(), ['pulse'])
+
+
 class TestRegistry(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.NamedTemporaryFile('w', suffix='.json', delete=False)

@@ -57,6 +57,7 @@ run_case() {
   fx tmux new-session -d -s "$name" -x 200 -y 10 "bash -c '$WORK/bin/claude $WORK $flag \"$2\"; true'"
   timeout 5 wait-for --every 0.05 --until "env -u TMUX TMUX_TMPDIR='$TMX' tmux capture-pane -pt '=$name:' | grep -q '❯'" >/dev/null
   fx bash "$PULSE" >/dev/null 2>&1
+  fx tmux capture-pane -pJt "=$name:" 2>/dev/null | tr -d '\n' >"$WORK/typed"
   tail -n1 "$WORK/pulse.log"
 }
 
@@ -109,6 +110,21 @@ echo 'fx-foreign-cron.service loaded failed failed fx' >>"$WORK/failed.txt"
 out=$(PC_NOT_OURS='^fx-foreign' SEED=$recent run_case failed-foreign '\033[7m \033[27m')
 case "$out" in *"skip"*"queue unchanged (needs 0, failed 2"*) ok "foreign failed unit stays out of the queue";; *) nok "foreign failed unit stays out of the queue" "$out";; esac
 rm -f "$WORK/failed.txt"
+
+# T1411: an open Discord escalation (discord-liaison/state/escalations/*.md) fires once and is named in the turn.
+ESC="$WORK/agents/discord-liaison/state/escalations"; mkdir -p "$ESC/done"
+echo fx >"$ESC/20261027T090000Z-111.md"
+out=$(SEED=$recent run_case escalation-new '\033[7m \033[27m')
+case "$out" in *" fired session="*"escalations 1"*"new: escalation $ESC/20261027T090000Z-111.md"*) ok "new escalation fires, line names it";;
+  *) nok "new escalation fires, line names it" "$out";; esac
+grep -qF "Discord escalation: $ESC/20261027T090000Z-111.md" "$WORK/typed" && ok "turn names the escalation file" \
+  || nok "turn names the escalation file" "$(cat "$WORK/typed" 2>/dev/null)"
+out=$(SEED=$recent run_case escalation-same '\033[7m \033[27m')
+case "$out" in *"skip"*"queue unchanged"*"escalations 1"*) ok "same escalation skips as unchanged";; *) nok "same escalation skips as unchanged" "$out";; esac
+mv "$ESC/20261027T090000Z-111.md" "$ESC/done/"
+out=$(SEED=$recent run_case escalation-done '\033[7m \033[27m')
+case "$out" in *"skip"*"queue empty"*"escalations 0"*) ok "done escalation leaves the queue";; *) nok "done escalation leaves the queue" "$out";; esac
+rm -rf "$WORK/agents/discord-liaison"
 
 out=$(ORCH=0 run_case not-orchestrator '\033[7m \033[27m')
 case "$out" in *"runs no orchestrator claude"*) ok "pane without the orchestrator claude skips";; *) nok "pane without the orchestrator claude skips" "$out";; esac
