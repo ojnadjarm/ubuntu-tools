@@ -28,13 +28,14 @@ from .watch import CDN, MAX_ATTACHMENT, Watcher
 
 GENERAL = '#general'
 ME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-USAGE = ('usage: discord-liaison tick [--dry-run]|check|inbox|done|post <thread> [--image <png>] <text…>|'
+USAGE = ('usage: discord-liaison tick [--dry-run]|check|inbox|done|post <thread> [--image <file>] [--reply <message>] <text…>|'
          'react <thread> <message> <emoji>|art <prompt…>|escalate <message> <what…>|map <thread> <project>|pr <project>|'
          'job <message> <task…>|job-run <id>|status')
 FAILED = '{author}, no he podido terminarlo. Lo paso al orquestador y te respondo aquí.'
 IMAGE_MAGIC = (b'\x89PNG\r\n\x1a\n', b'\xff\xd8\xff')
 SEEN_MAGIC = IMAGE_MAGIC + (b'GIF87a', b'GIF89a')
 MAX_IMAGE = 10 * 1024 * 1024
+MAX_MEDIA = 25 * 1024 * 1024
 SHEET_FRAMES, SHEET_PX = 12, 2048
 
 
@@ -259,18 +260,24 @@ class App:
         return bool(self.forum) and ch.get('parent_id') == self.forum
 
     def image_ok(self, path):
-        """Only a PNG or JPEG made by `art`, under the size limit, may be attached."""
+        """A PNG/JPEG made by `art` (<= 10 MB), or a PNG/JPEG/GIF/WebP/MP4 inside a job's folder (<= 25 MB)."""
         real = os.path.realpath(path)
-        if os.path.dirname(real) != os.path.realpath(self.art_dir) or not os.path.isfile(real):
+        if not os.path.isfile(real):
             return False
         with open(real, 'rb') as f:
-            head = f.read(8)
-        return any(head.startswith(m) for m in IMAGE_MAGIC) and os.path.getsize(real) <= MAX_IMAGE
+            head = f.read(12)
+        size = os.path.getsize(real)
+        if os.path.dirname(real) == os.path.realpath(self.art_dir):
+            return head.startswith(IMAGE_MAGIC) and size <= MAX_IMAGE
+        rel = os.path.relpath(real, os.path.realpath(self.jobs.dir))
+        media = head.startswith(SEEN_MAGIC) or (head[:4] == b'RIFF' and head[8:12] == b'WEBP') or head[4:8] == b'ftyp'
+        return not rel.startswith('..') and os.sep in rel and media and size <= MAX_MEDIA
 
     async def post(self, args):
-        image = ''
-        if args[1:2] == ['--image'] and len(args) > 2:
-            image, args = args[2], args[:1] + args[3:]
+        opts = {'--image': '', '--reply': ''}
+        while args[1:2] and args[1] in opts and len(args) > 2:
+            opts[args[1]], args = args[2], args[:1] + args[3:]
+        image, reply = opts['--image'], opts['--reply']
         if len(args) < 2:
             print(USAGE)
             return 2
@@ -279,17 +286,19 @@ class App:
             print(f'refused: {tid} is neither a thread of the forum nor #general')
             return 3
         if image and not self.image_ok(image):
-            print('refused: --image takes only a PNG/JPEG made by `discord-liaison art` (max 10 MB)')
+            print('refused: --image takes a PNG/JPEG made by `discord-liaison art` (max 10 MB) '
+                  'or a PNG/JPEG/GIF/WebP/MP4 in your job folder (max 25 MB)')
             return 3
         parts = chunks(clean(text, [self.env.get(k, '') for k in SECRET_KEYS]))
         if self.env.get('LIAISON_DRY_RUN'):
             print(f'would post {len(parts)} message(s) to {tid}{" with " + image if image else ""}:\n' + '\n'.join(parts))
             return 0
         for i, part in enumerate(parts):
+            ref = reply if i == 0 else ''
             if image and i == len(parts) - 1:
-                await self.rest.send_file(tid, part, image)
+                await self.rest.send_file(tid, part, image, reply=ref)
             else:
-                await self.rest.send(tid, part)
+                await self.rest.send(tid, part, reply=ref)
         print(f'posted {len(parts)} message(s){" with the image" if image else ""}')
         return 0
 

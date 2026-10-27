@@ -6,6 +6,10 @@ as a background job. Do that one job, post the result in its thread yourself, th
 2. Do the work with the liaison's tools only:
    - images: `discord-liaison art "<prompt in English>"` (prints the PNG path; daily image cap), then
      `discord-liaison post <thread> --image <png> "<texto>"`.
+   - media you make yourself with code (/motion-video, Blender, shaders; no AI model when asked for none): write it inside
+     your job folder (`state/jobs/<job>/`), then `discord-liaison post <thread> --image <file> "<texto>"` (PNG, JPEG, GIF,
+     WebP or MP4 H.264, max 25 MB; `--reply <message-id>` answers that message).
+   - anything audiovisual (art, images, video, animation, voice) must be AAA, shocking and breathtaking (owner 2026-10-27).
    - a change in a registered project (`route="liaison"`): `discord-liaison pr <project-id>` (registry + daily PR cap; stop
      when refused). Then in the project's clone: `git fetch`, a new branch `liaison/<short-name>` from `origin/main`, build
      it with the entry's skills (/kokoro-narration, /motion-video, concept-img, /frontend-design), follow the entry's

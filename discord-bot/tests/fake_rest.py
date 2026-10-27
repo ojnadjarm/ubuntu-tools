@@ -92,7 +92,8 @@ class FakeDiscord:
         else:
             body = await q.json()
         m = {'id': str(next(self.ids)), 'author': {'id': '900', 'username': 'agents'}, 'content': body['content'],
-             'attachments': files, 'allowed_mentions': body.get('allowed_mentions')}
+             'attachments': files, 'allowed_mentions': body.get('allowed_mentions'),
+             'message_reference': body.get('message_reference')}
         self.messages.setdefault(q.match_info['c'], []).append(m)
         return web.json_response(m)
 

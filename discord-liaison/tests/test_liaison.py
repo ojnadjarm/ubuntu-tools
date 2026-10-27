@@ -230,6 +230,38 @@ class TestImages(Base):
         self.assertEqual(self.fake.sent('400'), [])
 
 
+    async def test_post_job_media_any_kind_as_reply(self):
+        job = os.path.join(self.tmp.name, 'state', 'jobs', '20261027T094852-1', 'out')
+        os.makedirs(job)
+        kinds = {'a.mp4': b'\0\0\0\x18ftypisom' + b'0' * 64, 'b.gif': b'GIF89a' + b'0' * 64,
+                 'c.webp': b'RIFF\0\0\0\0WEBPVP8 ' + b'0' * 64, 'd.jpg': b'\xff\xd8\xff' + b'0' * 64}
+        for name, data in kinds.items():
+            with open(os.path.join(job, name), 'wb') as f:
+                f.write(data)
+            rc, out = await self.run_cli('post', '999', '--image', os.path.join(job, name), '--reply', '77', 'mira',
+                                         env={'DISCORD_GENERAL_ID': '999'})
+            self.assertEqual(rc, 0, out)
+            m = self.fake.messages['999'][-1]
+            self.assertEqual(m['attachments'], [{'filename': name, 'size': len(data)}])
+            self.assertEqual(m['message_reference'], {'message_id': '77', 'fail_if_not_exists': False})
+            self.assertEqual(m['content'], 'mira')
+
+    async def test_post_media_refused_outside_a_job_folder_too_big_or_not_media(self):
+        jobs = os.path.join(self.tmp.name, 'state', 'jobs')
+        job = os.path.join(jobs, 'j1')
+        os.makedirs(job)
+        mp4 = b'\0\0\0\x18ftypisom' + b'0' * 64
+        cases = {os.path.join(self.tmp.name, 'x.mp4'): mp4, os.path.join(jobs, 'loose.mp4'): mp4,
+                 os.path.join(job, 'notes.mp4'): b'TOKEN=abc' + b'0' * 64,
+                 os.path.join(job, 'big.mp4'): mp4 + b'0' * (25 * 1024 * 1024)}
+        for p, data in cases.items():
+            with open(p, 'wb') as f:
+                f.write(data)
+        for p in list(cases) + [os.path.join(job, '..', '..', '..', 'x.mp4')]:
+            rc, out = await self.run_cli('post', '999', '--image', p, 'hola', env={'DISCORD_GENERAL_ID': '999'})
+            self.assertEqual(rc, 3, p)
+        self.assertEqual(self.fake.sent('999'), [])
+
 class TestReact(Base):
     async def test_react_on_general_or_forum_only(self):
         env = {'DISCORD_GENERAL_ID': '999'}

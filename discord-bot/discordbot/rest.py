@@ -61,15 +61,21 @@ class Rest:
     async def messages(self, cid, limit=20):
         return await self.call('GET', f'/channels/{cid}/messages', params={'limit': str(limit)})
 
-    async def send(self, cid, content):
-        return await self.call('POST', f'/channels/{cid}/messages',
-                               json={'content': content, 'allowed_mentions': {'parse': []}})
+    @staticmethod
+    def _body(content, reply):
+        body = {'content': content, 'allowed_mentions': {'parse': []}}
+        if reply:
+            body['message_reference'] = {'message_id': reply, 'fail_if_not_exists': False}
+        return body
 
-    async def send_file(self, cid, content, path):
-        """One message with one file attachment (multipart upload), mentions disabled."""
+    async def send(self, cid, content, reply=''):
+        return await self.call('POST', f'/channels/{cid}/messages', json=self._body(content, reply))
+
+    async def send_file(self, cid, content, path, reply=''):
+        """One message with one file attachment (multipart upload), mentions disabled; `reply` = message id to answer."""
         def form():
             f = aiohttp.FormData()
-            f.add_field('payload_json', jsonlib.dumps({'content': content, 'allowed_mentions': {'parse': []}}),
+            f.add_field('payload_json', jsonlib.dumps(self._body(content, reply)),
                         content_type='application/json')
             f.add_field('files[0]', open(path, 'rb').read(), filename=os.path.basename(path))
             return f

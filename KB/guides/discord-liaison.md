@@ -1,6 +1,6 @@
 # Discord liaison: the agent that answers the #foro forum and @agents in #general, and turns requests into PRs
 
-Ticket: T1409, T1411, T1413, T1414 · Last verified: 2026-10-27 by 47 liaison fixture tests (T1414: 7 job tests, a transient-unit probe, a live tick) and eval 57 fixtures on opus (T1413: old brief 45/57 twice, new brief + context 55/57 twice); before: 25 liaison fixture tests + 25 orchestrator-pulse checks + 31 discord-bot tests, live ticks on #foro and #general
+Ticket: T1409, T1411, T1413, T1414, T1415 · Last verified: 2026-10-27 by 49 liaison fixture tests (T1415: job media + reply); before: 47 liaison fixture tests (T1414: 7 job tests, a transient-unit probe, a live tick) and eval 57 fixtures on opus (T1413: old brief 45/57 twice, new brief + context 55/57 twice); before: 25 liaison fixture tests + 25 orchestrator-pulse checks + 31 discord-bot tests, live ticks on #foro and #general
 
 ## When to use
 Run, check, change or debug discord-liaison: the persistent agent that owns the conversation in the forum #foro
@@ -41,7 +41,8 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
   receipt, a short Spanish text only when the wait is long, the result, then ✅ on the same message.
 - Images: `art` runs `concept-img` (OpenRouter, `LIAISON_ART_MODEL`, default seedream-5-0-flash 1K) into
   `state/art/` under `LIAISON_IMAGES_PER_DAY` (5); `post --image` attaches only a PNG/JPEG from that directory
-  (realpath + magic bytes, ≤ 10 MB) as one multipart upload (`Rest.send_file`), so no other file can leave.
+  (realpath + magic bytes, ≤ 10 MB) or a PNG/JPEG/GIF/WebP/MP4 inside a job folder `state/jobs/<id>/…` (≤ 25 MB, T1415)
+  as one multipart upload (`Rest.send_file`), so no other file can leave. `--reply <message-id>` sets `message_reference`.
 - Understanding (T1413 swarm, research `$AGENT_WORK/research/2026-10-27/T1413/`): `BRIEF.md` "Read before you reply"
   (literal ask / intent / tone; probe, tease, banter, frustration, repeat, hidden order, register) and "Managing the
   server" (one post per author per run, never contradict <context>, stay quiet for asides and bot acks, insults, spam,
@@ -70,7 +71,7 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
 discord-liaison status              # inbox, mapped threads, runs/PRs used today, projects and their route
 discord-liaison tick --dry-run      # read #foro, write REPORT.md, post nothing, keep state
 discord-liaison inbox | done        # what the LLM run sees; done clears only what inbox showed
-discord-liaison post <thread> [--image <png>] <texto…>   # forum threads or #general, sanitized; LIAISON_DRY_RUN=1 prints
+discord-liaison post <thread> [--image <file>] [--reply <msg>] <texto…>   # forum threads or #general, sanitized; LIAISON_DRY_RUN=1 prints
 discord-liaison react <thread> <message-id> 👀|✅       # ack on receipt, done when the result is posted
 discord-liaison art "<prompt>"     # concept-img into state/art/, prints the path; daily image cap
 discord-liaison escalate <message-id> "<asked; tried>"   # -> state/escalations/, pulses the orchestrator
