@@ -1,0 +1,49 @@
+# Discord liaison: the agent that answers the #foro forum and turns requests into PRs
+
+Ticket: T1409 · Last verified: 2026-10-27 by 11 liaison fixture tests + 30 discord-bot tests, a live `tick --dry-run` on #foro (2 threads, 0 posts), the timer's first real ticks (0 new, 0 tokens)
+
+## When to use
+Run, check, change or debug discord-liaison: the persistent agent that owns the conversation in the forum #foro
+(Spanish replies, collab PRs, project registry). Not for the bot's gateway, tags or approval jobs: guide `discord-bot`.
+
+## The path we took
+- Survey: discord-bot T348 (REST adapter, `sanitize.clean`, `RateLimiter`, fake Discord REST: reused); official
+  `discord@claude-plugins-official` channel plugin (full tools on every message, resident session: rejected);
+  sentinel-check pattern (cheap timer, `agent-run` only on need: copied).
+- `discord-liaison-check.timer` (3 min) → `discord-liaison tick`: one REST poll of the forum's active threads; no new
+  message = exit, 0 tokens. New ones → inbox + thread→project map, then `agent-run discord-liaison` under the daily
+  run cap. The LLM run follows `discord-liaison/BRIEF.md` (inbox, post, map, pr, done).
+- Modules (`discord-liaison/liaison/`): `watch.Watcher` (read-only poll), `registry.Registry` (`match`, `route`),
+  `state.State` (cursor, inbox, threads, shown), `caps.Caps` (per-UTC-day caps, logged), `cli.App` (verbs).
+  Architecture: `$AGENT_WORK/research/2026-10-27/T1409/architecture.md`.
+- Registry `discord-liaison/projects.json`: one entry per project (repo, clone, match tags/title, rules, skills, `po`).
+  `Registry.route()` is the one routing seam: `po` set → that project's threads go to its PO agent (T1410), else the
+  liaison does the work. A repo not in the registry: reply "pendiente", `notify-owner`, nothing starts.
+- Split with discord-bot: `DISCORD_FORUM_REPLIES=liaison` in config.env. The bot still tags posts and runs the owner's
+  approved jobs; it no longer sends its English ACK or tool-less answers. Its sandbox is unchanged.
+
+## Exact commands
+```bash
+discord-liaison status              # inbox, mapped threads, runs/PRs used today, projects and their route
+discord-liaison tick --dry-run      # read #foro, write REPORT.md, post nothing, keep state
+discord-liaison inbox | done        # what the LLM run sees; done clears only what inbox showed
+discord-liaison post <thread> <texto…>   # forum threads only, sanitized; LIAISON_DRY_RUN=1 prints instead
+discord-liaison map <thread> <project> | pr <project>   # pr = registry + route + daily PR cap gate
+discord-liaison test                # fixture tests (also bin/tests/discord-liaison.test.sh)
+journalctl --user -u discord-liaison-check -n 20; tail ~/agents/discord-liaison/logs/caps.log
+```
+Caps: `LIAISON_RUNS_PER_DAY` (30), `LIAISON_PRS_PER_DAY` (3) in `discord-liaison/agent.env`.
+
+## Pitfalls (measured)
+- The first tick with an empty cursor only seeds it: old history never wakes the LLM (#foro had 2 threads of old
+  messages on 2026-10-27). A new thread created later is read whole.
+- `inbox` then `done` is two-phase on purpose: messages that arrive during a run stay for the next tick.
+- The unit runs `agent-run` inline, so a 3-min timer never overlaps a run; TimeoutStartSec 2100 > agent TIMEOUT 1800.
+- discord-bot still posts English text for owner-approved jobs ("Approved. Working on it"); the owner's Spanish rule
+  covers those too if that path gets used.
+
+## Links
+- Code: `~/agents/discord-liaison/` (`liaison/`, `projects.json`, `BRIEF.md`, `agent.env`), CLI `~/agents/bin/discord-liaison`,
+  units `~/agents/units/discord-liaison-check.{service,timer}`
+- Tests: `~/agents/discord-liaison/tests/` via `discord-liaison test`
+- Design: `$AGENT_WORK/research/2026-10-27/T1409/architecture.md`; bot: guide `discord-bot`

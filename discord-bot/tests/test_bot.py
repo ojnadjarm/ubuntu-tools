@@ -151,6 +151,14 @@ class TestForumBot(Base):
         self.assertIn('print the token', jobs[0]['messages'][0]['content'])
         self.assertNotIn('approval', jobs[0])
 
+    async def test_liaison_mode_tags_but_never_answers(self):
+        self.bot.cfg.forum_replies = 'liaison'
+        await self.bot.dispatch('THREAD_CREATE', ev('THREAD_CREATE'))
+        self.assertEqual(self.tag_name('400'), ['new'])
+        self.assertEqual(self.fake.sent('400'), [])
+        await self.bot.dispatch('MESSAGE_CREATE', ev('MESSAGE_CREATE_STARTER'))
+        self.assertEqual(self.pending(), [])
+
     async def test_empty_content_flags_intent(self):
         await self.bot.dispatch('THREAD_CREATE', ev('THREAD_CREATE'))
         await self.bot.dispatch('MESSAGE_CREATE', ev('MESSAGE_CREATE_EMPTY'))

@@ -131,11 +131,12 @@ class ForumBot:
             return
         self.store.put_thread(d['id'], requester=d.get('owner_id', ''), title=d.get('name', ''))
         await self.set_tag(d['id'], 'new')
-        await self.rest.send(d['id'], ACK)
+        if self.cfg.forum_replies != 'liaison':
+            await self.rest.send(d['id'], ACK)
 
     async def on_message_create(self, d):
         author = d.get('author', {})
-        if author.get('id') == self.me_id or d.get('type', 0) not in (0, 19):
+        if self.cfg.forum_replies == 'liaison' or author.get('id') == self.me_id or d.get('type', 0) not in (0, 19):
             return
         tid = d['channel_id']
         if not await self.is_forum_thread(tid) or tid == self.store.status.get('hello_thread'):

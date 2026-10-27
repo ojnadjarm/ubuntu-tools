@@ -24,6 +24,7 @@ class Config:
     requests_per_day: int = 10
     jobs_per_day: int = 3
     poll_seconds: float = 2.0
+    forum_replies: str = 'bot'
 
     @classmethod
     def from_env(cls, env=None):
@@ -41,6 +42,7 @@ class Config:
             requests_per_day=int(e.get('DISCORD_REQUESTS_PER_DAY', '10')),
             jobs_per_day=int(e.get('DISCORD_JOBS_PER_DAY', '3')),
             poll_seconds=float(e.get('DISCORD_POLL_SECONDS', '2')),
+            forum_replies=e.get('DISCORD_FORUM_REPLIES', 'bot'),
         )
 
     def token(self):

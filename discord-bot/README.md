@@ -10,4 +10,5 @@ and friends' bots alike.
 - Config: `DISCORD_*` keys in config.env (`config.example.env`); token `~/agents/secrets/discord-bot-token`.
 - Code: `discordbot/` (core, gateway, rest, runner, jobs, store, sanitize, netproxy, cli); tests in `tests/`.
 - State: `state/` (bot-writable: status, threads, rate ledger, job spool), `runner-state/` and `work/` (runner only).
+- Forum replies: with `DISCORD_FORUM_REPLIES=liaison` the bot only tags and runs approved jobs; discord-liaison answers (T1409).
 - Guide: `~/agents/KB/guides/discord-bot.md`; architecture: `$AGENT_WORK/research/2026-10-15/T348/architecture.md`.

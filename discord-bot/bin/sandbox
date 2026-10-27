@@ -23,7 +23,7 @@ args+=(--dir "$H" --ro-bind "$ME/discordbot" "$ME/discordbot" --ro-bind "$ME/.ve
        --setenv HOME "$H" --setenv PATH /usr/bin --setenv LANG C.UTF-8 --setenv PYTHONDONTWRITEBYTECODE 1
        --setenv DISCORD_PROXY "http://127.0.0.1:$port" --setenv DISCORD_TOKEN_FILE "$TOKEN"
        --setenv DISCORD_STATE_DIR "$ME/state")
-while IFS='=' read -r k v; do args+=(--setenv "$k" "$v"); done < <(env | grep -E '^DISCORD_(GUILD_ID|FORUM_ID|OWNER_ID|ALLOWLIST|REQUESTS_PER_DAY|JOBS_PER_DAY|POLL_SECONDS)=')
+while IFS='=' read -r k v; do args+=(--setenv "$k" "$v"); done < <(env | grep -E '^DISCORD_(GUILD_ID|FORUM_ID|OWNER_ID|ALLOWLIST|REQUESTS_PER_DAY|JOBS_PER_DAY|POLL_SECONDS|FORUM_REPLIES)=')
 inner='"$0" -m discordbot.netproxy relay /run/dbot/proxy.sock '"$port"' 2>/dev/null &
 for _ in $(seq 100); do (exec 3<>/dev/tcp/127.0.0.1/'"$port"') 2>/dev/null && break; sleep 0.05; done
 exec "$@"'

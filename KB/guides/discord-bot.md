@@ -4,6 +4,7 @@ Ticket: T348, T361, T448 · Last verified: 2026-10-20 by T846 read-only audit (`
 
 ## When to use
 Run, check, change or debug the `agents` Discord bot, post into its forum, or build another sandboxed chat bot.
+Conversation in #foro (Spanish replies, collab PRs): guide `discord-liaison`; with `DISCORD_FORUM_REPLIES=liaison` the bot only tags and runs approved jobs (T1409).
 Not for a Discord bridge into an interactive Claude session: that is the official `discord@claude-plugins-official`
 channel plugin (`--channels`), which gives the chat that session's tools.
 
