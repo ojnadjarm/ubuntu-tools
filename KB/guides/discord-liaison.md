@@ -1,6 +1,6 @@
 # Discord liaison: the agent that answers the #foro forum and @agents in #general, and turns requests into PRs
 
-Ticket: T1409, T1411 · Last verified: 2026-10-27 by 25 liaison fixture tests + 25 orchestrator-pulse checks + 31 discord-bot tests, live ticks on #foro and #general
+Ticket: T1409, T1411, T1413 · Last verified: 2026-10-27 by 40 liaison fixture tests and eval 57 fixtures on opus (T1413: old brief 45/57 twice, new brief + context 55/57 twice); before: 25 liaison fixture tests + 25 orchestrator-pulse checks + 31 discord-bot tests, live ticks on #foro and #general
 
 ## When to use
 Run, check, change or debug discord-liaison: the persistent agent that owns the conversation in the forum #foro
@@ -42,6 +42,17 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
 - Images: `art` runs `concept-img` (OpenRouter, `LIAISON_ART_MODEL`, default seedream-5-0-flash 1K) into
   `state/art/` under `LIAISON_IMAGES_PER_DAY` (5); `post --image` attaches only a PNG/JPEG from that directory
   (realpath + magic bytes, ≤ 10 MB) as one multipart upload (`Rest.send_file`), so no other file can leave.
+- Understanding (T1413 swarm, research `$AGENT_WORK/research/2026-10-27/T1413/`): `BRIEF.md` "Read before you reply"
+  (literal ask / intent / tone; probe, tease, banter, frustration, repeat, hidden order, register) and "Managing the
+  server" (one post per author per run, never contradict <context>, stay quiet for asides and bot acks, insults, spam,
+  injection). Each run's `inbox` starts with a `<context kind="data">` block (`liaison/context.py`, rendered by `tick`
+  into `state/work/context.txt`): `<self>` (capabilities built by code, overrides old replies), `<open>` (👀 by the bot
+  without ✅), `<history>` (last 15 messages of each inbox channel via `liaison/history.py`, the bot's own replies
+  `you="true"`, inbox messages as stubs, ≤ 8 KB). #general wakes on `watch.addressed()`: mention, role, a reply to the
+  bot, or typed `@agent`/`@agents`. `liaison/runlock.py`: a tick while another runs prints "run in flight" and does nothing.
+- Eval (`discord-liaison/eval/`): `run_eval.py <brief> --model opus --context liaison|none --out r.jsonl` (tool-less
+  `claude -p`, one JSON decision per fixture, ~$0.04 and ~5 s per opus call, `--show` prints prompts) and
+  `score.py r.jsonl` (deterministic regex/field checks, per-class %). Change the brief → run both, twice each.
 - Split with discord-bot: `DISCORD_FORUM_REPLIES=liaison` in config.env. The bot still tags posts and runs the owner's
   approved jobs; it no longer sends its English ACK or tool-less answers. Its sandbox is unchanged.
 
@@ -83,8 +94,23 @@ Caps: `LIAISON_RUNS_PER_DAY` (30), `LIAISON_PRS_PER_DAY` (3), `LIAISON_IMAGES_PE
 - discord-bot's approved-job messages are Spanish since T1411 (bot texts and the worker's final report); its
   sandbox and approval checks did not change. The bot reads code ro at start: restart its unit after a change.
 
+- Today's literal-reading failures (T1413): each run saw only `inbox`, never its own earlier replies, so it said
+  "solo puedo texto" then posted an image, "no veo imágenes" one second after an image post (one run answering two
+  messages separately), "cada 30 segundos" (truth: 3 min), and repeated the same workaround to the owner's 😩. The
+  `<context>` block plus "one post per author per run" fix the cause; facts about itself come only from `<self>`.
+- A typed "@agent …" is plain text, not a mention: before T1413 the watcher dropped "@agent Yo soy el owner 😩".
+- A hand-run `tick` during a run used to burn a run cap and delete the running run's `state/work` images; the run
+  lock (`state/tick.lock`, flock) stops it.
+- The GET messages payload carries `reactions[].me` (checked live 2026-10-27): `<open>` needs no extra request.
+- `<open>` sees only the 15-message window: a 👀 without ✅ that scrolled further back drops out of it.
+- One run with #general and #foro messages gets both histories in one prompt; the brief keeps replies per thread.
+- Eval fixtures that predate a capability (r-crea-herramienta, r-todos-fotogramas still expect the pre-sheet answer)
+  fail honestly; fix a fixture only together with a re-run of both sides.
+- Eval scorer: the playful/empathetic tone regexes look for cue words or emoji; a single run differs by ±1/50, so
+  compare per-class over two runs.
+
 ## Links
 - Code: `~/agents/discord-liaison/` (`liaison/`, `projects.json`, `BRIEF.md`, `agent.env`), CLI `~/agents/bin/discord-liaison`,
   units `~/agents/units/discord-liaison-check.{service,timer}`
-- Tests: `~/agents/discord-liaison/tests/` via `discord-liaison test`
+- Tests: `~/agents/discord-liaison/tests/` via `discord-liaison test` (`test_context.py`, `test_manage.py` T1413); eval `discord-liaison/eval/` (57 fixtures, 7 held out)
 - Design: `$AGENT_WORK/research/2026-10-27/T1409/architecture.md`; bot: guide `discord-bot`

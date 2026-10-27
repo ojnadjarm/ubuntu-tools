@@ -18,7 +18,10 @@ from discordbot.runner import SECRET_KEYS
 from discordbot.sanitize import chunks, clean
 
 from .caps import Caps
+from .context import ContextRenderer, self_line
+from .history import History
 from .registry import Registry
+from .runlock import run_lock
 from .state import State
 from .watch import CDN, MAX_ATTACHMENT, Watcher
 
@@ -137,6 +140,13 @@ class App:
                         f'PRs {self.caps.used("pr")}/{self.caps.limits["pr"]}\n')
             print(f'dry run: threads {threads}, #general mentions {mentions}, {len(msgs)} new')
             return 0
+        with run_lock(os.path.join(self.home, 'state', 'tick.lock')) as held:
+            if not held:
+                print('run in flight: this tick does nothing')
+                return 0
+            return await self.run_tick()
+
+    async def run_tick(self):
         msgs, _ = await self.check()
         print(f'{len(msgs)} new, inbox {len(self.state.inbox)}')
         self.nudge()
@@ -145,6 +155,7 @@ class App:
         if not self.caps.take('run'):
             return 0
         await self.fetch_images()
+        await self.write_context()
         cmd = self.env.get('LIAISON_AGENT_CMD', 'agent-run discord-liaison')
         try:
             return subprocess.call(cmd, shell=True, stdin=subprocess.DEVNULL)
@@ -181,6 +192,18 @@ class App:
                                 with open(os.path.splitext(dest)[0] + '.note', 'w') as f:
                                     f.write(note)
 
+    async def write_context(self):
+        """Render the inbox channels' recent turns into state/work/context.txt for this run's `inbox`."""
+        me = (await self.rest.me())['id']
+        names = {m['thread_id']: m['thread'] for m in self.state.inbox}
+        hist = History(self.rest)
+        channels = [(name, await hist.recent(tid)) for tid, name in names.items()]
+        text = ContextRenderer(me, self.owner).render(
+            channels, [m['id'] for m in self.state.inbox], self_line(self.caps.limits['img'] - self.caps.used('img')))
+        os.makedirs(self.work, exist_ok=True)
+        with open(os.path.join(self.work, 'context.txt'), 'w') as f:
+            f.write(text + '\n')
+
     def images(self, mid):
         return sorted(p for p in glob.glob(os.path.join(glob.escape(self.work), f'{mid}-*')) if not p.endswith('.note'))
 
@@ -193,6 +216,11 @@ class App:
 
     def inbox(self):
         self.state.mark_shown()
+        try:
+            with open(os.path.join(self.work, 'context.txt')) as f:
+                print(f.read(), end='')
+        except OSError:
+            print('<context kind="data">historial no disponible</context>')
         for m in self.state.inbox:
             pid = (self.state.thread(m['thread_id']) or {}).get('project', '')
             route = self.registry.route(pid) if pid else ''

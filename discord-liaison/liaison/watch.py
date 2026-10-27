@@ -1,9 +1,19 @@
 """Read-only polls: new messages in the forum's active threads, and #general messages that mention the bot."""
 import os
+import re
 
 CDN = ('https://cdn.discordapp.com/', 'https://media.discordapp.net/')
 IMAGE_EXT = ('.png', '.jpg', '.jpeg', '.webp', '.gif')
 MAX_ATTACHMENT, MAX_ATTACHMENTS = 8 * 1024 * 1024, 4
+TYPED = re.compile(r'(?<![\w@./:`>-])@agents?\b(?![@.]\w)', re.IGNORECASE)
+
+
+def addressed(m, me, role):
+    """True when a #general message is for the bot: a mention of it or its role, a reply to it, or a typed @agent(s) outside quotes."""
+    return (me in {u.get('id') for u in m.get('mentions', [])}
+            or bool(role) and role in m.get('mention_roles', [])
+            or ((m.get('referenced_message') or {}).get('author') or {}).get('id') == me
+            or any(TYPED.search(line) for line in m.get('content', '').splitlines() if not line.startswith('>')))
 
 
 def images(m, cdn=CDN):
@@ -48,7 +58,7 @@ class Watcher:
         return out, cur
 
     async def general(self, channel_id, last):
-        """Return (mentions, cursor): messages after `last` that mention the bot or its role; no `last` only seeds."""
+        """Return (mentions, cursor): messages after `last` addressed to the bot (`addressed`); no `last` only seeds."""
         if not self.me:
             self.me = (await self.rest.me())['id']
         if self.role is None:
@@ -61,9 +71,7 @@ class Watcher:
         out = []
         for m in sorted((m for m in msgs if int(m['id']) > int(last)), key=lambda m: int(m['id'])):
             last, a = m['id'], m.get('author', {})
-            hit = (self.me in {u.get('id') for u in m.get('mentions', [])}
-                   or bool(self.role) and self.role in m.get('mention_roles', []))
-            if a.get('id') == self.me or not hit:
+            if a.get('id') == self.me or not addressed(m, self.me, self.role):
                 continue
             text = m.get('content', '').replace(f'<@{self.me}>', '@agents').replace(f'<@!{self.me}>', '@agents')
             if self.role:
