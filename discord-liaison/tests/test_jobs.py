@@ -40,21 +40,24 @@ class TestJobQueue(unittest.TestCase):
         self.assertEqual(self.q.dispatch(3, self.launch)[0], [])
         self.assertEqual([j['id'] for j in self.q.list('queued')], ids[3:])
         self.assertEqual(self.q.reap(), [])
-        self.clock.t += GRACE + 1
-        with run_lock(os.path.join(self.tmp.name, ids[0], 'lock')):
-            lost = self.q.reap()
-        self.assertEqual([j['id'] for j in lost], ids[1:3])
-        self.assertEqual(self.q.dispatch(3, self.launch)[0], ids[3:])
-        self.assertEqual(self.launched, ids)
+        for retried in (False, True):
+            self.clock.t += GRACE + 1
+            with run_lock(os.path.join(self.tmp.name, ids[0], 'lock')):
+                lost = self.q.reap()
+            self.assertEqual([j['id'] for j in lost], ids[1:3] if retried else [])
+            self.assertEqual(self.q.dispatch(3, self.launch)[0], ids[3:] if retried else ids[1:3])
+        self.assertEqual(self.launched, ids[:3] + ids[1:3] + ids[3:])
 
-    def test_failed_launch_marks_the_job_failed(self):
+    def test_failed_launch_is_retried_once_then_fails(self):
         jid = self.q.create(msg('7'), 'task')['id']
+        self.assertEqual(self.q.dispatch(3, lambda _: 1), ([], []))
+        self.assertEqual((self.q.get(jid)['status'], self.q.get(jid)['attempt']), ('queued', 2))
         started, failed = self.q.dispatch(3, lambda _: 1)
         self.assertEqual((started, [j['id'] for j in failed]), ([], [jid]))
         self.assertEqual(self.q.get(jid)['status'], 'failed')
 
 
-class TestJobCli(Base):
+class JobBase(Base):
     async def asyncSetUp(self):
         await super().asyncSetUp()
         self.launched = os.path.join(self.tmp.name, 'launched.log')
@@ -77,6 +80,8 @@ class TestJobCli(Base):
         await self.run_cli('inbox')
         return ids
 
+
+class TestJobCli(JobBase):
     async def test_job_from_inbox_starts_then_queues_over_the_cap(self):
         a, b = await self.inbox('haz un PR con la voz', 'y una imagen del héroe')
         rc, out = await self.run_cli('job', a, 'PR on ten: narrator voice')
@@ -144,7 +149,7 @@ class TestJobCli(Base):
         jid = self.launches()[0]
         q = self.jobs()
         job = q.get(jid)
-        job['started'] -= GRACE + 1
+        job.update(started=job['started'] - GRACE - 1, attempt=2)
         q.save(job)
         await self.run_cli('tick')
         self.assertEqual((q.get(jid)['status'], q.get(jid)['why']), ('failed', 'lost'))

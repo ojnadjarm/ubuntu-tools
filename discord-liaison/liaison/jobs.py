@@ -9,6 +9,8 @@ import time
 
 from discordbot.store import save_json
 
+from .routing import after_failure
+
 GRACE = 120
 
 
@@ -68,12 +70,9 @@ class JobQueue:
             yield
 
     def reap(self):
-        """Running jobs whose runner is gone (killed, reboot) become failed; returns them."""
+        """Running jobs whose runner is gone (killed, reboot) are retried or failed; returns the failed ones."""
         with self._queue_lock():
-            lost = [j for j in self.list('running') if not self.alive(j)]
-            for j in lost:
-                self.finish(j, 'failed', 'lost')
-        return lost
+            return [j for j in self.list('running') if not self.alive(j) and not self.retry(j, 'lost')]
 
     def dispatch(self, cap, launch):
         """Start queued jobs, oldest first, while fewer than `cap` run; returns (started ids, jobs whose launch failed)."""
@@ -84,10 +83,18 @@ class JobQueue:
                 self.save(job)
                 if launch(job['id']) == 0:
                     started.append(job['id'])
-                else:
-                    self.finish(job, 'failed', 'launch')
+                elif not self.retry(job, 'launch'):
                     failed.append(job)
             return started, failed
+
+    def retry(self, job, why):
+        """Queue the job again while attempts remain (True), else finish it failed (False)."""
+        if after_failure(job.get('attempt', 1)) == 'retry':
+            job.update(status='queued', attempt=job.get('attempt', 1) + 1, why=why)
+            self.save(job)
+            return True
+        self.finish(job, 'failed', why)
+        return False
 
     def finish(self, job, status, why=''):
         for p in job.get('files', []):

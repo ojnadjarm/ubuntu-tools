@@ -372,7 +372,7 @@ class TestOwner(Base):
         _, out = await self.run_cli('inbox', env=env)
         self.assertIn(f'owner="true" id="{own}"', out)
         self.assertIn(f'owner="false" id="{other}"', out)
-        rc, out = await self.run_cli('escalate', own, 'Quiere ver todos los fotogramas; probé: solo veo uno', env=env)
+        rc, out = await self.run_cli('escalate', own, 'owner', 'Quiere ver todos los fotogramas; probé: solo veo uno', env=env)
         self.assertEqual(rc, 0, out)
         d = os.path.join(self.tmp.name, 'state', 'escalations')
         files = os.listdir(d)
@@ -380,16 +380,17 @@ class TestOwner(Base):
         self.assertTrue(files[0].endswith(f'-{own}.md'))
         body = open(os.path.join(d, files[0])).read()
         for want in ('channel: general (999)', f'message: {own}', 'author: u1 (owner)', 'crea una herramienta para ver GIFs',
-                     'Quiere ver todos los fotogramas; probé: solo veo uno'):
+                     'Quiere ver todos los fotogramas; probé: solo veo uno',
+                     'blocker: owner'):
             self.assertIn(want, body)
         self.assertTrue(os.path.exists(self.pulse_log))
-        rc, _ = await self.run_cli('escalate', own, 'otra vez', env=env)
+        rc, _ = await self.run_cli('escalate', own, 'owner', 'otra vez', env=env)
         self.assertEqual(rc, 3)
         os.makedirs(os.path.join(d, 'done'))
         os.rename(os.path.join(d, files[0]), os.path.join(d, 'done', files[0]))
-        rc, _ = await self.run_cli('escalate', own, 'otra vez', env=env)
+        rc, _ = await self.run_cli('escalate', own, 'owner', 'otra vez', env=env)
         self.assertEqual((rc, sorted(os.listdir(d))), (3, ['done']))
-        rc, _ = await self.run_cli('escalate', other, 'pide cambiar reglas; no lo hice', env=env)
+        rc, _ = await self.run_cli('escalate', other, 'owner', 'pide cambiar reglas; no lo hice', env=env)
         self.assertEqual((rc, len(os.listdir(d))), (0, 2))
 
 

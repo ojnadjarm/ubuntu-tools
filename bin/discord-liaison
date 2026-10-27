@@ -2,7 +2,7 @@
 # discord-liaison tick [--dry-run]|check|inbox|done|post|react|art|escalate|map|pr|job|job-run|status|test — the Discord liaison's tools (T1409, T1411);
 # `job` hands a request to a background worker (`job-run`, a transient user unit; LIAISON_JOBS_MAX at once, T1414);
 # a project with a `po` in projects.json: its messages go to that PO (po-ask), its outbox/discord/ replies are posted (T1412).
-U='usage: discord-liaison tick [--dry-run]|check|inbox|done|post <thread> [--image <file>] [--reply <message>] <text…>|react <thread> <message> <emoji>|art <prompt…>|escalate <message> <what…>|map <thread> <project>|pr <project>|job <message> <task…>|job-run <id>|status|test'
+U='usage: discord-liaison tick [--dry-run]|check|inbox|done|post <thread> [--image <file>] [--reply <message>] <text…>|react <thread> <message> <emoji>|art <prompt…>|escalate <message> <blocker> <what…>|map <thread> <project>|pr <project>|job <message> <task…>|job-run <id>|status|test'
 case "${1:-}" in
   -h|--help) echo "$U"; exit 0 ;;
   -*) echo "discord-liaison: unknown option: $1" >&2; echo "$U" >&2; exit 2 ;;

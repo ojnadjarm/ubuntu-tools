@@ -1,6 +1,6 @@
 # Discord liaison: the agent that answers the #foro forum and @agents in #general, and turns requests into PRs
 
-Ticket: T1409, T1411, T1413, T1414, T1415 · Last verified: 2026-10-27 by 49 liaison fixture tests (T1415: job media + reply); before: 47 liaison fixture tests (T1414: 7 job tests, a transient-unit probe, a live tick) and eval 57 fixtures on opus (T1413: old brief 45/57 twice, new brief + context 55/57 twice); before: 25 liaison fixture tests + 25 orchestrator-pulse checks + 31 discord-bot tests, live ticks on #foro and #general
+Ticket: T1409, T1411, T1413, T1414, T1415, T1416 · Last verified: 2026-10-27 by 57 liaison fixture tests (T1416: 8 routing tests, job vs escalate); before: 49 (T1415: job media + reply); before: 47 liaison fixture tests (T1414: 7 job tests, a transient-unit probe, a live tick) and eval 57 fixtures on opus (T1413: old brief 45/57 twice, new brief + context 55/57 twice); before: 25 liaison fixture tests + 25 orchestrator-pulse checks + 31 discord-bot tests, live ticks on #foro and #general
 
 ## When to use
 Run, check, change or debug discord-liaison: the persistent agent that owns the conversation in the forum #foro
@@ -31,9 +31,13 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
   reads them with Read; `tick` deletes `state/work/` when the run ends.
 - The owner (T1411): `inbox` marks `owner="true"` when the author id equals `DISCORD_OWNER_ID` (the guild owner,
   stored by `discord-bot setup`); his requests are the owner's decisions.
-- Escalations (owner, T1411): never "no puedo" / "lo decide el owner". Beyond its tools or rules the liaison reacts 👀,
+- Worker first (owner, T1416: "it should only reach you if something is blocking him"): work or a missing tool is a
+  `job`; `escalate <message> <blocker>` takes only `permission`, `owner`, `secret` or `attempts` (`liaison/routing.py`),
+  any other reason is refused toward `job`. A failed worker run is retried once in the same runner, a lost runner or
+  failed launch is requeued once (`attempt` in job.json); the second failure posts the note and escalates `attempts`.
+- Escalations (owner, T1411): never "no puedo" / "lo decide el owner". When blocked the liaison reacts 👀,
   acks in Spanish and runs `escalate`, which writes `state/escalations/<utc>-<msg>.md` (channel, message, author,
-  request, what it tried) and starts `orchestrator-pulse`; every `tick` starts it again while an open file is missing
+  blocker, request, what it tried) and starts `orchestrator-pulse`; every `tick` starts it again while an open file is missing
   from the pulse snapshot (`~/agents/log/pulse-queue.json` key `escalations`). The pulse stays idle-only and logged; its
   turn begins `Discord escalation: <file>`. The orchestrator answers, then moves the file to `escalations/done/`; an
   open or done escalation of the same message is refused (KB/orchestrator.md "Pulse").
@@ -74,7 +78,7 @@ discord-liaison inbox | done        # what the LLM run sees; done clears only wh
 discord-liaison post <thread> [--image <file>] [--reply <msg>] <texto…>   # forum threads or #general, sanitized; LIAISON_DRY_RUN=1 prints
 discord-liaison react <thread> <message-id> 👀|✅       # ack on receipt, done when the result is posted
 discord-liaison art "<prompt>"     # concept-img into state/art/, prints the path; daily image cap
-discord-liaison escalate <message-id> "<asked; tried>"   # -> state/escalations/, pulses the orchestrator
+discord-liaison escalate <message-id> <permission|owner|secret|attempts> "<asked; tried>"   # -> state/escalations/, pulses the orchestrator
 discord-liaison map <thread> <project> | pr <project>   # pr = registry + route + daily PR cap gate
 discord-liaison job <message-id> "<task>"   # triage: hand a work request to a background worker (queued over the cap)
 discord-liaison job-run <id>                # the worker's runner (started by the transient unit; not by hand)
@@ -127,8 +131,12 @@ Caps: `LIAISON_RUNS_PER_DAY` (30), `LIAISON_PRS_PER_DAY` (3), `LIAISON_IMAGES_PE
 - Eval scorer: the playful/empathetic tone regexes look for cue words or emoji; a single run differs by ±1/50, so
   compare per-class over two runs.
 
+- Before T1416 any request beyond the triage run went to the orchestrator, whose pulse fires only when its prompt is
+  idle and empty (pulse.log "input line not empty"): the 09:46 art request waited 30 min. Workers have the same tools.
+- A retry of a crashed worker runs inline: requeuing it would launch a transient unit with the running unit's name.
+
 ## Links
 - Code: `~/agents/discord-liaison/` (`liaison/`, `projects.json`, `BRIEF.md`, `JOB.md`, `agent.env`), CLI `~/agents/bin/discord-liaison`,
   units `~/agents/units/discord-liaison-check.{service,timer}`
-- Tests: `~/agents/discord-liaison/tests/` via `discord-liaison test` (`test_context.py`, `test_manage.py` T1413, `test_jobs.py` T1414); eval `discord-liaison/eval/` (57 fixtures, 7 held out)
+- Tests: `~/agents/discord-liaison/tests/` via `discord-liaison test` (`test_context.py`, `test_manage.py` T1413, `test_jobs.py` T1414, `test_routing.py` T1416); eval `discord-liaison/eval/` (57 fixtures, 7 held out)
 - Design: `$AGENT_WORK/research/2026-10-27/T1409/architecture.md`; bot: guide `discord-bot`

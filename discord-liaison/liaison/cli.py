@@ -21,6 +21,7 @@ from .caps import Caps
 from .context import ContextRenderer, self_line
 from .history import History
 from .jobs import JobQueue
+from .routing import BLOCKERS, MAX_ATTEMPTS, after_failure, route
 from .registry import Registry
 from .runlock import run_lock
 from .state import State
@@ -29,7 +30,7 @@ from .watch import CDN, MAX_ATTACHMENT, Watcher
 GENERAL = '#general'
 ME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 USAGE = ('usage: discord-liaison tick [--dry-run]|check|inbox|done|post <thread> [--image <file>] [--reply <message>] <text…>|'
-         'react <thread> <message> <emoji>|art <prompt…>|escalate <message> <what…>|map <thread> <project>|pr <project>|'
+         'react <thread> <message> <emoji>|art <prompt…>|escalate <message> <blocker> <what…>|map <thread> <project>|pr <project>|'
          'job <message> <task…>|job-run <id>|status')
 FAILED = '{author}, no he podido terminarlo. Lo paso al orquestador y te respondo aquí.'
 IMAGE_MAGIC = (b'\x89PNG\r\n\x1a\n', b'\xff\xd8\xff')
@@ -352,20 +353,29 @@ class App:
             self.pulse()
 
     def escalate(self, args):
-        """Hand a request beyond the liaison's tools or rules to the orchestrator: state/escalations/<utc>-<msg>.md."""
+        """Hand a blocked request to the orchestrator: state/escalations/<utc>-<msg>.md naming the blocker."""
         msgs = self.state.inbox + [j['message'] for j in self.jobs.list()]
         m = next((m for m in msgs if args and m['id'] == args[0]), None)
+        usage = (f'usage: discord-liaison escalate <message-id from the inbox or a job> <{"|".join(BLOCKERS)}> '
+                 '"<what is asked; what was tried>"')
         if len(args) < 2 or m is None:
-            print('usage: discord-liaison escalate <message-id from the inbox or a job> "<what is asked; what you tried>"')
+            print(usage)
             return 2
-        path = self.write_escalation(m, ' '.join(args[1:]))
+        if route(args[1]) == 'job':
+            print(f'refused: not blocked; hand the work to a worker: discord-liaison job {m["id"]} "<task>". '
+                  f'Escalate only for: {"; ".join(f"{k} = {v}" for k, v in BLOCKERS.items())}')
+            return 3
+        if len(args) < 3:
+            print(usage)
+            return 2
+        path = self.write_escalation(m, args[1], ' '.join(args[2:]))
         if not path:
             print(f'refused: message {m["id"]} is already escalated (open or done)')
             return 3
         print(f'escalated to the orchestrator: {path}')
         return 0
 
-    def write_escalation(self, m, tried):
+    def write_escalation(self, m, blocker, tried):
         """Write the escalation file and pulse; None when this message was escalated before."""
         d = os.path.join(self.home, 'state', 'escalations')
         if glob.glob(os.path.join(glob.escape(d), f'*-{m["id"]}.md')) + glob.glob(
@@ -376,7 +386,7 @@ class App:
         who = ' (owner)' if self.owner and m.get('author_id') == self.owner else ''
         with open(path, 'w') as f:
             f.write(f'# Discord escalation\n\nchannel: {m.get("channel", "foro")} ({m["thread_id"]})\nmessage: {m["id"]}\n'
-                    f'author: {m["author"]}{who}\n\n## Request\n\n{m["content"]}\n\n## What the liaison tried\n\n'
+                    f'author: {m["author"]}{who}\nblocker: {blocker} ({BLOCKERS[blocker]})\n\n## Request\n\n{m["content"]}\n\n## What the liaison tried\n\n'
                     f'{tried}\n\nAnswer in the channel, then move this file to done/.\n')
         self.pulse()
         return path
@@ -418,13 +428,14 @@ class App:
             await self.notify_failure(j, 'launch failed')
 
     async def notify_failure(self, job, why):
-        """A short Spanish note in the request's thread, then an escalation to the orchestrator."""
+        """After the last attempt: a short Spanish note in the request's thread, then an escalation to the orchestrator."""
         m = job['message']
         try:
             await self.post([m['thread_id'], FAILED.format(author=m['author'])])
         except RestError:
             pass
-        self.write_escalation(m, f'background job {job["id"]} failed ({why}); task: {job["task"]}')
+        self.write_escalation(m, 'attempts', f'background job {job["id"]} failed {job.get("attempt", 1)} times '
+                                             f'(last: {why}); task: {job["task"]}')
 
     def job_prompt(self, job):
         """JOB.md, BRIEF.md's Rules, then the job: task, message and the triage run's context, as data."""
@@ -443,7 +454,10 @@ class App:
         imgs = [p for p in job['files'] if not p.endswith(('.txt', '.note'))]
         images = f' images="{" ".join(imgs)}"' if imgs else ''
         body = m['content'].replace('</message', '<\\/message')
-        text = (f'{head}\n{rules}\n## Your job\n\njob: {job["id"]}\ntask (from the triage run): {job["task"]}\n\n{context}'
+        text = (f'{head}\n{rules}\n## Your job\n\njob: {job["id"]}\nattempt: {job.get("attempt", 1)} of {MAX_ATTEMPTS}\n'
+                f'task (from the triage run): {job["task"]}\nrequest: the <message> below, verbatim\n'
+                f'must: reply in Spanish only; anything audiovisual is AAA, shocking and breathtaking; '
+                f'post the result and react ✅ yourself\n\n{context}'
                 f'<message channel="{m.get("channel", "foro")}" thread="{m["thread_id"]}" title="{m["thread"]}" '
                 f'project="{m.get("project", "")}" route="{m.get("route", "")}" author="{m["author"]}" '
                 f'owner="{str(m.get("owner", False)).lower()}" id="{m["id"]}"{images}>\n{body}\n</message>\n')
@@ -453,7 +467,7 @@ class App:
         return path
 
     async def job_run(self, args):
-        """The worker's runner: hold the job lock, run the agent, on failure note + escalate, then start the next job."""
+        """The worker's runner: hold the job lock, run the agent (a failed run is retried once), then start the next job."""
         job = self.jobs.get(args[0]) if args else None
         if job is None or job['status'] not in ('queued', 'running'):
             print('refused: no queued or running job with that id')
@@ -466,15 +480,20 @@ class App:
             self.jobs.save(job)
             logs = os.path.join(self.home, 'logs', 'jobs')
             os.makedirs(logs, exist_ok=True)
-            q = {k: shlex.quote(v) for k, v in {
-                'prompt': self.job_prompt(job), 'id': job['id'], 'home': self.home, 'model': self.env.get('MODEL', 'opus'),
-                'timeout': self.env.get('LIAISON_JOB_TIMEOUT', '1800'), 'logs': logs,
-                'preamble': os.path.join(os.path.dirname(ME), 'AGENT-PREAMBLE.md')}.items()}
-            cmd = self.env.get('LIAISON_WORKER_CMD', (
-                'agent-exec --prompt-file {prompt} --system-file {preamble} --model {model} --cwd {home} '
-                '--name discord-liaison-job --timeout {timeout} --raw-out {logs}/{id}.json --meta-out {logs}/{id}.meta.json '
-                '>>{logs}/{id}.log 2>&1')).format(**q)
-            rc = subprocess.call(cmd, shell=True, stdin=subprocess.DEVNULL)
+            while True:
+                q = {k: shlex.quote(v) for k, v in {
+                    'prompt': self.job_prompt(job), 'id': job['id'], 'home': self.home, 'model': self.env.get('MODEL', 'opus'),
+                    'timeout': self.env.get('LIAISON_JOB_TIMEOUT', '1800'), 'logs': logs,
+                    'preamble': os.path.join(os.path.dirname(ME), 'AGENT-PREAMBLE.md')}.items()}
+                cmd = self.env.get('LIAISON_WORKER_CMD', (
+                    'agent-exec --prompt-file {prompt} --system-file {preamble} --model {model} --cwd {home} '
+                    '--name discord-liaison-job --timeout {timeout} --raw-out {logs}/{id}.json --meta-out {logs}/{id}.meta.json '
+                    '>>{logs}/{id}.log 2>&1')).format(**q)
+                rc = subprocess.call(cmd, shell=True, stdin=subprocess.DEVNULL)
+                if rc == 0 or after_failure(job.get('attempt', 1)) == 'escalate':
+                    break
+                job['attempt'] = job.get('attempt', 1) + 1
+                self.jobs.save(job)
             self.jobs.finish(job, 'done' if rc == 0 else 'failed', f'exit {rc}')
             if rc != 0:
                 await self.notify_failure(job, f'worker exit {rc}')
