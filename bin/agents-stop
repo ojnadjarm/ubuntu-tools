@@ -19,10 +19,10 @@ stop_if_running() {
   stopped="$stopped ${1%.*}"
 }
 
-for u in $(units 'agent@*.service') sentinel-check.service moodle-keep-weekly.service pcbench-weekly.service ailearning-ci-daily.service ailearning-ci-weekly.service fleet-ci-daily.service orchestrator-pulse.service improve-meter.service discord-bot.service; do
+for u in $(units 'agent@*.service') $(units 'po@*.service') po-picks.service sentinel-check.service moodle-keep-weekly.service pcbench-weekly.service ailearning-ci-daily.service ailearning-ci-weekly.service fleet-ci-daily.service orchestrator-pulse.service improve-meter.service discord-bot.service; do
   stop_if_running "$u"
 done
-for u in $(units 'agent@*.timer') sentinel-check.timer moodle-keep-weekly.timer pcbench-weekly.timer ailearning-ci-daily.timer ailearning-ci-weekly.timer fleet-ci-daily.timer orchestrator-pulse.timer improve-meter.timer; do
+for u in $(units 'agent@*.timer') $(units 'po@*.path') sentinel-check.timer moodle-keep-weekly.timer pcbench-weekly.timer ailearning-ci-daily.timer ailearning-ci-weekly.timer fleet-ci-daily.timer orchestrator-pulse.timer improve-meter.timer; do
   stop_if_running "$u"
 done
 

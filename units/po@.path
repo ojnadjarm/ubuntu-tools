@@ -1,0 +1,9 @@
+[Unit]
+Description=Product-owner agent po-%i: wake on a request in its inbox (T1412)
+
+[Path]
+DirectoryNotEmpty=%h/agents/po-%i/inbox
+Unit=po@%i.service
+
+[Install]
+WantedBy=default.target

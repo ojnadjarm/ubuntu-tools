@@ -1,0 +1,13 @@
+[Unit]
+Description=Product-owner agent po-%i: one run per batch of inbox requests (T1412)
+
+[Service]
+Type=oneshot
+Environment=PATH=%h/.local/bin:%h/agents/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus
+WorkingDirectory=%h/agents/po-%i
+ExecStart=%h/agents/bin/po-run %i
+TimeoutStartSec=infinity
+MemoryMax=8G
+Nice=5

@@ -99,3 +99,11 @@ portfolio/incoming/
 /discord-bot/run/
 /discord-bot/runner-state/
 /discord-bot/work/
+
+# Product-owner agents (T1412): requests and replies are runtime, BRIEF.md and agent.env are tracked.
+/po-*/inbox/
+/po-*/current/
+/po-*/done/
+/po-*/outbox/
+/po-*/.inbox-tmp/
+/po-*/.po-run.lock

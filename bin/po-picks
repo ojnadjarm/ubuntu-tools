@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# usage: po-picks [--once] — files the owner's ntfy button taps as PO requests (no LLM; po-picks.service). Reads the reply topic
+# (NTFY_REPLY_TOPIC, else <topic>-picks) from the last seen id; a body `<p>:<pick-id>:<key>` that matches an unanswered
+# po-<p>/state/picks/<id>.json option becomes `po-ask <p> --from pick`; anything else is logged and dropped.
+# --once polls and exits (tests, catch-up); default streams (curl reconnects every hour; systemd restarts it).
+case "${1:-}" in -h|--help) awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; exit 0 ;; ''|--once) ;;
+  *) echo "po-picks: unknown argument '$1' (usage: po-picks [--once])" >&2; exit 2 ;; esac
+set -uo pipefail
+here=$(dirname "$(readlink -f "$0")")
+. "$here/polib.sh"
+ENV_FILE="${NTFY_ENV_FILE:-$HARNESS_HOME/secrets/ntfy.env}"
+# shellcheck source=/dev/null
+. "$ENV_FILE" || { echo "po-picks: cannot read $ENV_FILE" >&2; exit 1; }
+url="$NTFY_URL/${NTFY_REPLY_TOPIC:-$NTFY_TOPIC-picks}/json"
+SINCE="$HARNESS_HOME/state/po-picks.since"; LOG="$HARNESS_HOME/log/po-picks.log"
+mkdir -p "$(dirname "$SINCE")" "$(dirname "$LOG")"
+log() { printf '%s %s\n' "$(date -Is)" "$1" >>"$LOG"; }
+
+handle() {
+  local id body p pid key f label q
+  id=$(jq -r 'select(.event == "message") | .id' <<<"$1" 2>/dev/null) || return 0
+  [ -n "$id" ] || return 0
+  body=$(jq -r '.message // ""' <<<"$1")
+  echo "$id" >"$SINCE"
+  if [[ ! "$body" =~ ^([a-z0-9-]+):([0-9a-f]+):([A-Za-z0-9]+)$ ]]; then log "dropped $id: not a pick"; return 0; fi
+  p=${BASH_REMATCH[1]} pid=${BASH_REMATCH[2]} key=${BASH_REMATCH[3]}
+  f="$HARNESS_HOME/po-$p/state/picks/$pid.json"
+  [ -r "$f" ] || { log "dropped $id: no pick $p:$pid"; return 0; }
+  [ "$(jq -r '.answer // empty' "$f")" = "" ] || { log "dropped $id: $p:$pid already answered"; return 0; }
+  label=$(jq -r --arg k "$key" '.options[$k] // empty' "$f")
+  [ -n "$label" ] || { log "dropped $id: $p:$pid has no option $key"; return 0; }
+  q=$(jq -r '.msg' "$f")
+  if "$here/po-ask" "$p" --from pick --channel ntfy --copy "Owner pick $pid: $key = $label (question: $q)" >/dev/null; then
+    jq --arg k "$key" --arg t "$(date -Is)" '.answer = {key: $k, at: $t}' "$f" >"$f.tmp" && mv "$f.tmp" "$f"
+    log "filed $id: $p:$pid -> $key"
+  else
+    log "failed $id: po-ask $p"
+  fi
+}
+
+since=$(cat "$SINCE" 2>/dev/null); since=${since:-10m}
+if [ "${1:-}" = --once ]; then
+  curl -fsS -m 30 "$url?poll=1&since=$since" | while IFS= read -r line; do handle "$line"; done
+  exit "${PIPESTATUS[0]}"
+fi
+while :; do
+  since=$(cat "$SINCE" 2>/dev/null); since=${since:-10m}
+  curl -fsSN -m 3600 "$url?since=$since" | while IFS= read -r line; do handle "$line"; done
+  sleep 5
+done

@@ -1,0 +1,12 @@
+[Unit]
+Description=PO pick buttons: ntfy reply topic to the PO inboxes, no LLM (T1412)
+After=network-online.target
+
+[Service]
+Environment=PATH=%h/.local/bin:%h/agents/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/agents/bin/po-picks
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target

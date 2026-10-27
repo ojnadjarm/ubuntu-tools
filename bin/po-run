@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# usage: po-run <p> — the po@<p>.service body (no LLM): move the inbox to current/, run `agent-run po-<p>` once, file any
+# request the run left in current/ to done/ with an outcome line; repeat while the inbox refills (at most PO_MAX_LOOPS,
+# default 5; the path unit starts it again after that). One po-run per PO at a time: a second call exits 0 at once.
+help() { awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; }
+case "${1:-}" in -h|--help) help; exit 0 ;; '') help >&2; exit 2 ;; esac
+set -uo pipefail
+. "$(dirname "$(readlink -f "$0")")/polib.sh"
+dir=$(po_dir po-run "$1") || exit 2
+name="po-$1"
+mkdir -p "$dir/current" "$dir/done"
+exec 9>"$dir/.po-run.lock"
+flock -n 9 || { echo "po-run: $name is already running; that run picks up new requests"; exit 0; }
+shopt -s nullglob
+rc=0
+for _ in $(seq "${PO_MAX_LOOPS:-5}"); do
+  reqs=("$dir"/inbox/*.md)
+  [ ${#reqs[@]} -gt 0 ] || break
+  mv -n "${reqs[@]}" "$dir/current/"
+  agent-run "$name" 9>&-; rc=$?
+  for f in "$dir"/current/*.md; do
+    printf '\noutcome: left in current/ by the run (agent-run exit %s); see REPORT.md\n' "$rc" >>"$f"
+    mv -n "$f" "$dir/done/"
+  done
+done
+exit "$rc"

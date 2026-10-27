@@ -11,7 +11,8 @@ LOG_FILE="${NTFY_LOG_FILE:-$HOME/agents/log/notify.log}"
 KEYS_FILE="${NTFY_KEYS_FILE:-$HOME/agents/log/notify-keys.tsv}"
 
 usage() {
-  echo 'usage: notify-owner [-p min|low|default|high|urgent] [-t title] [-g tags] [-k cause-key] "message"' >&2
+  echo 'usage: notify-owner [-p min|low|default|high|urgent] [-t title] [-g tags] [-k cause-key] [-a "label=body;…"] "message"' >&2
+  echo '  -a: up to 3 ntfy buttons; a tap POSTs body to the reply topic (NTFY_REPLY_TOPIC, else <topic>-picks), read by po-picks' >&2
   echo '  -p high: same key (-k, else the text; digits and a trailing " · path" dropped) sent in 24 h → logged dup in notify-keys.tsv, not sent' >&2
   exit 2
 }
@@ -20,12 +21,14 @@ prio=default
 title="${HARNESS_HOST:-$(hostname)}"
 tags=
 key=
-while getopts ':p:t:g:k:h' opt; do
+actions=
+while getopts ':p:t:g:k:a:h' opt; do
   case "$opt" in
     p) prio=$OPTARG ;;
     t) title=$OPTARG ;;
     g) tags=$OPTARG ;;
     k) key=$OPTARG ;;
+    a) actions=$OPTARG ;;
     *) usage ;;
   esac
 done
@@ -71,6 +74,14 @@ PY
 fi
 args=(-fsS -m 15 -X POST -H "Title: $title" -H "Priority: $prio")
 if [ -n "$tags" ]; then args+=(-H "Tags: $tags"); fi
+if [ -n "$actions" ]; then
+  case "$actions" in *[,\"\']*) echo "notify-owner: -a labels and bodies take no commas or quotes" >&2; exit 2 ;; esac
+  IFS=';' read -ra acts <<<"$actions"; hdr=
+  for a in "${acts[@]:0:3}"; do
+    hdr="${hdr:+$hdr; }http, ${a%%=*}, $NTFY_URL/${NTFY_REPLY_TOPIC:-$NTFY_TOPIC-picks}, method=POST, body=${a#*=}, clear=true"
+  done
+  args+=(-H "Actions: $hdr")
+fi
 if printf '%s' "$msg" | curl "${args[@]}" --data-binary @- "$NTFY_URL/$NTFY_TOPIC" >/dev/null; then
   status=ok
 else

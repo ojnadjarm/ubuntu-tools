@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# usage: po-new <p> "<Project name>" — make the product-owner agent ~/agents/po-<p> from ~/agents/po-template: BRIEF.md
+# (fill its "## Project" block next), agent.env, inbox/ current/ done/ outbox/discord/, state/PROJECT|BACKLOG|RUNS.md.
+# Refuses (exit 3) when po-<p> exists. Prints the unit command that wakes it on a request.
+help() { awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; }
+case "${1:-}" in -h|--help) help; exit 0 ;; '') help >&2; exit 2 ;; esac
+set -euo pipefail
+. "$(dirname "$(readlink -f "$0")")/polib.sh"
+p="$1"; name="${2:-$1}"
+case "$p" in -*|*[!a-z0-9-]*|template) echo "po-new: name must be [a-z0-9-] and not 'template'" >&2; exit 2 ;; esac
+case "$name" in *[\|\&\\]*) echo "po-new: project name may not contain | & or \\" >&2; exit 2 ;; esac
+tpl="$HARNESS_HOME/po-template"; dir="$HARNESS_HOME/po-$p"
+[ -r "$tpl/BRIEF.tmpl.md" ] || { echo "po-new: no template at $tpl" >&2; exit 1; }
+[ ! -e "$dir" ] || { echo "po-new: $dir exists" >&2; exit 3; }
+fill() { sed -e "s|{{P}}|$p|g" -e "s|{{NAME}}|$name|g" "$1"; }
+mkdir -p "$dir/inbox" "$dir/current" "$dir/done" "$dir/outbox/discord" "$dir/state/picks" "$dir/logs"
+fill "$tpl/BRIEF.tmpl.md" >"$dir/BRIEF.md"
+cp "$tpl/agent.env" "$dir/agent.env"
+for f in PROJECT BACKLOG RUNS; do fill "$tpl/$f.md" >"$dir/state/$f.md"; done
+echo "made $dir; fill the '## Project' block of BRIEF.md, then: pc units enable po@$p.path --user --now --apply"

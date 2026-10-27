@@ -14,7 +14,7 @@ while IFS= read -r line; do
   case "$line" in *"(disabled)"*) continue ;; esac
   unit="$(printf '%s\n' "$line" | awk -F'|' '{print $3}' | grep -o '`[^`]*`' | head -1 | tr -d '`')"
   [ -n "$unit" ] || continue
-  case "$unit" in *.timer|*.service) ;; *) unit="$unit.timer" ;; esac
+  case "$unit" in *.timer|*.service|*.path) ;; *) unit="$unit.timer" ;; esac
   systemctl --user enable --now "$unit" >/dev/null 2>&1 && started="$started ${unit%.timer}"
 done <"$roster"
 

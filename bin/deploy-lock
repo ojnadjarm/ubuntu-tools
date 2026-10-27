@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# usage: deploy-lock <env> [--version '<cmd>'] -- <cmd…> — one deployer per live env (T1405 #2): waits for the flock on
+# ~/agents/state/deploy-<env>.lock (DEPLOY_LOCK_WAIT seconds, default 3600), prints the live version read by --version
+# before and after, and runs <cmd> with DEPLOY_LIVE_BEFORE set so it can bump past it. Exit: <cmd>'s, 4 on lock timeout.
+help() { awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; }
+case "${1:-}" in -h|--help) help; exit 0 ;; ''|-*) help >&2; exit 2 ;; esac
+set -uo pipefail
+. "$(dirname "$(readlink -f "$0")")/polib.sh"
+env_="$1"; shift
+case "$env_" in *[!A-Za-z0-9._-]*) echo "deploy-lock: bad env name '$env_'" >&2; exit 2 ;; esac
+vcmd=
+[ "${1:-}" = --version ] && { vcmd="${2:?deploy-lock: --version needs a command}"; shift 2; }
+[ "${1:-}" = -- ] && shift
+[ $# -gt 0 ] || { help >&2; exit 2; }
+live() { [ -n "$vcmd" ] && bash -c "$vcmd" 2>/dev/null | head -1; }
+
+lock="$HARNESS_HOME/state/deploy-$env_.lock"
+mkdir -p "$(dirname "$lock")"
+exec 9>"$lock"
+if ! flock -n 9; then
+  echo "deploy-lock $env_: another deploy holds the lock; waiting"
+  flock -w "${DEPLOY_LOCK_WAIT:-3600}" 9 || { echo "deploy-lock $env_: still locked after ${DEPLOY_LOCK_WAIT:-3600} s" >&2; exit 4; }
+fi
+before=$(live)
+echo "deploy-lock $env_: live before ${before:-unknown}"
+DEPLOY_LIVE_BEFORE="$before" "$@" 9>&-; rc=$?
+after=$(live)
+echo "deploy-lock $env_: live after ${after:-unknown} (exit $rc)"
+exit "$rc"

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# usage: po-status [<p>] — one line per product-owner agent: last run (end, exit), inbox and in-progress requests, open
+# BACKLOG items, pushes today, then its REPORT.md `ESCALATE:` lines indented. Read-only; the orchestrator's view of POs.
+case "${1:-}" in -h|--help) awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; exit 0 ;; esac
+set -uo pipefail
+. "$(dirname "$(readlink -f "$0")")/polib.sh"
+if [ $# -gt 0 ]; then names=("$1"); po_dir po-status "$1" >/dev/null || exit 2; else mapfile -t names < <(po_list); fi
+[ ${#names[@]} -gt 0 ] || { echo "po-status: no PO agents under $HARNESS_HOME"; exit 0; }
+count() { find "$1" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l; }
+for p in "${names[@]}"; do
+  d="$HARNESS_HOME/po-$p"
+  last=$(tail -n +2 "$d/logs/index.tsv" 2>/dev/null | tail -1 | awk -F'\t' '{print $2 " exit " $3}')
+  open=$(grep -cE '\|[[:space:]]*(open|doing)[[:space:]]*\|[[:space:]]*$' "$d/state/BACKLOG.md" 2>/dev/null)
+  pings=$(grep -c "^$(date +%F)" "$d/state/pings.tsv" 2>/dev/null)
+  printf 'po-%s  last %s  inbox %s  running %s  open %s  pushes today %s\n' "$p" "${last:-never}" \
+    "$(count "$d/inbox")" "$(count "$d/current")" "${open:-0}" "${pings:-0}"
+  grep -h '^ESCALATE:' "$d/REPORT.md" 2>/dev/null | sed 's/^/  /'
+done
+exit 0

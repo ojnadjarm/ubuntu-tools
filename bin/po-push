@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# usage: po-push <p> [--pick 'A=<label>;B=<label>[;C=<label>]'] "<message>" — a PO's push to the owner through notify-owner:
+# prefixed "[<p>] ", at most PINGS_PER_DAY a day (po-<p>/agent.env, default 3; log state/pings.tsv; exit 3 when spent).
+# --pick adds up to 3 ntfy buttons; one tap reaches po-picks, which files the pick in po-<p>/inbox/ (state/picks/<id>.json).
+help() { awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; }
+case "${1:-}" in -h|--help) help; exit 0 ;; '') help >&2; exit 2 ;; esac
+set -uo pipefail
+. "$(dirname "$(readlink -f "$0")")/polib.sh"
+p="$1"; shift
+dir=$(po_dir po-push "$p") || exit 2
+pick=
+[ "${1:-}" = --pick ] && { pick="${2:?po-push: --pick needs options}"; shift 2; }
+[ $# -eq 1 ] && [ -n "$1" ] || { help >&2; exit 2; }
+msg="$1"; case "$msg" in "[$p]"*) ;; *) msg="[$p] $msg" ;; esac
+PINGS_PER_DAY=3
+# shellcheck source=/dev/null
+. <(grep -E '^PINGS_PER_DAY=[0-9]+' "$dir/agent.env" 2>/dev/null)
+mkdir -p "$dir/state/picks"
+used=$(grep -c "^$(date +%F)" "$dir/state/pings.tsv" 2>/dev/null)
+[ "${used:-0}" -lt "$PINGS_PER_DAY" ] ||
+  { echo "po-push: refused, $PINGS_PER_DAY/$PINGS_PER_DAY pushes used today; put it in REPORT.md for the orchestrator" >&2; exit 3; }
+
+acts=()
+if [ -n "$pick" ]; then
+  id="$(date +%m%d%H%M%S)$(od -An -N2 -tx1 /dev/urandom | tr -d ' \n')"
+  IFS=';' read -ra opts <<<"$pick"
+  [ ${#opts[@]} -le 3 ] || { echo "po-push: at most 3 pick options (ntfy limit)" >&2; exit 2; }
+  json='{}'
+  for o in "${opts[@]}"; do
+    k=${o%%=*}; label=${o#*=}
+    case "$k" in ''|*[!A-Za-z0-9]*) echo "po-push: option keys are letters or digits ('$k')" >&2; exit 2 ;; esac
+    json=$(jq -c --arg k "$k" --arg l "$label" '. + {($k): $l}' <<<"$json")
+    acts+=("$k ${label:0:16}=$p:$id:$k")
+  done
+  jq -n --arg id "$id" --arg msg "$msg" --argjson o "$json" --arg t "$(date -Is)" \
+    '{id: $id, msg: $msg, options: $o, sent: $t, answer: null}' >"$dir/state/picks/$id.json"
+fi
+args=(-t "$p")
+[ ${#acts[@]} -eq 0 ] || args+=(-a "$(IFS=';'; echo "${acts[*]}")")
+notify-owner "${args[@]}" "$msg" || { echo "po-push: notify-owner failed" >&2; exit 1; }
+printf '%s\t%s\t%s\n' "$(date +%F)" "$(date -Is)" "$msg" >>"$dir/state/pings.tsv"
+echo "pushed ($((${used:-0} + 1))/$PINGS_PER_DAY today)${id:+; pick $id}"
