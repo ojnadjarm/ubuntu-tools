@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Hourly pulse: types one prompt into the orchestrator's tmux session, only when it sits idle at an empty prompt
 # and the standing queue changed since the last fire (a new need id, a new failed unit not in PC_NOT_OURS, a new HEALTH.md,
-# a new open Discord escalation in PULSE_ESCALATIONS, named in the turn as "Discord escalation: <file>") or the last fire
+# a new open Discord escalation in PULSE_ESCALATIONS, named in the turn as "Discord escalation: <file>"; between 80 and 95 %
+# of the plan only a new escalation fires, with an escalation-only turn) or the last fire
 # is PULSE_FLOOR_H old; the queue at each fire is kept in PULSE_QUEUE (default pulse-queue.json beside the log).
 # Fires only into the exact session's pane when it runs the orchestrator claude (--append-system-prompt-file …ORCHESTRATOR.md) and
 # ~/.claude/sessions/<pid>.json confirms that pane and an idle status; anything unverifiable is a logged skip.
@@ -74,10 +75,15 @@ line=$(prompt_line)
 rest=$(printf '%s' "$line" | sed -e 's/^❯//' -e 's/^>//' | tr -d ' \302\240')
 [ -z "$rest" ] || { log skip "input line not empty"; exit 0; }
 
-plan-usage --check 80 >/dev/null 2>&1; [ $? -ne 1 ] || { log skip "plan >= 80%"; exit 0; }
+esc_files=$(find "$ESC_DIR" -maxdepth 1 -name '*.md' 2>/dev/null | sort)
+# 80-95 % (T1412, owner): only a Discord escalation gets through, as an escalation-only turn; the standing queue waits.
+over=0; plan-usage --check 80 >/dev/null 2>&1; [ $? -ne 1 ] || over=1
+if [ "$over" = 1 ]; then
+  [ -n "$esc_files" ] || { log skip "plan >= 80%"; exit 0; }
+  plan-usage --check 95 >/dev/null 2>&1; [ $? -ne 1 ] || { log skip "plan >= 95%"; exit 0; }
+fi
 need_ids=$(pc need list --json 2>/dev/null | jq -r '.[].id' 2>/dev/null | sort -u)
 failed_units=$(systemctl --user list-units --state=failed --plain --no-legend 2>/dev/null | awk 'NF{print $1}' | grep -vE "$PC_NOT_OURS" | sort -u)
-esc_files=$(find "$ESC_DIR" -maxdepth 1 -name '*.md' 2>/dev/null | sort)
 needs=$(printf '%s' "$need_ids" | grep -c .); failed=$(printf '%s' "$failed_units" | grep -c .); escs=$(printf '%s' "$esc_files" | grep -c .)
 # Ids in $1 (newline list) absent from snapshot key $2.
 fresh() { comm -23 <(printf '%s\n' "$1" | grep .) <(jq -r ".$2[]?" "$SNAP" 2>/dev/null | sort -u) | paste -sd' ' -; }
@@ -90,7 +96,10 @@ if [ -n "$last" ]; then
 fi
 queue="needs $needs, failed $failed, health $health, escalations $escs"
 new=$(printf '%s' "${new_needs:+need $new_needs; }${new_failed:+failed $new_failed; }${new_escs:+escalation $new_escs; }" | sed 's/; $//'); new=${new:-none}
-if [ "$new" = none ] && [ "$health" = unchanged ] && [ "$age" -lt $((FLOOR_H * 3600)) ]; then
+if [ "$over" = 1 ]; then
+  [ -n "$new_escs" ] || { log skip "plan >= 80%, no new escalation ($queue)"; exit 0; }
+  TURN="Week plan 80-95%: only the escalation, no standing queue."
+elif [ "$new" = none ] && [ "$health" = unchanged ] && [ "$age" -lt $((FLOOR_H * 3600)) ]; then
   if [ "$needs" = 0 ] && [ "$failed" = 0 ] && [ "$escs" = 0 ]; then log skip "queue empty ($queue)"; else log skip "queue unchanged ($queue)"; fi
   exit 0
 fi
