@@ -1,9 +1,10 @@
-"""discord-liaison tick|check|inbox|done|post|map|pr|status: the forum liaison's tools (T1409)."""
+"""discord-liaison tick|check|inbox|done|post|map|pr|status: the liaison's tools for #foro and #general (T1409, T1411)."""
 import asyncio
 import os
 import subprocess
 import sys
 
+from discordbot.cli import write_config
 from discordbot.config import Config
 from discordbot.rest import Rest, RestError
 from discordbot.runner import SECRET_KEYS
@@ -14,6 +15,7 @@ from .registry import Registry
 from .state import State
 from .watch import Watcher
 
+GENERAL = '#general'
 ME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 USAGE = 'usage: discord-liaison tick [--dry-run]|check|inbox|done|post <thread> <text…>|map <thread> <project>|pr <project>|status'
 
@@ -23,15 +25,32 @@ class App:
         self.env, self.rest = env, rest
         self.home = env.get('LIAISON_HOME', ME)
         self.forum, self.guild = env.get('DISCORD_FORUM_ID', ''), env.get('DISCORD_GUILD_ID', '')
+        self.general = env.get('DISCORD_GENERAL_ID', '')
         self.state = State(os.path.join(self.home, 'state'))
         self.registry = Registry(env.get('LIAISON_REGISTRY', os.path.join(ME, 'projects.json')))
         os.makedirs(os.path.join(self.home, 'logs'), exist_ok=True)
         self.caps = Caps(os.path.join(self.home, 'state', 'caps.json'), os.path.join(self.home, 'logs', 'caps.log'),
                          {'run': int(env.get('LIAISON_RUNS_PER_DAY', '30')), 'pr': int(env.get('LIAISON_PRS_PER_DAY', '3'))})
 
+    async def general_id(self, save):
+        """#general's id: DISCORD_GENERAL_ID, else the guild's text channel named general, stored in config.env."""
+        if not self.general:
+            chans = await self.rest.guild_channels(self.guild)
+            self.general = next((c['id'] for c in chans if c.get('type') == 0 and c.get('name') == 'general'), '')
+            if self.general and save:
+                write_config({'DISCORD_GENERAL_ID': self.general}, self.env.get('HARNESS_CONFIG'))
+        return self.general
+
     async def check(self, save=True):
-        msgs, cur = await Watcher(self.rest, self.guild, self.forum).poll(self.state.cursor)
+        w = Watcher(self.rest, self.guild, self.forum)
+        msgs, cur = await w.poll(self.state.cursor)
+        gid = await self.general_id(save)
+        if gid:
+            mentions, cur[GENERAL] = await w.general(gid, self.state.cursor.get(GENERAL, ''))
+            msgs += mentions
         for m in msgs:
+            if m.get('channel') == 'general':
+                continue
             th = self.state.thread(m['thread_id']) or {}
             if not th.get('project'):
                 p = self.registry.match(m['thread'], m['tags'])
@@ -45,15 +64,16 @@ class App:
     async def tick(self, args):
         if args == ['--dry-run']:
             msgs, cur = await self.check(save=False)
-            threads = sum(1 for k in cur if k != '_seeded')
+            threads = sum(1 for k in cur if k not in ('_seeded', GENERAL))
+            mentions = sum(1 for m in msgs if m.get('channel') == 'general')
             seeded = not self.state.cursor
             with open(os.path.join(self.home, 'REPORT.md'), 'w') as f:
-                f.write(f'# discord-liaison: dry run (read #foro, posted nothing)\n\nthreads {threads}, new messages '
-                        f'{len(msgs)}{" (first real tick only seeds the cursor)" if seeded else ""}, inbox '
+                f.write(f'# discord-liaison: dry run (read #foro and #general, posted nothing)\n\nthreads {threads}, '
+                        f'#general mentions {mentions}, new messages {len(msgs)}{" (first real tick only seeds the cursor)" if seeded else ""}, inbox '
                         f'{len(self.state.inbox)}, LLM run: {"would start" if msgs or self.state.inbox else "no"}\n'
                         f'caps today: runs {self.caps.used("run")}/{self.caps.limits["run"]}, '
                         f'PRs {self.caps.used("pr")}/{self.caps.limits["pr"]}\n')
-            print(f'dry run: threads {threads}, {len(msgs)} new')
+            print(f'dry run: threads {threads}, #general mentions {mentions}, {len(msgs)} new')
             return 0
         msgs, _ = await self.check()
         print(f'{len(msgs)} new, inbox {len(self.state.inbox)}')
@@ -70,7 +90,7 @@ class App:
             pid = (self.state.thread(m['thread_id']) or {}).get('project', '')
             route = self.registry.route(pid) if pid else ''
             body = m['content'].replace('</message', '<\\/message')
-            print(f'<message thread="{m["thread_id"]}" title="{m["thread"]}" tags="{",".join(m["tags"])}" '
+            print(f'<message channel="{m.get("channel", "foro")}" thread="{m["thread_id"]}" title="{m["thread"]}" tags="{",".join(m["tags"])}" '
                   f'project="{pid}" route="{route}" author="{m["author"]}" bot="{str(m["bot"]).lower()}" id="{m["id"]}">\n'
                   f'{body}\n</message>')
         print(f'{len(self.state.inbox)} message(s); run `discord-liaison done` after answering them')
@@ -91,8 +111,8 @@ class App:
             ch = await self.rest.channel(tid)
         except RestError:
             ch = {}
-        if not self.forum or ch.get('parent_id') != self.forum:
-            print(f'refused: {tid} is not a thread of the forum')
+        if not (self.forum and ch.get('parent_id') == self.forum or self.general and tid == self.general):
+            print(f'refused: {tid} is neither a thread of the forum nor #general')
             return 3
         parts = chunks(clean(text, [self.env.get(k, '') for k in SECRET_KEYS]))
         if self.env.get('LIAISON_DRY_RUN'):

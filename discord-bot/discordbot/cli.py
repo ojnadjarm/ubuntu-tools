@@ -39,8 +39,8 @@ async def readiness(rest):
     return guilds, '; '.join(missing) or None
 
 
-def write_config(values):
-    path = os.environ.get('HARNESS_CONFIG') or os.path.expanduser('~/.config/pc-harness/config.env')
+def write_config(values, path=None):
+    path = path or os.environ.get('HARNESS_CONFIG') or os.path.expanduser('~/.config/pc-harness/config.env')
     lines = open(path).read().splitlines() if os.path.exists(path) else []
     for k, v in values.items():
         rx = re.compile(rf'^{k}=')

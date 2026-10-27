@@ -199,6 +199,7 @@ class TestForumBot(Base):
         self.assertEqual(len(jobs), 1)
         self.assertEqual(jobs[0]['approval'], {'kind': 'tag'})
         self.assertEqual(self.tag_name('400'), ['approved', 'in progress'])
+        self.assertIn('Aprobado. Me pongo con ello; te cuento aquí cuando termine.', self.fake.sent('400'))
 
     async def test_tag_by_non_owner_starts_nothing(self):
         await self.bot.dispatch('THREAD_CREATE', ev('THREAD_CREATE'))
@@ -206,7 +207,7 @@ class TestForumBot(Base):
                                                     applied_tags=self.fake.tag_by('400', 'approved', '3')))
         self.assertEqual(self.pending(), [])
         self.assertEqual(self.tag_name('400'), ['approved', 'new'])
-        self.assertFalse(any('Approved' in m for m in self.fake.sent('400')))
+        self.assertFalse(any('Aprobado' in m for m in self.fake.sent('400')))
 
     async def test_only_owner_reaction_approves(self):
         await self.bot.dispatch('THREAD_CREATE', ev('THREAD_CREATE'))
@@ -224,6 +225,11 @@ class TestForumBot(Base):
         self.assertNotIn('192.168', last)
         self.assertNotIn('example.org', last)
         self.assertEqual(self.tag_name('400'), ['done'])
+
+    async def test_work_without_report_is_spanish(self):
+        await self.bot.dispatch('THREAD_CREATE', ev('THREAD_CREATE'))
+        await self.bot.deliver({'kind': 'work', 'thread_id': '400', 'ok': False, 'reply': ''})
+        self.assertEqual(self.fake.sent('400')[-1], 'El trabajo terminó sin informe.')
 
 
 class TestRunner(Base):
@@ -252,6 +258,7 @@ class TestRunner(Base):
         w = FakeWorker()
         res = await self.runner(worker=w).handle(self.job())
         self.assertFalse(res['ok'])
+        self.assertEqual(res['reply'], 'No pude confirmar la aprobación en Discord, así que no se ejecutó nada.')
         self.assertEqual(w.jobs, [])
 
     async def test_real_tag_approval_runs_and_cleans(self):
@@ -264,7 +271,7 @@ class TestRunner(Base):
         self.assertNotIn('/home/someone', res['reply'])
         self.assertNotIn('10.1.2.3', res['reply'])
         res2 = await r.handle(self.job(id='j2'))
-        self.assertIn('limit', res2['reply'])
+        self.assertEqual(res2['reply'], 'Este miembro llegó al límite diario de trabajos; no se ejecutó nada.')
         self.assertEqual(len(w.jobs), 1)
 
     async def test_tag_by_non_owner_refused(self):

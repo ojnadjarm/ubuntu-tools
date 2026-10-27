@@ -1,17 +1,20 @@
-# Discord liaison: the agent that answers the #foro forum and turns requests into PRs
+# Discord liaison: the agent that answers the #foro forum and @agents in #general, and turns requests into PRs
 
-Ticket: T1409 · Last verified: 2026-10-27 by 11 liaison fixture tests + 30 discord-bot tests, a live `tick --dry-run` on #foro (2 threads, 0 posts), the timer's first real ticks (0 new, 0 tokens)
+Ticket: T1409, T1411 · Last verified: 2026-10-27 by 15 liaison fixture tests + 31 discord-bot tests, a live tick on #foro and #general
 
 ## When to use
 Run, check, change or debug discord-liaison: the persistent agent that owns the conversation in the forum #foro
-(Spanish replies, collab PRs, project registry). Not for the bot's gateway, tags or approval jobs: guide `discord-bot`.
+(Spanish replies, collab PRs, project registry) and answers @agents mentions in #general. Not for the bot's gateway, tags or approval jobs: guide `discord-bot`.
 
 ## The path we took
 - Survey: discord-bot T348 (REST adapter, `sanitize.clean`, `RateLimiter`, fake Discord REST: reused); official
   `discord@claude-plugins-official` channel plugin (full tools on every message, resident session: rejected);
   sentinel-check pattern (cheap timer, `agent-run` only on need: copied).
 - `discord-liaison-check.timer` (3 min) → `discord-liaison tick`: one REST poll of the forum's active threads; no new
-  message = exit, 0 tokens. New ones → inbox + thread→project map, then `agent-run discord-liaison` under the daily
+  message = exit, 0 tokens. Same tick reads #general (`DISCORD_GENERAL_ID`, found once by name among the guild's
+  text channels and stored in config.env) and keeps only messages that mention the bot user or its managed role
+  (`mentions`, `mention_roles`; role = the guild role whose `tags.bot_id` is the bot); other #general traffic costs
+  nothing. New ones → inbox + thread→project map, then `agent-run discord-liaison` under the daily
   run cap. The LLM run follows `discord-liaison/BRIEF.md` (inbox, post, map, pr, done).
 - Modules (`discord-liaison/liaison/`): `watch.Watcher` (read-only poll), `registry.Registry` (`match`, `route`),
   `state.State` (cursor, inbox, threads, shown), `caps.Caps` (per-UTC-day caps, logged), `cli.App` (verbs).
@@ -19,6 +22,8 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
 - Registry `discord-liaison/projects.json`: one entry per project (repo, clone, match tags/title, rules, skills, `po`).
   `Registry.route()` is the one routing seam: `po` set → that project's threads go to its PO agent (T1410), else the
   liaison does the work. A repo not in the registry: reply "pendiente", `notify-owner`, nothing starts.
+- #general (owner, T1411): answer general questions on any topic, in Spanish; send people to #foro only for
+  coordination with other agents or follow-up on a project; never start work from #general (`BRIEF.md`).
 - Split with discord-bot: `DISCORD_FORUM_REPLIES=liaison` in config.env. The bot still tags posts and runs the owner's
   approved jobs; it no longer sends its English ACK or tool-less answers. Its sandbox is unchanged.
 
@@ -27,7 +32,7 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
 discord-liaison status              # inbox, mapped threads, runs/PRs used today, projects and their route
 discord-liaison tick --dry-run      # read #foro, write REPORT.md, post nothing, keep state
 discord-liaison inbox | done        # what the LLM run sees; done clears only what inbox showed
-discord-liaison post <thread> <texto…>   # forum threads only, sanitized; LIAISON_DRY_RUN=1 prints instead
+discord-liaison post <thread> <texto…>   # forum threads or #general, sanitized; LIAISON_DRY_RUN=1 prints instead
 discord-liaison map <thread> <project> | pr <project>   # pr = registry + route + daily PR cap gate
 discord-liaison test                # fixture tests (also bin/tests/discord-liaison.test.sh)
 journalctl --user -u discord-liaison-check -n 20; tail ~/agents/discord-liaison/logs/caps.log
@@ -39,8 +44,12 @@ Caps: `LIAISON_RUNS_PER_DAY` (30), `LIAISON_PRS_PER_DAY` (3) in `discord-liaison
   messages on 2026-10-27). A new thread created later is read whole.
 - `inbox` then `done` is two-phase on purpose: messages that arrive during a run stay for the next tick.
 - The unit runs `agent-run` inline, so a 3-min timer never overlaps a run; TimeoutStartSec 2100 > agent TIMEOUT 1800.
-- discord-bot still posts English text for owner-approved jobs ("Approved. Working on it"); the owner's Spanish rule
-  covers those too if that path gets used.
+- The first tick that knows #general seeds its cursor at the latest message: no mention older than the deploy is
+  answered (2026-10-27: the 08:25 joke mention was answered by hand before the deploy).
+- Discord renders a mention as `<@bot-id>` or `<@&role-id>`; `@agents` typed by a member is usually the bot's
+  managed role, not the user, so both count. The watcher rewrites both to `@agents` before the LLM sees them.
+- discord-bot's approved-job messages are Spanish since T1411 (bot texts and the worker's final report); its
+  sandbox and approval checks did not change. The bot reads code ro at start: restart its unit after a change.
 
 ## Links
 - Code: `~/agents/discord-liaison/` (`liaison/`, `projects.json`, `BRIEF.md`, `agent.env`), CLI `~/agents/bin/discord-liaison`,

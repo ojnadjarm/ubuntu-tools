@@ -1,10 +1,10 @@
-"""Read-only forum poll: new messages in the forum's active threads since a per-thread cursor."""
+"""Read-only polls: new messages in the forum's active threads, and #general messages that mention the bot."""
 
 
 class Watcher:
     def __init__(self, rest, guild_id, forum_id):
         self.rest, self.guild_id, self.forum_id = rest, guild_id, forum_id
-        self.me = ''
+        self.me, self.role = '', None
 
     async def threads(self):
         act = await self.rest.call('GET', f'/guilds/{self.guild_id}/threads/active')
@@ -31,3 +31,29 @@ class Watcher:
                             'content': m.get('content', '')[:1500]})
             cur.setdefault(tid, '0')
         return out, cur
+
+    async def general(self, channel_id, last):
+        """Return (mentions, cursor): messages after `last` that mention the bot or its role; no `last` only seeds."""
+        if not self.me:
+            self.me = (await self.rest.me())['id']
+        if self.role is None:
+            roles = await self.rest.call('GET', f'/guilds/{self.guild_id}/roles')
+            self.role = next((r['id'] for r in roles if (r.get('tags') or {}).get('bot_id') == self.me), '')
+        if not last:
+            latest = await self.rest.call('GET', f'/channels/{channel_id}/messages', params={'limit': '1'})
+            return [], latest[0]['id'] if latest else '0'
+        msgs = await self.rest.call('GET', f'/channels/{channel_id}/messages', params={'limit': '50', 'after': last})
+        out = []
+        for m in sorted((m for m in msgs if int(m['id']) > int(last)), key=lambda m: int(m['id'])):
+            last, a = m['id'], m.get('author', {})
+            hit = (self.me in {u.get('id') for u in m.get('mentions', [])}
+                   or bool(self.role) and self.role in m.get('mention_roles', []))
+            if a.get('id') == self.me or not hit:
+                continue
+            text = m.get('content', '').replace(f'<@{self.me}>', '@agents').replace(f'<@!{self.me}>', '@agents')
+            if self.role:
+                text = text.replace(f'<@&{self.role}>', '@agents')
+            out.append({'id': m['id'], 'channel': 'general', 'thread_id': channel_id, 'thread': '#general', 'tags': [],
+                        'author': a.get('global_name') or a.get('username', '?'), 'bot': bool(a.get('bot')),
+                        'content': text[:1500]})
+        return out, last

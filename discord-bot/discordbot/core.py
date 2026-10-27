@@ -193,12 +193,12 @@ class ForumBot:
             return
         req = th.get('requester', '')
         if req != self.owner_id and not self.rates.take('job', req, self.cfg.jobs_per_day):
-            await self.rest.send(tid, f'Approved, but this member has reached {self.cfg.jobs_per_day} jobs today; '
-                                      'approve it again tomorrow (UTC).')
+            await self.rest.send(tid, f'Aprobado, pero este miembro ya llegó a {self.cfg.jobs_per_day} trabajos hoy; '
+                                      'apruébalo de nuevo mañana (UTC).')
             return
         self.store.put_thread(tid, work='queued')
         await self.set_tag(tid, 'in progress')
-        await self.rest.send(tid, 'Approved. Working on it; I will report back here.')
+        await self.rest.send(tid, 'Aprobado. Me pongo con ello; te cuento aquí cuando termine.')
         self.spool.put({'kind': 'work', 'thread_id': tid, 'requester_id': req or '0', 'title': th.get('title', ''),
                         'messages': await self.history(tid), 'approval': approval,
                         'work_summary': th.get('work_summary', '')})
@@ -224,7 +224,7 @@ class ForumBot:
         try:
             if res.get('kind') == 'work':
                 self.store.put_thread(tid, work='done')
-                await self.say(tid, res.get('reply') or 'The job finished without a report.')
+                await self.say(tid, res.get('reply') or 'El trabajo terminó sin informe.')
                 await self.set_tag(tid, 'done' if res.get('ok') else 'accepted')
                 return
             await self.say(tid, res.get('reply') or 'Sorry, I could not answer that one.')
