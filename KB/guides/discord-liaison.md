@@ -1,6 +1,6 @@
 # Discord liaison: the agent that answers the #foro forum and @agents in #general, and turns requests into PRs
 
-Ticket: T1409, T1411, T1413 · Last verified: 2026-10-27 by 40 liaison fixture tests and eval 57 fixtures on opus (T1413: old brief 45/57 twice, new brief + context 55/57 twice); before: 25 liaison fixture tests + 25 orchestrator-pulse checks + 31 discord-bot tests, live ticks on #foro and #general
+Ticket: T1409, T1411, T1413, T1414 · Last verified: 2026-10-27 by 47 liaison fixture tests (T1414: 7 job tests, a transient-unit probe, a live tick) and eval 57 fixtures on opus (T1413: old brief 45/57 twice, new brief + context 55/57 twice); before: 25 liaison fixture tests + 25 orchestrator-pulse checks + 31 discord-bot tests, live ticks on #foro and #general
 
 ## When to use
 Run, check, change or debug discord-liaison: the persistent agent that owns the conversation in the forum #foro
@@ -50,6 +50,15 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
   without ✅), `<history>` (last 15 messages of each inbox channel via `liaison/history.py`, the bot's own replies
   `you="true"`, inbox messages as stubs, ≤ 8 KB). #general wakes on `watch.addressed()`: mention, role, a reply to the
   bot, or typed `@agent`/`@agents`. `liaison/runlock.py`: a tick while another runs prints "run in flight" and does nothing.
+- Delegate (owner, T1414): the LLM run is triage only (agent.env TIMEOUT 300, target < 60 s): quick answers inline,
+  anything more (PR, image, code, research) gets 👀 + ack + `job <message-id> "<task>"`. `liaison/jobs.py` `JobQueue`:
+  `state/jobs/<id>/job.json` (message, task, copied images + context.txt, status queued|running|done|failed);
+  `dispatch` starts queued jobs oldest first up to `LIAISON_JOBS_MAX` (3) as transient units
+  `systemd-run --user --unit discord-liaison-job-<id>` → `discord-liaison job-run <id>`: holds `jobs/<id>/lock`, runs
+  `agent-exec` (prompt = `JOB.md` + BRIEF.md's "## Rules" + the job, fleet preamble, `LIAISON_JOB_TIMEOUT` 1800,
+  logs `logs/jobs/<id>.*`), then starts the next queued job. The worker posts the result and ✅ itself; a non-zero exit,
+  a failed launch or a lost runner (no lock, > 120 s after start; reaped by every `tick`) gets a Spanish note in the
+  thread + an escalation. `tick` dispatches before the run lock, which guards the triage run only.
 - Eval (`discord-liaison/eval/`): `run_eval.py <brief> --model opus --context liaison|none --out r.jsonl` (tool-less
   `claude -p`, one JSON decision per fixture, ~$0.04 and ~5 s per opus call, `--show` prints prompts) and
   `score.py r.jsonl` (deterministic regex/field checks, per-class %). Change the brief → run both, twice each.
@@ -66,16 +75,24 @@ discord-liaison react <thread> <message-id> 👀|✅       # ack on receipt, don
 discord-liaison art "<prompt>"     # concept-img into state/art/, prints the path; daily image cap
 discord-liaison escalate <message-id> "<asked; tried>"   # -> state/escalations/, pulses the orchestrator
 discord-liaison map <thread> <project> | pr <project>   # pr = registry + route + daily PR cap gate
+discord-liaison job <message-id> "<task>"   # triage: hand a work request to a background worker (queued over the cap)
+discord-liaison job-run <id>                # the worker's runner (started by the transient unit; not by hand)
+journalctl --user -u 'discord-liaison-job-*' -n 20; ls ~/agents/discord-liaison/state/jobs/
 discord-liaison test                # fixture tests (also bin/tests/discord-liaison.test.sh)
 journalctl --user -u discord-liaison-check -n 20; tail ~/agents/discord-liaison/logs/caps.log
 ```
-Caps: `LIAISON_RUNS_PER_DAY` (30), `LIAISON_PRS_PER_DAY` (3), `LIAISON_IMAGES_PER_DAY` (5) in `discord-liaison/agent.env`.
+Caps: `LIAISON_RUNS_PER_DAY` (30), `LIAISON_PRS_PER_DAY` (3), `LIAISON_IMAGES_PER_DAY` (5), `LIAISON_JOBS_MAX` (3),
+`LIAISON_JOB_TIMEOUT` (1800) in `discord-liaison/agent.env`.
 
 ## Pitfalls (measured)
 - The first tick with an empty cursor only seeds it: old history never wakes the LLM (#foro had 2 threads of old
   messages on 2026-10-27). A new thread created later is read whole.
 - `inbox` then `done` is two-phase on purpose: messages that arrive during a run stay for the next tick.
-- The unit runs `agent-run` inline, so a 3-min timer never overlaps a run; TimeoutStartSec 2100 > agent TIMEOUT 1800.
+- The unit runs `agent-run` inline, so a 3-min timer never overlaps a run; TimeoutStartSec 2100 > triage TIMEOUT 300.
+- Jobs cannot use `agent-run`: its lock is one per agent dir, so a second job would exit "already running". The runner
+  calls `agent-exec` directly. A plain `&` child dies with the oneshot check service; the transient unit does not.
+- `state/work/` is deleted when the triage run ends: `job` copies the message's images and context.txt into the job dir.
+- Jobs take caps concurrently: `Caps.take` re-reads caps.json under an flock; `art` names files `<stamp>-<pid>.png`.
 - The first tick that knows #general seeds its cursor at the latest message: no mention older than the deploy is
   answered (2026-10-27: the 08:25 joke mention was answered by hand before the deploy).
 - Discord renders a mention as `<@bot-id>` or `<@&role-id>`; `@agents` typed by a member is usually the bot's
@@ -110,7 +127,7 @@ Caps: `LIAISON_RUNS_PER_DAY` (30), `LIAISON_PRS_PER_DAY` (3), `LIAISON_IMAGES_PE
   compare per-class over two runs.
 
 ## Links
-- Code: `~/agents/discord-liaison/` (`liaison/`, `projects.json`, `BRIEF.md`, `agent.env`), CLI `~/agents/bin/discord-liaison`,
+- Code: `~/agents/discord-liaison/` (`liaison/`, `projects.json`, `BRIEF.md`, `JOB.md`, `agent.env`), CLI `~/agents/bin/discord-liaison`,
   units `~/agents/units/discord-liaison-check.{service,timer}`
-- Tests: `~/agents/discord-liaison/tests/` via `discord-liaison test` (`test_context.py`, `test_manage.py` T1413); eval `discord-liaison/eval/` (57 fixtures, 7 held out)
+- Tests: `~/agents/discord-liaison/tests/` via `discord-liaison test` (`test_context.py`, `test_manage.py` T1413, `test_jobs.py` T1414); eval `discord-liaison/eval/` (57 fixtures, 7 held out)
 - Design: `$AGENT_WORK/research/2026-10-27/T1409/architecture.md`; bot: guide `discord-bot`

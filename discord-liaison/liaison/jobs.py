@@ -1,0 +1,97 @@
+"""Background jobs (T1414): a request that needs real work becomes state/jobs/<id>/, run by a worker outside the run lock."""
+import contextlib
+import fcntl
+import glob
+import json
+import os
+import shutil
+import time
+
+from discordbot.store import save_json
+
+GRACE = 120
+
+
+class JobQueue:
+    def __init__(self, d, clock=time.time):
+        self.dir, self.clock = d, clock
+        os.makedirs(d, exist_ok=True)
+
+    def _p(self, jid, name='job.json'):
+        return os.path.join(self.dir, jid, name)
+
+    def get(self, jid):
+        try:
+            with open(self._p(jid)) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return None
+
+    def save(self, job):
+        save_json(self._p(job['id']), job)
+
+    def create(self, message, task, files=()):
+        """Queue one job for an inbox message; copy its images and the run's context into the job dir."""
+        jid = time.strftime('%Y%m%dT%H%M%S', time.gmtime(self.clock())) + f'-{message["id"]}'
+        os.makedirs(os.path.join(self.dir, jid))
+        kept = []
+        for src in files:
+            dest = os.path.join(self.dir, jid, os.path.basename(src))
+            shutil.copy(src, dest)
+            kept.append(dest)
+        job = {'id': jid, 'message': message, 'task': task, 'files': kept, 'status': 'queued', 'created': self.clock()}
+        self.save(job)
+        return job
+
+    def list(self, *status):
+        paths = glob.glob(os.path.join(glob.escape(self.dir), '*', 'job.json'))
+        jobs = [self.get(os.path.basename(os.path.dirname(p))) for p in paths]
+        return sorted((j for j in jobs if j and (not status or j['status'] in status)), key=lambda j: j['id'])
+
+    def locked(self, jid):
+        """True while a runner holds the job's lock."""
+        with open(self._p(jid, 'lock'), 'a') as f:
+            try:
+                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            fcntl.flock(f, fcntl.LOCK_UN)
+            return False
+
+    def alive(self, job):
+        return self.clock() - job.get('started', 0) < GRACE or self.locked(job['id'])
+
+    @contextlib.contextmanager
+    def _queue_lock(self):
+        with open(os.path.join(self.dir, '.lock'), 'a') as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            yield
+
+    def reap(self):
+        """Running jobs whose runner is gone (killed, reboot) become failed; returns them."""
+        with self._queue_lock():
+            lost = [j for j in self.list('running') if not self.alive(j)]
+            for j in lost:
+                self.finish(j, 'failed', 'lost')
+        return lost
+
+    def dispatch(self, cap, launch):
+        """Start queued jobs, oldest first, while fewer than `cap` run; returns (started ids, jobs whose launch failed)."""
+        with self._queue_lock():
+            started, failed = [], []
+            for job in self.list('queued')[:max(cap - len(self.list('running')), 0)]:
+                job.update(status='running', started=self.clock())
+                self.save(job)
+                if launch(job['id']) == 0:
+                    started.append(job['id'])
+                else:
+                    self.finish(job, 'failed', 'launch')
+                    failed.append(job)
+            return started, failed
+
+    def finish(self, job, status, why=''):
+        for p in job.get('files', []):
+            if os.path.exists(p):
+                os.unlink(p)
+        job.update(status=status, ended=self.clock(), why=why)
+        self.save(job)

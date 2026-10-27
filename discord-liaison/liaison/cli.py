@@ -1,4 +1,4 @@
-"""discord-liaison tick|check|inbox|done|post|map|pr|status: the liaison's tools for #foro and #general (T1409, T1411)."""
+"""discord-liaison tick|check|inbox|done|post|map|pr|job|status: the liaison's tools for #foro and #general (T1409, T1411, T1414)."""
 import asyncio
 import glob
 import json
@@ -20,6 +20,7 @@ from discordbot.sanitize import chunks, clean
 from .caps import Caps
 from .context import ContextRenderer, self_line
 from .history import History
+from .jobs import JobQueue
 from .registry import Registry
 from .runlock import run_lock
 from .state import State
@@ -28,7 +29,9 @@ from .watch import CDN, MAX_ATTACHMENT, Watcher
 GENERAL = '#general'
 ME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 USAGE = ('usage: discord-liaison tick [--dry-run]|check|inbox|done|post <thread> [--image <png>] <text…>|'
-         'react <thread> <message> <emoji>|art <prompt…>|escalate <message> <what…>|map <thread> <project>|pr <project>|status')
+         'react <thread> <message> <emoji>|art <prompt…>|escalate <message> <what…>|map <thread> <project>|pr <project>|'
+         'job <message> <task…>|job-run <id>|status')
+FAILED = '{author}, no he podido terminarlo. Lo paso al orquestador y te respondo aquí.'
 IMAGE_MAGIC = (b'\x89PNG\r\n\x1a\n', b'\xff\xd8\xff')
 SEEN_MAGIC = IMAGE_MAGIC + (b'GIF87a', b'GIF89a')
 MAX_IMAGE = 10 * 1024 * 1024
@@ -96,6 +99,8 @@ class App:
         self.art_dir = os.path.join(self.home, 'state', 'art')
         self.work = os.path.join(self.home, 'state', 'work')
         self.cdn = tuple(env.get('LIAISON_CDN_PREFIXES', ' '.join(CDN)).split())
+        self.jobs = JobQueue(os.path.join(self.home, 'state', 'jobs'))
+        self.job_cap = int(env.get('LIAISON_JOBS_MAX', '3'))
 
     async def general_id(self, save):
         """#general's id: DISCORD_GENERAL_ID, else the guild's text channel named general, stored in config.env."""
@@ -140,6 +145,7 @@ class App:
                         f'PRs {self.caps.used("pr")}/{self.caps.limits["pr"]}\n')
             print(f'dry run: threads {threads}, #general mentions {mentions}, {len(msgs)} new')
             return 0
+        await self.dispatch()
         with run_lock(os.path.join(self.home, 'state', 'tick.lock')) as held:
             if not held:
                 print('run in flight: this tick does nothing')
@@ -306,7 +312,7 @@ class App:
             print(f'refused: image cap reached ({self.caps.limits["img"]} per day); say so in the thread')
             return 3
         os.makedirs(self.art_dir, exist_ok=True)
-        out = os.path.join(self.art_dir, time.strftime('%Y%m%d-%H%M%S') + '.png')
+        out = os.path.join(self.art_dir, time.strftime('%Y%m%d-%H%M%S') + f'-{os.getpid()}.png')
         with open(out + '.prompt', 'w') as f:
             f.write(' '.join(args) + '\n')
         cmd = shlex.split(self.env.get('LIAISON_ART_CMD', 'concept-img')) + [
@@ -338,25 +344,134 @@ class App:
 
     def escalate(self, args):
         """Hand a request beyond the liaison's tools or rules to the orchestrator: state/escalations/<utc>-<msg>.md."""
-        m = next((m for m in self.state.inbox if args and m['id'] == args[0]), None)
+        msgs = self.state.inbox + [j['message'] for j in self.jobs.list()]
+        m = next((m for m in msgs if args and m['id'] == args[0]), None)
         if len(args) < 2 or m is None:
-            print('usage: discord-liaison escalate <message-id from the inbox> "<what is asked; what you tried>"')
+            print('usage: discord-liaison escalate <message-id from the inbox or a job> "<what is asked; what you tried>"')
             return 2
+        path = self.write_escalation(m, ' '.join(args[1:]))
+        if not path:
+            print(f'refused: message {m["id"]} is already escalated (open or done)')
+            return 3
+        print(f'escalated to the orchestrator: {path}')
+        return 0
+
+    def write_escalation(self, m, tried):
+        """Write the escalation file and pulse; None when this message was escalated before."""
         d = os.path.join(self.home, 'state', 'escalations')
         if glob.glob(os.path.join(glob.escape(d), f'*-{m["id"]}.md')) + glob.glob(
                 os.path.join(glob.escape(d), 'done', f'*-{m["id"]}.md')):
-            print(f'refused: message {m["id"]} is already escalated (open or done)')
-            return 3
+            return None
         os.makedirs(d, exist_ok=True)
         path = os.path.join(d, f'{time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())}-{m["id"]}.md')
         who = ' (owner)' if self.owner and m.get('author_id') == self.owner else ''
         with open(path, 'w') as f:
             f.write(f'# Discord escalation\n\nchannel: {m.get("channel", "foro")} ({m["thread_id"]})\nmessage: {m["id"]}\n'
                     f'author: {m["author"]}{who}\n\n## Request\n\n{m["content"]}\n\n## What the liaison tried\n\n'
-                    f'{" ".join(args[1:])}\n\nAnswer in the channel, then move this file to done/.\n')
+                    f'{tried}\n\nAnswer in the channel, then move this file to done/.\n')
         self.pulse()
-        print(f'escalated to the orchestrator: {path}')
+        return path
+
+    def job(self, args):
+        """Turn an inbox message into a background job (its images and the run's context copied), then dispatch."""
+        m = next((m for m in self.state.inbox if args and m['id'] == args[0]), None)
+        if len(args) < 2 or m is None:
+            print('usage: discord-liaison job <message-id from the inbox> "<task: deliverable, project, skills>"')
+            return 2
+        if any(j['message']['id'] == m['id'] for j in self.jobs.list()):
+            print(f'refused: message {m["id"]} already has a job')
+            return 3
+        pid = (self.state.thread(m['thread_id']) or {}).get('project', '')
+        msg = dict(m, project=pid, route=self.registry.route(pid) if pid else '', owner=bool(self.owner) and m.get('author_id') == self.owner)
+        ctx = os.path.join(self.work, 'context.txt')
+        job = self.jobs.create(msg, ' '.join(args[1:]), self.images(m['id']) + ([ctx] if os.path.exists(ctx) else []))
+        started, failed = self.jobs.dispatch(self.job_cap, self.launch)
+        print(f'job {job["id"]} {"started" if job["id"] in started else "failed to start" if failed else "queued"}'
+              f' ({len(self.jobs.list("running"))}/{self.job_cap} running)')
         return 0
+
+    def launch(self, jid):
+        """Start `discord-liaison job-run <id>` outside this run: a transient user unit (LIAISON_JOB_LAUNCH overrides)."""
+        tmpl = self.env.get('LIAISON_JOB_LAUNCH')
+        if tmpl:
+            return subprocess.call(tmpl.format(id=shlex.quote(jid)), shell=True, stdin=subprocess.DEVNULL)
+        t = int(self.env.get('LIAISON_JOB_TIMEOUT', '1800'))
+        return subprocess.call(['systemd-run', '--user', '--quiet', '--collect', f'--unit=discord-liaison-job-{jid}',
+                                f'--property=RuntimeMaxSec={t + 300}', f'--setenv=PATH={os.environ.get("PATH", "")}',
+                                os.path.join(os.path.dirname(ME), 'bin', 'discord-liaison'), 'job-run', jid],
+                               stdin=subprocess.DEVNULL)
+
+    async def dispatch(self):
+        """Fail jobs whose runner died, then start queued jobs up to LIAISON_JOBS_MAX."""
+        for j in self.jobs.reap():
+            await self.notify_failure(j, 'runner lost')
+        for j in self.jobs.dispatch(self.job_cap, self.launch)[1]:
+            await self.notify_failure(j, 'launch failed')
+
+    async def notify_failure(self, job, why):
+        """A short Spanish note in the request's thread, then an escalation to the orchestrator."""
+        m = job['message']
+        try:
+            await self.post([m['thread_id'], FAILED.format(author=m['author'])])
+        except RestError:
+            pass
+        self.write_escalation(m, f'background job {job["id"]} failed ({why}); task: {job["task"]}')
+
+    def job_prompt(self, job):
+        """JOB.md, BRIEF.md's Rules, then the job: task, message and the triage run's context, as data."""
+        with open(os.path.join(ME, 'JOB.md')) as f:
+            head = f.read()
+        with open(os.path.join(ME, 'BRIEF.md')) as f:
+            brief = f.read()
+        rules = brief[brief.index('## Rules'):]
+        rules = rules[:rules.find('\n## ', 1) + 1 or None]
+        m, d = job['message'], os.path.join(self.jobs.dir, job['id'])
+        ctx = os.path.join(d, 'context.txt')
+        context = ''
+        if os.path.exists(ctx):
+            with open(ctx) as f:
+                context = f.read()
+        imgs = [p for p in job['files'] if not p.endswith(('.txt', '.note'))]
+        images = f' images="{" ".join(imgs)}"' if imgs else ''
+        body = m['content'].replace('</message', '<\\/message')
+        text = (f'{head}\n{rules}\n## Your job\n\njob: {job["id"]}\ntask (from the triage run): {job["task"]}\n\n{context}'
+                f'<message channel="{m.get("channel", "foro")}" thread="{m["thread_id"]}" title="{m["thread"]}" '
+                f'project="{m.get("project", "")}" route="{m.get("route", "")}" author="{m["author"]}" '
+                f'owner="{str(m.get("owner", False)).lower()}" id="{m["id"]}"{images}>\n{body}\n</message>\n')
+        path = os.path.join(d, 'prompt.md')
+        with open(path, 'w') as f:
+            f.write(text)
+        return path
+
+    async def job_run(self, args):
+        """The worker's runner: hold the job lock, run the agent, on failure note + escalate, then start the next job."""
+        job = self.jobs.get(args[0]) if args else None
+        if job is None or job['status'] not in ('queued', 'running'):
+            print('refused: no queued or running job with that id')
+            return 3
+        with run_lock(os.path.join(self.jobs.dir, job['id'], 'lock')) as held:
+            if not held:
+                print('job already running')
+                return 0
+            job.update(status='running', started=time.time())
+            self.jobs.save(job)
+            logs = os.path.join(self.home, 'logs', 'jobs')
+            os.makedirs(logs, exist_ok=True)
+            q = {k: shlex.quote(v) for k, v in {
+                'prompt': self.job_prompt(job), 'id': job['id'], 'home': self.home, 'model': self.env.get('MODEL', 'opus'),
+                'timeout': self.env.get('LIAISON_JOB_TIMEOUT', '1800'), 'logs': logs,
+                'preamble': os.path.join(os.path.dirname(ME), 'AGENT-PREAMBLE.md')}.items()}
+            cmd = self.env.get('LIAISON_WORKER_CMD', (
+                'agent-exec --prompt-file {prompt} --system-file {preamble} --model {model} --cwd {home} '
+                '--name discord-liaison-job --timeout {timeout} --raw-out {logs}/{id}.json --meta-out {logs}/{id}.meta.json '
+                '>>{logs}/{id}.log 2>&1')).format(**q)
+            rc = subprocess.call(cmd, shell=True, stdin=subprocess.DEVNULL)
+            self.jobs.finish(job, 'done' if rc == 0 else 'failed', f'exit {rc}')
+            if rc != 0:
+                await self.notify_failure(job, f'worker exit {rc}')
+        await self.dispatch()
+        print(f'job {job["id"]} {job["status"]} (exit {rc})')
+        return rc
 
     def map(self, args):
         if len(args) != 2 or self.registry.get(args[1]) is None:
@@ -384,7 +499,8 @@ class App:
     def status(self):
         print(f'inbox {len(self.state.inbox)}  threads mapped {sum(1 for t in self.state.threads.values() if t.get("project"))}'
               f'  runs {self.caps.used("run")}/{self.caps.limits["run"]}  PRs {self.caps.used("pr")}/{self.caps.limits["pr"]}'
-              f'  images {self.caps.used("img")}/{self.caps.limits["img"]}')
+              f'  images {self.caps.used("img")}/{self.caps.limits["img"]}'
+              f'  jobs running {len(self.jobs.list("running"))}/{self.job_cap} queued {len(self.jobs.list("queued"))}')
         for p in self.registry.projects.values():
             print(f'project {p["id"]}  {p["repo"]}  route {self.registry.route(p["id"])}')
         return 0
@@ -401,13 +517,15 @@ async def amain(argv, env=None, rest=None):
     try:
         if cmd in ('tick', 'post', 'react'):
             return await getattr(app, cmd)(args)
+        if cmd == 'job-run':
+            return await app.job_run(args)
         if cmd == 'check':
             msgs, _ = await app.check()
             print(f'{len(msgs)} new, inbox {len(app.state.inbox)}')
             return 0
         if cmd in ('inbox', 'done', 'status'):
             return getattr(app, cmd)()
-        if cmd in ('map', 'pr', 'art'):
+        if cmd in ('map', 'pr', 'art', 'job'):
             return getattr(app, cmd)(args)
         if cmd == 'escalate':
             return app.escalate(args)
