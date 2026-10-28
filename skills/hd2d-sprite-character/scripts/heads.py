@@ -17,7 +17,8 @@ def eyes(iris, lash='#160812', blush='#f2a090'):
 
 
 def anime_head(m, p, A, s):
-    """Skin only on the lower head, cap cut at the brow, 5 bang cones, side locks, crown spikes, optional ponytail with rings."""
+    """Skin only on the lower head, cap cut at the brow, 5 bang cones, side locks, crown spikes, optional ponytail with rings,
+    long hair (`long` = length below the head) and a gold circlet with a gem (`circlet` = gem material)."""
     H = A['head']; dark, light = s.get('hair_lines', ('#5e2012', '#ffe2a8'))
     m.add(sphere(H + V(0, 0.4, -0.4), 5.7), 'skin', 'head')
     m.add(cone(H + V(0, -0.6, 1.4), H + V(0, -5.3, 3.9), 4.5, 0.5), 'skin', 'head')
@@ -55,6 +56,17 @@ def anime_head(m, p, A, s):
         for a_, b_, r0, r1 in ((c0, c1, 1.8, 2.6), (c1, c2, 2.6, 2.6), (c2, c3, 2.6, 2.0), (c3, c4, 2.0, 0.6)):
             m.add(cone(a_, b_, r0, r1), 'hair', 'tail', tail_tex)
             m.lines.append((a_ + V(0.5, 1.2, 0), b_ + V(0.5, 0.8, 0), s.get('tail_line', '#ffd08a'), 1.0))
+    if s.get('long'):
+        tl = p['tail']; L = s['long']
+        for x, z, r in ((-3.4, -2.6, 2.8), (0.0, -4.4, 3.4), (3.4, -2.6, 2.8)):
+            top = H + V(x, 3.4, z); mid = H + V(x * 1.2, -L * 0.45, z - 2.2) + tl * 0.5; end = H + V(x * 1.1, -L, z - 2.6) + tl * 1.2
+            m.add(cone(top, mid, r, r * 0.95), 'hair', 'tail', tail_tex)
+            m.add(cone(mid, end, r * 0.95, 0.5), 'hair', 'tail', tail_tex)
+            m.lines.append((mid + V(0.6, 0, 0.4), end + V(0.4, 1.0, 0.2), s.get('tail_line', '#ffd08a'), 1.0))
+    if s.get('circlet'):
+        m.add(torus(H + V(0, 3.0, 0.4), 6.0, 0.45, sy=1.0), 'gold', None)
+        m.add(octa(H + V(0, 3.6, 6.3), 1.0, sy=1.5), 'gold', None)
+        m.add(sphere(H + V(0, 3.6, 6.9), 0.65), s['circlet'], None)
     en, ef = eyes(s.get('iris', ('#173a8c', '#2f7ee6', '#8fd8ff')))
     for sd in (-1, 1):
         m.stamps.append((H + V(2.1 * sd, -0.4, 5.6), en if sd > 0 else ef, V(0.2 * sd, 0, 1)))

@@ -387,12 +387,12 @@ def overlay(out, model, pal):
             rgba[y, x, :3] = hexrgb(col); rgba[y, x, 3] = 255
             if emis: out['emis'][y, x] = max(out['emis'][y, x], emis)
     for a, b, col, *rest in model.lines:
-        tol = rest[0] if rest else 2.5
+        tol = rest[0] if rest else 2.5; le = rest[1] if len(rest) > 1 else 0.0
         x0, y0, d0 = project(a, R, pv, sc); x1, y1, d1 = project(b, R, pv, sc)
         n = int(max(abs(x1 - x0), abs(y1 - y0)) * 1.5) + 1
         for i in range(n + 1):
             f = i / n
-            put(x0 + (x1 - x0) * f, y0 + (y1 - y0) * f, d0 + (d1 - d0) * f, col, tol)
+            put(x0 + (x1 - x0) * f, y0 + (y1 - y0) * f, d0 + (d1 - d0) * f, col, tol, le)
     for pt, pattern, facing, *rest in model.stamps:
         if facing is not None and (R.T @ np.asarray(facing, float)) @ DV > -0.15:
             continue

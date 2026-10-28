@@ -87,6 +87,23 @@ def staff(m, p, A, w):
         m.add(cone(top + V(1.6 * s, 3.4, 0), top + V(1.0 * s, 7.0, 0.2), 0.5, 0.15), 'gold', None)
     m.add(octa(top + sd * 2.8, 1.6, sy=1.6), 'gem_e', None)
     m.dots.append((top + sd * 3.6 + V(0, 0, 1.2), '#f2fff0', 1.0, 4))
+    if w.get('bolt'):
+        lightning(m, top + sd * 2.8, w['bolt'], p.get('ph', 0.0), w.get('arcs', 4), w.get('reach', 9.0))
+
+
+def lightning(m, c, cols, ph, arcs, reach):
+    """Jagged glowing arcs from c that re-strike every frame: a white core over a coloured halo (cols = (core, halo))."""
+    rng = np.random.default_rng(int(ph * 1000) + 11)
+    for k in range(arcs):
+        a = 6.283 * (k / arcs + rng.uniform(-0.12, 0.12)); d = unit(V(np.cos(a), rng.uniform(-0.6, 0.9), np.sin(a)))
+        pts = [c]
+        for i in range(1, 5):
+            pts.append(c + d * reach * i / 4 + V(*rng.normal(0, 1.1, 3)))
+        for a_, b_ in zip(pts, pts[1:]):
+            for o in (V(0.35, 0, 0), V(-0.35, 0, 0), V(0, 0.35, 0)):
+                m.lines.append((a_ + o, b_ + o, cols[1], 1e9, 0.8))
+            m.lines.append((a_, b_, cols[0], 1e9, 1.0))
+    m.dots.append((c + V(0, 0, 1.4), cols[0], 1.0, 1e9))
 
 
 def shield(m, p, A, w):

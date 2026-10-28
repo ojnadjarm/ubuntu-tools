@@ -49,6 +49,12 @@ bash $S/tests/selftest.sh
   then Principled specular catching the moon). What held cyan: ramp topping at `#5adcc4`, emission colour = luminance x (0.12, 1.0, 0.8),
   strength 2.8 + 6 x mask, Specular IOR Level 0, alpha 0.68 fading over the bottom 20% of the plane, and a numpy-blurred alpha aura plane behind.
 - Variant specs (`kobold_alzado`, `kobold_espectral`) load `kobold.py` by path next to them: copy the base with them.
+- Heroes follow the game log, not a guessed species (T1414, 2026-10-28): Gakata had been a lion gladiator and Ojo Penetrante a falcon vizier;
+  the log says knight with Knight's Cuirass + Lightning Staff and a sorceress. Read the log's equipment before picking a head or body kind.
+- Overlay lines carried no glow, so lightning drawn with `m.lines` stayed flat: lines now take a 5th value (emission); `gear.lightning`
+  draws a white core over three offset halo lines with tol 1e9, re-seeded per frame so the arcs re-strike.
+- A sheath across the back or on the main-hand hip hides behind the hair and the staff arm at yaw -0.6: the off hip (x -6.8, forward 3.4)
+  is the only place the hilt shows.
 
 ## Links
 - Skill: `~/agents/skills/hd2d-sprite-character` (linked into `~/.claude/skills`)
