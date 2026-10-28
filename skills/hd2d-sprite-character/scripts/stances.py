@@ -38,13 +38,26 @@ def caster(ph):
                 head=V(0, 0.25 * br, 0.6), feet=[V(-3.6, 0, 2.2), V(3.6, 0, -1.6)])
 
 
+def spellcast(ph):
+    """Dynamic caster: wide stance leaning in, staff held out beside the near hip tilted away from the body, off arm thrust at the enemy."""
+    br = np.sin(TAU * ph)
+    return dict(b=-1.8 + 0.4 * br, chest=0.5 * br, crouch=1.2, lean=3.0,
+                hilt=V(11.2, 25.4 + 0.3 * np.sin(TAU * ph - 0.4), 6.4), sword=V(0.2, 1.0, 0.16),
+                off=V(-9.4, 33.0 + 0.6 * np.sin(TAU * ph - 0.6), 11.0), off_grip='claw',
+                palm={-1: V(-1.0, 0.5, 0.4)}, point={-1: V(-0.4, 1.0, 0.2)},
+                cape=V(1.6 + lag(ph, 0.8, 0.3), 0, -2.2 + lag(ph, 0.6, 0.3)), fold=0.8 * br,
+                tail=V(0.8 + lag(ph, 0.6, 0.2), 0, -0.6 + lag(ph, 0.6, 0.3)), ph=ph,
+                head=V(-0.4, 0.25 * br, 0.9), feet=[V(-6.4, 0, 4.0), V(5.6, 0, -3.6)])
+
+
 def brawler(ph):
     """Upright beast: heavy rocking breath, paws raised forward with claws out, wide flat feet."""
     br = np.sin(TAU * ph)
     return dict(b=-1.2 + 0.9 * br, chest=0.8 * br, crouch=1.0, lean=2.2,
-                hands={-1: V(-9.6, 40.0 + 1.0 * np.sin(TAU * ph - 0.4), 15.0), 1: V(11.0, 37.0 + 1.0 * np.sin(TAU * ph - 0.8), 14.0)},
+                hands={-1: V(-15.0, 46.0 + 1.0 * np.sin(TAU * ph - 0.4), 11.0), 1: V(16.6, 49.0 + 1.0 * np.sin(TAU * ph - 0.8), 7.0)},
+                palm={-1: V(0.2, 0.2, 1.0), 1: V(0.6, 0.2, 0.8)},
                 cape=V(0, 0, 0), fold=br, tail=V(0, 0, 0), ph=ph,
                 head=V(0, 0.4 * br, 1.2), feet=[V(-6.0, 0, 2.6), V(6.0, 0, -2.0)])
 
 
-STANCES = dict(low_guard=low_guard, high_guard=high_guard, caster=caster, brawler=brawler)
+STANCES = dict(low_guard=low_guard, high_guard=high_guard, caster=caster, spellcast=spellcast, brawler=brawler)

@@ -26,8 +26,8 @@ STAR = {(0, -3): '#fff2b0', (0, -2): '#fffbe8', (0, -1): '#fffbe8', (-3, 0): '#e
         (0, 0): '#ffffff', (1, 0): '#fffbe8', (2, 0): '#f8d270', (3, 0): '#e0ac44', (0, 1): '#f8d270', (-1, 1): '#b8862e',
         (1, 1): '#b8862e', (0, 2): '#e0ac44', (0, 3): '#b8862e', (-1, -1): '#f8d270', (1, -1): '#f8d270'}
 SPEC = dict(
-    frames=8, scale=1.6, stance='low_guard',
-    body=dict(kind='plate', emblem=STAR, hand=1.3),
+    frames=8, scale=1.6, stance='low_guard', hand_bias=0.5,
+    body=dict(kind='plate', emblem=STAR, hand=1.45, knuckle='gold'),
     head=dict(kind='anime', ponytail=True, iris=('#173a8c', '#2f7ee6', '#8fd8ff')),
     cape=dict(length=1.0),
     weapon=dict(kind='sword', hands=2, length=26.0, rune='#7fd0ff', rune_glow=1.0, edge='#9ad6ff'),

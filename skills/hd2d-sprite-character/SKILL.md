@@ -27,12 +27,12 @@ bash $S/tests/selftest.sh                                           # Gamelyn pi
 | Key | Meaning |
 |---|---|
 | `RAMPS`, `MATS` | ramps by name; `mats` entries `(ramp, {kind: metal/skin/cloth/emis, bias, wrap, gamma, glow})`; `glow` 0..1 writes the emissive mask (any kind) |
-| `stance` | `stances.STANCES`: `low_guard` (owner's pick for a two-handed knight), `high_guard`, `caster`, `brawler`; `pose(ph, p)` tweaks |
-| `body` | `kind` plate/gladiator/robe/beast, `height`, `width`, `head_lift`, `emblem` (stamp), `hand` size, `pauldron` side |
-| `head` | `kind` anime (`ponytail`, `iris` 3 hex, `bangs`, `spikes`, `locks`, `hair_lines`) / lion / falcon / bear (`iris`) |
-| `weapon`, `offhand`, `cape` | `sword` (hands 2, length, rune, edge), `scimitar` (curve, edge_side), `staff` (up, down); `shield` (r), `orb`; cape `length` |
+| `stance` | `stances.STANCES`: `low_guard` (owner's pick for a two-handed knight), `high_guard`, `caster`, `spellcast` (dynamic caster, staff beside the hip), `brawler` (paws raised out of the body silhouette); `pose(ph, p)` tweaks; `palm`/`point` {side: dir} aim free hands |
+| `body` | `kind` plate/gladiator/robe/beast, `height`, `width`, `head_lift`, `emblem` (stamp), `hand` size (1.45-1.7 reads), `knuckle` (gauntlet plate material), `claw` (talon tip material), `pauldron` side |
+| `head` | `kind` anime (`ponytail`, `iris` 3 hex, `bangs`, `spikes`, `locks`, `hair_lines`) / lion (`scar` hex, `earring` mat) / falcon (`circlet` gem mat) / bear (`iris`) |
+| `weapon`, `offhand`, `cape` | `sword` (hands 1/2, `grip` length, length, rune or None, edge), `scimitar` (curve, edge_side), `staff` (up, down); `shield` (r), `orb`; cape `length` |
 | `extra(m, p, A)` | one-off parts (imps riding, a fairy); `A` = anchors (pel, chest, neck, head, sh) |
-| `hand_mat` | material the hands copy (default `steel`) |
+| `hand_mat`, `hand_bias` | ramp the hands copy (default `steel`), shaded matte so a 6 px fist reads; `hand_d` (seams) is derived |
 
 Material names the parts expect: `steel dsteel gold dgold leather trim cape cape_in skin hair hair_h hair_s blade blade_f blade_e gem`
 (knight); `fur fur_l fur_s mane mane_s kilt kilt_s nose mouth claw` (beasts); `robe robe_in plate sash wood gem_e feather feather_l beak beak_d` (caster).
@@ -42,4 +42,9 @@ Material names the parts expect: `steel dsteel gold dgold leather trim cape cape
 - Cape is born under the pauldrons (3 units below the neck, clipped flat at neck-1.4), never from the head; gold clasps.
 - A glowing blade keeps its colour only with a saturated ramp (top step `#a8e0ff`, no near-white) and emission = albedo squared in the scene shader.
 - Detail without growing the hero: raise `scale` and the cell, shrink the plane pixel by the same ratio.
+- Hands (owner 2026-10-28, "every pose looked odd because of the hands"): a fist wraps the handle with the handle, guard and pommel
+  visible above and below it, two knuckle seams, the thumb over the index toward the camera, the wrist continuing the forearm;
+  free hands have four separate fingers; beast paws are raised out of the body silhouette with palm pads and four claws facing the camera.
+- A one-handed blade needs a guard, a grip showing below the fist and a pommel, and must clear the head: a curved blade leaving a fist read as a claw.
+- A staff is held beside the hip and tilts away from the body; never through the shoulder.
 - Match the reference's quality, not its design: keep each character's own look (owner rejected a horned redesign).

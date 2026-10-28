@@ -23,10 +23,10 @@ EYE = {(0, -2): '#e0ac44', (-2, -1): '#e0ac44', (-1, -1): '#fff2b0', (0, -1): '#
        (-3, 0): '#e0ac44', (-2, 0): '#ffffff', (-1, 0): '#36c040', (0, 0): '#0c3a18', (1, 0): '#36c040', (2, 0): '#ffffff', (3, 0): '#e0ac44',
        (-2, 1): '#e0ac44', (-1, 1): '#fff2b0', (0, 1): '#fff2b0', (1, 1): '#fff2b0', (2, 1): '#e0ac44', (0, 2): '#e0ac44'}
 SPEC = dict(
-    frames=8, scale=1.6, stance='caster', hand_mat='beak',
-    body=dict(kind='robe', emblem=EYE, hand=1.2, height=1.04),
-    head=dict(kind='falcon', iris='#7dff6a'),
-    weapon=dict(kind='staff', up=30.0, down=27.0),
+    frames=8, scale=1.6, stance='spellcast', hand_mat='beak', hand_bias=-0.2,
+    body=dict(kind='robe', emblem=EYE, hand=1.35, height=1.04, claw='beak_d'),
+    head=dict(kind='falcon', iris='#7dff6a', circlet='gem_e'),
+    weapon=dict(kind='staff', up=26.0, down=24.0),
     offhand=dict(kind='orb', r=2.0, spark='#c8ffb8'),
     groups=dict(body=1.2),
 )

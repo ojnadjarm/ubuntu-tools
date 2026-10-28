@@ -2,7 +2,7 @@
 import numpy as np
 from core import V, sphere, ellipsoid, cone, torus, box, octa, inter, rot_z, rot_x
 from rig import ik, yaw
-from hands import add_hand
+from hands import add_hand, add_paw
 from parts import RIVET, bands, lame, unit
 
 UP = V(0, 1, 0)
@@ -187,10 +187,11 @@ def plate_arm(m, p, A, side, hand, grip, axis, s):
     el = ik(sh, hand, 7.2, 7.4, V(side * 1.0, -0.6, -0.2))
     m.add(cone(sh, el, 2.6, 2.2), 'dsteel', 'arm%d' % side)
     fa = unit(hand - el)
-    m.add(ellipsoid(el, (2.2, 2.2, 2.2)), 'gold', None)
-    m.add(ellipsoid(el + V(1.3 * side, 0, -0.6), (0.7, 2.2, 1.8)), 'dgold', None)
+    m.add(ellipsoid(el, (1.7, 1.7, 1.7)), 'gold', None)
+    m.add(ellipsoid(el + V(1.1 * side, 0, -0.6), (0.6, 1.8, 1.5)), 'dgold', None)
     m.dots.append((el + V(0.6 * side, 0.4, 1.8), RIVET, 0.0, 1.5))
-    wr = add_hand(m, el, hand, side, grip, axis=axis, size=s.get('hand', 1.3), cuff=('gold', 2.4))
+    wr = add_hand(m, el, hand, side, grip, axis=axis, size=s.get('hand', 1.3), cuff=('gold', 2.4), knuckle=s.get('knuckle'), claw=s.get('claw'),
+                  palm=p.get('palm', {}).get(side), point=p.get('point', {}).get(side))
     m.add(cone(el, wr, 2.5, 2.2), 'steel', 'arm%d' % side, bands(el, fa, (2.6,), 0.3))
     m.group('arm%d' % side, 0.5)
 
@@ -209,7 +210,8 @@ def gladiator_arm(m, p, A, side, hand, grip, axis, s):
     el = ik(sh, hand, 7.4, 7.4, V(side * 1.0, -0.6, -0.2))
     m.add(cone(sh, el, 3.0, 2.6), 'fur', 'arm%d' % side)
     fa = unit(hand - el)
-    wr = add_hand(m, el, hand, side, grip, axis=axis, size=s.get('hand', 1.3), mat='hand', cuff=('gold', 2.5))
+    wr = add_hand(m, el, hand, side, grip, axis=axis, size=s.get('hand', 1.3), cuff=('gold', 2.0), knuckle=s.get('knuckle'), claw=s.get('claw'),
+                  palm=p.get('palm', {}).get(side), point=p.get('point', {}).get(side))
     m.add(cone(el, wr, 2.6, 2.3), 'leather', 'arm%d' % side, bands(el, fa, (1.6, 4.4), 0.32, 'gold'))
     m.group('arm%d' % side, 0.6)
 
@@ -220,24 +222,20 @@ def robe_arm(m, p, A, side, hand, grip, axis, s):
     m.add(sphere(sh + V(0.4 * side, 0.4, 0), 3.4), 'robe', 'arm%d' % side)
     el = ik(sh, hand, 7.2, 7.4, V(side * 1.0, -0.6, -0.2))
     m.add(cone(sh, el, 3.0, 2.8), 'robe', 'arm%d' % side)
-    wr = add_hand(m, el, hand, side, grip, axis=axis, size=s.get('hand', 1.2), mat='hand')
+    wr = add_hand(m, el, hand, side, grip, axis=axis, size=s.get('hand', 1.2), knuckle=s.get('knuckle'), claw=s.get('claw'),
+                  palm=p.get('palm', {}).get(side), point=p.get('point', {}).get(side))
     fa = unit(hand - el)
     m.add(cone(el, wr - fa * 0.4, 2.9, 3.6), 'robe', 'arm%d' % side, bands(el, fa, (np.linalg.norm(wr - el) - 1.6,), 0.5, 'trim'))
     m.group('arm%d' % side, 0.6)
 
 
 def beast_arm(m, p, A, side, hand, grip, axis, s):
-    """Thick fur arm ending in a paw with four claws."""
+    """Thick fur arm ending in a paw: pale palm pad toward the enemy, four toe pads with seams, curved ivory claws."""
     sh = A['sh'][side]
     el = ik(sh, hand, 9.0, 8.4, V(side * 1.0, -0.8, -0.2))
     m.add(cone(sh, el, 5.0, 4.0), 'fur', 'arm%d' % side)
-    m.add(cone(el, hand, 4.0, 3.4), 'fur', 'arm%d' % side)
-    fa = unit(hand - el)
-    m.add(sphere(hand + fa * 1.6, 3.4), 'fur', 'arm%d' % side)
-    sideways = unit(np.cross(fa, V(0, 0, 1))) if abs(fa[2]) < 0.9 else V(1, 0, 0)
-    for i in (-1.5, -0.5, 0.5, 1.5):
-        c0 = hand + fa * 4.0 + sideways * 1.2 * i
-        m.add(cone(c0, c0 + fa * 2.6 + V(0, -0.8, 0.6), 0.6, 0.12), 'claw', None)
+    wr = add_paw(m, el, hand, side, s.get('hand', 1.6), p.get('palm', {}).get(side))
+    m.add(cone(el, wr, 4.0, 3.2), 'fur', 'arm%d' % side)
     m.group('arm%d' % side, 1.4)
 
 

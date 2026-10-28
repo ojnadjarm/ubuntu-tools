@@ -340,7 +340,7 @@ def _selout(idx, pm, op, dep, sel):
     isel = np.isin(pm, sel) & op
     for dy, dx in nbs:
         npm = _nb(pm, dy, dx, -1); nop = _nb(op, dy, dx, False)
-        diff = isel & (~nop | (npm != pm))
+        diff = isel & (~nop | ~np.isin(npm, sel))
         if (dy, dx) in ((1, 0), (0, 1)):
             idx[diff] = 0
     return idx, pm, op

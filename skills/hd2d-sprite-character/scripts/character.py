@@ -35,7 +35,7 @@ class Character:
 
     def build(self, f):
         S = self.S; p = self.pose(f); bs = S['body']
-        m = Model(); m.sel = {'hand'}
+        m = Model(); m.sel = {'hand', 'hand_d'}
         for g, k in dict(GROUPS, **S.get('groups', {})).items():
             m.group(g, k)
         A = anchors(p, bs)
@@ -68,7 +68,9 @@ def load(path):
     RAMPS.update(getattr(mod, 'RAMPS', {}))
     ms = mats(**mod.MATS) if isinstance(next(iter(mod.MATS.values())), (str, tuple)) else mod.MATS
     if 'hand' not in ms:
-        ms['hand'] = dict(ms[mod.SPEC.get('hand_mat', 'steel')], bias=-0.4)
+        ms['hand'] = dict(ramp=ms[mod.SPEC.get('hand_mat', 'steel')]['ramp'], wrap=0.55, gamma=0.9, bias=mod.SPEC.get('hand_bias', 0.0))
+    if 'hand_d' not in ms:
+        ms['hand_d'] = dict(ms['hand'], bias=ms['hand'].get('bias', 0.0) - 1.8)
     return Character(mod.SPEC, ms, getattr(mod, 'extra', None))
 
 

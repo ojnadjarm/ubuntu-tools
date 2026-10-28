@@ -1,6 +1,6 @@
 """Heads: FFBE-style anime head (bangs to the eye line, tall eyes, V chin) and beast heads (lion, falcon, bear)."""
 import numpy as np
-from core import V, pat, sphere, ellipsoid, cone, torus, inter, sub
+from core import V, pat, sphere, ellipsoid, cone, torus, inter, sub, octa, rot_z
 
 EYE_ROWS_N = ['dkkkk', '.sbwk', '.bil.', '..ll.', '....r']
 EYE_ROWS_F = ['kkkd', 'kwb.', '.li.', '.l..']
@@ -81,14 +81,13 @@ def lion_head(m, p, A, s):
     m.add(ellipsoid(H + V(0, -2.2, 4.6), (4.0, 3.0, 3.4)), 'fur_l', 'head')
     m.add(ellipsoid(H + V(0, 2.2, 4.4), (4.8, 1.3, 2.0)), 'fur', 'head')
     m.add(ellipsoid(H + V(0, -0.6, 7.6), (1.6, 1.0, 1.0)), 'nose', None)
-    m.add(ellipsoid(H + V(0, -4.8, 4.6), (2.4, 1.3, 2.2)), 'mouth', None)
-    for sd in (-1, 1):
-        m.lines.append((H + V(0.8 * sd, 2.6, 6.0), H + V(3.8 * sd, 3.4, 5.0), '#3a3034', 1.2))
+    m.add(ellipsoid(H + V(0, -4.6, 5.0), (1.6, 0.8, 1.4)), 'mouth', None)
     for sd in (-1, 1):
         m.add(cone(H + V(1.3 * sd, -3.8, 6.2), H + V(1.4 * sd, -6.2, 6.0), 0.55, 0.12), 'claw', None)
         m.add(sphere(H + V(4.8 * sd, 5.4, -0.6), 1.8), 'fur', None)
         m.add(sphere(H + V(4.8 * sd, 5.4, 0.0), 0.9), 'mouth', None)
     beast_eyes(m, H, (2.6, 1.0, 5.6), s.get('iris', '#f2b030'))
+    lion_face(m, H, s)
     rng = np.random.default_rng(s.get('seed', 7))
     for ring, (R, z, n, w) in enumerate(((6.4, -0.6, 14, 2.6), (7.8, -2.6, 16, 2.8), (6.6, -4.4, 10, 2.6))):
         for i in range(n):
@@ -99,6 +98,26 @@ def lion_head(m, p, A, s):
             t = H + V(np.sin(a) * (R + 4.0), np.cos(a) * (R + 2.8) - 1.5, z - 2.0) + mn * (1 + ring) * 0.4 + V(*rng.normal(0, 0.5, 3))
             m.add(cone(r0, t, w, 0.4), 'mane', 'mane', lambda P, mt: np.where(np.sin(P[:, 0] * 2.6 + P[:, 1] * 1.4) > 0.6, 'mane_s', mt))
     m.group('mane', 1.0)
+
+
+def lion_face(m, H, s):
+    """Character for a beast face: heavy scowling brow, scar over the near eye, snarl with upper fangs, whisker spots,
+    nose glint, chin tuft, cheek ruffs and an optional gold earring."""
+    for sd in (-1, 1):
+        m.add(ellipsoid(H + V(2.2 * sd, 2.5, 5.2), (2.2, 0.8, 1.2), rot=rot_z(0.35 * sd)), 'mane_s', None)
+        m.lines.append((H + V(0.7 * sd, 1.9, 6.4), H + V(3.9 * sd, 2.9, 5.2), '#1e1a22', 1.6))
+        m.add(cone(H + V(1.0 * sd, -3.4, 6.6), H + V(1.1 * sd, -5.0, 6.6), 0.5, 0.1), 'claw', None)
+        m.add(cone(H + V(4.6 * sd, -1.4, 3.6), H + V(7.4 * sd, -3.2, 2.6), 1.6, 0.3), 'mane', None)
+        for k, (dx, dy) in enumerate(((1.6, -1.7), (2.4, -2.1), (2.0, -2.7))):
+            m.dots.append((H + V(dx * sd, dy, 6.9 - 0.2 * k), '#3a3440', 0.0, 1.5))
+    m.lines.append((H + V(-1.6, -4.0, 6.4), H + V(1.6, -4.0, 6.4), '#1a0a10', 1.2))
+    m.dots.append((H + V(-0.4, -0.2, 8.6), '#ffffff', 0.0, 1.5))
+    m.add(cone(H + V(0, -5.6, 4.8), H + V(0.2, -8.4, 4.0), 1.5, 0.3), 'mane', None)
+    sc = s.get('scar')
+    if sc:
+        m.lines.append((H + V(1.7, 4.0, 6.0), H + V(3.4, -1.4, 5.6), sc, 1.2))
+    if s.get('earring'):
+        m.add(torus(H + V(5.4, 3.6, 0.2), 0.9, 0.3, sy=1.0), s['earring'], None)
 
 
 def falcon_head(m, p, A, s):
@@ -114,9 +133,21 @@ def falcon_head(m, p, A, s):
         m.lines.append((H + V(3.4 * sd, -0.6, 4.0), H + V(3.6 * sd, -4.0, 2.8), '#2a1a12', 1.2))
         m.lines.append((H + V(1.2 * sd, 3.0, 5.0), H + V(4.2 * sd, 2.2, 4.0), '#2a1a12', 1.2))
     beast_eyes(m, H, (2.8, 1.4, 4.8), s.get('iris', '#7dff6a'), glow=1.0)
+    for sd in (-1, 1):
+        m.add(ellipsoid(H + V(2.6 * sd, 2.6, 4.4), (2.4, 0.9, 1.4), rot=rot_z(0.4 * sd)), 'feather', 'head')
+        m.lines.append((H + V(1.0 * sd, 2.0, 5.6), H + V(4.4 * sd, 3.2, 4.0), '#1a0c06', 1.6))
+        m.add(cone(H + V(4.2 * sd, -2.0, 2.6), H + V(6.6 * sd, -4.2, 1.6), 1.3, 0.25), 'feather_l', None)
+    m.add(ellipsoid(H + V(0, 0.0, 5.6), (1.9, 1.1, 1.2)), 'beak', 'beak')
+    m.dots.append((H + V(0.7, 0.1, 6.8), '#3a2408', 0.0, 1.5))
+    m.lines.append((H + V(0.4, 0.6, 6.4), H + V(0.3, -0.8, 8.6), '#fff8c8', 1.0))
+    for i, (x, h) in enumerate(((-1.4, 3.2), (0.0, 4.0), (1.4, 3.2))):
+        m.add(cone(H + V(x, 3.6, 3.6), H + V(x * 1.5, 3.6 + h, 4.6), 0.9, 0.2), 'feather', None)
     cut = ellipsoid(H + V(0, 0.2, 3.6), (5.8, 6.4, 6.2))
     hood = sub(ellipsoid(H + V(0, 1.4, -0.8), (7.6, 8.0, 7.8)), cut)
     m.add(hood, 'robe', None, lambda P, mt: np.where(cut(P) < 0.9, 'trim', mt))
+    if s.get('circlet'):
+        m.add(octa(H + V(0, 6.9, 4.4), 1.2, sy=1.5), 'gold', None)
+        m.add(sphere(H + V(0, 6.9, 5.2), 0.75), s['circlet'], None)
     m.add(cone(H + V(0, 6.4, -4.4), H + V(0, 3.6, -10.0) + p.get('tail', V(0, 0, 0)) * 0.6, 3.2, 0.8), 'robe', None)
 
 

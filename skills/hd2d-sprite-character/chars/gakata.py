@@ -1,4 +1,6 @@
-"""Gakata: white lion gladiator, cream mane, gunmetal spiked pauldron, red-orange tattered kilt, chrome round shield, raised shamshir."""
+"""Gakata: white lion gladiator, cream mane, scarred scowl, gunmetal spiked pauldron, red-orange tattered kilt, chrome round shield, raised broadsword."""
+from core import V
+
 RAMPS = {
     'lionfur': ['#1e1a22', '#3a3440', '#5e5662', '#8a8290', '#b4adb6', '#d8d2d6', '#f2eee8', '#ffffff'],
     'muzzle': ['#4a3a40', '#8a7a7c', '#c8bcb8', '#ece4dc', '#fffaf2'],
@@ -10,6 +12,7 @@ RAMPS = {
     'chrome': ['#0a0e1c', '#1c2436', '#34405a', '#5a6a8a', '#8ea2c4', '#c4d4ec', '#f2f8ff', '#ffffff'],
     'ruby': ['#3a0612', '#7a1026', '#c4243e', '#ff5a6a', '#ffc8c8'],
     'rose': ['#2a0e14', '#5a1e2a', '#8e3a48'],
+    'nosec': ['#120a0e', '#2a1c22', '#4a3640', '#6e5660'],
     'ivory': ['#6a5a48', '#b8a888', '#f2ead4', '#ffffff'],
     'scim': ['#0a1424', '#1a2a44', '#2e4668', '#4c6c94', '#7a9cc2', '#aecae6', '#e0f0ff', '#ffffff'],
 }
@@ -20,16 +23,17 @@ MATS = dict(
     gold=('gild', {'kind': 'metal', 'bias': 0.4}), dgold=('gild', {'kind': 'metal', 'bias': -0.8}),
     kilt=('ember', {'wrap': 0.5, 'gamma': 0.9, 'bias': 0.5}), kilt_s=('ember', {'wrap': 0.5, 'bias': -1.0}),
     leather=('hide', {'wrap': 0.4, 'bias': -0.2}), gem=('ruby', {'kind': 'metal', 'bias': 0.6}),
-    nose=('rose', {'wrap': 0.3}), mouth=('rose', {'wrap': 0.2, 'bias': -0.8}), claw=('ivory', {'kind': 'metal'}),
+    nose=('nosec', {'kind': 'metal', 'bias': 0.2}), mouth=('rose', {'wrap': 0.2, 'bias': -0.8}), claw=('ivory', {'kind': 'metal'}),
     blade=('scim', {'kind': 'metal', 'bias': 0.8}), blade_f=('scim', {'kind': 'metal', 'bias': -1.0}),
     blade_e=('scim', {'kind': 'metal', 'bias': 1.8}),
 )
 MATS['shield'] = MATS['blade']
 SPEC = dict(
-    frames=8, scale=1.6, stance='high_guard', hand_mat='fur',
-    body=dict(kind='gladiator', hand=1.4, width=1.05, pauldron=1),
-    head=dict(kind='lion', iris='#f2b030'),
-    weapon=dict(kind='scimitar', length=19.0, curve=1.0, edge_side=-1),
+    frames=8, scale=1.6, stance='high_guard', hand_mat='fur', hand_bias=0.2, pose=lambda ph, p: p.update(
+        hilt=p['hilt'] + V(1.6, 0.4, 2.4), sword=V(0.42, 0.86, -0.28)),
+    body=dict(kind='gladiator', hand=1.5, width=1.05, pauldron=1, knuckle='leather'),
+    head=dict(kind='lion', iris='#f2b030', scar='#d27c7c', earring='gold'),
+    weapon=dict(kind='sword', hands=1, grip=4.2, length=19.0, rune=None, edge='#e0f0ff'),
     offhand=dict(kind='shield', r=7.4),
     groups=dict(body=1.4),
 )

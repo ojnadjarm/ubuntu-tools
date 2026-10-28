@@ -37,8 +37,8 @@ def grips(p, w):
     """Hand targets {side: (point, grip, axis)} for the weapon spec: two-handed hilts, else main hand +1 and off hand -1."""
     sd = unit(p['sword']); hilt = p['hilt'] + V(0, p['b'] * 0.6, 0)
     if w.get('hands', 1) == 2:
-        return {-1: (hilt + sd * 0.9, 'grip', sd), 1: (hilt - sd * 1.9, 'grip', sd)}
-    out = {1: (hilt, 'grip', sd)}
+        return {-1: (hilt + sd * w.get('front', 0.0), 'grip', sd), 1: (hilt - sd * w.get('back', 4.9), 'grip', sd)}
+    out = {1: (hilt + sd * w.get('front', 0.0), 'grip', sd)}
     off = p.get('off')
     if off is not None:
         out[-1] = (off + V(0, p['b'] * 0.6, 0), p.get('off_grip', 'open'), None)
@@ -46,11 +46,12 @@ def grips(p, w):
 
 
 def sword(m, p, A, w):
-    """Two-handed longsword: leather grip with gold wraps, pommel gem, quillons, flat blade with fuller, runes and a glow line."""
-    sd = unit(p['sword']); hilt = p['hilt'] + V(0, A['b'] * 0.6, 0); L = w.get('length', 26.0)
-    m.add(cone(hilt - sd * 3.6, hilt + sd * 2.0, 0.85, 0.85), 'leather', None, bands(hilt, sd, (-2.6, -1.2, 0.2, 1.6), 0.22, 'dgold'))
-    m.add(octa(hilt - sd * 4.4, 1.5), 'gold', None)
-    m.add(sphere(hilt - sd * 4.4, 0.9), 'gem', None)
+    """Longsword (hands 1 or 2, grip length): leather grip with gold wraps, pommel gem, quillons, flat blade with fuller, runes and a glow line."""
+    sd = unit(p['sword']); hilt = p['hilt'] + V(0, A['b'] * 0.6, 0); L = w.get('length', 26.0); G = w.get('grip', 9.0)
+    m.add(cone(hilt - sd * G, hilt + sd * 2.0, 0.85, 0.85), 'leather', None,
+          bands(hilt, sd, tuple(np.arange(1.6, -G, -1.4)), 0.22, 'dgold'))
+    m.add(octa(hilt - sd * (G + 0.8), 1.5), 'gold', None)
+    m.add(sphere(hilt - sd * (G + 0.8), 0.9), 'gem', None)
     perp = unit(np.cross(sd, V(0, 0, 1)))
     for s in (-1, 1):
         m.add(cone(hilt + sd * 2.4, hilt + sd * 2.2 + perp * 3.6 * s, 0.95, 0.5), 'gold', None)
@@ -60,7 +61,7 @@ def sword(m, p, A, w):
     bs = hilt + sd * 3.0
     m.add(blade(bs, sd, perp, L, 2.1, 0.7), 'blade', None, blade_tex(bs, sd, perp, L, 2.1))
     m.add(box(bs + sd * 0.8, (2.3, 0.8, 0.8), rot=frame_to(sd)), 'dgold', None)
-    for u in (5.0, 9.0, 13.0):
+    for u in ((5.0, 9.0, 13.0) if w.get('rune', '#8fd0ff') else ()):
         m.dots.append((bs + sd * u + V(0, 0, 0.8), w.get('rune', '#8fd0ff'), w.get('rune_glow', 0.5), 1.5))
     m.lines.append((bs + sd * 1.0 + perp * 1.7 + V(0, 0, 0.5), bs + sd * (L - 4.5) + perp * 1.0 + V(0, 0, 0.4), w.get('edge', '#cfe6ff'), 1.2))
 

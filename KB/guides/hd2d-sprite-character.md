@@ -1,6 +1,6 @@
 # HD-2D battle sprite for any character (FF Brave Exvius / Octopath look) from a spec file
 
-Ticket: T1414 · Last verified: 2026-10-28 by `tests/selftest.sh` (Gamelyn pixel checksum, 4 templates render) and a 1080p party render (Tiny Epic Narrator)
+Ticket: T1414 · Last verified: 2026-10-28 by `tests/selftest.sh` (Gamelyn pixel checksum after the hands rework, 4 templates render) and a 1080p party render (Tiny Epic Narrator)
 
 ## When to use
 A new hero, monster rider or NPC in the HD-2D style next to Gamelyn: FFBE anime face, lamed armour, glowing weapon, battle idle.
@@ -30,6 +30,17 @@ bash $S/tests/selftest.sh
 - Warm torch light pushes a maroon ramp to salmon: start the fur ramp darker (top `#c05444`, bias 0).
 - Party spacing: 0.5 m in depth between rows overlapped heads and feet; 2.5-3 m between rows at lens 58 reads cleanly.
 - Old pose modules that monkey-patch `gamelyn.pose` break once Gamelyn is a spec; poses now live in `stances.py` + `SPEC['pose']`.
+
+- Hands at scale 1.6 are ~6 px: a two-segment finger box read as a blob (owner: every pose looked odd). What reads: `hands._wrap`, a rounded
+  fist box round the handle + back of hand + thumb cone, TWO knuckle seams (`hand_d`, thin texture bands); four seams turned to a checker,
+  alternating finger materials with the outline pass turned to a black grid.
+- `_selout` outlines hand pixels against any non-hand material only; seams come from the darker `hand_d`, not from outlines.
+- Metal shading on a 6 px hand is env-reflection noise (dark navy speckle): hands are matte (`wrap` 0.55) on the armour ramp, `hand_bias` +0.5.
+- Thumbs and palms must face the camera: in sprite space that is `hands.VIEW` (0.56, 0.3, 0.78) at yaw -0.6; a palm set to +z with the far
+  paw at -x was edge-on and the four claws fused into one blade.
+- Two-handed grip: hands 4.9 apart along a 9-unit grip (`grip`, `back`); 2.8 apart overlapped into one lump.
+- Elbow cops of radius 2.2 next to the grip stole the read; 1.7 keeps the hands the focus. Gold cuffs larger than the fist (2.5) looked like a gold ball.
+- Bigger `scale` (2.2) would add pixels but shrinks the fixed-size eye stamps: the approved FFBE face changes. Stay at 1.6.
 
 ## Links
 - Skill: `~/agents/skills/hd2d-sprite-character` (linked into `~/.claude/skills`)

@@ -29,7 +29,7 @@ MATS = dict(
 )
 SPEC = dict(
     frames=8, scale=1.6, stance='brawler', hand_mat='fur',
-    body=dict(kind='beast', height=1.25, width=1.5),
+    body=dict(kind='beast', height=1.25, width=1.5, hand=1.7),
     head=dict(kind='bear', iris='#ffcf40'),
     groups=dict(head=1.6, body=2.6),
 )
