@@ -60,4 +60,14 @@ def brawler(ph):
                 head=V(0, 0.4 * br, 1.2), feet=[V(-6.0, 0, 2.6), V(6.0, 0, -2.0)])
 
 
-STANCES = dict(low_guard=low_guard, high_guard=high_guard, caster=caster, spellcast=spellcast, brawler=brawler)
+def skulk(ph):
+    """Small hunched raider: knees bent, head thrust forward, spear levelled two-handed at the enemy, tail lashing."""
+    br = np.sin(TAU * ph)
+    return dict(b=-2.4 + 0.5 * br, chest=0.4 * br, crouch=2.4, lean=6.0,
+                hilt=V(3.4, 14.6 + 0.4 * np.sin(TAU * ph - 0.5), 5.4), sword=V(0.72, 0.2, 0.62),
+                cape=V(0, 0, 0), fold=1.2 * br, ph=ph,
+                tail=V(1.4 * np.sin(TAU * ph - 0.6), 0.6 * np.sin(TAU * ph - 1.2), 0), mane=V(0, 0, 0),
+                head=V(0, -0.8 + 0.3 * br, 2.2), feet=[V(-5.0, 0, 3.6), V(4.6, 0, -3.2)])
+
+
+STANCES = dict(low_guard=low_guard, high_guard=high_guard, caster=caster, spellcast=spellcast, brawler=brawler, skulk=skulk)

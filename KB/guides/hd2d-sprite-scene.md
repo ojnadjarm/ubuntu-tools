@@ -64,6 +64,12 @@ python3 dialogo.py frames frames_dlg
 - FFBE battle idles read by a wide low base (feet ~13 units apart along the facing, crouch 1.2, lean 2.4) and a blade that leaves
   the silhouette toward the enemy (dir (-0.66, 0.62, 0.42) at yaw -0.6, hilt at the waist); a hilt behind the head hides both hands.
 - "Match the reference's quality" is not "copy its design": the owner rejected a horned-helmet redesign; keep the character's own look.
+- Scene variants (T1414 v6, `--variante antes|despues`): one `ENEMIES` table per variant, the rest of the set, party, camera and audio shared.
+  `despues` adds the collapse: lid shoved off, cyan glow plane (must sit above the gold rim box, z 1.71, or the rim hides it), rubble heaps,
+  16 stones falling in loop-safe cycles that vanish into a small volume puff, Voronoi DISTANCE_TO_EDGE cracks warped by noise.
+- Volume factor on many cyan lights (tomb 3.0, three ghosts 1.5) turned the fog into a grey-green wash; 0.8 and 0.4 keep the contrast.
+- Keep falling stones and their dust puffs out of the party's side (x < 0.6): one puff in front of Gamelyn read as a grey ball.
+- Render cost 1080p, 16 samples: 33 s/frame with two kobolds, 42 s/frame for the collapse (volumes, halos, 60 extra objects).
 
 ## Links
 - Code: RunarStudio/Tiny_Epic_Narrator `arte/hd2d/` (PR #3 branch `liaison/gamelyn-dibujado`)

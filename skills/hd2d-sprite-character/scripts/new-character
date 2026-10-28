@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Copy a character template: new-character <name> <knight|gladiator|caster|beast> <dir>
+# Copy a character template: new-character <name> <knight|gladiator|caster|beast|kobold> <dir>
 set -euo pipefail
-[ $# -eq 3 ] || { echo "usage: new-character <name> <knight|gladiator|caster|beast> <dir>" >&2; exit 2; }
-declare -A T=([knight]=gamelyn [gladiator]=gakata [caster]=ojo [beast]=tier)
+[ $# -eq 3 ] || { echo "usage: new-character <name> <knight|gladiator|caster|beast|kobold> <dir>" >&2; exit 2; }
+declare -A T=([knight]=gamelyn [gladiator]=gakata [caster]=ojo [beast]=tier [kobold]=kobold)
 src="$(dirname "$(readlink -f "$0")")/../chars/${T[$2]:?unknown template $2}.py"
 mkdir -p "$3"; [ -e "$3/$1.py" ] && { echo "exists: $3/$1.py" >&2; exit 1; }
 cp "$src" "$3/$1.py"; echo "$3/$1.py"

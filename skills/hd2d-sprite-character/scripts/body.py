@@ -1,7 +1,7 @@
-"""Bodies and arms per armour kind: plate knight, gladiator, robed caster, upright beast. Each returns the anchor dict A."""
+"""Bodies and arms per armour kind: plate knight, gladiator, robed caster, upright beast, kobold. Each returns the anchor dict A."""
 import numpy as np
 from core import V, sphere, ellipsoid, cone, torus, box, octa, inter, rot_z, rot_x
-from rig import ik, yaw
+from rig import ik, yaw, TAU
 from hands import add_hand, add_paw
 from parts import RIVET, bands, lame, unit
 
@@ -239,5 +239,89 @@ def beast_arm(m, p, A, side, hand, grip, axis, s):
     m.group('arm%d' % side, 1.4)
 
 
-BODY = dict(plate=plate_body, gladiator=gladiator_body, robe=robe_body, beast=beast_body)
-ARM = dict(plate=plate_arm, gladiator=gladiator_arm, robe=robe_arm, beast=beast_arm)
+def scales(c, k=1.0):
+    """Texture: staggered scale rows (darker 'scale_s' crescents) over a reptile hide."""
+    def t(P, mt):
+        mt = mt.copy(); q = (P - c) * k
+        row = np.floor(q[:, 1] / 1.4); u = q[:, 0] / 1.6 + 0.5 * row
+        f = (q[:, 1] / 1.4 - row) + 0.35 * (2 * np.abs(u - np.round(u)))
+        mt[(f < 0.32) & (mt == 'scale')] = 'scale_s'
+        return mt
+    return t
+
+
+def kobold_body(m, p, A, s):
+    """Kobold: hunched scaly torso with a pale ribbed belly, digitigrade legs with three-toed claws, ragged loincloth on a rope
+    belt, bandolier with a tooth necklace, spine ridges and a long tail; `wisp` replaces the legs with a swirling ectoplasm tail."""
+    pel, chest, neck = A['pel'], A['chest'], A['neck']; h = A['h']
+    if s.get('wisp'):
+        sw = p['fold']
+
+        def wisp(P):
+            k = np.clip((pel[1] - P[:, 1]) / 16, 0, 1)
+            q = P - np.stack([3.4 * k ** 1.5 * np.sin(TAU * k + sw), 0 * k, -2.6 * k ** 2 + 1.6 * k * np.cos(TAU * k + sw)], 1)
+            return cone(pel + V(0, 1.0, 0), pel + V(0, -16.0, -2.0), 5.4, 0.6)(q) - 0.5 * k * np.sin(np.arctan2(q[:, 0], q[:, 2]) * 5 + 3 * sw)
+        m.add(wisp, 'scale', 'body', lambda P, mt: np.where(np.sin((P[:, 1] - pel[1]) * 0.9 + np.arctan2(P[:, 0], P[:, 2]) * 2) > 0.6, 'scale_s', mt))
+    else:
+        for side, ft in ((-1, p['feet'][0]), (1, p['feet'][1])):
+            hip = pel + V(3.0 * side, -1.2, 0)
+            hock = ft + V(0, 3.6 * h, -2.4 * h)
+            kn = ik(hip, hock, 6.4 * h, 6.2 * h, V(0.2 * side, 0.2, 1))
+            m.add(cone(hip, kn, 3.0, 2.0), 'scale', 'leg', scales(hip))
+            m.add(cone(kn, hock, 1.9, 1.3), 'scale', 'leg', scales(kn))
+            m.add(cone(hock, ft + V(0, 0.9, 0.6), 1.3, 1.1), 'scale', 'leg')
+            for i in (-1, 0, 1):
+                t0 = ft + V(0.9 * i, 0.7, 1.4); t1 = ft + V(1.5 * i, 0.4, 3.4 - abs(i) * 0.6)
+                m.add(cone(t0, t1, 0.75, 0.5), 'scale', None)
+                m.add(cone(t1, t1 + V(0.2 * i, -0.5, 1.2), 0.45, 0.08), 'claw', None)
+            m.add(cone(hock, hock + V(0, -0.6, -1.6), 0.5, 0.1), 'claw', None)
+    tl = p['tail']; t0 = pel + V(0, 0.4, -3.4)
+    pts = [t0, t0 + V(0, -3.0, -4.6) + tl * 0.4, t0 + V(0.6, -6.2, -9.6) + tl * 1.0, t0 + V(1.6, -7.4, -14.6) + tl * 1.6,
+           t0 + V(2.8, -6.4, -18.6) + tl * 2.2]
+    for i, (a_, b_) in enumerate(zip(pts, pts[1:])):
+        m.add(cone(a_, b_, 2.6 - 0.6 * i, 2.0 - 0.6 * i if i < 3 else 0.2), 'scale', 'tail', scales(t0))
+        m.add(cone(a_ + V(0, 2.0 - 0.4 * i, 0), a_ + V(0, 3.0 - 0.5 * i, -1.2), 0.6, 0.1), 'spine', None)
+    m.group('tail', 1.0)
+
+    def belly(P, mt):
+        mt = scales(chest)(P, mt); q = P - chest
+        b = (q[:, 2] > 2.2) & (np.abs(q[:, 0]) < 3.4)
+        mt[b] = 'belly'; mt[b & (np.abs(np.sin(q[:, 1] * 1.6)) < 0.22)] = 'belly_s'
+        return mt
+    m.add(ellipsoid(chest + V(0, -0.4, 0), (5.2, 5.6, 4.4)), 'scale', 'body', belly)
+    m.add(ellipsoid(pel + V(0, 3.0, 0.2), (4.4, 3.8, 3.8)), 'scale', 'body', belly)
+    m.add(cone(neck + V(0, -1.6, -0.4), neck + V(0, 1.4, 0.4), 2.8, 2.2), 'scale', 'body', scales(neck))
+    for i in range(4):
+        c = chest + V(0, 4.4 - 2.6 * i, -4.0 + 0.2 * i)
+        m.add(cone(c, c + V(0, 1.2, -1.6), 0.7, 0.1), 'spine', None)
+    if not s.get('wisp'):
+        sw = p['fold']
+        rag = inter(cone(pel + V(0, 0.6, 0), pel + V(0, -6.0, 0.6), 4.8, 5.8),
+                    lambda P: (pel[1] - 5.4 + 1.2 * np.abs(np.sin(np.arctan2(P[:, 0], P[:, 2] - pel[2]) * 4 + sw))) - P[:, 1])
+        m.add(rag, 'rag', None, lambda P, mt: np.where(np.sin(np.arctan2(P[:, 0] - pel[0], P[:, 2] - pel[2]) * 7) > 0.7, 'rag_s', mt))
+    m.add(torus(pel + V(0, 0.9, 0.2), 4.7, 0.6), 'leather', None, bands(pel, V(1, 0, 0), (-3, -1, 1, 3), 0.22, 'rag_s'))
+    a0 = chest + V(4.2, 3.6, 0.8); a1 = pel + V(-3.6, 1.6, 3.6)
+    m.add(cone(a0, a1, 0.7, 0.7), 'leather', None)
+    m.add(box(chest + V(0.4, 0.0, 4.6), (1.0, 0.8, 0.35)), 'rust', None)
+    for i, x in enumerate((-2.2, -0.8, 0.8, 2.2)):
+        c = neck + V(x, -2.4 - 0.7 * (1.5 - abs(i - 1.5)), 2.6)
+        m.add(cone(c, c + V(0, -1.4, 0.4), 0.45, 0.08), 'bone', None)
+    m.lines.append((neck + V(-2.8, -1.9, 2.4), neck + V(2.8, -1.9, 2.4), s.get('cord', '#3a2418'), 1.0))
+
+
+def kobold_arm(m, p, A, side, hand, grip, axis, s):
+    """Thin scaly arm with a rag-wrapped forearm, bony elbow spur and a clawed four-finger hand."""
+    sh = A['sh'][side]
+    m.add(sphere(sh + V(0.4 * side, 0.2, 0), 2.2), 'scale', 'arm%d' % side, scales(sh))
+    el = ik(sh, hand, 5.6, 5.4, V(side * 1.0, -0.8, -0.4))
+    m.add(cone(sh, el, 1.7, 1.3), 'scale', 'arm%d' % side, scales(sh))
+    m.add(cone(el, el + unit(el - hand) * 1.6 + V(0, 0.4, 0), 0.6, 0.1), 'spine', None)
+    wr = add_hand(m, el, hand, side, grip, axis=axis, size=s.get('hand', 1.1), claw=s.get('claw', 'claw'),
+                  palm=p.get('palm', {}).get(side), point=p.get('point', {}).get(side), rod=0.7)
+    fa = unit(hand - el)
+    m.add(cone(el, wr, 1.3, 1.1), 'scale', 'arm%d' % side, bands(el, fa, (np.linalg.norm(wr - el) - 1.4, np.linalg.norm(wr - el) - 2.6), 0.4, 'rag'))
+    m.group('arm%d' % side, 0.5)
+
+
+BODY = dict(plate=plate_body, gladiator=gladiator_body, robe=robe_body, beast=beast_body, kobold=kobold_body)
+ARM = dict(plate=plate_arm, gladiator=gladiator_arm, robe=robe_arm, beast=beast_arm, kobold=kobold_arm)

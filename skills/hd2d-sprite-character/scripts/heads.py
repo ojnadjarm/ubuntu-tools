@@ -1,4 +1,4 @@
-"""Heads: FFBE-style anime head (bangs to the eye line, tall eyes, V chin) and beast heads (lion, falcon, bear)."""
+"""Heads: FFBE-style anime head (bangs to the eye line, tall eyes, V chin) and beast heads (lion, falcon, bear, kobold)."""
 import numpy as np
 from core import V, pat, sphere, ellipsoid, cone, torus, inter, sub, octa, rot_z
 
@@ -166,4 +166,38 @@ def bear_head(m, p, A, s):
     m.lines.append((H + V(1.6, 4.4, 6.0), H + V(3.8, 1.2, 6.0), '#e8b0a0', 1.5))
 
 
-HEAD = dict(anime=anime_head, lion=lion_head, falcon=falcon_head, bear=bear_head)
+def kobold_head(m, p, A, s):
+    """Kobold: reptile skull with a long snout and a jaw hanging open over needle teeth, slit-pupil eyes under a hard brow,
+    two swept-back horns, finned ear frills, nostrils and a tongue; `glow` lights the eyes."""
+    H = A['head']; iris = s.get('iris', '#ffd23a'); gape = 0.9 + 0.3 * np.sin(2 * np.pi * p.get('ph', 0.0))
+    m.add(ellipsoid(H + V(0, 0.6, -0.6), (3.8, 3.6, 4.0)), 'scale', 'head')
+    m.add(cone(H + V(0, 0.2, 1.6), H + V(0, -0.2, 8.8), 3.0, 1.3), 'scale', 'head')
+    m.add(ellipsoid(H + V(0, 1.6, 2.8), (2.8, 1.0, 2.6)), 'scale', 'head')
+    m.group('head', 0.9)
+    jaw = H + V(0, -1.6 - gape, 1.2)
+    m.add(cone(jaw, jaw + V(0, -0.8 - gape, 6.6), 2.2, 0.9), 'scale', 'jaw')
+    m.add(cone(jaw + V(0, 1.2, 0.8), jaw + V(0, 0.8, 6.0), 1.6, 0.5), 'mouth', None)
+    m.add(cone(jaw + V(0, 0.8, 2.0), jaw + V(0.4, 0.5 - 0.4 * gape, 5.6), 0.6, 0.3), 'tongue', None)
+    m.group('jaw', 0.5)
+    for i in range(5):
+        z = 2.8 + 1.4 * i
+        for sd in (-1, 1):
+            m.add(cone(H + V(1.1 * sd * (1 - 0.12 * i), -1.2, z), H + V(1.1 * sd * (1 - 0.12 * i), -2.4, z + 0.2), 0.36, 0.05), 'bone', None)
+            m.add(cone(jaw + V(1.0 * sd, 1.2, z - 0.4), jaw + V(1.0 * sd, 2.0, z - 0.3), 0.3, 0.05), 'bone', None)
+    for sd in (-1, 1):
+        m.dots.append((H + V(0.7 * sd, 0.5, 9.0), '#140a08', 0.0, 1.5))
+        m.add(ellipsoid(H + V(1.9 * sd, 2.4, 2.8), (1.6, 0.6, 1.4), rot=rot_z(0.4 * sd)), 'scale_s', None)
+        h0 = H + V(2.2 * sd, 3.0, -0.6); h1 = h0 + V(1.0 * sd, 2.0, -3.4); h2 = h1 + V(0.6 * sd, 0.6, -3.2)
+        m.add(cone(h0, h1, 1.0, 0.6), 'horn', None, lambda P, mt: np.where(np.sin(P[:, 2] * 3.0) > 0.7, 'horn_d', mt))
+        m.add(cone(h1, h2, 0.6, 0.08), 'horn', None)
+        fan = H + V(3.0 * sd, 0.6, -1.0)
+        for k in range(3):
+            tip = fan + V(3.0 * sd, 2.2 - 2.0 * k, -2.0 - 0.6 * k)
+            m.add(cone(fan, tip, 0.45, 0.08), 'spine', None)
+        m.add(inter(ellipsoid(fan + V(1.6 * sd, 0.2, -1.6), (1.6, 2.2, 1.5)), lambda P, c=fan: 0.25 - np.abs((P - c) @ V(0.8 * sd, 0, -0.6))),
+              'frill', None, lambda P, mt, c=fan: np.where(np.sin((P[:, 1] - c[1]) * 2.4) > 0.6, 'frill_d', mt))
+    beast_eyes(m, H, (2.0, 1.2, 3.6), iris, glow=s.get('glow', 0.0))
+    m.lines.append((H + V(0.6, 1.9, 4.2), H + V(3.0, 2.4, 3.2), '#120a08', 1.4))
+
+
+HEAD = dict(anime=anime_head, lion=lion_head, falcon=falcon_head, bear=bear_head, kobold=kobold_head)

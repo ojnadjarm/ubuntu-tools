@@ -1,4 +1,4 @@
-"""Gear: cape anchored under the pauldrons, two-handed glowing sword, scimitar, staff with gem, round shield, spell orb."""
+"""Gear: cape anchored under the pauldrons, two-handed glowing sword, scimitar, staff with gem, crude spear, round shield, spell orb."""
 import numpy as np
 from core import V, sphere, ellipsoid, cone, torus, box, octa, inter, frame_to
 from parts import bands, blade, blade_tex, unit
@@ -114,5 +114,18 @@ def orb(m, p, A, w):
         m.dots.append((c + V(3.4 * np.cos(a), 1.2 * np.sin(2 * a), 3.4 * np.sin(a)), w.get('spark', '#b8ffb0'), 1.0, 9))
 
 
-WEAPON = dict(sword=sword, scimitar=scimitar, staff=staff)
+def spear(m, p, A, w):
+    """Crude spear: knotted shaft with rag wraps and a hanging fang charm, rusty leaf-shaped iron head lashed on with cord."""
+    sd = unit(p['sword']); hilt = p['hilt'] + V(0, A['b'] * 0.6, 0)
+    top = hilt + sd * w.get('up', 14.0); bot = hilt - sd * w.get('down', 10.0)
+    m.add(cone(bot, top, 0.7, 0.62), 'wood', None, bands(hilt, sd, (-8.0, 6.0, 7.0, 11.0), 0.4, 'rag'))
+    perp = unit(np.cross(sd, V(0, 0, 1)))
+    m.add(blade(top, sd, perp, w.get('length', 7.0), w.get('width', 2.2), 0.6), 'blade', None, blade_tex(top, sd, perp, w.get('length', 7.0), w.get('width', 2.2)))
+    m.add(cone(top - sd * 1.2, top + sd * 0.6, 0.9, 0.8), 'rag_s', None)
+    c = top - sd * 2.2
+    m.add(cone(c, c + V(0, -2.4, 0.3), 0.15, 0.15), 'rag_s', None)
+    m.add(cone(c + V(0, -2.4, 0.3), c + V(0.2, -4.0, 0.5), 0.45, 0.06), 'bone', None)
+
+
+WEAPON = dict(sword=sword, scimitar=scimitar, staff=staff, spear=spear)
 OFFHAND = dict(shield=shield, orb=orb)

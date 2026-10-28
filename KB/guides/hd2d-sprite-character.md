@@ -1,6 +1,6 @@
 # HD-2D battle sprite for any character (FF Brave Exvius / Octopath look) from a spec file
 
-Ticket: T1414 · Last verified: 2026-10-28 by `tests/selftest.sh` (Gamelyn pixel checksum after the hands rework, 4 templates render) and a 1080p party render (Tiny Epic Narrator)
+Ticket: T1414 · Last verified: 2026-10-28 by `tests/selftest.sh` (Gamelyn pixel checksum unchanged, 7 specs render incl. kobold, kobold_alzado, kobold_espectral) and 1080p renders of both sarcophagus variants (Tiny Epic Narrator)
 
 ## When to use
 A new hero, monster rider or NPC in the HD-2D style next to Gamelyn: FFBE anime face, lamed armour, glowing weapon, battle idle.
@@ -41,6 +41,14 @@ bash $S/tests/selftest.sh
 - Two-handed grip: hands 4.9 apart along a 9-unit grip (`grip`, `back`); 2.8 apart overlapped into one lump.
 - Elbow cops of radius 2.2 next to the grip stole the read; 1.7 keeps the hands the focus. Gold cuffs larger than the fist (2.5) looked like a gold ball.
 - Bigger `scale` (2.2) would add pixels but shrinks the fixed-size eye stamps: the approved FFBE face changes. Stay at 1.6.
+- Kobold (T1414 v6): stance hilt coordinates are absolute, so a small body (`height` 0.88) needs its own stance (`skulk`, hilt y 14.6);
+  borrowing `low_guard` put the hands above the head. A spear along +z (the facing) foreshortens to a stub at yaw 0.55: aim it (0.72, 0.2, 0.62).
+- A short snout (cone to z 7.4) read as a dog; z 8.8 plus a jaw hanging open 0.9-1.2 with five needle teeth per side reads as a reptile.
+  A pink frill membrane read as a hair bun: keep frills in the scale hue.
+- Spectral variant: at 0.5 m the ghost washed to white three times in the scene (emission = albedo x 6, then a near-white ramp top,
+  then Principled specular catching the moon). What held cyan: ramp topping at `#5adcc4`, emission colour = luminance x (0.12, 1.0, 0.8),
+  strength 2.8 + 6 x mask, Specular IOR Level 0, alpha 0.68 fading over the bottom 20% of the plane, and a numpy-blurred alpha aura plane behind.
+- Variant specs (`kobold_alzado`, `kobold_espectral`) load `kobold.py` by path next to them: copy the base with them.
 
 ## Links
 - Skill: `~/agents/skills/hd2d-sprite-character` (linked into `~/.claude/skills`)

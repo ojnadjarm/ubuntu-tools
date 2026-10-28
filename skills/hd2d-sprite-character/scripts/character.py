@@ -3,8 +3,8 @@
 A spec module defines RAMPS (name -> hex ramp), MATS (material -> ramp + shading), SPEC (dict below) and optionally
 `extra(m, p, A)` for one-off parts (riders, familiars). `load(path)` returns an object with FRAMES, SCALE and build(f).
 
-SPEC keys: frames, scale, stance (stances.STANCES name), pose (callable(ph, p) -> p tweaks), body {kind, height, width,
-head_lift, emblem, hand}, head {kind, ...heads.py options}, weapon {kind, ...gear.py options} or None, offhand {kind} or None,
+SPEC keys: frames, scale, stance (stances.STANCES name), pose (callable(ph, p) -> p tweaks; p['hands'] + p['hand_grip'] free both hands),
+body {kind, height, width, head_lift, emblem, hand, wisp}, head {kind, ...heads.py options}, weapon {kind, ...gear.py options} or None, offhand {kind} or None,
 cape {length} or None, groups {name: k} smooth-union radii.
 """
 import importlib.util
@@ -43,7 +43,7 @@ class Character:
         if S.get('cape') is not None:
             cape(m, p, A, S['cape'])
         w = S.get('weapon')
-        hands = {sd: (pt, 'relaxed', None) for sd, pt in p['hands'].items()} if 'hands' in p else grips(p, w or {})
+        hands = {sd: (pt, p.get('hand_grip', 'relaxed'), None) for sd, pt in p['hands'].items()} if 'hands' in p else grips(p, w or {})
         for sd, (pt, grip, axis) in hands.items():
             ARM[bs['kind']](m, p, A, sd, pt, grip, axis, bs)
         if w:
