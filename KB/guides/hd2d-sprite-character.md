@@ -1,0 +1,37 @@
+# HD-2D battle sprite for any character (FF Brave Exvius / Octopath look) from a spec file
+
+Ticket: T1414 · Last verified: 2026-10-28 by `tests/selftest.sh` (Gamelyn pixel checksum, 4 templates render) and a 1080p party render (Tiny Epic Narrator)
+
+## When to use
+A new hero, monster rider or NPC in the HD-2D style next to Gamelyn: FFBE anime face, lamed armour, glowing weapon, battle idle.
+Not for Godot walk sheets (/pixel-avatar) or the 3D set itself (guide hd2d-sprite-scene).
+
+## The path we took
+- Survey: /pixel-avatar (T702 SDF tracer, walk sheets) existed; the Gamelyn module (T1414) held every owner-approved detail but
+  was one 250-line file. Chosen: split it into parts behind a spec, ported first and checked pixel-identical (8 frames x 3 maps, 0 px diff).
+- Modules: `core/rig/hands` (tracer, unchanged but for `glow`), `parts` (bands, lames, blades), `body` (plate, gladiator, robe, beast +
+  their arms), `heads` (anime, lion, falcon, bear), `gear` (cape, sword, scimitar, staff, shield, orb), `stances`, `character`
+  (dispatch tables, open for new kinds without editing the builder), `sprite` (CLI). Spec files: `chars/*.py`.
+
+## Exact commands
+```bash
+S=~/.claude/skills/hd2d-sprite-character
+$S/scripts/new-character mira knight /tmp/chars
+python3 $S/scripts/sprite.py /tmp/chars/mira.py /tmp/mira --frames 0 --sheet /tmp/mira.png
+bash $S/tests/selftest.sh
+```
+
+## Pitfalls (measured)
+- A glowing blade went white twice: an emissive near-white ramp, then albedo x (2.2, 3.2, 4.0). What kept it light blue in AgX:
+  a saturated ramp topping at `#a8e0ff`, mask `glow` 0.55, and emission = albedo squared x 3 in the scene shader (non-glow pixels keep 0.2 x albedo).
+- Standing in the god ray washes any sprite; Gamelyn at x 1.6 lost the blade colour, at x 1.9-2.0 it held.
+- Parts placed at nominal radii end up inside a bigger body (bear harness straps at z 8.6 inside a z 10 belly): draw straps as texture bands on the body.
+- Riders behind the head vanish at yaw -0.6: put them on the shoulders (x +/-10, forward 5).
+- Warm torch light pushes a maroon ramp to salmon: start the fur ramp darker (top `#c05444`, bias 0).
+- Party spacing: 0.5 m in depth between rows overlapped heads and feet; 2.5-3 m between rows at lens 58 reads cleanly.
+- Old pose modules that monkey-patch `gamelyn.pose` break once Gamelyn is a spec; poses now live in `stances.py` + `SPEC['pose']`.
+
+## Links
+- Skill: `~/agents/skills/hd2d-sprite-character` (linked into `~/.claude/skills`)
+- Project use: RunarStudio/Tiny_Epic_Narrator `arte/hd2d/pixel/personajes/`, PR #3
+- Tests: `bash ~/.claude/skills/hd2d-sprite-character/tests/selftest.sh` (~70 s)

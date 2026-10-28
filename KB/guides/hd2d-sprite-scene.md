@@ -1,6 +1,6 @@
 # HD-2D scene: pixel-art sprites in a lit 3D diorama (Octopath / FF Brave Exvius look), made with code
 
-Ticket: T1414 · Last verified: 2026-10-28 by a 1080p 4 s loop render (Tiny Epic Narrator, sarcophagus chamber, Gamelyn v4 low guard, shoulder cape, blue steel)
+Ticket: T1414 · Last verified: 2026-10-28 by a 1080p 4 s loop render (Tiny Epic Narrator, sarcophagus chamber, whole party: Gamelyn low guard with light-blue glowing blade, Gakata, Ojo Penetrante, Tier)
 
 ## When to use
 "2D HD", "HD-2D", "Octopath style", "FF Resonance / Brave Exvius style": small crisp pixel sprites standing in a 3D
@@ -58,6 +58,9 @@ python3 dialogo.py frames frames_dlg
   Start it 3 units under the neck, top radius 6.6, and clip it flat at `neck - 1.4` (hidden under gorget and pauldrons); add clasps.
 - An emissive 'ice' blade blooms to white in the scene: a blue steel ramp with `kind: metal` (bias 0.8, fuller -1.8, edges 1.6)
   keeps it bluish and detailed; runes as dots with emission 0.5.
+- "The blade glows light blue" (owner, v5): metal ramp topping at `#a8e0ff` + mask `glow` 0.55 + emission = albedo squared x 3 in
+  `hero_mat`; a near-white top step or an albedo x (2.2, 3.2, 4.0) tint blooms white. Characters now come from /hd2d-sprite-character specs.
+- Whole party (T1414 v5): `PARTY` table in `cripta_hd2d.py` (sprite dir, cell, feet, accent light); 4 heroes + ghost at 1080p, 20 samples = 43 s/frame.
 - FFBE battle idles read by a wide low base (feet ~13 units apart along the facing, crouch 1.2, lean 2.4) and a blade that leaves
   the silhouette toward the enemy (dir (-0.66, 0.62, 0.42) at yaw -0.6, hilt at the waist); a hilt behind the head hides both hands.
 - "Match the reference's quality" is not "copy its design": the owner rejected a horned-helmet redesign; keep the character's own look.
