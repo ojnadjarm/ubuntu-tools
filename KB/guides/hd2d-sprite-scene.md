@@ -1,6 +1,6 @@
 # HD-2D scene: pixel-art sprites in a lit 3D diorama (Octopath / FF Brave Exvius look), made with code
 
-Ticket: T1414 · Last verified: 2026-10-28 by a 1080p 4 s loop render (Tiny Epic Narrator, sarcophagus chamber, Gamelyn v2 detail)
+Ticket: T1414 · Last verified: 2026-10-28 by a 1080p 4 s loop render (Tiny Epic Narrator, sarcophagus chamber, Gamelyn v3 anime face)
 
 ## When to use
 "2D HD", "HD-2D", "Octopath style", "FF Resonance / Brave Exvius style": small crisp pixel sprites standing in a 3D
@@ -42,6 +42,18 @@ python3 dialogo.py frames frames_dlg
   cell (128 -> 176) and shrink the plane pixel by the same ratio (`HERO_PX = 1.12 / 1.6`): 61 -> 87 px tall, same screen size.
 - Gold bands on every plate read as stripes, not trim: one band per piece, plus 1 px rivets (`m.dots`) and stacked
   hollow lames (ellipsoid minus an offset ellipsoid) for pauldrons and tassets. 8-9 step ramps give the specular room.
+- A face built as a skin sphere with 2x2 eye stamps and a mouth line reads "circle with two dots and a line" (owner, v2).
+  FFBE heads (studied from a sheet in `dsxragnarok/ffbetool` test fixtures; spriters-resource and fandom images sit behind
+  Cloudflare, curl and headless Chrome both get the challenge page): skin is only the lower ~40% of the head, bangs reach
+  the eye line, each eye is taller than wide (dark lash cap, 2 px coloured iris, white glint), V chin with a dark tip, no nose.
+  Recipe that worked: sphere + cone jaw to a point, hair cap cut away below the brow at the front (`inter` with
+  min(brow - y, z - z0)), 5 bang cones and 2 side locks as hard unions (group None: the outline pass draws the separations),
+  a dark line per lock on its shadow side and a light one near the root, a separate flat `glint` ramp for the halo band,
+  eyes as `pat()` stamps (near eye 5x5, far eye 4x4). Lift the head 0.5 so the chin clears the gorget.
+- A sword as one round cone plus a white line reads as a light-saber stick: a flat diamond-section SDF (taper, then a
+  6-unit point) with a darker fuller and light edges as texture bands; in the scene the emissive bloom eats most of it.
+- Alternative poses as tiny modules that import the hero and replace `gamelyn.pose` (`build` reads the module global):
+  `sprite.py gamelyn_estocada ...`; a raised guard by the head crosses the face again, a level thrust does not.
 - "Match the reference's quality" is not "copy its design": the owner rejected a horned-helmet redesign; keep the character's own look.
 
 ## Links
