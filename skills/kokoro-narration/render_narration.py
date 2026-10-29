@@ -1,26 +1,64 @@
-"""Render a unit's narration with Kokoro fp32 and write mastered clips plus a cue sheet of word-start marks."""
+"""Render a unit's narration with Kokoro fp32 or edge-tts and write mastered clips plus a cue sheet of word-start marks."""
 import json, os, re, subprocess, sys, pathlib
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
-import numpy as np, soundfile as sf, torch
-from kokoro import KPipeline
+import numpy as np, soundfile as sf
 
-if len(sys.argv) < 3:
-    sys.exit("usage: render_narration.py <unit.json> <out-dir> [clip-id…]")
+ENGINE = "kokoro"
+if "--engine" in sys.argv[1:-1]:
+    i = sys.argv.index("--engine")
+    ENGINE = sys.argv.pop(i + 1); sys.argv.pop(i)
+if len(sys.argv) < 3 or ENGINE not in ("kokoro", "edge"):
+    sys.exit("usage: render_narration.py [--engine kokoro|edge] <unit.json> <out-dir> [clip-id…]")
 UNIT = json.loads(pathlib.Path(sys.argv[1]).read_text())
 OUT = pathlib.Path(sys.argv[2])
 RAW = OUT.parent / (OUT.name + ".raw")
-SR, LEAD, GAP, TERM_GAP, BIAS = 24000, 0.15, 0.30, 0.65, 0.04
+SR, LEAD, GAP, TERM_GAP, BIAS, TAIL = 24000, 0.15, 0.30, 0.65, 0.04, 0.15
+EDGE_VOICES = {"e": "es-ES-AlvaroNeural"}
 KBPS = os.environ.get("NARRATION_KBPS")
 CUE = re.compile(r"\{(\w+)\}")
 
-torch.set_num_threads(8)
 voice, speed = UNIT["voice"]["voice"], UNIT["voice"]["speed"]
-pipe = KPipeline(lang_code=voice[0], repo_id="hexgrad/Kokoro-82M")
+if ENGINE == "kokoro":
+    import torch
+    from kokoro import KPipeline
+    torch.set_num_threads(8)
+    pipe = KPipeline(lang_code=voice[0], repo_id="hexgrad/Kokoro-82M")
+else:
+    import asyncio, edge_tts
+    voice = voice if voice.endswith("Neural") else EDGE_VOICES.get(voice[0]) or sys.exit(f"no edge voice for {voice}: name one, e.g. es-ES-AlvaroNeural")
 
 
 def words_of(text):
-    """Alphanumeric words in order, as Kokoro tokenises them."""
-    return [w for w in re.findall(r"[A-Za-z0-9']+", text)]
+    """Alphanumeric words in order, as the engine tokenises them."""
+    return re.findall(r"(?:[^\W_]|')+", text)
+
+
+def kokoro_synth(text):
+    """Kokoro audio and (token, start, end) timings; untimed tokens have start None."""
+    chunks, toks, off = [], [], 0.0
+    for r in pipe(text, voice=voice, speed=speed):
+        a = r.audio.numpy()
+        toks += [(tk.text, None, None) if tk.start_ts is None else (tk.text, off + tk.start_ts, off + tk.end_ts) for tk in r.tokens or []]
+        chunks.append(a); off += len(a) / SR
+    return np.concatenate(chunks), toks
+
+
+def edge_synth(text):
+    """edge-tts audio (24 kHz, cut TAIL after the last word) and (word, start, end) from its word boundaries."""
+    async def stream():
+        mp3, toks = b"", []
+        rate = f"{round((speed - 1) * 100):+d}%"
+        async for c in edge_tts.Communicate(text, voice, rate=rate, boundary="WordBoundary").stream():
+            if c["type"] == "audio":
+                mp3 += c["data"]
+            elif c["type"] == "WordBoundary":
+                toks.append((c["text"], c["offset"] / 1e7, (c["offset"] + c["duration"]) / 1e7))
+        return mp3, toks
+    mp3, toks = asyncio.run(stream())
+    pcm = subprocess.run(["ffmpeg", "-v", "error", "-i", "-", "-f", "f32le", "-ac", "1", "-ar", str(SR), "-"],
+                         input=mp3, capture_output=True, check=True).stdout
+    a = np.frombuffer(pcm, np.float32)
+    return (a[: int((toks[-1][2] + TAIL) * SR)] if toks else a), toks
 
 
 def render(sentence):
@@ -33,23 +71,21 @@ def render(sentence):
         else:
             plain += p
     text, lead = plain.strip(), len(plain) - len(plain.lstrip())
-    chunks, words, pos, off, at = [], [], [], 0.0, 0
-    for r in pipe(text, voice=voice, speed=speed):
-        a = r.audio.numpy()
-        for tk in r.tokens or []:
-            c = text.find(tk.text, at)
-            at = c + len(tk.text) if c >= 0 else at
-            if tk.start_ts is not None and any(ch.isalnum() for ch in tk.text):
-                words.append({"w": tk.text, "s": off + tk.start_ts, "e": off + tk.end_ts})
-                pos.append(c)
-        chunks.append(a); off += len(a) / SR
+    audio, toks = (kokoro_synth if ENGINE == "kokoro" else edge_synth)(text)
+    words, pos, at = [], [], 0
+    for w, s, e in toks:
+        c = text.find(w, at)
+        at = c + len(w) if c >= 0 else at
+        if s is not None and any(ch.isalnum() for ch in w):
+            words.append({"w": w, "s": s, "e": e})
+            pos.append(c)
     expected = words_of(plain)
     if len(expected) != len(words):
         print(f"WARN word count {len(words)} != {len(expected)}: {plain}", file=sys.stderr)
     if marks and (not words or -1 in pos):
-        sys.exit(f"cannot place {sorted(marks)}: Kokoro words {[w['w'] for w in words]} do not match: {plain}")
+        sys.exit(f"cannot place {sorted(marks)}: {ENGINE} words {[w['w'] for w in words]} do not match: {plain}")
     marks = {m: next((k for k, c in enumerate(pos) if c >= mc - lead), len(words) - 1) for m, mc in marks.items()}
-    return np.concatenate(chunks), words, marks, sentence.endswith("|")
+    return audio, words, marks, sentence.endswith("|")
 
 
 def master(src, stem):
@@ -78,7 +114,7 @@ def encode(wav, stem):
 
 RAW.mkdir(parents=True, exist_ok=True)
 (OUT / "audio").mkdir(parents=True, exist_ok=True)
-sheet = {"voice": UNIT["voice"], "bias": BIAS, "clips": {}}
+sheet = {"voice": UNIT["voice"] if ENGINE == "kokoro" else {**UNIT["voice"], "engine": "edge-tts", "voice": voice}, "bias": BIAS, "clips": {}}
 only = set(sys.argv[3:])
 prev = json.loads((OUT / "cues.json").read_text()) if (OUT / "cues.json").exists() and only else None
 if prev and "kbps" in prev:

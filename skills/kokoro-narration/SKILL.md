@@ -1,6 +1,6 @@
 ---
 name: kokoro-narration
-description: Offline narration with local Kokoro TTS (af_heart). Use for narrated explainers, voice-over, TTS clips with word timestamps, audio-driven animation timelines. Gives word timings, {cue} marks, cues.json and -16 LUFS Opus/AAC clips.
+description: Narration with local Kokoro TTS (af_heart, English) or edge-tts (es-ES-AlvaroNeural, Spanish). Use for narrated explainers, voice-over, TTS clips with word timestamps, audio-driven animation timelines. Gives word timings, {cue} marks, cues.json and -16 LUFS Opus/AAC clips.
 allowed-tools: Bash(~/.local/opt/kokoro/bin/python:*)
 ---
 
@@ -34,6 +34,10 @@ $PY ~/.claude/skills/kokoro-narration/render_narration.py unit.json public/bundl
   The site caps only the first chapter (600 kB per format).
 - stderr `WARN word count` means Kokoro tokenised differently from the script (`U.S.`, `real-time`, `5.50`). Marks still land on their word:
   they are placed by text position. A mark in a sentence with no timed word, or whose tokens are not in the text, stops the render.
+- **Spanish: `--engine edge`** (owner's pick, T1428): `$PY …/render_narration.py --engine edge unit.json out` with `"voice": "es"`
+  (→ `es-ES-AlvaroNeural`) or any edge voice name. Words and marks come from edge-tts word boundaries; output is the same as Kokoro's.
+  Kokoro `ef_dora` gives no Spanish word timings, so `{cue}` marks fail there. Edge needs network and uses Microsoft Edge's **unofficial**
+  read-aloud endpoint (no key, may break). The paid fallback is Azure Speech with the same voice. About 6 s for a 2-sentence clip.
 - Runtime: play through one `AudioContext`, clock = `ctx.currentTime − ctx.outputLatency`, scrub the timeline to it.
   Never drive animation from `setTimeout`. Reference: `T65/mockups/atelier/src/core/clock.ts`, `src/audio/voice.ts`.
 - Speed: ~1× real time on this CPU (fixture: 2 sentences in 7.8 s wall, model load included).

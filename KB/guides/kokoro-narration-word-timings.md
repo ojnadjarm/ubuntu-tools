@@ -1,9 +1,11 @@
 # Narrate with local Kokoro TTS, word timings and a cue sheet that drives the animation
 
-Ticket: T65 (narration lane), used by T65 mockups, T69, T70 ports · Last verified: 2026-10-20 by T846 read-only audit (`--help`, paths, code); before: 2026-10-19 by rendering the SKILL.md fixture offline with the skill script (marks tubes 0.515 s, input 4.065 s, 42 s wall at load ~9), the Ogg command and `test -e` on every path
+Ticket: T65 (narration lane), used by T65 mockups, T69, T70 ports; T1428 added `--engine edge` for Spanish · Last verified: 2026-10-29 by T1428 (8/8 skill tests; real renders: es-ES-AlvaroNeural clip, marks botón 0.515 s, cambiar 4.49 s, 6.4 s wall; English fixture unchanged, tubes 0.515 s, input 4.065 s); before: 2026-10-20 by T846 read-only audit (`--help`, paths, code); before: 2026-10-19 by rendering the SKILL.md fixture offline with the skill script (marks tubes 0.515 s, input 4.065 s, 42 s wall at load ~9), the Ogg command and `test -e` on every path
 
 ## When to use
 - A narrated explainer, voice-over or tutorial where visuals must land on spoken words: use the skill `/kokoro-narration`.
+- **Spanish: `--engine edge`** (edge-tts, `es-ES-AlvaroNeural`, owner's pick in T1428). Kokoro `ef_dora` sounds clearly worse
+  and gives no word timings in Spanish. English stays on Kokoro `af_heart`.
 - Not for the Eye's live voice: that is sherpa-onnx int8 Kokoro in `~/the-dark-eye` (real-time, lower quality, see pitfalls).
 - Not for pronunciation reference clips: `~/agents/dashboard/src/tts-gen.js` (T30) already does those.
 
@@ -22,6 +24,7 @@ Ticket: T65 (narration lane), used by T65 mockups, T69, T70 ports · Last verifi
 ```bash
 PY=~/.local/opt/kokoro/bin/python
 $PY ~/.claude/skills/kokoro-narration/render_narration.py unit.json out/bundle [clip-id…]   # skill copy, paths as args; clip ids re-render only those, plus any clip missing from cues.json, at the sheet's kbps
+$PY ~/.claude/skills/kokoro-narration/render_narration.py --engine edge es.unit.json out/es   # Spanish: "voice": "es" (→ es-ES-AlvaroNeural) or any edge voice name; needs network
 ffmpeg -loglevel error -i out/bundle/audio/w1.opus -c:a libvorbis -q:a 4 w1.ogg             # Godot wants Ogg
 # score a new voice/model the way the lane did (WER, MOS, consistency, table):
 cd ~/agent-work/research/2026-09-23/T65/tts/scripts && cat run_all.sh     # r_*.py renderers, score.py, table.py
@@ -59,6 +62,17 @@ cd ~/agent-work/research/2026-09-23/T65/tts/scripts && cat run_all.sh     # r_*.
 - **A budget nobody owned lowered the voice quality** (T84 → T99 → T100): an agent-set 3 MB per-unit cap made T84 encode at 20 kbps and T99
   re-encode U01 to ~22 kbps to fit 7 new lines (3,130 kB). The owner removed the cap ("take out the cap, don't redo anything"); only the
   first chapter keeps 600 kB. Never lower the bitrate to fit a budget he did not set.
+
+- **Spanish (T1428, 2026-10-29).** Kokoro `ef_dora` gives **0 word timings** (`WARN word count 0 != 12`): no Spanish token
+  came back with a `start_ts`, so a `{cue}` mark stops the render. `--engine edge` takes words from edge-tts `WordBoundary` events.
+  Over 41 words those starts sat a median 0–60 ms from faster-whisper word starts (Alvaro 22–30 ms), so the same +40 ms bias applies.
+- edge-tts uses Microsoft Edge's **unofficial** read-aloud endpoint: no key, no SLA, and it can break or be blocked at any time. The paid
+  fallback is **Azure Speech** with the same voice name (~$0.014/min, needs an Azure account). It needs network: an offline render fails.
+- Edge clips end in ~0.8 s of silence, which would stretch every sentence gap. The renderer cuts each sentence 0.15 s after the last word's end.
+  Edge speed: unit `speed` maps to `rate` (0.95 → `-5%`); the Kokoro-tuned 0.92 is not a tested choice for Alvaro (the proof used 1.0).
+- Rejected for Spanish (T1428 page `~/drop/tts-es/`): Qwen3-TTS local (RTF 11–29 on this CPU, one variant misread 2 of 3 lines),
+  OpenRouter `openai/gpt-audio` (~$0.083/min) and `-mini` (~$0.005/min). Those are chat models that answer the line unless told
+  "your spoken reply is only this text", and they give no word timings.
 
 ## Links
 - Skill: `~/.claude/skills/kokoro-narration/` (SKILL.md + `render_narration.py`)
