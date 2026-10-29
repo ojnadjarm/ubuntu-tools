@@ -55,6 +55,11 @@ bash $S/tests/selftest.sh
   `width` 2.9, `length` 31, `grip_mat` 'gold', no rune; the lion's scimitar steel, not blue). Steel ramp `#0b0e15`..`#eef2f6`, glow only on the edge (0.15).
 - Overlay lines carried no glow, so lightning drawn with `m.lines` stayed flat: lines now take a 5th value (emission); `gear.lightning`
   draws a white core over three offset halo lines with tol 1e9, re-seeded per frame so the arcs re-strike.
+- The vizier read as "too simple" (owner 2026-10-29): a hooded robe hides the card's silhouette. What read at 1.6 scale: no hood
+  (`hood` False), a Dracula collar as a cone shell cut to the back half and a flat top (rim band 1 unit), two stacked rotated boxes per
+  pauldron (6.6 x 1.8 x 5.4 and 5.0 x 1.4 x 4.8, rot_z 0.5) with a 0.13 gold rim and two spikes, a scaled tabard box with a stamp in front.
+  Rims at 0.2 made the near pauldron read as solid gold. Late-binding closures: a texture lambda that captures `top` breaks when `top` is
+  reused later in `extra()` (broadcast error); give closure vars unique names.
 - A sheath across the back or on the main-hand hip hides behind the hair and the staff arm at yaw -0.6: the off hip (x -6.8, forward 3.4)
   is the only place the hilt shows.
 

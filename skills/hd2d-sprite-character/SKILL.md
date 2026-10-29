@@ -16,7 +16,7 @@ python3 $S/scripts/sprite.py <dir>/mira.py /tmp/mira --frames 0 --sheet /tmp/mir
 python3 $S/scripts/sprite.py <dir>/mira.py <sprites>/mira --cell 176                    # 8 frames: a##, e## (emissive), n## (normal)
 bash $S/tests/selftest.sh                                           # Gamelyn pixel checksum + every template renders
 ```
-1. Copy the closest template from `chars/` (gamelyn = knight, gakata = knight with a lightning staff, ojo = sorceress with long hair, tier = beast + riders, kobold = small
+1. Copy the closest template from `chars/` (gamelyn = knight, gakata = lion gladiator with scimitar and shield, ojo = birdfolk vizier with Dracula collar and spiked pauldrons, tier = beast + riders, kobold = small
    monster; `kobold_alzado` = a pose variant, `kobold_espectral` = the spectral variant: both load `kobold.py` and override a few keys).
 2. Restyle in this order: `RAMPS` (8-9 steps, dark navy to near-white), `MATS`, then `SPEC` keys, then `extra()`.
 3. Read one zoomed sheet (`--sheet`, x3 nearest) per change; never a loop of screenshots.
@@ -30,8 +30,8 @@ bash $S/tests/selftest.sh                                           # Gamelyn pi
 | `RAMPS`, `MATS` | ramps by name; `mats` entries `(ramp, {kind: metal/skin/cloth/emis, bias, wrap, gamma, glow})`; `glow` 0..1 writes the emissive mask (any kind) |
 | `stance` | `stances.STANCES`: `low_guard` (owner's pick for a two-handed knight), `high_guard`, `caster`, `spellcast` (dynamic caster, staff beside the hip), `brawler` (paws raised out of the body silhouette), `skulk` (hunched small monster, spear levelled; enemies face right at yaw 0.55); `pose(ph, p)` tweaks; `palm`/`point` {side: dir} aim free hands; `hands` + `hand_grip` free both hands (claws) |
 | `body` | `kind` plate/gladiator/robe/beast/kobold (`wisp`: legs become a swirling ectoplasm tail, `cord` necklace colour), `height`, `width`, `head_lift`, `emblem` (stamp), `hand` size (1.45-1.7 reads), `knuckle` (gauntlet plate material), `claw` (talon tip material), `pauldron` side |
-| `head` | `kind` anime (`ponytail`, `long` hair length, `circlet` gem mat, `iris` 3 hex, `bangs`, `spikes`, `locks`, `hair_lines`) / lion (`scar` hex, `earring` mat) / falcon (`circlet` gem mat) / bear (`iris`) / kobold (`iris`, `glow`) |
-| `weapon`, `offhand`, `cape` | `sword` (hands 1/2, `grip` length, length, rune or None, edge), `scimitar` (curve, edge_side), `staff` (up, down, `bolt` = (core, halo) hex for re-striking lightning arcs, `arcs`, `reach`; `gear.lightning` also works in `extra()`), `spear` (up, down, length, width); `shield` (r), `orb`; cape `length` |
+| `head` | `kind` anime (`ponytail`, `long` hair length, `circlet` gem mat, `iris` 3 hex, `bangs`, `spikes`, `locks`, `hair_lines`) / lion (`scar` hex, `earring` mat) / falcon (`circlet` gem mat, `hood` False for a bare head) / bear (`iris`) / kobold (`iris`, `glow`) |
+| `weapon`, `offhand`, `cape` | `sword` (hands 1/2, `grip` length, length, `width` (2.1; 2.9 greatsword), `grip_mat`, rune or None, edge), `scimitar` (curve, edge_side), `staff` (up, down, `bolt` = (core, halo) hex for re-striking lightning arcs, `arcs`, `reach`; `gear.lightning` also works in `extra()`), `spear` (up, down, length, width); `shield` (r), `orb`; cape `length` |
 | `extra(m, p, A)` | one-off parts (imps riding, a fairy); `A` = anchors (pel, chest, neck, head, sh) |
 | `hand_mat`, `hand_bias` | ramp the hands copy (default `steel`), shaded matte so a 6 px fist reads; `hand_d` (seams) is derived |
 

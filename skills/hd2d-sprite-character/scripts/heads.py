@@ -133,7 +133,7 @@ def lion_face(m, H, s):
 
 
 def falcon_head(m, p, A, s):
-    """Falcon: feathered head with cheek stripe, hooked beak, a spectral glowing eye, under a deep hood with a gold rim."""
+    """Falcon: feathered head with cheek stripe, hooked beak, a spectral glowing eye, under a deep hood with a gold rim (`hood` False: bare)."""
     H = A['head']
     m.add(ellipsoid(H + V(0, 0.4, 0.6), (5.0, 5.4, 5.6)), 'feather', 'head',
           lambda P, mt: np.where((P[:, 1] - H[1] < -1.0) & (P[:, 2] - H[2] > 1.4), 'feather_l', mt))
@@ -154,6 +154,8 @@ def falcon_head(m, p, A, s):
     m.lines.append((H + V(0.4, 0.6, 6.4), H + V(0.3, -0.8, 8.6), '#fff8c8', 1.0))
     for i, (x, h) in enumerate(((-1.4, 3.2), (0.0, 4.0), (1.4, 3.2))):
         m.add(cone(H + V(x, 3.6, 3.6), H + V(x * 1.5, 3.6 + h, 4.6), 0.9, 0.2), 'feather', None)
+    if not s.get('hood', True):
+        return
     cut = ellipsoid(H + V(0, 0.2, 3.6), (5.8, 6.4, 6.2))
     hood = sub(ellipsoid(H + V(0, 1.4, -0.8), (7.6, 8.0, 7.8)), cut)
     m.add(hood, 'robe', None, lambda P, mt: np.where(cut(P) < 0.9, 'trim', mt))
