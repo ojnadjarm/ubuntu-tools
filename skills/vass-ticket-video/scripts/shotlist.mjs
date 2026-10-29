@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const TOP_KEYS = new Set(['ticket', 'phase', 'voice', 'front_user', 'back_user', 'steps', 'say', 'recall', 'overrides', 'antes_words']);
+const TOP_KEYS = new Set(['ticket', 'phase', 'voice', 'front_user', 'back_user', 'steps', 'say', 'recall', 'overrides']);
 const STEP_KEYS = new Set(['say', 'site', 'go', 'click', 'fill', 'wait', 'settle', 'highlight', 'overlay', 'ws', 'ws_title', 'still', 'hold', 'pre']);
 const SEL = /^(link|button|tab|text|css):./;
 
@@ -48,11 +48,8 @@ export function toUnit(s) {
     clips: s.steps.map((st, i) => ({ id: `s${i + 1}`, sentences: [st.say] })) };
 }
 
-const words = (t) => t.replace('{hl}', '').split(/\s+/).filter(Boolean).length;
-const RECALL_MAX = 15;
-
 // A después list without steps reuses the antes steps named in <outdir>/guion-antes.md ("Shot list: <path>"):
-// same screens and actions, new lines in `say` (one per antes step, null drops it), one short `recall` line first.
+// same screens and actions, new lines in `say` (one per antes step, null drops it), an optional `recall` line first.
 export function resolveDespues(s, outdir) {
   if (s.phase !== 'despues' || s.steps) return s;
   const guion = path.join(outdir, 'guion-antes.md');
@@ -79,18 +76,7 @@ export function resolveDespues(s, outdir) {
   }).filter(Boolean);
   if (s.recall) steps[0].say = `${s.recall} ${steps[0].say}`;
   return { ticket: s.ticket, phase: 'despues', voice: s.voice || antes.voice,
-    front_user: s.front_user || antes.front_user, back_user: s.back_user || antes.back_user, recall: s.recall, steps,
-    antes_words: antes.steps.reduce((n, st) => n + words(st.say), 0) };
-}
-
-// After-fix videos assume the viewer saw antes: one short recall line at most, never longer than antes.
-export function despuesRules(s) {
-  const e = [];
-  if (s.phase !== 'despues') return e;
-  if (s.recall && words(s.recall) > RECALL_MAX) e.push(`recall: one short line (<= ${RECALL_MAX} words), got ${words(s.recall)}`);
-  const total = (s.steps || []).reduce((n, st) => n + words(st.say || ''), 0);
-  if (s.antes_words && total > s.antes_words) e.push(`despues says ${total} words, antes ${s.antes_words}: keep despues shorter`);
-  return e;
+    front_user: s.front_user || antes.front_user, back_user: s.back_user || antes.back_user, recall: s.recall, steps };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -99,7 +85,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (cmd === 'resolve') {
     try { s = resolveDespues(s, outdir); } catch (err) { console.error(err.message); process.exit(1); }
   }
-  const e = s.phase === 'despues' && !s.steps ? [] : validate(s).concat(despuesRules(s));
+  const e = s.phase === 'despues' && !s.steps ? [] : validate(s);
   if (e.length) { console.error(e.join('\n')); process.exit(1); }
   if (cmd === 'unit') console.log(JSON.stringify(toUnit(s), null, 1));
   else if (cmd === 'resolve') console.log(JSON.stringify(s, null, 1));

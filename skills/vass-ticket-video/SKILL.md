@@ -44,8 +44,8 @@ Shot list (keep it in `~/agent-work/research/<date>/<T>/`: it names test users, 
 - Every report gives the direct https `.mp4` link (the `mp4:` line the CLI prints), not only the folder.
 
 ## Después (owner rule, 2026-10-29)
-The después video assumes the viewer saw antes. It does not explain the issue again: it has at most one short `recall` line
-(≤ 15 words), then shows the fix on the same steps and screens as antes, and it is never longer than antes. Write it without
+The antes video sits on the same ticket, so después does not show or re-explain the old error. It goes straight to the change
+working, for as long as that takes; there is no length limit. By default it reuses the antes steps and screens. Write it without
 `steps`; the CLI reads `guion-antes.md` (in `--out`, else `~/drop/<ticket>/`), finds its `Shot list:` and reuses those steps:
 ```json
 { "ticket": "jira29", "phase": "despues", "recall": "Antes, el Resumen mostraba las netas sin convertir.",
@@ -53,7 +53,8 @@ The después video assumes the viewer saw antes. It does not explain the issue a
   "overrides": { "2": { "highlight": ["Netas (último*"] } } }
 ```
 - `say`: one line per antes step; `null` drops that step (its go/click/fill/wait still run, silently, before the next one). Antes overlays are dropped because they show the bug; add new ones in `overrides` (by antes index).
-- Refused: a recall over 15 words, more words than antes, a `say` list of the wrong length, or a missing `guion-antes.md`.
+- `recall` is optional and has no cap; do not use it to explain the old error again.
+- Refused: a `say` list of the wrong length, or a missing `guion-antes.md`. Or give después its own `steps` (a big fix needs more screens).
 
 ## Pitfalls
 - Seed the data first (dev DB is fine): the skill films, it does not create attempts or fix code. Después: apply the fix, re-run with `"phase": "despues"`.

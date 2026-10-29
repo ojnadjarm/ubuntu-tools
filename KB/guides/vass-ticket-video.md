@@ -31,9 +31,9 @@ Config keys (config.env; documented in `config.example.env`): `VASS_STUDENT_PASS
 `MOODLE_ADMIN_PASSWORD`), `VASS_FRONT_URL`, `VASS_MOODLE_URL` (default `https://<tailnet-fqdn>:8446` / `:8445`),
 `VASS_MOODLE_CONTAINER`. Shot lists name test users, so they belong in `~/agent-work`, never in a tracked file.
 
-Owner rule (2026-10-29): the después video assumes the viewer saw antes. It gets at most one short recall line, then shows
-the fix on the same steps and screens, and it is never longer than antes. A después list has no `steps`: `recall` (≤ 15 words)
-and `say` (one line per antes step, `null` drops a step). The CLI reads `guion-antes.md` (its `Shot list:` line) and reuses the
+Owner rule (2026-10-29, corrected): the antes video sits on the same ticket, so después does not show or re-explain the old
+error. It goes straight to the change working, for as long as that takes, with no length limit. By default a después list has
+no `steps`: an optional `recall` and `say` (one line per antes step, `null` drops a step); its own `steps` are fine too. The CLI reads `guion-antes.md` (its `Shot list:` line) and reuses the
 antes steps without their overlays. See SKILL.md for the format. Every report gives the direct https `.mp4` link.
 
 ## Pitfalls (measured)
@@ -57,7 +57,7 @@ antes steps without their overlays. See SKILL.md for the format. Every report gi
   fast with "Moodle login page broken".
 - Flaky front: 1 of 6 live runs timed out on a 30 s `wait` (front slow, then fine on re-run). The error names the step and
   saves `fail.png` in the work dir.
-- Después proof (mechanics): the JIRA-29 después list (2 kept steps, 1 dropped, 1 recall line) rendered 12.7 s against
+- Después proof (mechanics): the JIRA-29 después list (2 kept steps, 1 dropped) rendered 12.7 s against
   antes 54 s, in 40 s wall. Dropping antes step 1 broke the next step's `click` until dropped steps' actions ran silently (`pre`).
 - Measure the antes/después pair on the same data: seed first (dev DB is fine), record antes, apply the fix, then re-run the
   same shot list with `"phase": "despues"`.

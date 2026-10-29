@@ -68,7 +68,7 @@ ev "guion strips the cue mark" "! grep -q '{hl}' '$T/out/guion-antes.md'"
 ev "index links the video" "grep -q \"src='selftest-antes.mp4'\" '$T/out/index.html'"
 ev "guion names its shot list" "grep -q '^Shot list: .*fixtures/shots.json' '$T/out/guion-antes.md'"
 
-# Después: no steps -> the antes steps from guion-antes.md, new lines, one short recall, never longer than antes.
+# Después: no steps -> the antes steps from guion-antes.md, new lines, optional recall, no length limit.
 dsp() { python3 -c "import json,sys; d={'ticket':'selftest','phase':'despues','recall':'Antes salía otro valor.','say':['Ahora la tarjeta {hl}coincide.',None,'Objetivos igual.']}; $1; json.dump(d, open(sys.argv[1],'w'))" "$T/d.json"; }
 dsp "pass"
 node "$S/shotlist.mjs" resolve "$T/d.json" "$T/out" > "$T/dr.json" 2>"$T/dr.err"; is "despues resolves from guion-antes.md" "$?" 0
@@ -78,10 +78,10 @@ is "despues: antes overlay not carried over" "$(python3 -c 'import json,sys;prin
 dsp "d['say']=[None,'Ahora el servicio coincide.','Objetivos igual.']"
 node "$S/shotlist.mjs" resolve "$T/d.json" "$T/out" > "$T/dr.json" 2>"$T/dr.err"
 is "despues: a dropped step's navigation runs silently first" "$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d["steps"][0]["pre"][0]["go"], "say" in d["steps"][0]["pre"][0])' "$T/dr.json")" "/results/summary False"
-dsp "d['recall']='Antes ' + 'uno dos tres cuatro cinco seis siete ocho nueve diez once doce trece catorce quince'"
-node "$S/shotlist.mjs" resolve "$T/d.json" "$T/out" >/dev/null 2>"$T/dr.err"; ev "despues: long recall rejected" "[ $? = 1 ] && grep -q 'one short line' '$T/dr.err'"
+dsp "d['recall']='Antes ' + 'muy ' * 40 + 'mal.'"
+node "$S/shotlist.mjs" resolve "$T/d.json" "$T/out" >/dev/null 2>"$T/dr.err"; is "despues: long recall accepted" "$?" 0
 dsp "d['say'][0]='Ahora ' + 'muy ' * 30 + 'bien.'"
-node "$S/shotlist.mjs" resolve "$T/d.json" "$T/out" >/dev/null 2>"$T/dr.err"; ev "despues longer than antes rejected" "[ $? = 1 ] && grep -q 'keep despues shorter' '$T/dr.err'"
+node "$S/shotlist.mjs" resolve "$T/d.json" "$T/out" >/dev/null 2>"$T/dr.err"; is "despues: longer than antes accepted" "$?" 0
 dsp "d['say']=d['say'][:2]"
 node "$S/shotlist.mjs" resolve "$T/d.json" "$T/out" >/dev/null 2>"$T/dr.err"; ev "despues needs one line per antes step" "[ $? = 1 ] && grep -q 'list of 3 lines' '$T/dr.err'"
 dsp "pass"
