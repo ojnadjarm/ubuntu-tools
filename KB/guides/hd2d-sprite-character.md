@@ -1,6 +1,6 @@
 # HD-2D battle sprite for any character (FF Brave Exvius / Octopath look) from a spec file
 
-Ticket: T1414 · Last verified: 2026-10-28 by `tests/selftest.sh` (Gamelyn pixel checksum unchanged, 7 specs render incl. kobold, kobold_alzado, kobold_espectral) and 1080p renders of both sarcophagus variants (Tiny Epic Narrator)
+Ticket: T1414 · Last verified: 2026-10-29 by `tests/selftest.sh` (Gamelyn pixel checksum unchanged, 7 specs render incl. kobold, kobold_alzado, kobold_espectral) and 1080p renders of both sarcophagus variants (Tiny Epic Narrator)
 
 ## When to use
 A new hero, monster rider or NPC in the HD-2D style next to Gamelyn: FFBE anime face, lamed armour, glowing weapon, battle idle.
@@ -49,8 +49,10 @@ bash $S/tests/selftest.sh
   then Principled specular catching the moon). What held cyan: ramp topping at `#5adcc4`, emission colour = luminance x (0.12, 1.0, 0.8),
   strength 2.8 + 6 x mask, Specular IOR Level 0, alpha 0.68 fading over the bottom 20% of the plane, and a numpy-blurred alpha aura plane behind.
 - Variant specs (`kobold_alzado`, `kobold_espectral`) load `kobold.py` by path next to them: copy the base with them.
-- Heroes follow the game log, not a guessed species (T1414, 2026-10-28): Gakata had been a lion gladiator and Ojo Penetrante a falcon vizier;
-  the log says knight with Knight's Cuirass + Lightning Staff and a sorceress. Read the log's equipment before picking a head or body kind.
+- Heroes follow the character cards, not the game log's equipment (owner 2026-10-29, reverting a log-based rework): the log turned the lion
+  gladiator into a human and the falcon vizier into a sorceress, both wrong. Ask for the cards; describe all four back and get a yes first.
+- A "golden sword" in a card read is a guess: the owner wanted plain steel blades (Gamelyn a two-handed steel greatsword with a gold grip,
+  `width` 2.9, `length` 31, `grip_mat` 'gold', no rune; the lion's scimitar steel, not blue). Steel ramp `#0b0e15`..`#eef2f6`, glow only on the edge (0.15).
 - Overlay lines carried no glow, so lightning drawn with `m.lines` stayed flat: lines now take a 5th value (emission); `gear.lightning`
   draws a white core over three offset halo lines with tol 1e9, re-seeded per frame so the arcs re-strike.
 - A sheath across the back or on the main-hand hip hides behind the hair and the staff arm at yaw -0.6: the off hip (x -6.8, forward 3.4)

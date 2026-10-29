@@ -46,9 +46,9 @@ def grips(p, w):
 
 
 def sword(m, p, A, w):
-    """Longsword (hands 1 or 2, grip length): leather grip with gold wraps, pommel gem, quillons, flat blade with fuller, runes and a glow line."""
-    sd = unit(p['sword']); hilt = p['hilt'] + V(0, A['b'] * 0.6, 0); L = w.get('length', 26.0); G = w.get('grip', 9.0)
-    m.add(cone(hilt - sd * G, hilt + sd * 2.0, 0.85, 0.85), 'leather', None,
+    """Longsword (hands 1 or 2, grip length, blade width, grip_mat): wrapped grip with gold bands, pommel gem, quillons, flat blade with fuller, runes and a glow line."""
+    sd = unit(p['sword']); hilt = p['hilt'] + V(0, A['b'] * 0.6, 0); L = w.get('length', 26.0); G = w.get('grip', 9.0); W = w.get('width', 2.1)
+    m.add(cone(hilt - sd * G, hilt + sd * 2.0, 0.85, 0.85), w.get('grip_mat', 'leather'), None,
           bands(hilt, sd, tuple(np.arange(1.6, -G, -1.4)), 0.22, 'dgold'))
     m.add(octa(hilt - sd * (G + 0.8), 1.5), 'gold', None)
     m.add(sphere(hilt - sd * (G + 0.8), 0.9), 'gem', None)
@@ -59,11 +59,11 @@ def sword(m, p, A, w):
     m.add(ellipsoid(hilt + sd * 2.6, (1.4, 1.4, 1.0)), 'gold', None)
     m.add(sphere(hilt + sd * 2.6 + V(0, 0, 0.8), 0.7), 'gem', None)
     bs = hilt + sd * 3.0
-    m.add(blade(bs, sd, perp, L, 2.1, 0.7), 'blade', None, blade_tex(bs, sd, perp, L, 2.1))
-    m.add(box(bs + sd * 0.8, (2.3, 0.8, 0.8), rot=frame_to(sd)), 'dgold', None)
+    m.add(blade(bs, sd, perp, L, W, 0.7), 'blade', None, blade_tex(bs, sd, perp, L, W))
+    m.add(box(bs + sd * 0.8, (W + 0.2, 0.8, 0.8), rot=frame_to(sd)), 'dgold', None)
     for u in ((5.0, 9.0, 13.0) if w.get('rune', '#8fd0ff') else ()):
         m.dots.append((bs + sd * u + V(0, 0, 0.8), w.get('rune', '#8fd0ff'), w.get('rune_glow', 0.5), 1.5))
-    m.lines.append((bs + sd * 1.0 + perp * 1.7 + V(0, 0, 0.5), bs + sd * (L - 4.5) + perp * 1.0 + V(0, 0, 0.4), w.get('edge', '#cfe6ff'), 1.2))
+    m.lines.append((bs + sd * 1.0 + perp * 1.7 * W / 2.1 + V(0, 0, 0.5), bs + sd * (L - 4.5) + perp * W / 2.1 + V(0, 0, 0.4), w.get('edge', '#cfe6ff'), 1.2))
 
 
 def scimitar(m, p, A, w):
