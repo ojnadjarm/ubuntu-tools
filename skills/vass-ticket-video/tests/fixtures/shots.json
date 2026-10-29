@@ -1,0 +1,14 @@
+{
+  "ticket": "selftest",
+  "phase": "antes",
+  "front_user": "alumno@example.invalid",
+  "steps": [
+    { "go": "/results/summary", "wait": "text:Netas (último", "still": "resumen",
+      "say": "Abrimos el Resumen. La tarjeta de {hl}netas muestra un valor.", "highlight": ["Netas (último*"] },
+    { "ws": [ { "label": "Resumen", "fn": "local_results_get_results_summary", "user": "alumno@example.invalid",
+                "args": {}, "pick": ["current_netas"] } ],
+      "say": "El servicio devuelve el mismo dato." },
+    { "click": "link:Objetivos", "wait": ["text:Objetivos", 500],
+      "say": "{hl}En Objetivos sale otro.", "overlay": { "title": "Netas", "cols": [ { "label": "A", "value": "1" } ] } }
+  ]
+}

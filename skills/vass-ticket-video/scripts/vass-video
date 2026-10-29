@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# vass-video — VASS ticket shot list -> Spanish narrated mp4 + stills + guion.md in ~/drop/<ticket>/ + checked https link.
+set -uo pipefail
+HERE=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+. "${HARNESS_HOME:-$HOME/agents}/bin/env.sh"
+
+usage() {
+  cat <<'EOF'
+usage: vass-video <shots.json> [--out DIR] [--name BASE] [--work DIR] [--no-drop] [--no-review]
+       vass-video --check <shots.json>
+  --out     output folder (default ~/drop/<ticket>/); a scratch folder keeps an existing video safe
+  --name    mp4 base name (default <ticket>-<phase>)
+  --work    keep intermediates here (default a temp dir, removed on success)
+  --no-drop skip the https link check
+Config (config.env): VASS_STUDENT_PASSWORD (front), VASS_MOODLE_PASSWORD (back, default MOODLE_ADMIN_PASSWORD),
+  VASS_FRONT_URL / VASS_MOODLE_URL (default https://<tailnet-fqdn>:8446 / :8445), VASS_MOODLE_CONTAINER.
+Exit: 0 done · 1 a phase failed · 64 usage
+EOF
+}
+
+[ "${1:-}" = --check ] && { node "$HERE/shotlist.mjs" check "${2:?shots.json}"; exit; }
+[ $# -ge 1 ] && [ "${1:0:1}" != - ] || { usage; exit 64; }
+SHOTS=$(readlink -f "$1"); shift
+OUT= NAME= WORK= DROP=1 REVIEW=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --out) OUT=$2; shift 2 ;;
+    --name) NAME=$2; shift 2 ;;
+    --work) WORK=$2; shift 2 ;;
+    --no-drop) DROP=0; shift ;;
+    --no-review) REVIEW=--no-review; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage; exit 64 ;;
+  esac
+done
+
+node "$HERE/shotlist.mjs" check "$SHOTS" >/dev/null || exit 1
+TICKET=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["ticket"])' "$SHOTS")
+OUT=${OUT:-${DROP_DIR:-$HOME/drop}/$TICKET}
+KEEP=${WORK:+1}
+WORK=${WORK:-$(mktemp -d)}; mkdir -p "$WORK"
+# despues without steps: reuse the antes steps named in guion-antes.md (in --out, else ~/drop/<ticket>).
+SRC=$SHOTS
+ANTES=$OUT; [ -f "$ANTES/guion-antes.md" ] || ANTES=${DROP_DIR:-$HOME/drop}/$TICKET
+node "$HERE/shotlist.mjs" resolve "$SHOTS" "$ANTES" > "$WORK/shots.json" || exit 1
+SHOTS=$WORK/shots.json
+FQDN=${HARNESS_TAILNET_FQDN:-$HARNESS_HOST}
+export VASS_FRONT_URL=${VASS_FRONT_URL:-https://$FQDN:8446}
+export VASS_MOODLE_URL=${VASS_MOODLE_URL:-https://$FQDN:8445}
+export VASS_MOODLE_PASSWORD=${VASS_MOODLE_PASSWORD:-${MOODLE_ADMIN_PASSWORD:-}}
+export VASS_STUDENT_PASSWORD=${VASS_STUDENT_PASSWORD:-}
+CONTAINER=${VASS_MOODLE_CONTAINER:-moodle45-app-1}
+KPY=${KOKORO_PY:-$HOME/.local/opt/kokoro/bin/python}
+RENDER=${KOKORO_RENDER:-$HARNESS_HOME/skills/kokoro-narration/render_narration.py}
+
+T0=$(date +%s.%N)
+lap() { printf 'vass-video: %-10s %5.1f s\n' "$1" "$(echo "$(date +%s.%N) - $T0" | bc)"; }
+die() { echo "vass-video: $*" >&2; echo "vass-video: intermediates kept in $WORK" >&2; exit 1; }
+
+# 1. narration: one edge clip per step (Alvaro); its duration paces the recording.
+node "$HERE/shotlist.mjs" unit "$SHOTS" > "$WORK/unit.json" || die "unit build failed"
+"$KPY" "$RENDER" --engine edge "$WORK/unit.json" "$WORK/vo" > "$WORK/vo.log" 2>&1 || die "narration failed (edge needs network): $(tail -1 "$WORK/vo.log")"
+lap narration
+
+# 2. WS side-by-side data, picked fields only (mws refuses the VASS env, so run in its container).
+python3 - "$SHOTS" <<'PY' > "$WORK/ws-jobs.tsv"
+import json, sys
+for i, st in enumerate(json.load(open(sys.argv[1]))["steps"], 1):
+    for w in st.get("ws", []):
+        print(f"{i}\t{json.dumps(w, ensure_ascii=False)}")
+PY
+if [ -s "$WORK/ws-jobs.tsv" ]; then
+  while IFS=$'\t' read -r step job; do
+    res=$(docker exec -i "$CONTAINER" php -- "$job" < "$HERE/ws.php" 2>"$WORK/ws.err" | tail -1) \
+      || die "ws step $step failed: $(grep -m1 -iv 'token\|password' "$WORK/ws.err")"
+    python3 -c 'import json,sys; j=json.loads(sys.argv[1]); print(json.dumps({"label": j.get("label", j["fn"]), "fn": j["fn"], "result": json.loads(sys.argv[2])}))' "$job" "$res" >> "$WORK/ws-$step.jsonl"
+  done < "$WORK/ws-jobs.tsv"
+  for f in "$WORK"/ws-*.jsonl; do python3 -c 'import json,sys; print(json.dumps([json.loads(l) for l in open(sys.argv[1])]))' "$f" > "${f%l}"; done
+  lap ws
+fi
+
+# 3. record headless (--mute-audio), each step held for its clip.
+rm -f "$WORK/raw.webm"
+node "$HERE/shoot.mjs" "$SHOTS" "$WORK" 2>&1 | grep -v -iE 'cookie|token|authorization' || true
+[ -s "$WORK/raw.webm" ] || die "recording failed"
+lap recording
+
+# 4. captions, VO mix, trim, encode, review, stills, guion, index.
+python3 "$HERE/assemble.py" "$SHOTS" "$WORK" "$OUT" --source "$SRC" ${NAME:+--name "$NAME"} $REVIEW || die "assemble failed"
+lap assemble
+
+if [ "$DROP" = 1 ]; then
+  rel=${OUT#"${DROP_DIR:-$HOME/drop}"/}
+  [ "$rel" != "$OUT" ] || die "--out is outside ~/drop: no link (use --no-drop)"
+  drop-link "$OUT/index.html" | tail -1
+  printf 'mp4: '; drop-link "$OUT/${NAME:-$TICKET-$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["phase"])' "$SHOTS")}.mp4" | tail -1
+fi
+[ -n "$KEEP" ] || rm -rf "$WORK"
+lap total
