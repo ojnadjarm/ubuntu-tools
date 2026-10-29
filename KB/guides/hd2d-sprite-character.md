@@ -1,6 +1,6 @@
 # HD-2D battle sprite for any character (FF Brave Exvius / Octopath look) from a spec file
 
-Ticket: T1414 · Last verified: 2026-10-29 by `tests/selftest.sh` (Gamelyn pixel checksum unchanged, 7 specs render incl. kobold, kobold_alzado, kobold_espectral) and 1080p renders of both sarcophagus variants (Tiny Epic Narrator)
+Ticket: T1414 · Last verified: 2026-10-29 (staff clear of the pauldron, 8 frames) by `tests/selftest.sh` (Gamelyn pixel checksum unchanged, 7 specs render incl. kobold, kobold_alzado, kobold_espectral) and 1080p renders of both sarcophagus variants (Tiny Epic Narrator)
 
 ## When to use
 A new hero, monster rider or NPC in the HD-2D style next to Gamelyn: FFBE anime face, lamed armour, glowing weapon, battle idle.
@@ -60,6 +60,10 @@ bash $S/tests/selftest.sh
   pauldron (6.6 x 1.8 x 5.4 and 5.0 x 1.4 x 4.8, rot_z 0.5) with a 0.13 gold rim and two spikes, a scaled tabard box with a stamp in front.
   Rims at 0.2 made the near pauldron read as solid gold. Late-binding closures: a texture lambda that captures `top` breaks when `top` is
   reused later in `extra()` (broadcast error); give closure vars unique names.
+- The staff clipped through the near pauldron and the pauldron read too thick (owner 2026-10-29): `spellcast` puts the hilt at x 11.2
+  aiming (0.2, 1, 0.16), straight up through a pauldron reaching x ~16. What cleared it in all 8 frames: a spec `pose` moving the hilt
+  out (+5.6 x, +1.2 z) and tilting the staff to (0.62, 1.0, 0.26); pauldron plates 5.2 x 0.9 x 5.0 and 3.9 x 0.7 x 4.4, spike tip at x 6.6.
+  At 3.4 out the shaft still grazed the gold rim corner: check a x10 crop of the shoulder per frame, not the whole sheet.
 - A sheath across the back or on the main-hand hip hides behind the hair and the staff arm at yaw -0.6: the off hip (x -6.8, forward 3.4)
   is the only place the hilt shows.
 

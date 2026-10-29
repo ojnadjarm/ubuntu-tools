@@ -39,8 +39,19 @@ SPEC = dict(
     head=dict(kind='falcon', iris='#7dff6a', hood=False),
     weapon=dict(kind='staff', up=26.0, down=24.0),
     offhand=dict(kind='orb', r=2.6, spark='#c8ffb8'),
-    groups=dict(body=1.2),
+    groups=dict(body=1.2), pose=lambda ph, p: _staff_clear(p),
 )
+
+
+def _staff_clear(p):
+    """Staff hand further out and the staff tilted away so it clears the near pauldron in every frame."""
+    p['hilt'] = p['hilt'] + V(HILT_OUT, 0, 1.2)
+    p['sword'] = V(*STAFF_DIR)
+    return p
+
+
+HILT_OUT, STAFF_DIR = 5.6, (0.62, 1.0, 0.26)
+PAUL = (5.2, 0.9, 3.9, 0.7)
 
 
 def _rim(c, half, rot, w):
@@ -64,10 +75,10 @@ def extra(m, p, A):
                                                      np.where(P[:, 2] > neck[2] - 1.4, 'robe_in', mt)))
     for sd in (-1, 1):
         sh = A['sh'][sd]; r = rot_z(-0.5 * sd)
-        for k, (off, half) in enumerate(((V(3.0 * sd, 3.6, 0.6), V(6.6, 1.8, 5.4)), (V(5.0 * sd, 0.2, 1.0), V(5.0, 1.4, 4.8)))):
+        for k, (off, half) in enumerate(((V(3.0 * sd, 3.2, 0.6), V(PAUL[0], PAUL[1], 5.0)), (V(3.8 * sd, 0.6, 1.0), V(PAUL[2], PAUL[3], 4.4)))):
             c = sh + off; hf = half
             m.add(box(c, hf, rot=r, r=0.4), 'pauldron', None, _rim(c, hf, r, 0.13))
-        tip = sh + V(7.8 * sd, 5.6, 0.2)
+        tip = sh + V(6.6 * sd, 5.2, 0.2)
         m.add(cone(tip, tip + V(3.4 * sd, 8.4, -0.8), 1.8, 0.15), 'pauldron', None)
         m.add(cone(tip + V(-1.6 * sd, -0.6, 2.8), tip + V(0.6 * sd, 4.8, 3.4), 1.2, 0.12), 'pauldron', None)
         m.add(cone(tip + V(1.0 * sd, -3.6, 4.4), tip + V(2.8 * sd, -0.2, 4.8), 0.9, 0.12), 'trim', None)

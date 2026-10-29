@@ -1,6 +1,6 @@
 ---
 name: hd2d-sprite-character
-description: Build HD-2D battle sprites (Octopath / FF Brave Exvius look) for any character from a short spec - palette ramps, body/armour kind (plate knight, gladiator, robed caster, upright beast, kobold with tail, or a spectral wisp body), head (FFBE anime face and hair, long hair, circlet, lion, falcon, bear, kobold), weapon (glowing longsword, scimitar, staff, crude spear), off hand (shield, spell orb), cape under the pauldrons, battle stance (low guard, high guard, caster, brawler, skulk) - ray-marched SDF to pixel art with outlines, normal map and emissive mask per frame, ready for planes in a Blender diorama. Use for "HD-2D character", "2D HD sprite", "FFBE sprite", "Brave Exvius style", "Octopath sprite", "new hero sprite like Gamelyn", "party sprites", "pixel knight/mage/beast", "kobold / monster / spectral enemy sprite". Not for walk-cycle sheets for Godot (/pixel-avatar) or the 3D set (guide hd2d-sprite-scene).
+description: HD-2D battle sprites (Octopath / FFBE look) from a short spec - knight, caster, beast, kobold, wisp; 8-frame lit idle with normal and emissive maps for a Blender diorama. Use for "HD-2D / FFBE / Octopath sprite", "party / monster sprite". Not Godot walk sheets (/pixel-avatar).
 ---
 
 # hd2d-sprite-character: one spec file per character -> 8-frame lit battle idle
@@ -48,7 +48,7 @@ Material names the parts expect: `steel dsteel gold dgold leather trim cape cape
   visible above and below it, two knuckle seams, the thumb over the index toward the camera, the wrist continuing the forearm;
   free hands have four separate fingers; beast paws are raised out of the body silhouette with palm pads and four claws facing the camera.
 - A one-handed blade needs a guard, a grip showing below the fist and a pommel, and must clear the head: a curved blade leaving a fist read as a claw.
-- A staff is held beside the hip and tilts away from the body; never through the shoulder.
+- A staff is held beside the hip and tilts away from the body, clear of the pauldron in every frame (x10 crop per frame); pauldrons are thin plates, not blocks.
 - Match the reference's quality, not its design: keep each character's own look (owner rejected a horned redesign).
 - A spectral variant is a palette swap to `kind: emis` ramps with no near-white step plus `wisp`; the glow, translucency and aura come from
   the scene material (`spectre_mat` + `halo_mat` in the Tiny Epic Narrator `cripta_hd2d.py`), not from brighter sprite pixels.
