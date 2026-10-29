@@ -45,7 +45,9 @@ Shot list (keep it in `~/agent-work/research/<date>/<T>/`: it names test users, 
 
 ## Después (owner rule, 2026-10-29)
 The antes video sits on the same ticket, so después does not show or re-explain the old error. It goes straight to the change
-working, for as long as that takes; there is no length limit. By default it reuses the antes steps and screens. Write it without
+working, and its length scales with the change. A small fix gets a very short video that only shows the one screen that is
+now right (drop the other steps with `null`). A big change takes as long as it needs; there is no length limit. By default it
+reuses the antes steps and screens. Write it without
 `steps`; the CLI reads `guion-antes.md` (in `--out`, else `~/drop/<ticket>/`), finds its `Shot list:` and reuses those steps:
 ```json
 { "ticket": "jira29", "phase": "despues", "recall": "Antes, el Resumen mostraba las netas sin convertir.",

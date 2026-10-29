@@ -32,7 +32,8 @@ Config keys (config.env; documented in `config.example.env`): `VASS_STUDENT_PASS
 `VASS_MOODLE_CONTAINER`. Shot lists name test users, so they belong in `~/agent-work`, never in a tracked file.
 
 Owner rule (2026-10-29, corrected): the antes video sits on the same ticket, so después does not show or re-explain the old
-error. It goes straight to the change working, for as long as that takes, with no length limit. By default a después list has
+error. It goes straight to the change working, and its length scales with the change: a small fix gets a very short video
+showing only the one screen that is now right; a big change takes as long as it needs (no length limit). By default a después list has
 no `steps`: an optional `recall` and `say` (one line per antes step, `null` drops a step); its own `steps` are fine too. The CLI reads `guion-antes.md` (its `Shot list:` line) and reuses the
 antes steps without their overlays. See SKILL.md for the format. Every report gives the direct https `.mp4` link.
 
