@@ -1,6 +1,6 @@
 # HD-2D battle sprite for any character (FF Brave Exvius / Octopath look) from a spec file
 
-Ticket: T1414 · Last verified: 2026-10-29 (staff clear of the pauldron, 8 frames) by `tests/selftest.sh` (Gamelyn pixel checksum unchanged, 7 specs render incl. kobold, kobold_alzado, kobold_espectral) and 1080p renders of both sarcophagus variants (Tiny Epic Narrator)
+Ticket: T1414, T1431 · Last verified: 2026-10-30 (card-faithful Tier with scaled riders, Gakaza roar, Orawk eyeball, blade glint) by `tests/selftest.sh` (Gamelyn checksum unchanged, 7 specs render)
 
 ## When to use
 A new hero, monster rider or NPC in the HD-2D style next to Gamelyn: FFBE anime face, lamed armour, glowing weapon, battle idle.
@@ -66,6 +66,15 @@ bash $S/tests/selftest.sh
   At 3.4 out the shaft still grazed the gold rim corner: check a x10 crop of the shoulder per frame, not the whole sheet.
 - A sheath across the back or on the main-hand hip hides behind the hair and the staff arm at yaw -0.6: the off hip (x -6.8, forward 3.4)
   is the only place the hilt shows.
+- Card riders drawn at 1x (~22 px tall) read as blobs at battle size (T1431): a `Scaled(m, c, k)` proxy in the spec (SDF evaluated at
+  (P - c) / k + c, distance x k, overlay points mapped out) draws them 1.35-1.5x without re-tuning any offset.
+- A rider on the far shoulder at sh + (1.4, 6, -1.4) hid behind the bear's head at yaw -0.6; out and forward, sh + (-2.4, 6.4, 1.6), it reads.
+- A golden sheen as body texture read as tiger stripes: keep it to the crown (`fur_h` where y > 3k and sin > 0.3). Brown fur at bias 0.3
+  read khaki; a darker red-brown ramp at bias 0.1 reads grizzly under warm torches.
+- A monkey with 2x2 dark eyes and a white tooth line read as a skull: 1 px eyes and a dark V grin with one white tooth read friendly.
+- A held prop other than the orb (Orawk's floating eyeball): `offhand=None` keeps the stance's `off` hand pose; draw the prop in `extra()`.
+- Blade glint (`glint=True` on sword or scimitar): a 4-arm star stamp plus an emissive dot sliding up the edge for ph < 0.5. Opt-in, so the
+  template Gamelyn checksum in the selftest stays; stances now pass `ph`.
 
 ## Links
 - Skill: `~/agents/skills/hd2d-sprite-character` (linked into `~/.claude/skills`)

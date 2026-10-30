@@ -46,7 +46,7 @@ def grips(p, w):
 
 
 def sword(m, p, A, w):
-    """Longsword (hands 1 or 2, grip length, blade width, grip_mat): wrapped grip with gold bands, pommel gem, quillons, flat blade with fuller, runes and a glow line."""
+    """Longsword (hands 1 or 2, grip length, blade width, grip_mat, glint): wrapped grip with gold bands, pommel gem, quillons, flat blade with fuller, runes and a glow line."""
     sd = unit(p['sword']); hilt = p['hilt'] + V(0, A['b'] * 0.6, 0); L = w.get('length', 26.0); G = w.get('grip', 9.0); W = w.get('width', 2.1)
     m.add(cone(hilt - sd * G, hilt + sd * 2.0, 0.85, 0.85), w.get('grip_mat', 'leather'), None,
           bands(hilt, sd, tuple(np.arange(1.6, -G, -1.4)), 0.22, 'dgold'))
@@ -64,6 +64,22 @@ def sword(m, p, A, w):
     for u in ((5.0, 9.0, 13.0) if w.get('rune', '#8fd0ff') else ()):
         m.dots.append((bs + sd * u + V(0, 0, 0.8), w.get('rune', '#8fd0ff'), w.get('rune_glow', 0.5), 1.5))
     m.lines.append((bs + sd * 1.0 + perp * 1.7 * W / 2.1 + V(0, 0, 0.5), bs + sd * (L - 4.5) + perp * W / 2.1 + V(0, 0, 0.4), w.get('edge', '#cfe6ff'), 1.2))
+    if w.get('glint'):
+        glint(m, p, bs + perp * 0.5 * W + V(0, 0, 0.6), sd, L)
+
+
+def glint(m, p, base, sd, L):
+    """A star of light sliding up the blade edge over the first half of the loop, gone for the second half."""
+    ph = p.get('ph', 0.0)
+    if ph >= 0.5:
+        return
+    c = base + sd * L * (0.12 + 1.6 * ph); arm = 1 + int(2 * (1.0 - abs(ph - 0.25) * 4.0) > 0.5)
+    star = {(0, 0): '#ffffff'}
+    for r in range(1, arm + 1):
+        for d in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            star[(d[0] * r, d[1] * r)] = '#fff8e0' if r == 1 else '#e8f0ff'
+    m.stamps.append((c, star, None))
+    m.dots.append((c, '#ffffff', 1.0, 1e9))
 
 
 def scimitar(m, p, A, w):
@@ -75,6 +91,8 @@ def scimitar(m, p, A, w):
     m.add(cone(hilt + sd * 2.0 - perp * 2.6, hilt + sd * 2.0 + perp * 2.6, 0.8, 0.8), 'gold', None)
     bs = hilt + sd * 2.4
     m.add(blade(bs, sd, perp, L, 1.9, 0.6, curve=w.get('curve', 1.0)), 'blade', None, blade_tex(bs, sd, perp, L, 1.9, w.get('curve', 1.0), 0))
+    if w.get('glint'):
+        glint(m, p, bs + perp * 0.9 + V(0, 0, 0.5), sd, L * 0.8)
 
 
 def staff(m, p, A, w):
@@ -107,14 +125,14 @@ def lightning(m, c, cols, ph, arcs, reach):
 
 
 def shield(m, p, A, w):
-    """Round buckler on the off hand facing p['shield_dir']: chrome face, gold rim, spokes and boss."""
+    """Round buckler on the off hand facing p['shield_dir']: face in `mat` (default steel), gold rim, spokes and boss."""
     c = p['off'] + V(0, A['b'] * 0.6, 0) + unit(p['shield_dir']) * 1.6; d = unit(p['shield_dir']); R = w.get('r', 7.0)
     rot = frame_to(d)
     def spokes(P, mt):
         q = P - c; r = np.sqrt((q @ rot[:, 0]) ** 2 + (q @ rot[:, 2]) ** 2); a = np.arctan2(q @ rot[:, 0], q @ rot[:, 2])
         mt = mt.copy(); mt[(np.abs((a + np.pi / 8) % (np.pi / 4) - np.pi / 8) * r < 0.45) & (r > 1.8)] = 'gold'
         return mt
-    m.add(inter(sphere(c - d * (R * 1.6), R * 1.75), lambda P: -((P - c) @ d) - 0.2), 'steel', None, spokes)
+    m.add(inter(sphere(c - d * (R * 1.6), R * 1.75), lambda P: -((P - c) @ d) - 0.2), w.get('mat', 'steel'), None, spokes)
     m.add(torus(c - d * 0.2, R - 0.3, 0.7, rot=rot), 'gold', None)
     m.add(sphere(c + d * 0.4, 1.6), 'gold', None)
     m.add(sphere(c + d * 1.4, 0.7), 'gem', None)

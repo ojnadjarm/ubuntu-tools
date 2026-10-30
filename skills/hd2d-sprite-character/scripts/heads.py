@@ -166,10 +166,32 @@ def falcon_head(m, p, A, s):
 
 
 def bear_head(m, p, A, s):
-    """Bear: big round head, pale muzzle with a black nose, small round ears, beady eyes, a scar over one brow."""
-    H = A['head']
-    m.add(sphere(H + V(0, 0.6, 0), 7.2), 'fur', 'head',
-          lambda P, mt: np.where(np.sin(P[:, 0] * 1.3 + P[:, 1] * 2.1) * np.sin(P[:, 1] * 1.7 - P[:, 2] * 1.1) > 0.6, 'fur_s', mt))
+    """Bear: big round head, pale muzzle with a black nose, small round ears, beady eyes, a scar over one brow; `grizzly` adds a
+    heavy brow, a broad snout bridge, a golden crown sheen (`fur_h`) and cheek ruffs, `size` scales the head."""
+    H = A['head']; k = s.get('size', 1.0)
+    tuft = lambda P, mt: np.where(np.sin(P[:, 0] * 1.3 + P[:, 1] * 2.1) * np.sin(P[:, 1] * 1.7 - P[:, 2] * 1.1) > 0.6, 'fur_s', mt)
+    if s.get('grizzly'):
+        def crown(P, mt):
+            mt = tuft(P, mt); q = P - H
+            mt[(q[:, 1] > 3.0 * k) & (np.sin(q[:, 0] * 2.2 + q[:, 2] * 1.4) > 0.3)] = 'fur_h'
+            return mt
+        m.add(sphere(H + V(0, 0.6 * k, 0), 7.2 * k), 'fur', 'head', crown)
+        for sd in (-1, 1):
+            m.add(ellipsoid(H + V(2.6 * sd * k, 2.4 * k, 5.6 * k), (2.6 * k, 1.1 * k, 1.6 * k), rot=rot_z(-0.25 * sd)), 'fur', 'head')
+            m.add(cone(H + V(5.6 * sd * k, -1.0 * k, 3.0 * k), H + V(8.6 * sd * k, -3.8 * k, 1.4 * k), 2.0 * k, 0.4), 'fur', None, tuft)
+        m.add(ellipsoid(H + V(0, -1.4 * k, 6.4 * k), (3.6 * k, 2.8 * k, 4.0 * k)), 'fur_l', 'head')
+        m.add(cone(H + V(0, 1.6 * k, 5.0 * k), H + V(0, -0.4 * k, 9.2 * k), 1.9 * k, 1.5 * k), 'fur_l', 'head')
+        m.add(ellipsoid(H + V(0, -0.4 * k, 10.0 * k), (1.9 * k, 1.3 * k, 1.1 * k)), 'nose', None)
+        m.dots.append((H + V(-0.5 * k, 0.1 * k, 11.0 * k), '#cfd2dc', 0.0, 1.5))
+        m.add(ellipsoid(H + V(0, -3.6 * k, 8.0 * k), (2.2 * k, 0.6 * k, 1.4 * k)), 'mouth', None)
+        m.lines.append((H + V(0, -1.6 * k, 10.6 * k), H + V(0, -3.0 * k, 9.4 * k), '#1a0e08', 1.0))
+        for sd in (-1, 1):
+            m.add(sphere(H + V(5.6 * sd * k, 6.2 * k, -0.8 * k), 2.4 * k), 'fur', 'head')
+            m.add(sphere(H + V(5.8 * sd * k, 6.2 * k, 0.4 * k), 1.2 * k), 'fur_l', None)
+            m.lines.append((H + V(1.0 * sd * k, 2.6 * k, 7.4 * k), H + V(3.8 * sd * k, 3.2 * k, 6.4 * k), '#140a06', 1.4))
+        beast_eyes(m, H, (2.6 * k, 1.5 * k, 6.9 * k), s.get('iris', '#ffcf40'))
+        return
+    m.add(sphere(H + V(0, 0.6, 0), 7.2), 'fur', 'head', tuft)
     m.add(ellipsoid(H + V(0, -2.0, 5.6), (3.8, 3.0, 3.8)), 'fur_l', 'head')
     m.add(ellipsoid(H + V(0, -0.6, 9.0), (1.8, 1.2, 1.1)), 'nose', None)
     m.add(ellipsoid(H + V(0, -4.0, 7.2), (2.0, 0.7, 1.4)), 'mouth', None)

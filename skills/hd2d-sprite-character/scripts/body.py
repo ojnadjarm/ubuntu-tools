@@ -141,8 +141,9 @@ def robe_body(m, p, A, s):
 
 
 def beast_body(m, p, A, s):
-    """Upright beast: barrel torso and belly, short thick legs with paws, leather harness and saddle on the shoulders."""
-    pel, chest, neck = A['pel'], A['chest'], A['neck']; h = A['h']
+    """Upright beast: barrel torso and belly, short thick legs with paws; leather harness and saddle (`harness` False: bare fur),
+    optional shoulder `hump`."""
+    pel, chest, neck = A['pel'], A['chest'], A['neck']; h = A['h']; harness = s.get('harness', True)
     for side, ft in ((-1, p['feet'][0]), (1, p['feet'][1])):
         hip = pel + V(5.2 * side, -2.0, 0)
         kn = ik(hip, ft + V(0, 3.2, 0), 8.0 * h, 7.2 * h, V(0.3 * side, 0, 1))
@@ -158,6 +159,8 @@ def beast_body(m, p, A, s):
         tuft = np.sin(q[:, 0] * 1.3 + q[:, 1] * 2.1) * np.sin(q[:, 1] * 1.7 - q[:, 2] * 1.1) > 0.55
         mt[tuft] = 'fur_s'
         mt[(q[:, 2] > 3.0) & (np.abs(q[:, 0]) < 5.0 * h) & (q[:, 1] < 2)] = 'fur_l'
+        if not harness:
+            return mt
         front = q[:, 2] > -2.0
         x1 = np.abs(q[:, 0] * 0.8 - q[:, 1] * 0.6 - 1.0) < 0.9; x2 = np.abs(q[:, 0] * 0.8 + q[:, 1] * 0.6 + 1.0) < 0.9
         mt[front & (x1 | x2) & (q[:, 1] > -9) & (q[:, 1] < 9)] = 'leather'
@@ -167,6 +170,10 @@ def beast_body(m, p, A, s):
     m.add(ellipsoid(chest + V(0, 1.0, -0.6), (10.6 * h, 8.6 * h, 8.0 * h)), 'fur', 'body', fur_tex)
     m.add(ellipsoid(neck + V(0, -1.2, -0.4), (6.6 * h, 4.6 * h, 5.6 * h)), 'fur', 'body', fur_tex)
     m.group('body', 2.6)
+    if s.get('hump'):
+        m.add(ellipsoid(chest + V(0, 7.0 * h, -3.4 * h), (7.6 * h, 4.4 * h, 5.6 * h)), 'fur', 'body', fur_tex)
+    if not harness:
+        return
     m.add(octa(chest + V(0, -1.3, 7.8 * h), 1.8), 'gold', None)
     m.add(sphere(chest + V(0, -1.3, 7.8 * h + 0.9), 0.8), 'gem', None)
     for sd in (-1, 1):

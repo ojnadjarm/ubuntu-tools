@@ -1,6 +1,6 @@
 # HD-2D scene: pixel-art sprites in a lit 3D diorama (Octopath / FF Brave Exvius look), made with code
 
-Ticket: T1414 · Last verified: 2026-10-28 by a 1080p 4 s loop render (Tiny Epic Narrator, sarcophagus chamber, whole party: Gamelyn low guard with light-blue glowing blade, Gakata, Ojo Penetrante, Tier)
+Ticket: T1414, T1431 · Last verified: 2026-10-30 by 1080p 4 s loop renders at 8 samples of both sarcophagus variants (Tiny Epic Narrator: card-faithful party, carved tomb, candles, banners)
 
 ## When to use
 "2D HD", "HD-2D", "Octopath style", "FF Resonance / Brave Exvius style": small crisp pixel sprites standing in a 3D
@@ -70,6 +70,12 @@ python3 dialogo.py frames frames_dlg
 - Volume factor on many cyan lights (tomb 3.0, three ghosts 1.5) turned the fog into a grey-green wash; 0.8 and 0.4 keep the contrast.
 - Keep falling stones and their dust puffs out of the party's side (x < 0.6): one puff in front of Gamelyn read as a grey ball.
 - Render cost 1080p, 16 samples: 33 s/frame with two kobolds, 42 s/frame for the collapse (volumes, halos, 60 extra objects).
+- Wall props above z ~6.4 at y 12.4 fall out of frame (lens 58, pitch 19): banners there showed only their hem (T1431).
+- Four candle point lights with shadows overflowed the shadow pool (4855 / 4096): small lights take `shadow=False`.
+- 1080p at 8 TAA samples looks the same as 16 on the sprites and halves the cost (19 s vs 46 s a frame); two Blender processes in parallel
+  on the Iris Xe gave no gain (75 s a frame each).
+- The window spot at 14000 W aimed at y 3 left a blown white disc in the foreground; 8000 W, blend 0.9, aimed between the two groups (0.6, 5.2).
+- The open tomb as a flat emissive plane read as a screen: a noise-ramped emission plus a low emission volume (density 0.35, 0.25) reads as mist.
 
 ## Links
 - Code: RunarStudio/Tiny_Epic_Narrator `arte/hd2d/` (PR #3 branch `liaison/gamelyn-dibujado`)

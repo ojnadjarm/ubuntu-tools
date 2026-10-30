@@ -12,7 +12,7 @@ def low_guard(ph):
                 sword=V(-0.66 + 0.03 * np.sin(TAU * ph - 0.9), 0.62, 0.42),
                 cape=V(1.4 + lag(ph, 0.6, 0.3), 0, -2.2 + lag(ph, 0.7, 0.32)), fold=0.5 * br,
                 tail=V(0.6 + lag(ph, 0.6, 0.22), lag(ph, 0.5, 0.18), -0.6 + lag(ph, 0.8, 0.26)),
-                head=V(0, 0.25 * br, 0.5), feet=[V(-6.6, 0, 4.4), V(6.2, 0, -4.2)])
+                head=V(0, 0.25 * br, 0.5), feet=[V(-6.6, 0, 4.4), V(6.2, 0, -4.2)], ph=ph)
 
 
 def high_guard(ph):
@@ -24,7 +24,7 @@ def high_guard(ph):
                 off=V(-5.2, 30.0 + 0.3 * br, 9.4), off_grip='fist', shield_dir=V(-0.35, 0.05, 1.0),
                 cape=V(1.2 + lag(ph, 0.5, 0.3), 0, -1.6 + lag(ph, 0.6, 0.32)), fold=0.6 * br,
                 tail=V(lag(ph, 0.8, 0.2), lag(ph, 0.6, 0.15), -1.0), mane=V(lag(ph, 0.3, 0.2), lag(ph, 0.3, 0.1), 0),
-                head=V(0, 0.25 * br, 0.8), feet=[V(-7.0, 0, 5.0), V(6.6, 0, -4.4)])
+                head=V(0, 0.25 * br, 0.8), feet=[V(-7.0, 0, 5.0), V(6.6, 0, -4.4)], ph=ph)
 
 
 def caster(ph):
