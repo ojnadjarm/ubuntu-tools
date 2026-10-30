@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# Nightly (T1430): moves the orchestrator session onto the installed Claude Code when its process runs an older binary.
+# Restarts only when safe: registry idle, empty input line, no turn, no background agents or workflows, no open Discord
+# escalation, and outside owner hours (OWNER_HOURS, default 08-01) unless the new version is OWNER_WAIT_H (24) h old.
+# Not safe: logged, retried next run. Restart: /exit typed into the pane, `systemctl --user start` the unit, read back
+# the new version and the same session id (--continue); a failure is one notify-owner line. One log line per run.
+# Usage: orchestrator-update-restart [--dry-run]   (--dry-run prints and logs the decision, changes nothing)
+case "${1:-}" in -h|--help) awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; exit 0 ;; esac
+set -uo pipefail
+BIN=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+. "$BIN/pclib.sh"
+. "$BIN/orchlib.sh"
+SESSION=${ORCHESTRATOR_TMUX_SESSION:-claude}
+UNIT=${ORCHESTRATOR_UNIT:-claude-orchestrator.service}
+LOG=${OUR_LOG:-$HOME/agents/log/orchestrator-update-restart.log}
+CLAUDE_DIR=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
+MARK=ORCHESTRATOR.md
+ESC_DIR=${OUR_ESCALATIONS:-$HOME/agents/discord-liaison/state/escalations}
+OWNER_HOURS=${OWNER_HOURS:-08-01}
+OWNER_WAIT_H=${OWNER_WAIT_H:-24}
+ACTIVE_MIN=${OUR_ACTIVE_MIN:-10}
+EXIT_WAIT=${OUR_EXIT_WAIT:-60}
+START_WAIT=${OUR_START_WAIT:-240}
+PANE=
+tm() { tmux "$@"; }
+
+# Prints "<noop|wait|restart> <reason>" from facts: running installed age_s hour busy_reason escalations.
+decide() {
+  local running=$1 installed=$2 age=$3 hour=$((10#$4)) busy=$5 escs=$6 from=$((10#${OWNER_HOURS%-*})) to=$((10#${OWNER_HOURS#*-}))
+  [ -n "$running" ] || { echo "wait no orchestrator claude found"; return; }
+  [ -n "$installed" ] || { echo "wait installed version unknown"; return; }
+  [ "$running" != "$installed" ] || { echo "noop up to date"; return; }
+  [ -z "$busy" ] || { echo "wait $busy"; return; }
+  [ "$escs" -eq 0 ] || { echo "wait $escs Discord escalation(s) open"; return; }
+  local owner=0
+  if [ "$from" -gt "$to" ]; then { [ "$hour" -ge "$from" ] || [ "$hour" -lt "$to" ]; } && owner=1
+  else [ "$hour" -ge "$from" ] && [ "$hour" -lt "$to" ] && owner=1; fi
+  if [ "$owner" = 1 ] && [ "$age" -lt $((OWNER_WAIT_H * 3600)) ]; then
+    echo "wait owner hours, new version $((age / 3600)) h old"; return
+  fi
+  echo "restart $running -> $installed"
+}
+
+# Version of the binary a pid runs (versions/<v>, maybe " (deleted)"); empty when unreadable.
+pid_version() { local e; e=$(readlink "/proc/$1/exe" 2>/dev/null) || return 0; e=${e% (deleted)}; basename "$e"; }
+installed_version() { claude --version 2>/dev/null | awk 'NR==1{print $1}'; }
+# Seconds since the claude launcher link last changed (the auto-updater repoints it).
+installed_age() { local c; c=$(command -v claude) || { echo 0; return; }; echo $(( $(date +%s) - $(stat -c %Y "$c") )); }
+open_escalations() { find "$ESC_DIR" -maxdepth 1 -name '*.md' 2>/dev/null | grep -c .; }
+# Session-level reasons not to restart pid $1; empty when idle.
+busy_reason() {
+  local pid=$1 st a line sid
+  st=$(reg "$pid" status)
+  [ "$st" = idle ] || { echo "session ${st:-unknown}, not idle"; return; }
+  [ "$(tm display -pt "$PANE" '#{pane_in_mode}' 2>/dev/null)" = 0 ] || { echo "pane in copy mode"; return; }
+  a=$(pane)
+  local why; why=$(pane_busy "$a"); [ -z "$why" ] || { echo "$why"; return; }
+  printf '%s\n' "$a" | awk '/^─/{f=1; next} f' | grep -qE '^ *◯ ' && { echo "background agents listed"; return; }
+  sid=$(reg "$pid" sessionId)
+  if [ -n "$sid" ] && find "$CLAUDE_DIR/projects"/*/"$sid"/subagents "$CLAUDE_DIR/projects"/*/"$sid"/workflows \
+       -type f -mmin "-$ACTIVE_MIN" 2>/dev/null | grep -q .; then
+    echo "agent or workflow activity in the last $ACTIVE_MIN min"; return
+  fi
+  line=$(prompt_line)
+  [ -n "$line" ] || { echo "no prompt box (dialog or startup)"; return; }
+  [ -z "$(printf '%s' "$line" | sed -e 's/^❯//' -e 's/^>//' | tr -d ' \302\240')" ] || echo "input line not empty"
+}
+log() { mkdir -p "$(dirname "$LOG")"; printf '%s %s\n' "$(date -Is)" "$*" >>"$LOG"; echo "orchestrator-update-restart: $*"; }
+fail() { log "fail $1"; notify-owner "orchestrator-update-restart: $1" >/dev/null 2>&1; exit 1; }
+# Sets PANE and OPID (the orchestrator claude in the session's pane); empty when absent.
+find_orch() {
+  local ppid=; PANE=; OPID=
+  read -r PANE ppid < <(tm display -pt "=$SESSION:" '#{pane_id} #{pane_pid}' 2>/dev/null)
+  [ -z "$ppid" ] || OPID=$(orch_pid "$ppid")
+}
+# True when the session pane runs an orchestrator claude on version $1 in session id $2.
+resumed() { find_orch; [ -n "$OPID" ] && [ "$(pid_version "$OPID")" = "$1" ] && [ "$(reg "$OPID" sessionId)" = "$2" ]; }
+
+[ "${BASH_SOURCE[0]}" = "$0" ] || return 0
+
+case "${1:-}" in
+  --check-resumed) resumed "$2" "$3"; exit ;;
+  ''|--dry-run) ;;
+  *) echo "usage: orchestrator-update-restart [--dry-run]" >&2; exit 2 ;;
+esac
+DRY=0; [ "${1:-}" = --dry-run ] && DRY=1
+find_orch; pid=$OPID
+running=; busy=; sid=
+if [ -n "$pid" ]; then running=$(pid_version "$pid"); sid=$(reg "$pid" sessionId); fi
+installed=$(installed_version)
+[ -z "$running" ] || [ "$running" = "$installed" ] || busy=$(busy_reason "$pid")
+read -r verdict reason < <(decide "$running" "$installed" "$(installed_age)" "$(date +%H)" "$busy" "$(open_escalations)")
+if [ "$DRY" = 1 ] || [ "$verdict" != restart ]; then
+  log "$([ "$DRY" = 1 ] && echo "dry-run ")$verdict $reason (running=${running:-none} installed=${installed:-none})"
+  exit 0
+fi
+
+[ -n "$sid" ] || fail "no session id for pid $pid; not restarted"
+a=$(pane); sleep 3
+[ "$(pane)" = "$a" ] || { log "wait pane changing (running=$running installed=$installed)"; exit 0; }
+tm send-keys -t "$PANE" -l "/exit" && sleep 1 && tm send-keys -t "$PANE" Enter
+if ! timeout "$EXIT_WAIT" wait-for --label orch-exit --until "! kill -0 $pid 2>/dev/null" >/dev/null 2>&1; then
+  tm send-keys -t "$PANE" C-u
+  fail "/exit did not end pid $pid in ${EXIT_WAIT}s; session left running on $running"
+fi
+systemctl --user start "$UNIT" || fail "systemctl --user start $UNIT failed after /exit"
+timeout "$START_WAIT" wait-for --label orch-resume --until "$(printf '%q ' "$BIN/orchestrator-update-restart") --check-resumed $installed $sid" >/dev/null 2>&1 \
+  || fail "after restart the pane does not run $installed in session ${sid:0:8} within ${START_WAIT}s"
+log "restarted $running -> $installed session=${sid:0:8}"

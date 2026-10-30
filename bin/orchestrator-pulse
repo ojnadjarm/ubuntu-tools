@@ -21,37 +21,7 @@ TURN=${PULSE_TURN:-'Pulse: run plan-usage, then continue the standing queue (see
 tm() { if [ -n "${PULSE_TMUX_SOCKET:-}" ]; then tmux -L "$PULSE_TMUX_SOCKET" "$@"; else tmux "$@"; fi; }
 log() { mkdir -p "$(dirname "$LOG")"; printf '%s %s session=%s %s\n' "$(date -Is)" "$1" "$SESSION" "$2" >>"$LOG"; echo "orchestrator-pulse: $1 $2"; }
 PANE=
-pane() { tm capture-pane -pJt "$PANE" 2>/dev/null; }
-# Prints the pid of the orchestrator claude (argv names claude and --append-system-prompt-file …$MARK) below pid $1.
-orch_pid() { ps -eo pid=,ppid=,args= | awk -v root="$1" -v mark="$MARK" '
-  { pp[$1] = $2; a = $0; sub(/^ *[0-9]+ +[0-9]+ +/, "", a); args[$1] = a }
-  END { for (p in pp) { q = p; while (q in pp && q != root && q > 1) q = pp[q]; if (q != root || p == root) continue
-          n = split(args[p], v, " "); c = 0
-          for (i = 1; i <= n; i++) { if (v[i] ~ /(^|\/)claude$/) c = 1
-            if (c && v[i] == "--append-system-prompt-file" && index(v[i+1], mark)) { print p; exit } } } }'; }
-# Field $2 of the Claude session registry entry for pid $1 (empty when absent).
-reg() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2]) or "")' "$CLAUDE_DIR/sessions/$1.json" "$2" 2>/dev/null; }
-# Drops dim ghost text (prompt suggestions) and the inverse cursor cell right before it; other escapes removed.
-unghost() { perl -ne '
-  chomp; my ($o, $h) = ("", "");
-  for my $t (split /(\e\[[0-9;:]*m)/) {
-    if ($t =~ /^\e\[([0-9;:]*)m$/) {
-      my @p = split /[;:]/, $1; @p = (0) unless @p;
-      while (@p) {
-        my $c = shift(@p) || 0;
-        if ($c == 0) { $d = $i = 0 } elsif ($c == 2) { $d = 1 } elsif ($c == 22) { $d = 0 }
-        elsif ($c == 7) { $i = 1 } elsif ($c == 27) { $i = 0 }
-        elsif ($c =~ /^[345]8$/) { my $m = shift(@p) || 0; splice @p, 0, ($m == 5 ? 1 : $m == 2 ? 3 : 0) }
-      }
-      next;
-    }
-    next if $t eq "";
-    if ($d) { $h = ""; next }
-    $o .= $h; $h = "";
-    if ($i) { $h = $t } else { $o .= $t }
-  }
-  $o .= $h; $o =~ s/\e(\[[0-9;?]*[A-Za-z]|\][^\a\e]*(\a|\e\\))//g; print "$o\n"'; }
-prompt_line() { tm capture-pane -peJt "$PANE" 2>/dev/null | unghost | grep -E '^(❯|>)' | tail -n1; }
+. "$(dirname "$(readlink -f "$0")")/orchlib.sh"
 squash() { tr -s ' \n' '  '; }
 # The input box text from the last prompt glyph to the box border, joined, so a wrapped prompt still matches.
 box_text() { pane | awk '/^(❯|>)/{buf=""; on=1} on&&/^─/{on=0} on{buf=buf" "$0} END{print buf}' | squash; }
@@ -66,10 +36,8 @@ st=$(reg "$opid" status)
 [ "$st" = idle ] || { log skip "orchestrator session ${st:-unknown}, not idle"; exit 0; }
 [ "$(tm display -pt "$PANE" '#{pane_in_mode}' 2>/dev/null)" = 0 ] || { log skip "pane in copy mode"; exit 0; }
 a=$(pane)
-case "$a" in
-  *"esc to interrupt"*) log skip "turn in progress"; exit 0 ;;
-  *"Waiting for"*"background"*) log skip "background agents running"; exit 0 ;;
-esac
+why=$(pane_busy "$a")
+[ -z "$why" ] || { log skip "$why"; exit 0; }
 line=$(prompt_line)
 [ -n "$line" ] || { log skip "no prompt box (dialog or startup)"; exit 0; }
 rest=$(printf '%s' "$line" | sed -e 's/^❯//' -e 's/^>//' | tr -d ' \302\240')

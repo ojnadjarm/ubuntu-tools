@@ -1,0 +1,8 @@
+[Unit]
+Description=Orchestrator onto the installed Claude Code when idle (T1430)
+
+[Service]
+Type=oneshot
+TimeoutStartSec=420
+Environment=PATH=%h/agents/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/bash -c '. %h/agents/bin/env.sh; exec %h/agents/bin/orchestrator-update-restart'
