@@ -49,7 +49,7 @@ export VASS_FRONT_URL=${VASS_FRONT_URL:-https://$FQDN:8446}
 export VASS_MOODLE_URL=${VASS_MOODLE_URL:-https://$FQDN:8445}
 export VASS_MOODLE_PASSWORD=${VASS_MOODLE_PASSWORD:-${MOODLE_ADMIN_PASSWORD:-}}
 export VASS_STUDENT_PASSWORD=${VASS_STUDENT_PASSWORD:-}
-CONTAINER=${VASS_MOODLE_CONTAINER:-moodle45-app-1}
+export VASS_MOODLE_CONTAINER=${VASS_MOODLE_CONTAINER:-moodle45-app-1}
 KPY=${KOKORO_PY:-$HOME/.local/opt/kokoro/bin/python}
 RENDER=${KOKORO_RENDER:-$HARNESS_HOME/skills/kokoro-narration/render_narration.py}
 
@@ -62,30 +62,13 @@ node "$HERE/shotlist.mjs" unit "$SHOTS" > "$WORK/unit.json" || die "unit build f
 "$KPY" "$RENDER" --engine edge "$WORK/unit.json" "$WORK/vo" > "$WORK/vo.log" 2>&1 || die "narration failed (edge needs network): $(tail -1 "$WORK/vo.log")"
 lap narration
 
-# 2. WS side-by-side data, picked fields only (mws refuses the VASS env, so run in its container).
-python3 - "$SHOTS" <<'PY' > "$WORK/ws-jobs.tsv"
-import json, sys
-for i, st in enumerate(json.load(open(sys.argv[1]))["steps"], 1):
-    for w in st.get("ws", []):
-        print(f"{i}\t{json.dumps(w, ensure_ascii=False)}")
-PY
-if [ -s "$WORK/ws-jobs.tsv" ]; then
-  while IFS=$'\t' read -r step job; do
-    res=$(docker exec -i "$CONTAINER" php -- "$job" < "$HERE/ws.php" 2>"$WORK/ws.err" | tail -1) \
-      || die "ws step $step failed: $(grep -m1 -iv 'token\|password' "$WORK/ws.err")"
-    python3 -c 'import json,sys; j=json.loads(sys.argv[1]); print(json.dumps({"label": j.get("label", j["fn"]), "fn": j["fn"], "result": json.loads(sys.argv[2])}))' "$job" "$res" >> "$WORK/ws-$step.jsonl"
-  done < "$WORK/ws-jobs.tsv"
-  for f in "$WORK"/ws-*.jsonl; do python3 -c 'import json,sys; print(json.dumps([json.loads(l) for l in open(sys.argv[1])]))' "$f" > "${f%l}"; done
-  lap ws
-fi
-
-# 3. record headless (--mute-audio), each step held for its clip.
+# 2. record headless (--mute-audio), each step held for its clip; ws steps call the container at their place in the order.
 rm -f "$WORK/raw.webm"
 node "$HERE/shoot.mjs" "$SHOTS" "$WORK" 2>&1 | grep -v -iE 'cookie|token|authorization' || true
 [ -s "$WORK/raw.webm" ] || die "recording failed"
 lap recording
 
-# 4. captions, VO mix, trim, encode, review, stills, guion, index.
+# 3. captions, VO mix, trim, encode, review, stills, guion, index.
 python3 "$HERE/assemble.py" "$SHOTS" "$WORK" "$OUT" --source "$SRC" ${NAME:+--name "$NAME"} $REVIEW || die "assemble failed"
 lap assemble
 

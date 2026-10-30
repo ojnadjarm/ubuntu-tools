@@ -1,9 +1,12 @@
 // shoot.mjs — record a VASS shot list headless, one narration clip per step, marks + stills into <work>.
-// Usage: node shoot.mjs <shots.json> <work>   (work holds vo/cues.json, ws-<n>.json; writes raw.webm, marks.json, still-*.png)
+// Usage: node shoot.mjs <shots.json> <work>   (work holds vo/cues.json; writes raw.webm, marks.json, still-*.png)
 //        node shoot.mjs --check <shots.json>  validate the shot list only (no browser)
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { validate, redact } from './shotlist.mjs';
+import { runSteps } from './runner.mjs';
 
 const args = process.argv.slice(2);
 if (args[0] === '--check') {
@@ -114,6 +117,17 @@ const overlay = (p, o) => p.evaluate((html) => {
   + (o.cols || []).map(c => `<div>${esc(c.label)}<br><b style="font-size:56px;color:${esc(c.color || '#2563eb')}">${esc(c.value)}</b>`
   + `<br><small>${esc(c.note || '')}</small></div>`).join('') + '</div>');
 
+// One external function as a user inside the Moodle container (mws refuses VASS); only the picked fields come back.
+function runWs(job, wsphp) {
+  try {
+    const out = execFileSync('docker', ['exec', '-i', env.VASS_MOODLE_CONTAINER || 'moodle45-app-1', 'php', '--', JSON.stringify(job)],
+      { input: wsphp, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim().split('\n').pop();
+    return JSON.parse(out);
+  } catch (e) {
+    throw new Error(`ws ${job.fn} failed: ${redact(String(e.stderr || e.message).trim().split('\n').pop())}`);
+  }
+}
+
 // Side-by-side JSON panes of WS results fetched before recording (ws-<step>.json).
 function wsPage(step, data) {
   const panes = data.map(d => `<div class="pane"><h2>${esc(d.label)}</h2><div class="fn">${esc(d.fn)}</div>`
@@ -126,7 +140,7 @@ h2{margin:0 0 4px;font-size:24px;color:#fff}.fn{font:14px monospace;color:#94a3b
 
 const chromium = await loadChromium();
 const b = await chromium.launch({ headless: true, args: ['--mute-audio'] });
-let c; let p; let stepNo = 0;
+let c; let p; let progress = { stepNo: 0 };
 try {
   const l = await b.newContext(ctxopts); await skipProfileGate(l);
   const lp = await l.newPage();
@@ -136,44 +150,38 @@ try {
 
   c = await b.newContext({ ...ctxopts, storageState: state, recordVideo: { dir: path.join(work, 'vid'), size: { width: 1280, height: 720 } } });
   await skipProfileGate(c);
-  p = await c.newPage(); const t0 = Date.now(); const marks = {};
-  const now = () => (Date.now() - t0) / 1000;
+  p = await c.newPage(); const t0 = Date.now();
   const W = (ms) => ms > 0 ? p.waitForTimeout(ms) : null;
-
-  for (const [i, step] of shots.steps.entries()) {
-    stepNo = i + 1;
-    const id = `s${i + 1}`; const site = step.site || 'front';
-    const act = async (a) => {
+  const wsphp = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'ws.php'));
+  const d = {
+    stepNo: 0,
+    now: () => (Date.now() - t0) / 1000,
+    wait: W,
+    clip: (id) => cues[id],
+    act: async (a) => {
       if (a.go) await p.goto(url(a.site || 'front', a.go));
       for (const sel of [].concat(a.click || [])) { await locator(p, sel).click(); }
       for (const f of [].concat(a.fill || [])) { await locator(p, f.sel).fill(f.value); }
       for (const w of [].concat(a.wait || [])) {
         if (typeof w === 'number') await W(w); else await locator(p, w).waitFor({ timeout: 30000 });
       }
-    };
-    for (const a of step.pre || []) await act(a);
-    if (step.ws) await p.setContent(wsPage(step, JSON.parse(fs.readFileSync(path.join(work, `ws-${i + 1}.json`), 'utf8'))));
-    await act({ ...step, site });
-    await W(step.settle ?? 1200);
-    marks[id] = now();
-    const clip = cues[id]; const cueAt = clip.marks?.hl;
-    const apply = async () => {
+    },
+    fetchWs: async (jobs) => jobs.map((j) => ({ label: j.label || j.fn, fn: j.fn, result: runWs(j, wsphp) })),
+    showWs: (step, data) => p.setContent(wsPage(step, data)),
+    apply: async (step) => {
       if (step.highlight) await highlight(p, step.highlight);
       if (step.overlay) await overlay(p, step.overlay);
-    };
-    if (cueAt == null) await apply();
-    else { await W((marks[id] + cueAt) * 1000 - now() * 1000); await apply(); }
-    const end = marks[id] + clip.duration + (step.hold ?? 0.6);
-    if (step.still) { await W((end - 0.4) * 1000 - now() * 1000); await p.screenshot({ path: path.join(work, `still-${i + 1}-${step.still}.png`) }); }
-    await W(end * 1000 - now() * 1000);
-  }
-  marks.end = now();
+    },
+    still: (n, step) => p.screenshot({ path: path.join(work, `still-${n}-${step.still}.png`) }),
+  };
+  progress = d;
+  const marks = await runSteps(shots.steps, d);
   const v = p.video(); await c.unrouteAll({ behavior: 'ignoreErrors' }); await c.close(); c = null;
   fs.renameSync(await v.path(), path.join(work, 'raw.webm'));
   fs.writeFileSync(path.join(work, 'marks.json'), JSON.stringify(marks, null, 1));
   console.log('shoot: steps', shots.steps.length, 'length', marks.end.toFixed(1), 's');
 } catch (e) {
-  console.error(`shoot failed at step ${stepNo}:`, redact(e), `(screen: ${path.join(work, 'fail.png')})`);
+  console.error(`shoot failed at step ${progress.stepNo}:`, redact(e), `(screen: ${path.join(work, 'fail.png')})`);
   process.exitCode = 1;
   if (p) await p.screenshot({ path: path.join(work, 'fail.png') }).catch(() => {});
 } finally {

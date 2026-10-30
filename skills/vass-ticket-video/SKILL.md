@@ -36,7 +36,7 @@ Shot list (keep it in `~/agent-work/research/<date>/<T>/`: it names test users, 
   (selector or ms) → `settle` ms (default 1200) → the narration line starts → `highlight`/`overlay` at the `{hl}` word (or at once)
   → `still` screenshot near the end → the step lasts the clip + `hold` s (default 0.6).
 - Selectors: `link:`, `button:`, `tab:` (exact accessible name), `text:`, `css:`. Highlight labels: exact text, `Prefix*`, or `css:`.
-- `ws` runs the function as `user` in the Moodle container and shows only the `pick` fields (dotted paths); token-like
+- `ws` runs the function as `user` in the Moodle container at that point in the step order (after the earlier UI steps) and shows only the `pick` fields (dotted paths); token-like
   fields are redacted. Write `say` in natural Spain Spanish, numbers in words ("menos cinco coma treinta y tres").
 - Config (config.env, keys in `config.example.env`): `VASS_STUDENT_PASSWORD`, `VASS_MOODLE_PASSWORD` (default
   `MOODLE_ADMIN_PASSWORD`), `VASS_FRONT_URL`/`VASS_MOODLE_URL` (default `https://<tailnet-fqdn>:8446` / `:8445`), `VASS_MOODLE_CONTAINER`.

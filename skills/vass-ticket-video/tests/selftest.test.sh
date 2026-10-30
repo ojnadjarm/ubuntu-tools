@@ -28,6 +28,24 @@ node "$S/shotlist.mjs" unit "$FX/shots.json" > "$T/unit.json"
 is "unit: engine edge, voice es" "$(python3 -c 'import json,sys;u=json.load(open(sys.argv[1]));print(u["voice"]["engine"],u["voice"]["voice"])' "$T/unit.json")" "edge es"
 is "unit: clip per step" "$(python3 -c 'import json,sys;print(",".join(c["id"] for c in json.load(open(sys.argv[1]))["clips"]))' "$T/unit.json")" "s1,s2,s3"
 
+# Step order: a ws step fetches at its place, after earlier UI steps changed the data (T1432: 9.1 shown instead of 6.5).
+cat > "$T/order.mjs" <<EOF
+import { runSteps } from '$S/runner.mjs';
+const log = []; let t = 0; let baremo = 9.1;
+const d = {
+  now: () => t, wait: async (ms) => { if (ms > 0) t += ms / 1000; },
+  clip: () => ({ duration: 1, marks: {} }),
+  act: async (a) => { if (a.click) { log.push('click ' + a.click); baremo = 6.5; } },
+  fetchWs: async (jobs) => { log.push('fetch ' + jobs[0].fn); return [{ result: { baremo } }]; },
+  showWs: async (step, data) => log.push('show ' + data[0].result.baremo),
+  apply: async () => {}, still: async () => {},
+};
+await runSteps([{ say: 'a', click: 'button:Guardar' }, { say: 'b', ws: [{ fn: 'f', user: 'u', pick: ['baremo'] }] }], d);
+console.log(log.join(' | '));
+EOF
+is "ws step fetches after the earlier UI step" "$(node "$T/order.mjs")" "click button:Guardar | fetch f | show 6.5"
+ev "vass-video makes no ws call before recording" "! grep -q 'docker exec' '$S/vass-video'"
+
 # Redaction of Playwright errors.
 r=$(node -e "import('$S/shotlist.mjs').then(m=>console.log(m.redact(new Error('GET x cookie=a eyJhbGciOi.eyJzdWIi.c2ln wstoken=0123abcd&x=1\nheaders...'))))")
 ok_r=1; grep -q "eyJhbGciOi\|0123abcd\|headers" <<<"$r" && ok_r=0

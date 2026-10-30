@@ -1,6 +1,6 @@
 # VASS ticket antes/después video in Spanish from a shot list
 
-Ticket: T1430 · Last verified: 2026-10-29 by re-rendering the JIRA-29 antes video through the skill alone (122 s wall) and the offline selftest (34/34)
+Ticket: T1430 · Last verified: 2026-10-29 by re-rendering the JIRA-29 antes video through the skill alone (122 s wall) and the offline selftest (36/36)
 
 ## When to use
 Every VASS ticket ships a Spanish "antes" video (bug replicated) and a "después" video (fixed), per the owner rule in the
@@ -15,6 +15,7 @@ T1383/T1424/T1429 Playwright scripts already existed. The skill chains them inst
 |---|---|
 | `shotlist.mjs` | schema check, narration unit (one edge clip per step, `{hl}` cue), error redaction |
 | `ws.php` | runs one external function as a user inside the container; prints only the `pick` fields |
+| `runner.mjs` | the step loop; a step's `ws` call runs at its place in the order |
 | `shoot.mjs` | headless Chromium `--mute-audio`; logs in to the front by e-mail and the back as admin before recording; each step: action, wait, line starts, highlight/overlay at `{hl}`, still, hold for the clip |
 | `assemble.py` | trims the head to the first line, mixes clips at their marks, captions from word timings, `mv-encode h264-web --burn`, review gate, stills, `guion-<phase>.md`, `index.html` |
 | `vass-video` | the CLI: narration → ws → recording → assemble → `drop-link` |
@@ -40,6 +41,9 @@ antes steps without their overlays. See SKILL.md for the format. Every report gi
 ## Pitfalls (measured)
 - Speed: JIRA-29 antes took 396 s by hand in T1429 (explore → 3 recordings → link) and 122 s through the skill. Of that,
   narration was 19 s, ws 0 s, recording 69 s (real time: 54 s of clips plus page loads) and assemble 34 s, including mv-review.
+- `ws` steps used to run before recording, so they showed data from before the on-screen actions (T1432: baremo 9.1
+  shown instead of 6.5). Now each `ws` call runs at its place in the step order (`runner.mjs`), after the earlier UI steps.
+  It adds about 3 s per call before that step's line starts. The selftest goes red on the old order.
 - `mws` refuses the VASS env ("Vass and 4.5 are never touched"). `ws` steps use `docker exec -i <container> php -- '<job>' < ws.php`
   (6.6 s for 2 calls). `call_external_function` from CLI fails with "session has been logged out"; `ws.php` calls the class directly.
 - Playwright errors dump request headers with the session JWT and the Moodle wstoken (T1429 printed one). The scripts print only
