@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""pr-daily-branch — one integration branch per day with every open dev PR merged into it, for one review.
+
+  pr-daily-branch <clone> [--repo OWNER/NAME] [--base main] [--prefix liaison/] [--name BRANCH] [--test CMD] [--apply]
+
+Open PRs into --base whose head starts with --prefix (the daily branches `<prefix>diaria-*` excluded) are merged,
+oldest PR first, with `git merge --no-ff`, into BRANCH (default `<prefix>diaria-<UTC date>`), which starts from
+origin/BRANCH when it already exists, else from origin/<base>. The work happens in a detached worktree next to the
+clone (`<clone>-wt-<branch with / as ->`); the clone's own checkout is never touched.
+Without --apply: prints `would: …` and changes nothing. With --apply: fetch, merge, --test (shell, in the worktree),
+then a plain `git push origin HEAD:<branch>` (never forced) and the worktree is removed.
+Resumable: heads already in the branch are skipped; after a conflict, resolve and commit in the worktree, re-run.
+Exit 0 done or nothing to do; 2 usage; 3 merge conflict (worktree kept); 4 --test failed; 5 push refused.
+"""
+import argparse, datetime, json, os, re, subprocess, sys
+
+
+def git(wt, *args, check=True):
+    return subprocess.run(['git', '-C', wt, *args], capture_output=True, text=True, check=check)
+
+
+def repo_of(clone):
+    url = git(clone, 'remote', 'get-url', 'origin').stdout.strip()
+    m = re.search(r'github\.com[:/]([^/]+/[^/]+?)(?:\.git)?$', url)
+    return m.group(1) if m else None
+
+
+def open_prs(repo, base, prefix):
+    out = subprocess.run(['gh', 'pr', 'list', '--repo', repo, '--state', 'open', '--base', base, '--limit', '100',
+                          '--json', 'number,headRefName,title'], capture_output=True, text=True, check=True).stdout
+    prs = [p for p in json.loads(out)
+           if p['headRefName'].startswith(prefix) and not p['headRefName'].startswith(f'{prefix}diaria-')]
+    return sorted(prs, key=lambda p: p['number'])
+
+
+def worktree(clone, name, base):
+    wt = f"{os.path.abspath(clone).rstrip('/')}-wt-{name.replace('/', '-')}"
+    if os.path.isdir(wt):
+        if git(wt, 'rev-parse', '-q', '--verify', 'MERGE_HEAD', check=False).returncode == 0:
+            print(f'conflict: merge in progress in {wt}: resolve, commit, then re-run')
+            sys.exit(3)
+        return wt
+    remote = git(clone, 'rev-parse', '-q', '--verify', f'origin/{name}', check=False).returncode == 0
+    git(clone, 'worktree', 'add', '--detach', wt, f'origin/{name}' if remote else f'origin/{base}')
+    return wt
+
+
+def merge(wt, ref, message):
+    """Merges ref unless it is already in HEAD; returns 'in', 'merged' or the conflicted paths."""
+    if git(wt, 'merge-base', '--is-ancestor', ref, 'HEAD', check=False).returncode == 0:
+        return 'in'
+    if git(wt, 'merge', '--no-ff', '-m', message, ref, check=False).returncode == 0:
+        return 'merged'
+    return git(wt, 'diff', '--name-only', '--diff-filter=U').stdout.split()
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    ap.add_argument('clone')
+    ap.add_argument('--repo')
+    ap.add_argument('--base', default='main')
+    ap.add_argument('--prefix', default='liaison/')
+    ap.add_argument('--name')
+    ap.add_argument('--test')
+    ap.add_argument('--apply', action='store_true')
+    a = ap.parse_args()
+    repo = a.repo or repo_of(a.clone)
+    if not repo:
+        ap.error('origin is not a GitHub remote: pass --repo OWNER/NAME')
+    name = a.name or f"{a.prefix}diaria-{datetime.datetime.now(datetime.timezone.utc):%Y-%m-%d}"
+    if a.apply:
+        git(a.clone, 'fetch', '--prune', 'origin')
+    prs = open_prs(repo, a.base, a.prefix)
+    if not prs:
+        print(f'nothing: no open PR into {a.base} under {a.prefix}')
+        return 0
+    plan = ', '.join(f"#{p['number']} {p['headRefName']}" for p in prs)
+    if not a.apply:
+        print(f'would: {name} = origin/{a.base} + {plan}')
+        return 0
+    wt = worktree(a.clone, name, a.base)
+    steps = [(f'origin/{a.base}', f'Rama diaria: al día con {a.base}')]
+    steps += [(f"origin/{p['headRefName']}", f"Rama diaria: une #{p['number']} ({p['headRefName']})") for p in prs]
+    for ref, message in steps:
+        result = merge(wt, ref, message)
+        if isinstance(result, list):
+            print(f"conflict: {message}: {' '.join(result)}; resolve and commit in {wt}, then re-run with --apply")
+            return 3
+        print(f'{result}: {ref}')
+    if a.test and subprocess.run(a.test, shell=True, cwd=wt).returncode != 0:
+        print(f'tests failed: {a.test} (worktree kept: {wt})')
+        return 4
+    push = git(wt, 'push', 'origin', f'HEAD:refs/heads/{name}', check=False)
+    if push.returncode != 0:
+        print(f'push refused (never forced): {push.stderr.strip()}')
+        return 5
+    sha = git(wt, 'rev-parse', '--short', 'HEAD').stdout.strip()
+    if git(a.clone, 'worktree', 'remove', wt, check=False).returncode != 0:
+        print(f'worktree kept (not clean): {wt}')
+    print(f"pushed {name} {sha}: {' '.join('#' + str(p['number']) for p in prs)}")
+    return 0
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except subprocess.CalledProcessError as e:
+        sys.exit(f"failed: {' '.join(e.cmd)}: {(e.stderr or '').strip()}")

@@ -9,7 +9,8 @@
    "rules": {
     "language": "es: narration and every forum post in Spanish",
     "copyright": "no official Tiny Epic Dungeons text, art or stats (README copyright section)",
-    "pr_flow": "feature branch, push over SSH, gh pr create, link in the thread; never push main, never merge"
+    "pr_flow": "feature branch, push over SSH, gh pr create, link in the thread; never push main, never merge",
+    "daily": "the maintainer asked (2026-10-31): when a liaison PR has waited 2+ days unmerged, keep one daily branch with every open PR: `pr-daily-branch <clone> --test 'npm test' --apply` (liaison/diaria-<date>), open or keep its PR 'Rama diaria <date>', link it in the thread"
    },
    "skills": ["kokoro-narration", "motion-video", "concept-img", "frontend-design"],
    "po": null
