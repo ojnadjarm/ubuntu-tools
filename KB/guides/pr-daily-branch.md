@@ -36,6 +36,9 @@ Registry: `discord-liaison/projects.json` rule `daily` tells liaison workers whe
   ~/agents, the personal repos and ~/projects/collab: the first fixture run had 9 FAILs from refused commits in /tmp. The test
   drops the guards dir from the fixture's PATH (the fixture is the sandbox, FLEET.md §5.6) and proves with a selftest that origin is a
   local bare repo and `gh` is a fake.
+- Adding a PR to the day's branch later: re-run the same command (live 2026-10-31: #14 added, `in:` ×3, `merged:` ×1,
+  fast-forward push). Then retitle the daily PR with `gh api -X PATCH repos/<owner>/<repo>/pulls/<n> -f title=… -f body=…`:
+  `gh pr edit` failed on this repo with the "Projects (classic) is being deprecated" GraphQL error.
 - Merging the daily PR makes GitHub mark the PRs it contains as merged; merging those PRs one by one leaves the daily PR
   empty: close it.
 - New CLI in ~/agents/bin: run `~/agents/install.sh --links` or live sessions get "command not found".
