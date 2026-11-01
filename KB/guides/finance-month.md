@@ -1,6 +1,6 @@
 # Monthly finances: bank export (.xlsx) → categorised ledger → private spending page (T147)
 
-Ticket: T147, page redesign T149, page actions T150 · Last verified: 2026-10-20 by T846 audit (`finance-month --help`, paths, units active, 11 + 7 tests defined); 2026-10-01 by `tests/test_finance.py` (4/4) and `tests/test_web.py` (7/7) on synthetic fixtures and the September 2026 run
+Ticket: T147, page redesign T149, page actions T150, Pantry look T1440 · Last verified: 2026-11-01 by T1441 (`test_finance.py` 14/14, `test_web.py` 7/7, live page 200, woff2 fonts); by T1440 (`test_finance.py` 14/14, `test_web.py` 7/7, live page 200); 2026-10-20 by T846 audit (`finance-month --help`, paths, units active, 11 + 7 tests defined); 2026-10-01 by `tests/test_finance.py` (4/4) and `tests/test_web.py` (7/7) on synthetic fixtures and the September 2026 run
 (76 rows, 0 running-balance gaps, net matches closing − opening balance).
 
 ## When to use
@@ -84,6 +84,21 @@ python3 ~/.claude/skills/finance-month/tests/test_web.py
 - F54 (2026-10-03): `finance-web`'s threading lock did not cover the CLI; two writers kept 71 of 80 rows. Every
   `ops` mutation (and `finance-month build`) now holds `flock` on `~/finance/.lock`; tmp names are unique and
   `rules.add` rewrites `rules.yaml` atomically. Test: `test_concurrent_writers_keep_every_row`.
+
+- T1440 (Pantry look, owner pick C of T1439): fonts are files, so CSP needs `font-src 'self'` and `guard.static_name`
+  must whitelist `fonts/<Name>.woff2`; the build copies them to `site/fonts/` (the bwrap sandbox only sees `~/finance`).
+- T1440: `::first-letter` does nothing on an `inline-flex` label (icon first): capitalise category names in Python.
+- T1440: a trip starting the month before puts its coin-strip label at column 1; `white-space: nowrap` pushed it off
+  the left edge at 400-1366 px. Label spans 12 columns clamped inside the month and wraps.
+- T1440: one-offs and bills off the coins was not enough: a single flight or rent row dwarfs every day; categories
+  matching travel/flight/hotel stay off too (`analysis.BOOKINGS`), bills = repeating merchants + recurring categories.
+- T1440: Playwright `dialog[open]` screenshots right after `showModal()` catch the 0.22 s "lay" animation half
+  transparent; wait 500 ms. Native checkboxes on paper cards need `color-scheme: light` (the page is dark).
+- T1441: a 50-char trip name wrapped the postcard `h2` to 3 lines at 400-1920 px. The title carries `--n` (its length);
+  `font-size: clamp(18px, min(max(26px, h2 scale), 330cqi / var(--n)), 46px)` + `text-wrap: balance` + 2-line clamp
+  (full name in `title` and on the tapped card). Young Serif measured ~0.6 em a char.
+- T1441: fonts are Latin + € WOFF2 subsets (311 KB TTF → 90 KB). pip is missing here: `uvx --from fonttools --with brotli
+  pyftsubset X.ttf --unicodes=U+0020-007E,U+00A0-00FF,U+2013-203A,U+20AC,U+2190-2193 --layout-features='*' --flavor=woff2`.
 
 ## Links
 - Code: `~/.claude/skills/finance-month/`, CLI symlink `~/agents/bin/finance-month`
