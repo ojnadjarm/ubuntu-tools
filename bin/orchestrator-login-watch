@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Pushes the owner once per incident when the orchestrator loses its Claude login (T1436); timer every 5 min.
 # usage: orchestrator-login-watch [--dry-run]   (--dry-run prints the decision; no push, no state, no log)
-# Lost = `claude auth status` JSON says loggedIn false, or the last 40 lines of the orchestrator pane
-# ($ORCHESTRATOR_TMUX_SESSION, read only) end on a login-lost marker (not followed by "Login successful"). Re-pushes every OLW_RENOTIFY_H (6) h
+# Lost = `claude auth status` JSON says loggedIn false, or the newest state notice in the whole scrollback of the orchestrator
+# pane ($ORCHESTRATOR_TMUX_SESSION, read only) is the system notice "● Remote Control disconnected …" rather than
+# "/remote-control is active" or a /login "Login successful". Notices are matched by their styling, so quoted text in a reply
+# never counts. Re-pushes every OLW_RENOTIFY_H (6) h
 # while lost; a healthy run clears the incident. One log line per state change in OLW_LOG.
 # env: OLW_STATE, OLW_LOG, OLW_RENOTIFY_H, OLW_NOW (epoch, tests).
 case "${1:-}" in -h|--help) awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; exit 0 ;; esac
@@ -14,13 +16,18 @@ LOG=${OLW_LOG:-$HOME/agents/log/orchestrator-login-watch.log}
 STATE=${OLW_STATE:-$HOME/agents/log/orchestrator-login-watch.state}
 RENOTIFY=$(( ${OLW_RENOTIFY_H:-6} * 3600 ))
 NOW=${OLW_NOW:-$(date +%s)}
-LOST='run /login|OAuth token unavailable|login expired|Signed out of Claude|API Error: 401|Remote Control disconnected'
-BACK='Login successful|Remote Control credential renewed'
 
 auth=$(claude auth status --json 2>/dev/null | jq -r 'if .loggedIn == true then "ok" elif .loggedIn == false then "out" else "unknown" end' 2>/dev/null)
 auth=${auth:-unknown}
-hit=$(tmux capture-pane -pJt "=$SESSION:" 2>/dev/null | sed -e :a -e '/^[[:space:]]*$/{$d;N;ba' -e '}' | tail -n 40 \
-  | grep -oE "$LOST|$BACK" | tail -n1 | grep -vE "$BACK")
+# Newest notice wins: a system notice has its text in the bullet's colour; a reply's text is uncoloured.
+hit=$(tmux capture-pane -peJt "=$SESSION:" -S - 2>/dev/null | perl -ne '
+  (my $t = $_) =~ s/\e\[[0-9;]*m|\e\]8;[^\e\a]*(?:\e\\|\a)//g;
+  if (/\e\[38;5;(\d+)m●\e\[39m \e\[38;5;\1m(Remote Control disconnected[^\e]*?)\s*(?:\e|$)/) { $s = $2; $l = 0; next }
+  if (/^\s*\/remote-control is active\e\[[0-9;]*m · Continue here/) { $s = ""; $l = 0; next }
+  if ($t =~ /^❯(?:\s|\xC2\xA0)+\/login\s*$/) { $l = 1; next }
+  if ($l && $t =~ /⎿(?:\s|\xC2\xA0)+Login successful/) { $s = ""; $l = 0; next }
+  $l = 0 unless $t =~ /^\s*$/;
+  END { print $s }')
 
 why=
 [ "$auth" = out ] && why="claude auth status: logged out"
@@ -34,7 +41,9 @@ elif [ $((NOW - ${notified:-0})) -ge "$RENOTIFY" ]; then action=renotify
 else action=hold
 fi
 
-msg="Orchestrator lost its Claude login (${why}). Fix: SSH (Termux) → tmux attach -t $SESSION → /login"
+fix=/login
+[ "$auth" != out ] && [ -n "$hit" ] && [[ "$hit" != *login* && "$hit" != *OAuth* ]] && fix=/remote-control
+msg="Orchestrator lost login/Remote Control (${why:0:80}). Fix: SSH (Termux) → tmux attach -t $SESSION → $fix"
 if [ "$DRY" = 1 ]; then
   echo "orchestrator-login-watch: auth=$auth pane=${hit:-clean} incident=${since:-none} → $action"
   exit 0
