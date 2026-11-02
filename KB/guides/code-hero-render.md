@@ -1,7 +1,7 @@
 # Make an AAA hero shot or character loop 100% with code (Blender EEVEE by script, numpy audio, no AI image)
 
-Ticket: T1415, T1417, T1450 · Last verified: 2026-11-02 by T1450 (61 s narrated film, 1464 frames at 1600x1125, `templates/film/`); before: 2026-10-27 by T1417: the Mooblox logo island 5 s loop rendered with the skill
-(150 frames at 1080², 9.9 s/frame), `tests/loop.test.py` 5/5, `tests/audio.test.sh` 3/3, `tests/smoke.test.sh` 6/6, `tests/encode.test.sh` 2/2
+Ticket: T1415, T1417, T1450, T1451 · Last verified: 2026-11-02 by T1451 (T1450 film remixed: calm score, remux only); by T1450 (61 s narrated film, 1464 frames at 1600x1125, `templates/film/`); before: 2026-10-27 by T1417: the Mooblox logo island 5 s loop rendered with the skill
+(150 frames at 1080², 9.3 s/frame), `tests/loop.test.py` 5/5, `tests/audio.test.sh` 3/3, `tests/smoke.test.sh` 6/6, `tests/encode.test.sh` 2/2
 
 ## When to use
 The owner asks for art "made with code" or "without AI image models": a mascot or character loop, a logo hero loop, a Discord
@@ -19,21 +19,22 @@ T1415 wrote a bespoke bpy scene (lib3d, character, stage, anim, sound). T1417 me
 | `hero/look.py` | EEVEE + AgX settings, DOF camera, compositor (bloom, fog glow, dispersion, vignette), aspect sizes |
 | `hero/loop.py` | `cyc`/`win`/`kick` maths, `seam()` check, `Keyer`, keys 1..N+1 + LINEAR (Blender 5 channelbags) |
 | `hero/cli.py` | shared argv (`--stills --size --aspect --samples --raytrace --concept`), build → key → look → render |
-| `hero-render` | concepts / stills / draft / final passes behind the load gate, contact sheets |
+| `hero-render` | concepts / stills / draft / final passes behind the load gate, blender under `heavy run --ticket $HERO_TICKET` (nice if no heavy), contact sheets |
 | `hero-audio` | numpy pad with whole cycles per loop + cue events (tap, pluck, bloop, chirp, bell, whoosh) that wrap the seam |
 | `hero-encode` | levels pre-grade → mv-encode film finish → ≤ 25 MB (CRF steps) → poster, seam SSIM, mv-review, `--clean` |
 The shot script owns only `build(scene, a)`, `pose(t)` and `apply(ctx, p, key, t)`. Starter: `templates/shot.py`.
 
 ## Exact commands
 ```bash
-S=~/.claude/skills/code-hero-render; P=~/agent-work/motion/<T>/<name>; mkdir -p $P; cp $S/templates/shot.py $P/
+S=~/.claude/skills/code-hero-render; P=~/agent-work/motion/<T>/<name>; mkdir -p $P/audio; cp $S/templates/shot.py $P/
 $S/scripts/hero-render $P/shot.py $P concepts neon,dusk,studio      # Read $P/concepts/sheet.jpg, pick
 $S/scripts/hero-render $P/shot.py $P stills 1,40,90 -- --concept dusk
 $S/scripts/hero-render $P/shot.py $P draft -- --concept dusk        # Read $P/draft_sheet.jpg
+echo '[{"t": 0.5, "kind": "bell", "pan": 0, "f": 523}]' > $P/audio/cues.json   # hand-written cue list, format: hero-audio --help
 $S/scripts/hero-audio $P/audio/score.wav --seconds 5 --root 87.31 --mood major --cues $P/audio/cues.json
 $S/scripts/hero-render $P/shot.py $P final -- --concept dusk        # run in the background
 $S/scripts/hero-encode $P/frames/final ~/drop/<T>/<name>.mp4 --audio $P/audio/score.wav --clean
-python3 $S/tests/loop.test.py && bash $S/tests/audio.test.sh && bash $S/tests/smoke.test.sh && bash $S/tests/encode.test.sh
+python3 $S/tests/loop.test.py && bash $S/tests/audio.test.sh && bash $S/tests/smoke.test.sh && bash $S/tests/encode.test.sh && bash $S/tests/heavy.test.sh
 ```
 
 ## Film mode (T1450): a narrated 45-90 s short, not a loop
@@ -55,7 +56,7 @@ title, word-lit captions, end card) and `encode.sh` (open gate to 16:9 + 4:5, tw
   the mesh, so every object origin sat at the world origin. In T1417 the spinning blox orbited the origin and the seam popped
   (SSIM last→first 0.884 against 0.956 for a normal step). Fixed in `prims` (scale only); test `smoke.test.sh` covers it.
   After the fix: 0.950 against 0.948. `hero-encode` prints WARN when the seam is 0.03 under a normal step.
-- Final 1080² with 32 samples and raytrace: 10.4 s/frame (T1415, 300 frames in 52 min at 42 % CPU), 9.9 s/frame (T1417, 150 frames in 24.7 min). Draft
+- Final 1080² with 32 samples and raytrace: 10.4 s/frame (T1415, 300 frames in 52 min at 42 % CPU), 9.3 s/frame (T1417, 150 frames in 23.3 min). Draft
   480/8: 1.4-1.9 s/frame. The draft caught T1415's only animation fix (the wave was too small).
 - A 16-bit 1080² PNG is 5.8 MB, so 300 frames take 1.7 GB: run `hero-encode --clean`.
 - The T1415 encode was 3.5 Mbps (4.6 MB for 10 s), so Discord's 25 MB is never the limit at 1080². The CRF loop only matters
@@ -75,6 +76,9 @@ title, word-lit captions, end card) and `encode.sh` (open gate to 16:9 + 4:5, tw
   last→first against 0.960 first→second in the mp4, while the same frames as 720 px PNGs gave 0.9827 against 0.9823. T1415's
   0.914 against 0.924-0.932 was measured on its mp4. `hero-encode` compares f_N→f_1 with f_1→f_2 at 540 px before encoding.
 - Never play the audio on this machine: `hero-audio` prints LUFS and peak from ffmpeg ebur128 only.
+- Film sound (T1451): the T1450 bed sat 14.7 dB under the VO (worst line 5.4), with bells up to MIDI 110 and 187 cue events;
+  the owner heard it "too loudy and high pitch". The calm rule (bed >= 18 dB under speech, 7 kHz low-pass, bells <= MIDI 81,
+  one layer per beat, every Kokoro clip leveled to -16 LUFS) is in SKILL.md pitfalls and `templates/film/score.py`.
 
 ## Links
 - Skill: `~/.claude/skills/code-hero-render/` (SKILL.md, reference/recipe.md, scripts/, templates/shot.py, tests/)
