@@ -40,8 +40,11 @@ python3 audio/score.py && ./encode.sh ~/drop/<T> && ./deliver.sh ~/drop/<T>
 - Resized arrival maps must be multiplied by the resize factor; dividing made sprites fill their square patch.
 - Polar-remapped noise left a seam at ±π; a sum of `sin(k θ + φ)` is periodic.
 - Brush bristles drawn in a few clumps read as 3 parallel lines; even offsets with 1 % jitter read as one stroke.
-- Speed at 1920x1350 with 12 fork workers: 0.35 s/frame wall; 2040 frames in about 5 min; assets 16 s once.
+- Speed at 1920x1350 with 12 fork workers: 0.21 s/frame wall; 2040 frames in 420 s under `heavy`; assets 16 s once.
 - `mv-encode --finish film` halation tints a bright paper frame; use `--finish clean`.
+- Captions on ink: dark text on paper, light text (`CapL`) only while the fog is dark; T1461's light window ran 2 s past the
+  clearing and the caption vanished on pale paper. Unspoken words at alpha `&H8C` read as missing on paper; `&H60` reads.
+- mv-review flags a painted hold over 2 s as `frozen` (T1461: blank page 2.2 s, ensō 4.1 s, end card): intended, not a stall.
 
 ## Links
 - Code: `~/.claude/skills/ink-wash/scripts/ink.py`, film `~/agent-work/motion/T1461/film/`
