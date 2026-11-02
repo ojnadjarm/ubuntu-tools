@@ -38,6 +38,11 @@ python3 audio/score.py && ./encode.sh ~/drop/<T> && ./deliver.sh ~/drop/<T>
 - Close-ups magnify local-unit dots: trenails at a fixed local radius became blobs at 2.75x; use `2.4 / scale`.
 - Sparse panels read as clip art; a harbour town, amphorae, rope coils and tools on the wall made them read as Hergé.
 - Speed with 12 fork workers under `heavy`: one-panel views 0.05 s/frame wall, the 12-panel page view about 0.15 s/frame.
+- `mv-review` failed holds as "frozen" (3 holds of 2.3-4.4 s): a slow push-in on every panel view (zoom +3 % over 10 s from its draw
+  time) cleared them. A 0.95 s pan into a dark panel that inked on bright paper counted 4 flashes/s; a 1.25 s pan, inking on arrival
+  and a 1 s colour flood for that panel gave 3 (the limit; 4:5 gave 1).
+- `-color_trc`/`-color_primaries` were dropped on a PNG-sequence x264 encode (tags read bt709/unknown/unknown); add
+  `-bsf:v h264_metadata=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1`.
 - Sound (film rule): bed 27.2 dB under the VO on the worst line, bed above 6 kHz at -58.6 dB.
 
 ## Links
