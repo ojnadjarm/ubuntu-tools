@@ -1,6 +1,6 @@
 # Make an AAA hero shot or character loop 100% with code (Blender EEVEE by script, numpy audio, no AI image)
 
-Ticket: T1415, T1417 · Last verified: 2026-10-27 by T1417: the Mooblox logo island 5 s loop rendered with the skill
+Ticket: T1415, T1417, T1450 · Last verified: 2026-11-02 by T1450 (61 s narrated film, 1464 frames at 1600x1125, `templates/film/`); before: 2026-10-27 by T1417: the Mooblox logo island 5 s loop rendered with the skill
 (150 frames at 1080², 9.9 s/frame), `tests/loop.test.py` 5/5, `tests/audio.test.sh` 3/3, `tests/smoke.test.sh` 6/6, `tests/encode.test.sh` 2/2
 
 ## When to use
@@ -36,6 +36,11 @@ $S/scripts/hero-encode $P/frames/final ~/drop/<T>/<name>.mp4 --audio $P/audio/sc
 python3 $S/tests/loop.test.py && bash $S/tests/audio.test.sh && bash $S/tests/smoke.test.sh && bash $S/tests/encode.test.sh
 ```
 
+## Film mode (T1450): a narrated 45-90 s short, not a loop
+`templates/film/` has `shot.py` (the T1450 worked example: a spark on a mirror floor, 11 beats, one continuous camera), `make_timeline.py`
+(Kokoro marks to `timeline.json`), `audio/score.py` (numpy score on the same cues, FFT reverb, VO ducking), `make_subs.py` (libass
+title, word-lit captions, end card) and `encode.sh` (open gate to 16:9 + 4:5, two-pass finish then burn, -16 LUFS). Steps: SKILL.md "Film mode".
+
 ## Pitfalls (measured)
 - Blender 5.0.1 has no `Action.fcurves`. T1415's "set LINEAR" loop ran on an empty list and did nothing. Walk
   `action.layers → strips → channelbags → fcurves` (`loop.linearize`). The `keyframe_new_interpolation_type` pref does not
@@ -55,6 +60,17 @@ python3 $S/tests/loop.test.py && bash $S/tests/audio.test.sh && bash $S/tests/sm
 - A 16-bit 1080² PNG is 5.8 MB, so 300 frames take 1.7 GB: run `hero-encode --clean`.
 - The T1415 encode was 3.5 Mbps (4.6 MB for 10 s), so Discord's 25 MB is never the limit at 1080². The CRF loop only matters
   at 4K or 30 s+.
+- T1450 film: 1600x1125 open gate, 12 samples + raytrace + `--fast` = 3.4-4.2 s/frame (Iris Xe, `heavy run`); 1920x1350 at 24 samples
+  was 12 s/frame. CPU work beside the render (numpy, encodes) slows it ~15 %, because `heavy` gives Blender idle CPU weight.
+- Emitters keyed to 0 render black (rings, orbs), and area lights mirror as rectangles in the glossy floor from a high camera:
+  scale emitters to 0.0001 while off and fade the rig before a crane-up (T1450 storyboard pass).
+- The spot shaft (the one volume light) left at 35 % showed as a stack of grey 8 px blocks (`--fast` volume tiles) above the
+  horizon once the crane brought black sky into frame (T1450 final, frames 1205-1300): fade it to 0 before the horizon enters.
+- `bmesh.ops.create_icosphere` x 3200 into one bmesh took over 3 min; one icosphere tiled through `from_pydata` with point attributes takes under 1 s.
+- libass: no fontconfig family "Inter Display Bold" (fell back to Noto Sans): use `Inter Display` with Bold -1.
+- End card over a bright bokeh field read busy (lanterns through the letters): a layer-0 libass `\p1` black box,
+  `\1a&H48&\blur60`, behind the text fixes it with no re-render; only the caption pass reruns (T1450 `make_subs.py`).
+- `mv-encode --finish film` halation runs after `--burn` and puts a red halo on white captions: finish first, burn in a second pass.
 - Seam check: measure it on the lossless PNGs, not the mp4. The H.264 file biases it: T1417's final measured 0.923
   last→first against 0.960 first→second in the mp4, while the same frames as 720 px PNGs gave 0.9827 against 0.9823. T1415's
   0.914 against 0.924-0.932 was measured on its mp4. `hero-encode` compares f_N→f_1 with f_1→f_2 at 540 px before encoding.
