@@ -22,6 +22,7 @@ from .caps import Caps
 from .context import ContextRenderer, self_line
 from .history import History
 from .jobs import JobQueue
+from .placement import NOTE_MAX, homes, misplaced
 from .routing import BLOCKERS, MAX_ATTEMPTS, after_failure, route
 from .registry import Registry
 from .runlock import run_lock
@@ -34,7 +35,7 @@ GENERAL = '#general'
 ME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 USAGE = ('usage: discord-liaison tick [--dry-run]|wake|check|inbox|done|post <thread> [--image <file>] [--reply <message>] <text…>|'
          'react <thread> <message> <emoji>|art <prompt…>|escalate <message> <blocker> <what…>|map <thread> <project>|pr <project>|'
-         'job <message> <task…>|job-run <id>|status')
+         'job <message> [--project <id>] <task…>|job-run <id>|status')
 STALE = ('refused: stale: a newer message from the requester or the owner is waiting in this conversation; do not post '
          'or react. The triage run handles it (it may replace this job). End with `stale: <what you made>`.')
 FAILED = '{author}, no he podido terminarlo. Lo paso al orquestador y te respondo aquí.'
@@ -349,6 +350,11 @@ class App:
         if not await self.allowed(tid):
             print(f'refused: {tid} is neither a thread of the forum nor #general')
             return 3
+        home = misplaced(self.job_projects(), tid, self.state.threads, text, image)
+        if home:
+            print(f'refused: this job works on {", ".join(self.job_projects())}: post its result in its thread '
+                  f'{", ".join(home)}; here at most a one-line link note (<= {NOTE_MAX} chars, no image)')
+            return 3
         if await self.stale(tid):
             print(STALE)
             return 4
@@ -368,6 +374,11 @@ class App:
                 await self.rest.send(tid, part, reply=ref)
         print(f'posted {len(parts)} message(s){" with the image" if image else ""}')
         return 0
+
+    def job_projects(self):
+        """The projects this job (LIAISON_JOB) works on: named by the triage (`job --project`) or taken by `pr`."""
+        jid = self.env.get('LIAISON_JOB', '')
+        return (self.jobs.get(jid) or {}).get('projects', []) if jid else []
 
     async def stale(self, tid):
         """From a job (LIAISON_JOB) posting in its own thread: a newer message from the requester (or the owner, in the
@@ -487,10 +498,16 @@ class App:
     def job(self, args):
         """Hand a conversation to one background worker: anchored on its newest message, all its messages and images
         carried, a live job of the same conversation stopped and replaced (T1421)."""
+        projects = []
+        while args[1:2] == ['--project'] and len(args) > 3:
+            projects, args = projects + [args[2]], args[:1] + args[3:]
         m = next((m for m in self.state.inbox if args and m['id'] == args[0]), None)
         if len(args) < 2 or m is None:
-            print('usage: discord-liaison job <message-id from the inbox> "<task: deliverable, project, skills>"')
+            print('usage: discord-liaison job <message-id from the inbox> [--project <id>] "<task: deliverable, project, skills>"')
             return 2
+        if any(self.registry.get(p) is None for p in projects):
+            print(f'refused: unknown project; known: {", ".join(self.registry.projects)}')
+            return 3
         conv = [x for x in merge(self.state.inbox) if key(x) == key(m)]
         if conv[-1]['id'] != m['id']:
             print(f'note: {m["id"]} is not the newest message of its conversation; the job answers {conv[-1]["id"]}')
@@ -507,6 +524,9 @@ class App:
         files = [f for x in conv for f in self.images(x['id'])] + [
             f for j in old for f in j.get('files', []) if os.path.exists(f) and not f.endswith('.txt')]
         job = self.jobs.create(msgs[-1], ' '.join(args[1:]), files + ([ctx] if os.path.exists(ctx) else []), msgs)
+        if projects:
+            job['projects'] = projects
+            self.jobs.save(job)
         for j in old:
             self.jobs.finish(j, 'superseded', f'replaced by {job["id"]}')
         started, failed = self.jobs.dispatch(self.job_cap, self.launch)
@@ -575,7 +595,12 @@ class App:
                         f'project="{x.get("project", "")}" route="{x.get("route", "")}" author="{x["author"]}" '
                         f'owner="{str(x.get("owner", False)).lower()}" id="{x["id"]}" '
                         f'newest="{str(x["id"] == m["id"]).lower()}"{images}>\n{body}\n</message>\n')
-        text = (f'{head}\n{rules}\n## Your job\n\njob: {job["id"]}\nattempt: {job.get("attempt", 1)} of {MAX_ATTEMPTS}\n'
+        target = ''
+        if job.get('projects'):
+            target = (f'project: {", ".join(job["projects"])}; post the result only in its thread '
+                      f'{", ".join(homes(self.state.threads, job["projects"])) or "(none mapped: this one)"}; the request\'s '
+                      f'thread gets at most a one-line link note\n')
+        text = (f'{head}\n{rules}\n## Your job\n\njob: {job["id"]}\nattempt: {job.get("attempt", 1)} of {MAX_ATTEMPTS}\n{target}'
                 f'task (from the triage run): {job["task"]}\nrequest: the <message newest="true"> below, verbatim; the '
                 f'messages before it are the same conversation, oldest first: the newest wins, a correction replaces '
                 f'what it corrects\nmust: reply in Spanish only; anything audiovisual is AAA, shocking and breathtaking; '
@@ -652,6 +677,10 @@ class App:
         if not self.caps.take('pr'):
             print(f'refused: PR cap reached ({self.caps.limits["pr"]} per day); say so in the thread')
             return 3
+        job = self.jobs.get(self.env.get('LIAISON_JOB', '')) if self.env.get('LIAISON_JOB') else None
+        if job is not None and args[0] not in job.get('projects', []):
+            job['projects'] = job.get('projects', []) + [args[0]]
+            self.jobs.save(job)
         p = self.registry.get(args[0])
         print(f'ok: one PR on {p["repo"]} (clone {p["clone"]}); rules: {p.get("rules")}; skills: {p.get("skills")}')
         return 0

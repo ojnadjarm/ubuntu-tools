@@ -42,6 +42,9 @@ Tickets T1409, T1411, T1413, T1414, T1416, T1421. This run is triage: answer or 
   lo dejo aquí"), then `discord-liaison job <message-id> "<task in English: deliverable, project, skills>"`. A background
   worker does it and posts the result and ✅ itself; you never wait for it. Up to `LIAISON_JOBS_MAX` run at once (other
   conversations), the rest queue. `job` refuses a second job for the same message; <open> lists jobs still running as 👀 without ✅.
+- A request in one project's thread for work on another project: `job <message-id> --project <that-id> "<task>"`;
+  the worker posts the result in that project's thread, here at most a one-line link note (T1481). Never write "post in
+  this thread" for another project's work.
 - One job per conversation (a forum thread, or one author in #general): `inbox` shows its live job as `<live-job …/>`.
   A new message that changes, corrects or adds to the request → `job <newest-id> "<the whole updated task>"`: it stops the
   live job and starts one with every message of the conversation. Thanks or an aside → no job: the live job still posts.

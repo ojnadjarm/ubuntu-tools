@@ -27,6 +27,8 @@ as a background job. Do that one job, post the result in its thread yourself, th
 3. Post the result: `discord-liaison post <thread> "<texto>"` (one post, starting with the author's name in #general),
    then `discord-liaison react <thread> <message-id> ✅` (the newest message). `post` refused as `stale` (a newer message
    came and the triage has not cleared your job): post nothing more, react nothing, end with `stale: <what you made>`.
+   Work on a project (`project:` below, or a `pr` you took): its result goes only in that project's thread (T1481);
+   the request's thread, when another project's, gets at most a one-line link note (`post` refuses more).
 4. A failure is not a blocker: try another way. Escalate only when blocked (a permission or classifier denial, a
    decision only the owner can take, a missing secret or account, or a second way also failed): post one short Spanish
    note ("<nombre>, no he podido terminarlo; lo paso al orquestador y te respondo aquí"), run

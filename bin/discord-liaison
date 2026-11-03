@@ -3,7 +3,7 @@
 # `job` hands a request to a background worker (`job-run`, a transient user unit; LIAISON_JOBS_MAX at once, T1414);
 # one live job per conversation, `wake` runs on the bot's nudge (discord-liaison-wake.path, T1421);
 # a project with a `po` in projects.json: its messages go to that PO (po-ask), its outbox/discord/ replies are posted (T1412).
-U='usage: discord-liaison tick [--dry-run]|wake|check|inbox|done|post <thread> [--image <file>] [--reply <message>] <text…>|react <thread> <message> <emoji>|art <prompt…>|escalate <message> <blocker> <what…>|map <thread> <project>|pr <project>|job <message> <task…>|job-run <id>|status|test'
+U='usage: discord-liaison tick [--dry-run]|wake|check|inbox|done|post <thread> [--image <file>] [--reply <message>] <text…>|react <thread> <message> <emoji>|art <prompt…>|escalate <message> <blocker> <what…>|map <thread> <project>|pr <project>|job <message> [--project <id>] <task…>|job-run <id>|status|test'
 case "${1:-}" in
   -h|--help) echo "$U"; exit 0 ;;
   -*) echo "discord-liaison: unknown option: $1" >&2; echo "$U" >&2; exit 2 ;;
