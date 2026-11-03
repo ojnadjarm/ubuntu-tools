@@ -1,6 +1,6 @@
 # Make an AAA hero shot or character loop 100% with code (Blender EEVEE by script, numpy audio, no AI image)
 
-Ticket: T1415, T1417, T1450, T1451 · Last verified: 2026-11-02 by T1451 (T1450 film remixed: calm score, remux only); by T1450 (61 s narrated film, 1464 frames at 1600x1125, `templates/film/`); before: 2026-10-27 by T1417: the Mooblox logo island 5 s loop rendered with the skill
+Ticket: T1415, T1417, T1450, T1451, T1469 · Last verified: 2026-11-03 by T1469 (9 film scores made steady, `scripts/film-modcheck` 9/9 PASS, 18 cuts remuxed, video md5 unchanged); 2026-11-02 by T1451 (T1450 film remixed: calm score, remux only); by T1450 (61 s narrated film, 1464 frames at 1600x1125, `templates/film/`); before: 2026-10-27 by T1417: the Mooblox logo island 5 s loop rendered with the skill
 (150 frames at 1080², 9.3 s/frame), `tests/loop.test.py` 5/5, `tests/audio.test.sh` 3/3, `tests/smoke.test.sh` 6/6, `tests/encode.test.sh` 2/2
 
 ## When to use
@@ -79,6 +79,15 @@ title, word-lit captions, end card) and `encode.sh` (open gate to 16:9 + 4:5, tw
 - Film sound (T1451): the T1450 bed sat 14.7 dB under the VO (worst line 5.4), with bells up to MIDI 110 and 187 cue events;
   the owner heard it "too loudy and high pitch". The calm rule (bed >= 18 dB under speech, 7 kHz low-pass, bells <= MIDI 81,
   one layer per beat, every Kokoro clip leveled to -16 LUFS) is in SKILL.md pitfalls and `templates/film/score.py`.
+- Film wobble (T1469): the owner heard "wou wou wou" in all 9 night films. Measured on the bed (pad through the film's own
+  reverb/tanh/EQ, events muted) as the worst 0.3-10 Hz sinusoidal modulation in 4 s windows: 4.3-10.8 dB peak-to-trough, mono
+  worst in 9/9. Three causes in `pad()`: L/R partials detuned ±0.0016-0.0018·√h (mono fold-down beats; removing it alone took
+  T1450 mono 4.3 -> 1.9 dB), a vibrato multiplied into the phase (`f * vib * (t + t0)`: pitch drift grows with t; T1450's
+  `0.02 * m % 5` made it ~1 Hz and ±600 cents by 30 s; removing it alone took L/R 2.0/2.3 -> 0.9/0.8 dB) and a 7-9 s swell.
+  All three out: 0.27-0.89 dB. Keep partials identical in L and R, no vibrato, swell or drone tremolo; check with
+  `scripts/film-modcheck audio/score.py`. Measure envelope as sqrt(low-passed x**2): 10 ms RMS blocks alias the 98-100 Hz
+  difference tones of a chord to 2 Hz and a Hilbert envelope shows 1.8 Hz second-order beats that are not in the power.
+  `hero-audio` (loops) still detunes L/R ±0.1-0.4 Hz.
 
 ## Links
 - Skill: `~/.claude/skills/code-hero-render/` (SKILL.md, reference/recipe.md, scripts/, templates/shot.py, tests/)
