@@ -52,6 +52,19 @@ class SwrTick(unittest.TestCase):
                 computes.append(cache._cache["slow"]["tried"] != before)
         self.assertEqual(computes, [True] * 6)
 
+    def test_refreshes_when_tried_lands_1ms_after_tick(self):
+        clock, calls = [1000.0], []
+        main = threading.main_thread()
+        blocks = {"b": (lambda: calls.append(1), 0)}
+        fake = lambda: clock[0] + (0 if threading.current_thread() is main else 0.001)
+        with mock.patch.object(cache.time, "time", fake):
+            for tick in range(6):
+                clock[0] = 1000.0 + tick * cache.TTL
+                cache.swr(blocks)
+                while cache._refreshing:
+                    time.sleep(0.01)
+        self.assertEqual(len(calls), 6)
+
 
 class SwrBlockTtl(unittest.TestCase):
     def setUp(self):

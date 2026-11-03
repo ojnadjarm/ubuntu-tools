@@ -75,7 +75,7 @@ def blank(text):
                 i += 1
             continue
         if text[i:i + 3] == '$((' or (two == '((' and (i == 0 or text[i - 1] in ' \t\n;')):
-            d, j = 0, i
+            d, j = 0, i + (c == "$")
             while j < n:
                 d += {'(': 1, ')': -1}.get(text[j], 0)
                 j += 1
@@ -129,7 +129,9 @@ def shell_words(text):
         toks = text[m.end() if m else 0:].split('\n', 1)[0].split()
         while toks and re.match(r'^\w+=\S*$', toks[0]):
             a = toks.pop(0)
-            if re.match(r'^\w+=\([^)]*$', a):
+            if '$(' in a:
+                toks = []
+            elif re.match(r'^\w+=\([^)]*$', a):
                 while toks and ')' not in toks.pop(0):
                     pass
         while toks and toks[0] in PREFIX:

@@ -24,7 +24,7 @@ if '-h' in sys.argv[1:] or '--help' in sys.argv[1:]:
     print(USAGE)
     sys.exit(0)
 
-import glob, json, os, re, subprocess, time
+import datetime, glob, json, os, re, subprocess, time
 
 HOME = os.path.expanduser('~')
 FIX = os.environ.get('PC_FIXTURE', '')
@@ -103,6 +103,10 @@ def units(since):
 
 
 def iso(s):
+    try:
+        return int(datetime.datetime.fromisoformat(s).timestamp())
+    except ValueError:
+        pass
     try:
         return int(time.mktime(time.strptime(s[:19], '%Y-%m-%dT%H:%M:%S')))
     except ValueError:

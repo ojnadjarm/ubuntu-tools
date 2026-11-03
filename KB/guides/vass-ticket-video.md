@@ -1,6 +1,6 @@
 # VASS ticket antes/después video in Spanish from a shot list
 
-Ticket: T1430 · Last verified: 2026-10-29 by re-rendering the JIRA-29 antes video through the skill alone (122 s wall) and the offline selftest (36/36)
+Ticket: T1430 (id reused: the 10-30 T1430 is orchestrator-update-restart, brief `T1430-orchestrator-auto-update-restart.md`; this one is `briefs/T1430-report.md`) · Last verified: 2026-10-29 by re-rendering the JIRA-29 antes video through the skill alone (122 s wall) and the offline selftest (36/36)
 
 ## When to use
 Every VASS ticket ships a Spanish "antes" video (bug replicated) and a "después" video (fixed), per the owner rule in the
@@ -55,7 +55,7 @@ antes steps without their overlays. See SKILL.md for the format. Every report gi
 - Playwright's video starts at page creation, so the first 3.8 s were a "Cargando perfil…" spinner. Assemble trims to 0.4 s
   before the first line.
 - Local editions are all past `secondcalldate`, so results cards say "último Simulacro"; seed Simulacro attempts and say so.
-- Only `en` is installed locally: back pages show English strings (T1427). Live classes need `$LIVECLASS_JWT_SECRET` in config.php;
+- Only `en` is installed locally: back pages show English strings (T1427). Never say so in the narration or captions (owner 2026-10-30). Live classes need `$LIVECLASS_JWT_SECRET` in config.php;
   Vimeo does not play headless, so use a YouTube URL (T1424).
 - 2026-10-29: the VASS `config.php` was mode 600 after a restore from backup (ctime 09:55). Moodle pages died with "Permission
   denied" while `login/token.php` and the WS still answered from opcache, so the front kept working. The back login now fails

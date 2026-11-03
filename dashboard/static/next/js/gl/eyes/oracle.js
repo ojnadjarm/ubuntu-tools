@@ -4,15 +4,6 @@ import { HEAD } from "../glsl.js";
 const fs = `${HEAD}
 const float RL = 1.085, CC = 0.355, RC = 0.715, DL = 0.866, DI = 0.80, IR = 0.52;
 
-vec2 lidsAt(vec3 n){
-  float a = atan(n.x, n.z), e = asin(clamp(n.y, -1.0, 1.0));
-  float s = max(1.0 - a * a, 0.0);
-  float eu = uLid.x * pow(s, 0.62) - 0.03 * (1.0 - s), el = -uLid.y * pow(s, 0.95);
-  float m = mix(el, eu, 0.22);
-  eu = mix(eu, m, uLid.z); el = mix(el, m, uLid.z);
-  return vec2(eu - e, e - el);
-}
-
 vec3 sclera(vec3 p, vec3 rd, mat3 B, float occ){
   vec3 n = normalize(p), q = n * B;
   float lim = q.z;

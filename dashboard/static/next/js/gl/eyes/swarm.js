@@ -1,15 +1,5 @@
 /* The Swarm: the eye as a cloud of katakana — iris rings turning with activity, sclera dust, lids as glyph sheets, the data rings and the halo as glyph orbits; it assembles from scatter (uForm) and blurs by point size. */
-import { PAL, EYECAM } from "../glsl.js";
-
-const LIDS = `
-vec2 lidsAt(vec3 n){
-  float a = atan(n.x, n.z), e = asin(clamp(n.y, -1.0, 1.0));
-  float s = max(1.0 - a * a, 0.0);
-  float eu = uLid.x * pow(s, 0.62) - 0.03 * (1.0 - s), el = -uLid.y * pow(s, 0.95);
-  float m = mix(el, eu, 0.22);
-  eu = mix(eu, m, uLid.z); el = mix(el, m, uLid.z);
-  return vec2(eu - e, e - el);
-}`;
+import { PAL, EYECAM, LIDS, BASIS } from "../glsl.js";
 
 const vs = `precision highp float;
 in vec3 position;
@@ -22,7 +12,7 @@ const float D = 7.0, RL = 1.085, IR = 0.52, DI = 0.8, PI2 = 6.2831853;
 const vec3 HN = vec3(0.0, 0.9536, 0.3011);
 float h11(float p){ p = fract(p * 0.1031); p *= p + 33.33; p *= p + p; return fract(p); }
 ${LIDS}
-mat3 basis(vec3 g){ vec3 r = normalize(cross(vec3(0.0, 1.0, 0.0), g)); return mat3(r, cross(g, r), g); }
+${BASIS}
 void main(){
   float kind = meta.x, seed = meta.y, size = meta.w, a = 1.0, dof = -1.0, flick = step(0.6, h11(seed * 9.0));
   vec3 p, col;
@@ -68,11 +58,8 @@ void main(){
     col = vec3(0.32, 0.5, 0.44) * 0.3 * (0.4 + 0.6 * smoothstep(0.1, 0.8, position.z)) * (1.0 - 0.5 * uSleep);
   } else {
     float az = position.x, d = position.y;
-    float s = max(1.0 - az * az, 0.0);
-    float eu = uLid.x * pow(s, 0.62) - 0.03 * (1.0 - s), el = -uLid.y * pow(s, 0.95);
-    float m = mix(el, eu, 0.22);
-    eu = mix(eu, m, uLid.z); el = mix(el, m, uLid.z);
-    float e = kind < 2.5 ? eu + d : el - d;
+    vec2 l = lidEdges(az);
+    float e = kind < 2.5 ? l.x + d : l.y - d;
     p = (RL + 0.02 * d) * vec3(cos(e) * sin(az), sin(e), cos(e) * cos(az));
     float edge = exp(-d / 0.012);
     col = mix(VIO * 0.16, mix(MINT, uFlash.rgb, uFlash.a) * (0.8 + 0.7 * uAct + 3.0 * uFlash.a), edge) * exp(-d / 0.2) * smoothstep(1.0, 0.6, abs(az));

@@ -40,13 +40,16 @@ def iso(v):
 
 
 def calendar(unit):
-    """Raw OnCalendar / OnUnitActiveSec of a user timer, drop-in schedule.conf last."""
-    cal = ""
+    """Raw OnCalendar lines of a user timer joined with ' + ' (else last OnUnitActiveSec / OnBootSec), drop-in schedule.conf last."""
+    cals, mono = [], ""
     for p in (os.path.join(UNIT_DIR, unit), os.path.join(UNIT_DIR, unit + ".d", "schedule.conf")):
         if os.path.exists(p):
-            m = re.findall(r"^On(?:Calendar|UnitActiveSec|BootSec)=(.+)$", open(p).read(), re.M)
-            cal = m[-1] if m else cal
-    return cal
+            for k, v in re.findall(r"^On(Calendar|UnitActiveSec|BootSec)=(.*)$", open(p).read(), re.M):
+                if k == "Calendar":
+                    cals = cals + [v] if v else []
+                elif v:
+                    mono = v
+    return " + ".join(cals) or mono
 
 
 def facts(specs, unit_props):

@@ -608,7 +608,7 @@ class App:
                     'agent-exec --prompt-file {prompt} --system-file {preamble} --model {model} --cwd {home} '
                     '--name discord-liaison-job --timeout {timeout} --raw-out {logs}/{id}.json --meta-out {logs}/{id}.meta.json '
                     '>>{logs}/{id}.log 2>&1')).format(**q)
-                rc = subprocess.call(cmd, shell=True, stdin=subprocess.DEVNULL, env=dict(os.environ, LIAISON_JOB=job['id']))
+                rc = subprocess.call(cmd, shell=True, stdin=subprocess.DEVNULL, env=dict(os.environ, LIAISON_JOB=job['id'], EFFORT=self.env.get('LIAISON_JOB_EFFORT', 'xhigh')))
                 job = self.jobs.get(job['id'])
                 if job['status'] == 'superseded':
                     print(f'job {job["id"]} superseded')

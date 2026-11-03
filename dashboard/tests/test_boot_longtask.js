@@ -1,14 +1,8 @@
 // Boot without a tap freeze: at 400 px, warm load, no long task over 120 ms in the first 3 s while the WebGL stage builds; fixture API, no live services.
 // Run: node tests/test_boot_longtask.js   (PWC = path to playwright-core; LT_W = viewport width, default 400; LT_DEBUG=1 prints the long tasks)
 "use strict";
-const fs = require("fs"), path = require("path"), http = require("http"), assert = require("assert");
-const pwc = () => {
-  const root = require("child_process").execFileSync("npm", ["root", "-g"], { encoding: "utf8", env: { ...process.env, PATH: path.dirname(process.execPath) + path.delimiter + process.env.PATH } }).trim();
-  return [path.join(root, "@playwright/mcp/node_modules/playwright-core"), path.join(root, "playwright-core")].find((d) => fs.existsSync(d));
-};
-const { chromium } = require(process.env.PWC || pwc());
-const STATIC = path.join(__dirname, "..", "static");
-const TYPES = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".json": "application/json", ".svg": "image/svg+xml" };
+const assert = require("assert");
+const { chromium, serveStatic } = require("./lib/browser");
 const MAX_MS = 120, WINDOW_MS = 3000, W = +(process.env.LT_W || 400);
 const now = new Date().toISOString();
 const STATUS = {
@@ -19,14 +13,7 @@ const STATUS = {
   verdict: { ok: false, problems: [], asks: [], needs: [{ kind: "need", t: now, text: "fixture need" }] },
 };
 
-const srv = http.createServer((req, res) => {
-  const u = req.url.split("?")[0];
-  if (u.startsWith("/api/")) { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify(u === "/api/status" ? STATUS : u === "/api/agents" ? { agents: [], roster: [] } : {})); }
-  const file = u === "/" ? path.join(STATIC, "next", "index.html") : path.join(STATIC, u.replace(/^\/static\//, ""));
-  if (!file.startsWith(STATIC) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); return res.end(); }
-  res.writeHead(200, { "Content-Type": TYPES[path.extname(file)] || "application/octet-stream", "Cache-Control": "max-age=600" });
-  fs.createReadStream(file).pipe(res);
-});
+const srv = serveStatic((u) => u === "/api/status" ? STATUS : undefined, { "Cache-Control": "max-age=600" });
 
 (async () => {
   await new Promise((ok) => srv.listen(0, "127.0.0.1", ok));

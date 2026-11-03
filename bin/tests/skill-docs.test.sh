@@ -12,7 +12,7 @@ miss() {
     var) re="${name}([^A-Z0-9_]|\$)" ;;
     *) re="(^|[^A-Za-z0-9_-])${name}([^A-Za-z0-9_-]|\$)" ;;
   esac
-  if [[ -n $line ]]; then grep -F -- "$line" "$doc" | grep -qE -- "$re"; else grep -qE -- "$re" "$doc"; fi && return 1
+  if [[ -n $line ]]; then grep -F -- "$line" "$doc" | grep -E -- "$re" > /dev/null; else grep -qE -- "$re" "$doc"; fi && return 1
   echo "MISSING $kind $name in ${doc#"$SK"/}"
 }
 

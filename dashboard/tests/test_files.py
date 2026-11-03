@@ -38,6 +38,16 @@ class Files(unittest.TestCase):
         self.assertEqual(server.ls_dir("../")[0], 404)
         self.assertEqual(server.ls_dir("escdir")[0], 404)
 
+    def test_drop_counts_folders(self):
+        from dash.services import files
+        open(os.path.join(self.root, "one.txt"), "w").write("abc")
+        os.utime(os.path.join(self.root, "sub", "n.md"), (2e9, 2e9))
+        out = files.drop()
+        self.assertEqual(out["count"], server.ls_dir("")[1]["count"])
+        self.assertEqual(out["bytes"], 3)
+        sub = next(f for f in out["files"] if f["name"] == "sub")
+        self.assertEqual((sub["kind"], sub["mtime"], out["files"][0]["name"]), ("folder", 2e9, "sub"))
+
     def test_ls_route_decodes_once(self):
         os.makedirs(os.path.join(self.root, "a%41b"))
         open(os.path.join(self.root, "a%41b", "x.txt"), "w").write("x")

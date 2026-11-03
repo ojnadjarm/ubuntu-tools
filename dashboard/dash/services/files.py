@@ -67,20 +67,24 @@ def ls_dir(raw):
     return 200, {"path": rel, "items": items, "count": len(items), "bytes": total}
 
 
+def _newest(p, t):
+    """Newest mtime of a folder and everything under it."""
+    for r, ds, fs in os.walk(p):
+        for n in ds + fs:
+            try:
+                t = max(t, os.lstat(os.path.join(r, n)).st_mtime)
+            except OSError:
+                pass
+    return t
+
+
 def drop():
-    """The drop folder's contents, newest first."""
-    out = []
-    total = 0
-    if os.path.isdir(DROP):
-        for n in os.listdir(DROP):
-            p = os.path.join(DROP, n)
-            if os.path.isfile(p) and not n.startswith("."):
-                st = os.stat(p)
-                total += st.st_size
-                out.append({"name": n, "bytes": st.st_size, "mtime": st.st_mtime,
-                            "kind": KINDS.get(os.path.splitext(n)[1].lower(), "file")})
+    """The drop folder's top-level files and folders (folder mtime = newest inside), newest first."""
+    d = ls_dir("")[1]
+    out = [{"name": i["name"], "bytes": i["bytes"], "kind": i["kind"],
+            "mtime": _newest(os.path.join(DROP, i["name"]), i["mtime"]) if i["dir"] else i["mtime"]} for i in d.get("items", [])]
     out.sort(key=lambda f: f["mtime"], reverse=True)
-    return {"url": "http://%s:8070/" % PUBLIC_HOST, "files": out, "count": len(out), "bytes": total}
+    return {"url": "http://%s:8070/" % PUBLIC_HOST, "files": out, "count": len(out), "bytes": d.get("bytes", 0)}
 
 
 _EXCERPTS = {}
@@ -157,23 +161,6 @@ def trash(*paths):
     except subprocess.TimeoutExpired:
         return "trash timed out after %d s" % t
     return (r.stderr.strip() or "trash failed") if r.returncode else None
-
-
-def delete_drop(raw):
-    """Trash one ~/drop file or folder: (status, payload); 400 for anything outside, hidden or missing."""
-    hit = fs_path(urllib.parse.quote(raw)) if isinstance(raw, str) else None
-    if not hit or not hit[1]:
-        return 400, {"error": "bad path"}
-    root = os.path.realpath(DROP)
-    parent = os.path.realpath(os.path.join(root, os.path.dirname(hit[1])))
-    path = os.path.join(parent, os.path.basename(hit[1]))
-    if parent != root and not parent.startswith(root + os.sep) or not os.path.lexists(path):
-        return 400, {"error": "not found"}
-    err = trash(path)
-    if err:
-        return 500, {"error": err}
-    forget("drop")
-    return 200, {"ok": True, "trashed": hit[1]}
 
 
 PROTECTED = [os.path.join(HOME, p) for p in ("agent-work/owner", "Documents", "moodle-envs", "agents/backups", "agents/secrets")]
@@ -335,10 +322,10 @@ def journal(h, verb, paths, done):
 def files_delete_route(h, path):
     body = h.body_json(4096, {})
     raw = body.get("path") if isinstance(body, dict) else None
-    code, out = delete_drop(raw)
+    code, out = delete_many([raw])
     if isinstance(raw, str):
-        journal(h, "delete", raw, [out["trashed"]] if code == 200 else [])
-    h.json(out, code)
+        journal(h, "delete", raw, out.get("trashed", []))
+    h.json({"ok": True, "trashed": out["trashed"][0]} if code == 200 else out, code)
 
 
 @route("POST", "/api/files/delete-many")
@@ -483,17 +470,20 @@ def drop_file(h, raw, query):
         size, etag = st.st_size, '"%x-%x"' % (st.st_mtime_ns, st.st_size)
         ctype = MIME.get(ext, "application/octet-stream")
         start, end = 0, size - 1
-        m = re.match(r"bytes=(\d*)-(\d*)$", h.headers.get("Range", ""))
+        m = size and re.match(r"bytes=(\d*)-(\d*)$", h.headers.get("Range", ""))
         if not m and h.fresh(etag):
             h.send_response(304)
             h.send_header("ETag", etag)
             h.send_header("Cache-Control", "no-cache")
             return h.end_headers()
-        if m and size and (m.group(1) or m.group(2)):
+        if m and (m.group(1) or m.group(2)):
             start = int(m.group(1)) if m.group(1) else max(0, size - int(m.group(2)))
             end = min(int(m.group(2)), size - 1) if m.group(2) and m.group(1) else size - 1
             if start > end:
-                return h.send(416, b"", "text/plain")
+                h.send_response(416)
+                h.send_header("Content-Range", "bytes */%d" % size)
+                h.send_header("Content-Length", "0")
+                return h.end_headers()
         h.send_response(206 if m else 200)
         h.send_header("Content-Type", ctype)
         h.send_header("Accept-Ranges", "bytes")
@@ -509,7 +499,7 @@ def drop_file(h, raw, query):
         h.send_header("ETag", etag)
         h.send_header("Cache-Control", "no-cache")
         h.end_headers()
-        if getattr(h, "head_only", False):
+        if getattr(h, "head_only", False) or not size:
             return
         h.wfile.flush()
         with open(full, "rb") as f:

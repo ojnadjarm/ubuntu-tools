@@ -8,7 +8,7 @@ set with DOF, bloom and volumetric light. Not for flat pixel maps (T703), nor pa
 
 ## The path we took
 - Sprites: the /pixel-avatar SDF tracer (`core.py`, `rig.py`, `hands.py`, vendored into the project's `arte/hd2d/pixel/`),
-  one module per character with `FRAMES`, `pose(f)`, `build(f)`; `sprite.py` writes albedo, emissive mask and normal map per frame
+  one spec per character in `pixel/personajes/` (guide hd2d-sprite-character); `sprite.py` writes albedo, emissive mask and normal map per frame
   at any yaw (3/4 battle view: yaw -0.6 facing left, 0.55 facing right).
 - Set: one bpy script (`cripta_hd2d.py`), self-contained (no ~/.claude import, so the repo builds anywhere).
   Each sprite frame is a vertical plane, image node `Closest`, alpha DITHERED (casts shadows); only one plane per sprite is
@@ -16,12 +16,12 @@ set with DOF, bloom and volumetric light. Not for flat pixel maps (T703), nor pa
 - Pixel scale: plane metres per sprite px = PX * depth * (36 / lens) / 1920, so every sprite lands on the same 3.5 screen px grid.
 - Look: procedural ashlar (Brick texture on two object axes + noise), emissive moon window as backlight, spot "god ray"
   with volume 7 through a fog cube (density 0.03), torch billboards with looping noise, tilt-shift = compositor band blur.
-- Post: `dialogo.py` (Pillow) for the translucent dialogue box, `sonido.py` numpy ambience, ffmpeg loop x3.
+- Post: `dialogo.py` (Pillow) for the translucent dialogue box, `../gamelyn/sonido.py` numpy ambience, `musica.py` numpy music mixed under it, ffmpeg loop.
 
 ## Exact commands
 ```bash
 cd <repo>/arte/hd2d/pixel
-python3 sprite.py gamelyn ../sprites/gamelyn --yaw -0.6 --sheet /tmp/g.png     # 8 frames in ~3 s
+python3 sprite.py personajes/gamelyn.py ../sprites/gamelyn --yaw -0.6 --sheet /tmp/g.png     # 8 frames in ~42 s
 cd .. && blender -b --factory-startup -P cripta_hd2d.py -- sprites /tmp/s_ --size 540 --samples 16 --vtile 8 --vsamples 48 --rays 1 --stills 40
 blender -b --factory-startup -P cripta_hd2d.py -- sprites frames/f_ --size 1080 --samples 20 --vtile 8 --vsamples 48 --rays 1
 python3 dialogo.py frames frames_dlg
@@ -38,7 +38,7 @@ python3 dialogo.py frames frames_dlg
   a vertical blade covers the face.
 - EEVEE "Shadow buffer full (2377/2048)" with ~10 shadowed lights: `eevee.shadow_pool_size = "1024"`.
 - Blender world volume did not show light shafts; a fog cube with Principled Volume did.
-- Detail upgrade without a bigger hero (T1414 v2): raise the module's `SCALE` (1.12 -> 1.6, `sprite.py` reads it), widen the
+- Detail upgrade without a bigger hero (T1414 v2): raise the spec's `scale` (1.12 -> 1.6), widen the
   cell (128 -> 176) and shrink the plane pixel by the same ratio (`HERO_PX = 1.12 / 1.6`): 61 -> 87 px tall, same screen size.
 - Gold bands on every plate read as stripes, not trim: one band per piece, plus 1 px rivets (`m.dots`) and stacked
   hollow lames (ellipsoid minus an offset ellipsoid) for pauldrons and tassets. 8-9 step ramps give the specular room.
@@ -52,14 +52,14 @@ python3 dialogo.py frames frames_dlg
   eyes as `pat()` stamps (near eye 5x5, far eye 4x4). Lift the head 0.5 so the chin clears the gorget.
 - A sword as one round cone plus a white line reads as a light-saber stick: a flat diamond-section SDF (taper, then a
   6-unit point) with a darker fuller and light edges as texture bands; in the scene the emissive bloom eats most of it.
-- Alternative poses as tiny modules that import the hero and replace `gamelyn.pose` (`build` reads the module global):
-  `sprite.py gamelyn_estocada ...`; a raised guard by the head crosses the face again, a level thrust does not.
+- Alternative poses are stances (`stances.py` + `SPEC['pose']`, guide hd2d-sprite-character); a raised guard by the head
+  crosses the face again, a level thrust does not.
 - A cape cone started at the neck with a round cap of radius 8 reaches head height: from behind it "hangs from the head" (owner, v3).
   Start it 3 units under the neck, top radius 6.6, and clip it flat at `neck - 1.4` (hidden under gorget and pauldrons); add clasps.
 - An emissive 'ice' blade blooms to white in the scene: a blue steel ramp with `kind: metal` (bias 0.8, fuller -1.8, edges 1.6)
   keeps it bluish and detailed; runes as dots with emission 0.5.
-- "The blade glows light blue" (owner, v5): metal ramp topping at `#a8e0ff` + mask `glow` 0.55 + emission = albedo squared x 3 in
-  `hero_mat`; a near-white top step or an albedo x (2.2, 3.2, 4.0) tint blooms white. Characters now come from /hd2d-sprite-character specs.
+- "The blade glows light blue" (owner, v5): recipe in guide hd2d-sprite-character (glowing blade pitfall); the scene side is `hero_mat`.
+  Characters now come from /hd2d-sprite-character specs.
 - Whole party (T1414 v5): `PARTY` table in `cripta_hd2d.py` (sprite dir, cell, feet, accent light); 4 heroes + ghost at 1080p, 20 samples = 43 s/frame.
 - FFBE battle idles read by a wide low base (feet ~13 units apart along the facing, crouch 1.2, lean 2.4) and a blade that leaves
   the silhouette toward the enemy (dir (-0.66, 0.62, 0.42) at yaw -0.6, hilt at the waist); a hilt behind the head hides both hands.

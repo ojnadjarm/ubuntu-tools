@@ -14,8 +14,10 @@ Stock netdata with the T26 config; every change through `pc conf put … --reloa
 | go.d `logind` | go.d.conf | on → off | GetAll/ListSessions/ListUsers ~1/s: 31 s/h inside systemd-logind |
 | go.d `systemdunits` | go.d.conf | on → off | 207 charts + a PID1 D-Bus poll; `pc status`/`pc doctor` already report failed units |
 | `[db] update every` | /etc/netdata/netdata.conf | 5 → 10 | global cadence (proc, go.d, journal plugin follow it) |
-| `[plugin:apps] update every` | netdata.conf | 10 → 30 | 1,074 charts |
-| `[plugin:cgroups] update every` | netdata.conf | 5 → 30 | 550 charts (11 containers + systemd) |
+| `[plugin:apps] update every` | netdata.conf | 10 → 30 → 60 (T1104) | 1,074 charts; moot since apps.plugin is off |
+| `[plugins] apps` | netdata.conf | yes → no (T1122) | apps.plugin: 1,032 of 2,018 charts, nothing in the fleet reads them |
+| `[plugin:cgroups] update every` | netdata.conf | 5 → 30 → 60 (T1104) | 550 charts (11 containers + systemd) |
+| `[plugins] systemd-journal` | netdata.conf | yes → no | systemd-journal plugin off |
 | `[web] web server threads` | netdata.conf | 16 (= CPUs) → 2 | each idle thread costs ~30 ms per 50 s; one owner, tailnet dashboard |
 | `[plugin:cgroups] check for new cgroups every` | netdata.conf | 30 → 60 | discovery + `cgroup-name` lookups; a new container shows up within 60 s |
 | `[statsd] enabled` | netdata.conf | yes → no | nothing sends to :8125; STATSD_IN cost ~40 ms per 50 s |
@@ -25,8 +27,12 @@ Result: netdata + logind per 50 s 2,191 ms → 431–627 ms (5 windows, load 0.5
 The step before statsd/threads/discovery measured 651–908 ms (810 and 858 ms at load 0.5): above the 800 ms CHECK.
 
 ## Rollback (newest first)
-The three netdata.conf ids chain: each undo restores the bytes before it, so undo newest first, one at a time.
+The seven netdata.conf ids and three go.d.conf ids each chain per file: each undo restores the bytes before it, so undo newest first, one at a time (`pc undo list` shows the ledger).
 ```bash
+pc undo dmamz3o3xzg5 --apply   # netdata.conf: apps.plugin off, transient scopes and veth/br-* skipped (T1122)
+pc undo dmaltvzlauqw --apply   # netdata.conf: apps + cgroups update every 30 → 60 (T1104)
+pc undo dmakich674t0 --apply   # go.d.conf: default_run no, only docker (T1084); undoing it re-polls Vass mongo/redis
+pc undo dmakicc62j1g --apply   # netdata.conf: systemd-journal plugin off
 pc undo dmaeq22z7rs7 --apply   # netdata.conf: web threads 2, cgroups discovery 60, statsd off
 pc undo dmaehiyoyser --apply   # netdata.conf: db 10 s, web threads 4, idlejitter off
 pc undo dmaebxd2w10v --apply   # go.d.conf: systemdunits off
@@ -34,7 +40,7 @@ pc undo dmae5w0vppse --apply   # netdata.conf: first trim
 pc undo dmae23pc9mma --apply   # netdata.conf: T26 original
 pc undo dmae218vpvtw --apply   # go.d.conf: intelgpu + logind off (removes the file)
 ```
-Out of order, `pc undo` refuses ("is now sha:…, not the ledger's … use --force"); `--force` on an older id also drops every later netdata.conf change.
+Out of order, `pc undo` refuses ("is now sha:…, not the ledger's … use --force"); `--force` on an older id also drops every later change to that file. On go.d.conf never `--force` past dmakich674t0: it restores `default_run: yes`, which brings back the Vass polling below.
 
 ## Exact commands
 ```bash

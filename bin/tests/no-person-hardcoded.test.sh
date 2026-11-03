@@ -34,10 +34,13 @@ hits() { # hits <label> <ere> [file list]
 # Intentional samples, one `file:line` each with its reason.
 ALLOW_HOME='
 discord-bot/tests/test_bot.py:45 redaction sample the bot must scrub from replies
-discord-bot/tests/test_bot.py:213 redaction sample the bot must scrub from replies
-discord-bot/tests/test_bot.py:215 asserts the redaction sample is gone
-discord-bot/tests/test_bot.py:256 asserts the redaction sample is gone
+discord-bot/tests/test_bot.py:223 redaction sample the bot must scrub from replies
+discord-bot/tests/test_bot.py:225 asserts the redaction sample is gone
+discord-bot/tests/test_bot.py:272 asserts the redaction sample is gone
 bin/tests/auditlib.test.py:53 fake error text for the audit error classifier
+discord-liaison/tests/test_liaison.py:217 redaction sample the liaison must scrub from posts
+discord-liaison/tests/test_liaison.py:223 asserts the redaction sample is gone
+discord-liaison/tests/test_liaison.py:494 redaction sample the liaison must scrub from posts
 '
 HOME_RE='/home/[A-Za-z0-9._-]+'
 

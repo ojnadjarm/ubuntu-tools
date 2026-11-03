@@ -19,3 +19,16 @@ class Perf(unittest.TestCase):
     def test_costly_endpoints_are_timed(self):
         for path in ("/api/agents", "/classic"):
             self.assertIn(path, perf.PATHS)
+
+    def test_cold_times_each_block_compute_without_cache(self):
+        import time
+        slept = []
+        real_sleep, time.sleep = time.sleep, lambda s: slept.append(s)
+        try:
+            ms = perf.cold({"slow": (lambda: real_sleep(0.2), {}), "fast": (lambda: 1, 0, 60)})
+        finally:
+            time.sleep = real_sleep
+        self.assertEqual(set(ms), {"slow", "fast"})
+        self.assertGreaterEqual(ms["slow"], 200)
+        self.assertLess(ms["fast"], 50)
+        self.assertEqual(slept, [])

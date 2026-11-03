@@ -1,6 +1,6 @@
 """human_cal turns the real OnCalendar forms on this machine into words."""
 import json, os, sys, tempfile, unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dash.services import system
@@ -27,6 +27,9 @@ class HumanCal(unittest.TestCase):
 
     def test_parked(self):
         self.assertEqual(self.cal("2099-01-01 00:00:00"), "parked")
+
+    def test_several_schedules(self):
+        self.assertEqual(self.cal("*-*-* 03:30 + hourly"), "daily 03:30 + hourly")
 
     def test_unknown_stays_raw(self):
         self.assertEqual(self.cal("weekly"), "weekly")
@@ -77,6 +80,18 @@ class Since24h(unittest.TestCase):
             with mock.patch.object(system, "HOME", h):
                 ev = system.since_24h()
         self.assertEqual([e["text"] for e in ev], ["hello\n2026-10-15"])
+
+    def test_newest_first_across_offset_change(self):
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        early = (now - timedelta(hours=2)).astimezone(timezone(timedelta(hours=2))).isoformat()
+        late = (now - timedelta(hours=1)).astimezone(timezone(timedelta(hours=1))).isoformat()
+        with tempfile.TemporaryDirectory() as h:
+            os.makedirs(os.path.join(h, "agents/log"))
+            with open(os.path.join(h, "agents/log/notify.log"), "w") as f:
+                f.write("%s\tx\tdefault\tearly\n%s\tx\tdefault\tlate\n" % (early, late))
+            with mock.patch.object(system, "HOME", h):
+                ev = system.since_24h()
+        self.assertEqual([e["text"] for e in ev], ["late", "early"])
 
     def sentinel(self, lines):
         now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()

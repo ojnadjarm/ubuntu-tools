@@ -44,5 +44,5 @@ $S/make-scene <dir> ~/drop/<T>                                     # still.png, 
 
 ## Links
 - Code: ~/.claude/skills/pixel-scene/ (SKILL.md, scripts/, templates/, reference/scene-spec.md)
-- Tests: ~/.claude/skills/pixel-scene/tests/selftest.sh
+- Tests: ~/.claude/skills/pixel-scene/tests/selftest.sh, tests/loop-rc.test.sh (loop.py exits non-zero when the encoder fails)
 - Design / results: ~/agent-work/research/2026-10-19/T709/shrine/, ~/drop/T709/; sources T703, T707, T704 under ~/agent-work/research/2026-10-19/

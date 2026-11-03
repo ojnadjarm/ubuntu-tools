@@ -3,8 +3,9 @@
 Ticket: T394, T955 · Last verified: 2026-10-20 by T955 fix (push-ready.test.sh 41/41, 9 rule mutations each fail a case; `--untracked ~/agents` 536/536 fleet-needed); 2026-10-20 by T955 (`push-ready ~/agents` READY); 2026-10-20 by T846 audit (usage, defaults in source, no gitleaks/trufflehog/detect-secrets on PATH); 2026-10-18 by `bash ~/agents/bin/tests/push-ready.test.sh` and three real-repo runs
 
 ## When to use
-The owner asks "can I push?" or a ticket ends in a repo he pushes. Read-only: it never runs a git write
-command and never pushes; the push stays his. Not for ~/agents tests (use `no-machine-values.test.sh`).
+Before any `git push`, agent or owner, in a personal repo (agents push them since 2026-10-23, AGENTS.md §5.1),
+or when the owner asks "can I push?". Read-only: it never runs a git write command and never pushes; the push is
+a separate step. Not for ~/agents tests (use `no-machine-values.test.sh`).
 
 ## The path we took
 Survey: no secrets scanner on the machine (gitleaks, trufflehog, detect-secrets absent; toolbox.md lists none);

@@ -1,7 +1,7 @@
 """Project tiles: one registry row per long-running project, its environment read live and read-only."""
 import html, os, re, shutil, threading
 from datetime import datetime
-from dash.cache import TTL, cached, forget
+from dash.cache import cached, forget
 from dash.env import HOME, PUBLIC_HOST, run
 from dash.routes import route
 from dash.services import sites
@@ -64,8 +64,13 @@ def fenced(lines):
     return out
 
 
+def is_done(state):
+    """True when "done" is one of the comma-separated state words before any "(" note."""
+    return "done" in [w.strip("` ").lower() for w in re.split(r"\s*\(", state)[0].split(",")]
+
+
 def open_tickets(path):
-    """Tickets ("## " sections) whose state is not just "done"; None when the file is missing."""
+    """Tickets ("## " sections) whose state words do not include "done"; None when the file is missing."""
     try:
         lines = open(path).read().splitlines()
     except OSError:
@@ -77,19 +82,20 @@ def open_tickets(path):
         if line.startswith("## "):
             states.append("")
         elif states and not states[-1] and STATE.match(line):
-            states[-1] = STATE.match(line).group(1).strip("` ").lower()
-    return sum(s != "done" for s in states)
+            states[-1] = STATE.match(line).group(1).strip("` ")
+    return sum(not is_done(s) for s in states)
 
 
 def ticket_sections(lines):
     """(id, start, end, done) per "## " ticket of lines; id is the heading's first word, end the next h1/h2 or EOF."""
-    heads = [i for i, (line, code) in enumerate(zip(lines, fenced(lines))) if not code and SECTION.match(line)] + [len(lines)]
+    code = fenced(lines)
+    heads = [i for i, line in enumerate(lines) if not code[i] and SECTION.match(line)] + [len(lines)]
     out = []
     for i, end in zip(heads, heads[1:]):
         if lines[i].startswith("## "):
-            st = next((STATE.match(l) for l in lines[i + 1:end] if STATE.match(l)), None)
+            st = next((STATE.match(lines[j]) for j in range(i + 1, end) if not code[j] and STATE.match(lines[j])), None)
             out.append((lines[i][3:].split()[0] if lines[i][3:].split() else "", i, end,
-                        bool(st) and st.group(1).strip("` ").lower() == "done"))
+                        bool(st) and is_done(st.group(1))))
     return out
 
 
@@ -129,13 +135,15 @@ def edit_ticket(key, tid, action):
                 if lines and not lines[-1].endswith("\n"):
                     lines[-1] += "\n"
         else:
-            i = next((j for j in range(start + 1, end) if STATE.match(lines[j])), None)
+            code = fenced(lines)
+            i = next((j for j in range(start + 1, end) if not code[j] and STATE.match(lines[j])), None)
             if i is None:
                 gap = [] if start + 1 < len(lines) and not lines[start + 1].strip() else ["\n"]
                 lines[start + 1:start + 1] = ["\n", "- **State:** done\n"] + gap
             else:
                 m = STATE.match(lines[i])
-                lines[i] = lines[i][:m.start(1)] + "done" + lines[i][m.end(1):]
+                note = re.search(r"\s*\(", m.group(1))
+                lines[i] = lines[i][:m.start(1)] + "done" + lines[i][m.start(1) + note.start() if note else m.end(1):]
         backup(path)
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
@@ -231,5 +239,5 @@ def project(key, p, docker):
 
 def projects():
     """Every registered project as a tile record; docker comes from the status cycle's cached block."""
-    docker = cached("docker", TTL, sites.docker_ps, [])
+    docker = cached("docker", float("inf"), sites.docker_ps, [])
     return [project(k, p, docker) for k, p in PROJECTS.items()]

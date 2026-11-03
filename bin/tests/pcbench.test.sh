@@ -171,7 +171,7 @@ printf '# toolbox\n| kernel | x |\n'  > "$SRC/KB/toolbox.md"
 printf '# pc-cli\n'                   > "$SRC/KB/pc-cli.md"
 printf '# skill\n'                    > "$SRC/skills/desktop/SKILL.md"
 printf '# readme\n'                   > "$SRC/README-pc-control.md"
-pbf() { PCBENCH_SRC="$SRC" PCBENCH_SRC_SKILL="$SRC/skills/desktop" PCBENCH_ARMS="$ARMS" "$PB" "$@"; }
+pbf() { PCBENCH_LOCK="$ARMS/.lock" PCBENCH_SRC="$SRC" PCBENCH_SRC_SKILL="$SRC/skills/desktop" PCBENCH_ARMS="$ARMS" "$PB" "$@"; }
 
 t "arm build --arm both builds from the fixture tree"
 out=$(pbf arm build --arm both 2>&1)
@@ -198,13 +198,13 @@ rout=$(pbf run --task D01 --arm both --dry-run --force 2>&1); rc=$?
 
 t "--allow-stale-arm passes the staleness gate"
 # proven by what it dies of next: the run lock, held here, not the stale arm.
-exec 9>"$HOME/agents/bench/.lock"
+exec 9>"$ARMS/.lock"
 if flock -n 9; then
   lout=$(pbf run --task D01 --arm new --dry-run --force --allow-stale-arm 2>&1)
   flock -u 9
   case $lout in *"another pcbench run holds"*) ok;; *) no "$(echo "$lout" | tr '\n' ' ')";; esac
 else
-  no "could not take bench/.lock for the test"
+  no "could not take the fixture lock for the test"
 fi
 exec 9>&-
 

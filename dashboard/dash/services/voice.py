@@ -1,5 +1,5 @@
 """Voice corpus: prompts, the error floor, word diff, drill verdicts, clips in and out, stats."""
-import glob, gzip, hashlib, json, os, re, shutil, subprocess, sys, urllib.parse
+import glob, gzip, hashlib, json, os, re, select, shutil, subprocess, sys, threading, urllib.parse
 from datetime import datetime
 from dash.cache import lock
 from dash.env import HERE, HOME
@@ -180,14 +180,56 @@ def pattern_verdict(prompt, heard, tokens=None, timestamps=None, machine=()):
     return out
 
 
+SERVE = ["systemd-run", "--user", "--quiet", "--wait", "--pipe", "--collect", "-p", "MemoryMax=2G",
+         NODE, os.path.join(HERE, "transcribe.js"), "--serve"]
+_srv = None
+_srv_lock = threading.Lock()
+
+
+def stop_server():
+    """Close the transcribe server's stdin so it exits, and reap it."""
+    global _srv
+    p, _srv = _srv, None
+    if p:
+        try:
+            p.stdin.close()
+            p.wait(timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            p.kill()
+            p.wait()
+
+
+def _ask(wav, timeout):
+    """One wav path to the server (started when absent or exited); its reply line, '' once it has exited."""
+    global _srv
+    if _srv is None or _srv.poll() is not None:
+        stop_server()
+        _srv = subprocess.Popen(SERVE, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    _srv.stdin.write(wav + "\n")
+    _srv.stdin.flush()
+    if not select.select([_srv.stdout], [], [], timeout)[0]:
+        raise subprocess.TimeoutExpired(SERVE, timeout)
+    return _srv.stdout.readline()
+
+
 def transcribe(wav):
-    """Run transcribe.js in its own transient unit (the model needs ~1.1 GB, the dashboard unit is capped); None if it fails."""
-    cmd = ["systemd-run", "--user", "--quiet", "--wait", "--pipe", "--collect", "-p", "MemoryMax=2G",
-           NODE, os.path.join(HERE, "transcribe.js"), wav]
-    try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
-        return json.loads(out.stdout) if out.returncode == 0 and out.stdout.strip() else None
-    except (subprocess.SubprocessError, ValueError, OSError):
+    """Decode via `transcribe.js --serve` in its own transient unit (~1.1 GB model, loaded once, exits after 120 s idle); None if it fails."""
+    with _srv_lock:
+        for _ in range(2):
+            try:
+                line = _ask(wav, 90)
+            except subprocess.TimeoutExpired:
+                stop_server()
+                return None
+            except OSError:
+                line = ""
+            if line:
+                try:
+                    out = json.loads(line)
+                except ValueError:
+                    return None
+                return None if "error" in out else out
+            stop_server()
         return None
 
 

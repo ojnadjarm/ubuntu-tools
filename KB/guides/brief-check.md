@@ -16,7 +16,7 @@ before handback. Not a test runner: the CHECK line names the real test or probe.
 - Gate (T419): agent transcript (`agent_transcript_path`, else `<session>/subagents/**/agent-<id>.jsonl`) → first
   user prompt → first `…briefs/T<nn>….md` path → brief has a `CHECK:` line → `check.json` missing, not JSON or not
   `"ok": true` = exit 2 with the `agent-verify` command on stderr. Passes (0): `stop_hook_active`, no brief path, no
-  CHECK line, brief missing, any hook error (fail open). Wiring is owner-go: owner-todo "subagent-stop-gate" block.
+  CHECK line, brief missing, any hook error (fail open). Live since 2026-10-19 (owner-todo 18).
 
 ## Exact commands
 ```bash

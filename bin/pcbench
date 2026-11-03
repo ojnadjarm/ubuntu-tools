@@ -16,7 +16,7 @@ ARMS = os.environ.get("PCBENCH_ARMS", os.path.join(BENCH, "arms"))
 ARM_SCRIPTS = os.path.join(BENCH, "arms")   # build-*.sh / exec.sh live with the bench, not the arm
 RUNS = os.path.join(BENCH, "runs")
 HELPERS = os.path.join(HOME, "agents", "bin", "pcbench.d")
-LOCK = os.path.join(BENCH, ".lock")
+LOCK = os.environ.get("PCBENCH_LOCK", os.path.join(BENCH, ".lock"))
 PREAMBLE = os.path.join(BENCH, "TRIAL-PREAMBLE.md")
 FP_FIELDS = ["default_sink", "null_modules", "power_profile", "failed_user_units", "docker",
              "monitors", "tailscale", "ufw", "tmux_claude", "pc_mode", "win_list",

@@ -16,5 +16,5 @@ Triggers: plan's own numbers, endpoint /usage reads, lesson build, orchestrator.
    - `source cache` = the live read failed; `stale` = older than 30 min. Say so, never present it as live.
 4. Never print or copy the OAuth token; the script reads it and never echoes it.
 
-Guide with pitfalls: `~/agents/KB/guides/plan-usage.md`. Hourly pulse: `orchestrator-pulse.timer`, log
+Guide with pitfalls: `~/agents/KB/guides/plan-usage.md`. Pulse: `pulse-5h-reset.timer` after each 5-hour reset (hourly `orchestrator-pulse.timer` off since 10-18), log
 `~/agents/log/pulse.log`, rules in `~/agents/KB/orchestrator.md` "Pulse".

@@ -214,7 +214,7 @@ run_one() {
   cmd=(env "PATH=$p" "SUDO_SHIM_TEST=$rel" CI_UNITS= ${tmp:+"TMPDIR=$tmp"} ${rlog:+"PC_TEST_ROOT_LOG=$rlog"} "${cmd[@]}")
   # Own scope per file: the cgroup OOM killer hits only this file; the wrapper marks an oom_kill for the report.
   local unit=rt-$BASHPID-$RANDOM.scope
-  [[ -n $scoped ]] && cmd=(systemd-run --user --scope -q --unit="$unit" --slice=agents.slice --expand-environment=no -p "MemoryMax=$mem" -p MemorySwapMax=0 -p OOMPolicy=continue
+  [[ -n $scoped ]] && cmd=(systemd-run --user --scope -q --slice=agents.slice --unit="$unit" --expand-environment=no -p "MemoryMax=$mem" -p MemorySwapMax=0 -p OOMPolicy=continue
     bash -c '"${@:3}"; rc=$?; c=/sys/fs/cgroup$(sed -n "s/^0:://p" /proc/self/cgroup); [ -e "$c/memory.events" ] && grep -qE "^oom_kill [1-9]" "$c/memory.events" && : >"$1"; awk "/^usage_usec/ { print \$2 / 1e6 }" "$c/cpu.stat" >"$2" 2>/dev/null; exit $rc'
     _ "$logs/${rel//\//__}.oom" "$logs/${rel//\//__}.cpu" "${cmd[@]}")
   t0=$(date +%s.%N)

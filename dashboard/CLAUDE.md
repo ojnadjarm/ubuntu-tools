@@ -11,7 +11,7 @@ dash/env.py          machine constants, run() for CLIs
 dash/http.py         Handler: route lookup, one-write send() (TCP_NODELAY, gzip ≥ 1 KB, ETag/304), pages, /static
 dash/routes.py       @route(method, path, prefix=False) registry
 dash/cache.py        cached() TTL memo; swr() stale-while-revalidate, blocks refreshed in parallel
-dash/services/       system, sites, files, thumbs, voice, state, agents — each registers its own routes
+dash/services/       system, sites, files, thumbs, voice, state, agents, projects, runners, todo, reports — each registers its own routes
 index.html           classic shell, served at /classic; loads static/js/app.js (module)
 static/eye.css       the one design system: tokens, chrome, @component blocks, responsive
 static/css/          machine.css
@@ -20,7 +20,7 @@ static/js/app.js     boot + lazy import() of the active screen
 static/js/screens/   sites, services, files, docs, machine, style — each exports render(grid, data)
 static/js/ui/        lightbox, head, copy, spark
 static/next/         the front end served at / (/next redirects): index.html, next.css, voice.css, js/{app,screens,store,stage,shapes,avatar,verdict}.js, js/screens/ (record.js, pron.js = Voice section), js/voice/{common,recorder}.js, js/gl/ (eye.js picks eyes/swarm.js), vendor/three.sub.js
-tools/perf.py        endpoint timings (5× keep-alive + 5× fresh, raw/gzip bytes); --cold waits 31 s
+tools/perf.py        endpoint timings (5× keep-alive + 5× fresh, raw/gzip bytes); --cold times each /api/status block computed without the cache
 tests/               pytest + node test_pronunciation_page.js (registerHooks maps /static/ to the tree), test_next.js
 ```
 

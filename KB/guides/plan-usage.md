@@ -1,6 +1,6 @@
-# Plan limits: 5-hour and weekly used %, and the hourly orchestrator pulse
+# Plan limits: 5-hour and weekly used %, and the orchestrator pulse after each 5-hour reset
 
-Ticket: T170 · Last verified: 2026-10-20 (T846: `plan-usage --help`, source constants, pulse markers, timer state) · 2026-10-10 (pulse ghost-text fix, fixture test) and 2026-10-03 by live `plan-usage` (week 55% = owner's reading), `--check` at 50/55/80, pulse fixtures on a private tmux socket
+Ticket: T170 · Last verified: 2026-10-24 (pulse-5h-reset source, timer, pulse.log) · 2026-10-20 (T846: `plan-usage --help`, source constants, pulse markers, timer state) · 2026-10-10 (pulse ghost-text fix, fixture test) and 2026-10-03 by live `plan-usage` (week 55% = owner's reading), `--check` at 50/55/80, pulse fixtures on a private tmux socket
 
 ## When to use
 Before deciding how much work to start (lesson builds, swarms, big tests): read the plan meter instead of asking
@@ -13,7 +13,11 @@ the owner. Not for token counts per session (those are in `~/.claude/projects` t
   endpoint `/usage` reads: the plan's own percentage, no tokens spent.
 - Architecture: source adapter `fetch()` (one endpoint → `{5h, week, scoped}`), cache `~/agents/state/usage.json`
   (last good reading, fallback on any failure, `stale` > 30 min), CLI `plan-usage` (line / `--json` / `--check`),
-  timer `orchestrator-pulse.timer` (disabled since 2026-10-18, owner: "not doing anything"; roster row in `KB/orchestrator.md`) → `orchestrator-pulse` (guarded `tmux send-keys`, echo then Enter). Each piece has one job; the pulse never reads the meter itself, the orchestrator does.
+  pulse `orchestrator-pulse` (guarded `tmux send-keys`, echo then Enter; skips at `plan-usage --check 80` ≥ 80%).
+  Its hourly `orchestrator-pulse.timer` is disabled since 2026-10-18 (owner: "not doing anything"); the live trigger is
+  `pulse-5h-reset.timer` (every 10 min at :02) → `pulse-5h-reset`: reads `resets_at` from `plan-usage --json`, keeps it
+  in `~/agents/state/pulse-5h-reset`, and once that time passes runs one pulse with `PULSE_FLOOR_H=0` (no
+  empty-queue skip). Measured: 7 fires 10-23 01:02 to 10-24 02:02, one per 5 h. Roster rows in `KB/orchestrator.md`.
 
 ## Exact commands
 ```bash
@@ -21,7 +25,8 @@ plan-usage                 # 5h 1% (resets 16:10) · week 55% (resets Tue 06 Oct
 plan-usage --json
 plan-usage --check 80      # exit 1 at/above 80% in either window, 2 = no reading
 plan-usage --cached        # no network
-systemctl --user list-timers orchestrator-pulse.timer
+systemctl --user list-timers pulse-5h-reset.timer orchestrator-pulse.timer
+cat ~/agents/state/pulse-5h-reset   # next 5h reset the pulse waits for
 tail ~/agents/log/pulse.log
 ```
 
@@ -45,6 +50,6 @@ tail ~/agents/log/pulse.log
   empty'. The emptiness check uses `capture-pane -e` and drops dim runs first; test `bin/tests/orchestrator-pulse.test.sh`.
 
 ## Links
-- Code: `~/agents/bin/plan-usage`, `~/agents/bin/orchestrator-pulse`, `~/.config/systemd/user/orchestrator-pulse.{service,timer}`
+- Code: `~/agents/bin/plan-usage`, `~/agents/bin/orchestrator-pulse`, `~/agents/bin/pulse-5h-reset`, `~/.config/systemd/user/{orchestrator-pulse,pulse-5h-reset}.{service,timer}`
 - Skill: `~/.claude/skills/plan-usage/SKILL.md`
-- Kill switch: `agents-stop` stops `orchestrator-pulse.{service,timer}`; `agents-start` follows the roster row in `KB/orchestrator.md` (disabled since 2026-10-18)
+- Kill switch: `agents-stop` stops `orchestrator-pulse.{service,timer}` but not `pulse-5h-reset.timer` (not in its list; stop it by hand); `agents-start` follows the roster rows in `KB/orchestrator.md`

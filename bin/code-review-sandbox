@@ -68,7 +68,7 @@ refuse() { printf '#!/bin/sh\necho "refused %s $*" >>"%s"\necho "%s: refused ins
 shims=()
 for c in systemctl systemd-run busctl docker notify-owner plan-publish eye; do refuse "$c"; done
 for c in systemctl systemd-run busctl docker; do
-  p="$(command -v "$c" 2>/dev/null)"; [ -n "$p" ] && shims+=(--ro-bind "$work/shims/$c" "$(readlink -f "$p")")
+  while read -r p; do shims+=(--ro-bind "$work/shims/$c" "$p"); done < <(type -aP "$c" | xargs -r readlink -f | sort -u)
 done
 shims+=(--ro-bind "$work/shims/notify-owner" "$B/notify-owner" --ro-bind "$work/shims/plan-publish" "$B/plan-publish")
 eye_real="$(readlink -f "$H/.local/bin/eye" 2>/dev/null)"

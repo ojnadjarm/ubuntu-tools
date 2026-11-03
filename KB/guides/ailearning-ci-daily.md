@@ -9,7 +9,9 @@ Reading, changing or re-running the once-a-day `npm run ci` of ailearning. Agent
 Copied from `pcbench-weekly` (bash `.service` + `.timer`, log in `~/agents/log/`). `bin/ailearning-ci-daily` copies the repo with `rsync -a`, minus `content/.render` and `out/`
 (the build and e2e write `dist/` and `out/`; `git worktree` would be a git write) to `/var/tmp/ailearning-ci.*`, adds `--mute-audio` to
 the copy's `tests/lib/browser.mjs`, loads node from nvm, runs `npm run ci:core` (= `npm run ci` minus declutter), then
-`npm run declutter -- <slug> --size 1366x768` for each `CHECKED` unit whose files changed since its last green declutter run, appends one
+`npm run declutter -- <slug> --size 1366x768` for each `CHECKED` unit whose files changed since its last green declutter run, then (nightly, also after
+a red `ci:core`) `npm run playthrough` report-only (T406: one log line `playthrough (report only): rc N, K failing cases, S s`, 490–1046 s in
+the 10-21..24 logs, fail list `~/agents/log/ailearning-playthrough/fails.txt`, never turns CI red; `playthrough-gate.md`), appends one
 row to `ailearning-ci.jsonl` (`mode` nightly or full), pushes once on a failure (EXIT trap, also on a timeout TERM) and deletes the copy.
 A `flock` on `~/agents/state/ailearning-ci.lock` makes a second run exit 75 at once; an unknown option exits 2. A run outside the
 `ailearning-ci-{daily,weekly}.service` cgroup (by hand, from an agent) logs to `ailearning-ci-manual.log` and never pushes when killed (rc 143).
@@ -51,7 +53,7 @@ clock starts after the guard, so a long wait does not defer every unit. The rend
 
 ## Exact commands
 ```bash
-systemctl --user start ailearning-ci-daily.service     # run it now (~8 min + declutter of changed units; run budget 3600 s, unit TimeoutStartSec=10800, source ~/agents/units)
+systemctl --user start ailearning-ci-daily.service     # run it now (~16 min idle: 941–948 s green 10-22..24 incl. playthrough, + declutter of changed units; run budget 3600 s, unit TimeoutStartSec=10800, source ~/agents/units)
 systemctl --user start ailearning-ci-weekly.service    # full declutter U01–U07 at 1366 (~2.3 h; log ~/agents/log/ailearning-ci-full.log)
 ailearning-ci-daily --mark 02-layers                    # after `npm run declutter -- 02 --size 1366x768` passed by hand: the nightly skips it
 ls ~/agents/state/ailearning-declutter/                 # one marker per unit green at its current files

@@ -15,8 +15,11 @@ A scratch dir goes only when its ticket has a `- <date> T<n>` line in history.md
 ```bash
 pc tmp              # KIND PATH MB AGE REASON, then "would: delete N paths, X MB"
 pc tmp --apply      # deletes, appends ~/agents/log/changes.jsonl, last line "rollback: none, scratch only"
+pc tmp --apply --if-over 2G   # same, but exits 0 "nothing: /tmp X GB < limit" while /tmp use is under 2G
+systemctl --user list-timers pc-tmp.timer   # next scheduled sweep
 ```
-maintenance-run calls `pc tmp --apply` each run (weekly, Sun 04:00).
+pc-tmp.timer/pc-tmp.service run `pc tmp --apply` daily at 03:30 and `pc tmp --apply --if-over 2G` hourly
+outside 03:xx; maintenance-run also calls `pc tmp --apply` each run (weekly, Sun 04:00).
 
 ## Pitfalls (measured)
 - Idle = newest mtime in the whole tree, not the dir's own mtime (a dir's mtime ignores nested writes).
@@ -25,5 +28,5 @@ maintenance-run calls `pc tmp --apply` each run (weekly, Sun 04:00).
 - Multi-phase tickets get a history line per phase while still running: the claims row and the 6 h idle gate guard them.
 
 ## Links
-- Code: ~/agents/bin/pc-tmp, ~/agents/bin/maintenance-run
+- Code: ~/agents/bin/pc-tmp, ~/agents/bin/maintenance-run, ~/.config/systemd/user/pc-tmp.{timer,service}
 - Tests: bash ~/agents/bin/tests/pc-tmp.test.sh

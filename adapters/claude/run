@@ -10,6 +10,7 @@ cmd=(claude -p "$(cat "$PROMPT_FILE")" --model "$MODEL" --permission-mode bypass
      --strict-mcp-config --tools "${AGENT_TOOLS:-Bash,Read,Edit,Write}"
      --settings "{\"claudeMdExcludes\":[\"$HOME/CLAUDE.md\"]}")
 [ -n "${AGENT_NAME:-}" ] && cmd+=(--name "agent-$AGENT_NAME")
+[ -n "${EFFORT:-}" ] && cmd+=(--effort "$EFFORT")
 if [ -n "${SYSTEM_FILE:-}" ] && [ -r "$SYSTEM_FILE" ]; then
   cmd+=(--append-system-prompt "$(cat "$SYSTEM_FILE")")
 fi

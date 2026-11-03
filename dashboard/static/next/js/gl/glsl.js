@@ -144,7 +144,25 @@ vec3 rings(vec3 ro, vec3 rd, out float tR){
 }
 `;
 
-/* Everything an eye shader starts with: the shared uniforms, palette, noise, studio, glyphs, camera and rings. */
+/* The eye's lids: lidEdges(azimuth) → (upper, lower) lid elevations from uLid; lidsAt(n) → how far n sits inside each lid. */
+export const LIDS = `
+vec2 lidEdges(float a){
+  float s = max(1.0 - a * a, 0.0);
+  float eu = uLid.x * pow(s, 0.62) - 0.03 * (1.0 - s), el = -uLid.y * pow(s, 0.95);
+  float m = mix(el, eu, 0.22);
+  return mix(vec2(eu, el), vec2(m), uLid.z);
+}
+vec2 lidsAt(vec3 n){
+  float a = atan(n.x, n.z), e = asin(clamp(n.y, -1.0, 1.0));
+  vec2 l = lidEdges(a);
+  return vec2(l.x - e, e - l.y);
+}`;
+
+/* The gaze frame: columns right, up and the gaze itself. */
+export const BASIS = `
+mat3 basis(vec3 g){ vec3 r = normalize(cross(vec3(0.0, 1.0, 0.0), g)); return mat3(r, cross(g, r), g); }`;
+
+/* Everything an eye shader starts with: the shared uniforms, palette, noise, studio, glyphs, camera, rings, lids and gaze basis. */
 export const HEAD = `precision highp float;
 uniform vec2 uRes; uniform vec3 uEye; uniform vec2 uCam; uniform vec3 uGaze; uniform vec4 uLid; uniform vec4 uFlash;
 uniform float uPupil, uTime, uAct, uQ, uSpin, uRingK, uSleep, uHalo; uniform sampler2D uAtlas; uniform vec3 uRingN; uniform vec4 uRing[8];
@@ -155,6 +173,7 @@ ${ENV}
 ${GLYPH}
 ${EYECAM}
 ${RINGS}
-mat3 basis(vec3 g){ vec3 r = normalize(cross(vec3(0.0, 1.0, 0.0), g)); return mat3(r, cross(g, r), g); }
+${LIDS}
+${BASIS}
 vec3 clean(vec3 c){ return any(isnan(c)) || any(isinf(c)) ? vec3(0.0) : max(c, 0.0); }
 `;

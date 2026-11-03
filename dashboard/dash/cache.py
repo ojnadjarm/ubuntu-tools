@@ -9,13 +9,13 @@ _cache = {}
 lock = threading.Lock()
 
 
-def cached(key, ttl, fn, empty=None):
-    """Return fn() memoised for ttl seconds; on error keep the last good value and record {at, error}."""
+def cached(key, ttl, fn, empty=None, tried=None):
+    """Return fn() memoised for ttl seconds (tried: the attempt time to record); on error keep the last good value and record {at, error}."""
     with lock:
         hit = _cache.get(key)
         if hit and time.time() - hit["tried"] < ttl:
             return hit["val"]
-    tried = time.time()
+    tried = time.time() if tried is None else tried
     try:
         val, err = fn(), None
     except Exception as e:
@@ -53,7 +53,7 @@ def swr(blocks):
 
     def fill(keys):
         with ThreadPoolExecutor(len(keys)) as pool:
-            list(pool.map(lambda k: cached(k, 0, *blocks[k][:2]), keys))
+            list(pool.map(lambda k: cached(k, 0, *blocks[k][:2], tried=now), keys))
 
     def refresh():
         try:

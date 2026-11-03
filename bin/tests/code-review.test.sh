@@ -39,7 +39,7 @@ out="$(bash "$BIN/code-review-sandbox" --fixture "$SBX/home" -- bash -c \
 t "sandbox: a setsid child does not outlive a timeout (pid namespace)"
 timeout 30 bash "$BIN/code-review-sandbox" --fixture "$SBX/home" -- bash -c 'setsid sleep 4747 & : >"$1/setsid-up"; sleep 30' _ "$SBX/home" >/dev/null 2>&1 & p0=$!
 timeout 10 wait-for --every 0.05 --until "[ -e '$SBX/home/setsid-up' ]" >/dev/null; kill -TERM "$p0"; wait "$p0"; rm -f "$SBX/home/setsid-up"
-timeout 2 wait-for --every 0.05 --until "! pgrep -f '^sleep 4747\$'" >/dev/null && ok || no "sleep 4747 still alive"
+timeout 2 wait-for --every 0.05 --until "! pgrep -f '^[s]leep 4747\$'" >/dev/null && ok || no "sleep 4747 still alive"
 
 t "sandbox: a second run leaves the first run's proxy socket alive"
 first=': >"$1/first-up"; until [ -e "$1/second-done" ]; do sleep 0.1; done

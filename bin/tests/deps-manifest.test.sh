@@ -9,7 +9,7 @@ WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 
 # Fixture: stub tools zzfx-* on PATH, scripts that call some and only mention others.
 mkdir -p "$WORK/stubs" "$WORK/agents/bin"
-for t in a b c d e f g n1 n2 n3 n4 n5 n6 n7 n8 n9; do printf '#!/bin/sh\n' >"$WORK/stubs/zzfx-$t"; chmod +x "$WORK/stubs/zzfx-$t"; done
+for t in a b c d e f g n1 n2 n3 n4 n5 n6 n7 n8 n9 n10; do printf '#!/bin/sh\n' >"$WORK/stubs/zzfx-$t"; chmod +x "$WORK/stubs/zzfx-$t"; done
 cat >"$WORK/agents/bin/fx-shell" <<'EOF'
 #!/usr/bin/env bash
 # zzfx-n1 is only named in this comment
@@ -25,6 +25,7 @@ zzfx-n6() { :; }; zzfx-n6
 awk '{ print | "zzfx-n7" }' /dev/null
 msg='Rules, in prose; zzfx-n8 is a word here'
 list=(a zzfx-n9 b)
+v=$("$x/fx" zzfx-n10 --json)
 EOF
 printf '#!/usr/bin/env python3\nimport subprocess\nsubprocess.run(["zzfx-e", "-x"])\n' >"$WORK/agents/bin/fx-py"
 mkdir -p "$WORK/pymods"; : >"$WORK/pymods/zzfxmod.py"

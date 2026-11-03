@@ -108,7 +108,7 @@ def since_24h():
                 if t and t >= cut:
                     text = r.group(3) if r.group(2) == "runaway" else r.group(2) + " " + r.group(3)
                     short = chore(r.group(3)) if r.group(2) == "runaway" else r.group(2) + " " + chore(r.group(3), True)
-                    key = re.sub(r"\d+", "N", text.split(")", 1)[0])
+                    key = re.sub(r"\d+", "N", short.split(")", 1)[0])
                     e = loops.setdefault(key, {"kind": "runaway", "prio": "default", "n": 0})
                     e.update(t=r.group(1), text=short, title=text, n=e["n"] + 1)
                 continue
@@ -130,7 +130,7 @@ def since_24h():
         for e in loops.values():
             n = e.pop("n")
             ev.append(dict(e, text=e["text"] + (" x%d" % n if n > 1 else "")))
-    ev.sort(key=lambda e: e["t"], reverse=True)
+    ev.sort(key=lambda e: when(e["t"]), reverse=True)
     return ev
 
 
@@ -222,6 +222,8 @@ def human_cal(cal):
     """systemd OnCalendar / OnUnitActiveSec -> words: daily 04:30, hourly at :07, once 2027-01-01 03:00, parked."""
     if not cal:
         return ""
+    if " + " in cal:
+        return " + ".join(human_cal(c) for c in cal.split(" + "))
     m = re.match(r"^(\d+)(min|h|s|d)$", cal)
     if m:
         n, u = int(m.group(1)), {"min": "min", "h": "h", "s": "s", "d": "d"}[m.group(2)]
@@ -269,6 +271,8 @@ def failure_rows(d):
                      "last": max(u["last"] for u in gone), "note": "", "ours": True, "dim": True})
     rows += [{"source": "agent", "what": a["agent"], "n": 1, "last": a["start"], "note": "exit %s" % a["exit"]} for a in d.get("agents", [])]
     rows += [{"source": "ci", "what": c["what"], "n": 1, "last": c["at"], "note": "rc %s" % c["rc"]} for c in d.get("ci", [])]
+    rows += [{"source": "ci", "what": "%s %s" % (c["tool"], c["project"]), "n": c["count"], "last": c["last"],
+              "note": ",".join(c.get("failed", []))} for c in d.get("creative", [])]
     rows += [{"source": "crash", "what": c["exe"], "n": 1, "last": c["at"], "note": ""} for c in d.get("crashes", [])]
     rows += [{"source": "need", "what": n.get("text", "").split("\n")[0][:80], "n": 1, "last": epoch(n.get("t")), "note": n.get("kind", "")}
              for n in d.get("needs", [])]

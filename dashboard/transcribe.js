@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// One-shot Parakeet decode of a mono wav at its own sample rate, same model and settings as the Eye; prints JSON.
+// Parakeet decode of a mono wav at its own sample rate, same model and settings as the Eye; prints JSON.
+// `--serve`: one model load, a wav path per stdin line, a JSON line each; exits after TRANSCRIBE_IDLE_MS (120 s) idle.
 const path = require("path");
 const BODY = process.env.EYE_BODY || path.join(process.env.HOME, "the-dark-eye", "body");
 const MODEL = path.join(BODY, "models", "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8");
@@ -13,10 +14,26 @@ const asr = new sherpa.OfflineRecognizer({
     tokens: path.join(MODEL, "tokens.txt"), modelType: "nemo_transducer", numThreads: 1, provider: "cpu", debug: false,
   },
 });
-const { samples, sampleRate } = sherpa.readWave(process.argv[2]);
-const t1 = Date.now();
-const decode = (s) => { const st = asr.createStream(); st.acceptWaveform({ sampleRate, samples: s }); asr.decode(st); return asr.getResult(st); };
-const r = decode(samples);
-const { text, filled } = fillGaps(samples, sampleRate, r, decode);
-process.stdout.write(JSON.stringify({ text, filled, tokens: r.tokens || [], timestamps: r.timestamps || [],
-  seconds: samples.length / sampleRate, load_ms: t1 - t0, decode_ms: Date.now() - t1, model: "parakeet-tdt-0.6b-v3-int8" }) + "\n");
+const load_ms = Date.now() - t0;
+const decode = (s, rate) => { const st = asr.createStream(); st.acceptWaveform({ sampleRate: rate, samples: s }); asr.decode(st); return asr.getResult(st); };
+const run = (file) => {
+  const { samples, sampleRate } = sherpa.readWave(file);
+  const t1 = Date.now();
+  const r = decode(samples, sampleRate);
+  const { text, filled } = fillGaps(samples, sampleRate, r, (s) => decode(s, sampleRate));
+  return { text, filled, tokens: r.tokens || [], timestamps: r.timestamps || [],
+    seconds: samples.length / sampleRate, load_ms, decode_ms: Date.now() - t1, model: "parakeet-tdt-0.6b-v3-int8" };
+};
+if (process.argv[2] !== "--serve") {
+  process.stdout.write(JSON.stringify(run(process.argv[2])) + "\n");
+} else {
+  const idle = Number(process.env.TRANSCRIBE_IDLE_MS) || 120000;
+  let timer = setTimeout(() => process.exit(0), idle);
+  require("readline").createInterface({ input: process.stdin }).on("line", (file) => {
+    clearTimeout(timer);
+    let out;
+    try { out = run(file.trim()); } catch (e) { out = { error: String(e.message || e) }; }
+    process.stdout.write(JSON.stringify(out) + "\n");
+    timer = setTimeout(() => process.exit(0), idle);
+  }).on("close", () => process.exit(0));
+}

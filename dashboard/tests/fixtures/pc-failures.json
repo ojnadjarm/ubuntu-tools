@@ -76,6 +76,20 @@
    "note": "~/agents/state/ci-fix/2026-10-19.md"
   }
  ],
+ "creative": [
+  {
+   "tool": "cpp-ci",
+   "project": "gamedev-perf",
+   "count": 2,
+   "last": 1792395536,
+   "dim": false,
+   "failed": [
+    "vulkan",
+    "perf"
+   ],
+   "summary": "~/agents/log/creative-ci/gamedev-perf.json"
+  }
+ ],
  "crashes": [
   {
    "file": "/var/crash/_usr_bin_foo.1000.crash",

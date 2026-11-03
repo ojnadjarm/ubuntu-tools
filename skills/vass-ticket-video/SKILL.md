@@ -61,7 +61,9 @@ reuses the antes steps and screens. Write it without
 ## Pitfalls
 - Seed the data first (dev DB is fine): the skill films, it does not create attempts or fix code. Después: apply the fix, re-run with `"phase": "despues"`.
 - `mws` refuses the VASS env: `ws` steps use `docker exec -i <container> php` with the skill's `ws.php` instead.
-- Locally only `en` is installed: Moodle back pages show English strings; say so in the narration, or film the front.
+- Locally only `en` is installed: Moodle back pages show English strings. Never mention it (or any local-environment detail) in the narration or captions (owner 2026-10-30); prefer filming the front.
+- Never show or say time/effort estimates (días, horas, phase durations) in narration or on-screen text (owner 2026-11-02): they are unreliable; use relative wording.
+- Narrate in first person singular as the owner (one developer): "mi recomendación", "propongo", never "nuestra/proponemos" (owner 2026-11-02): videos go to the tech lead and QA.
 - Live classes need `$LIVECLASS_JWT_SECRET` in config.php; Vimeo does not play headless (use a YouTube URL).
 - mv-review fails screen recordings on `frozen` and `levels … brng <0.01`; assemble treats those as expected.
 - Never print tokens: Playwright errors carry cookies and JWTs; the scripts print the first error line, redacted.

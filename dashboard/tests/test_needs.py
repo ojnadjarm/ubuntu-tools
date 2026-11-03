@@ -43,6 +43,18 @@ class Needs(unittest.TestCase):
             ("runaway", ts[2], "took down sandbox asr (rule3: stale sandbox, 90h old) x3"),
             ("runaway", ts[0], "killed a hand-run Dark Eye body outside dark-eye.service, 2h old")])
 
+    def test_same_chore_on_uuid_paths_folds_into_one_row(self):
+        from dash.services import system
+        home = tempfile.mkdtemp()
+        os.makedirs(os.path.join(home, "agents/sentinel/state"))
+        t = (datetime.now().astimezone() - timedelta(minutes=5)).isoformat(timespec="seconds")
+        with open(os.path.join(home, "agents/sentinel/state/sentinel.log"), "w") as f:
+            for p in ("-home-x/cc751548-4271-480e-995e-105f942aeb8c", "-home-x-moodle/9eb7a8a6-c624-4d74-906c-2f1b6f759063"):
+                f.write("%s runaway removed /tmp/claude-1000/%s/scratchpad (rule5: dead session's scratchpad, 24h old)\n" % (t, p))
+        with mock.patch.object(system, "HOME", home):
+            ev = system.since_24h()
+        self.assertEqual([e["text"] for e in ev], ["removed a dead session's scratchpad, 24h old x2"])
+
     def test_stuck_wait_kill_is_an_event(self):
         from dash.services import system
         home = tempfile.mkdtemp()

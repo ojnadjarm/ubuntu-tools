@@ -104,5 +104,18 @@ class Facts(unittest.TestCase):
         self.assertEqual(runners.facts(specs[:1], props), {"units": {}, "next": {}, "cal": {}, "tmux": {}})
 
 
+class Calendar(unittest.TestCase):
+    def test_every_oncalendar_line_and_dropin_reset(self):
+        with tempfile.TemporaryDirectory() as d:
+            open(os.path.join(d, "a.timer"), "w").write("[Timer]\nOnCalendar=*-*-* 03:30\nOnCalendar=hourly\n")
+            open(os.path.join(d, "b.timer"), "w").write("[Timer]\nOnBootSec=2min\nOnUnitActiveSec=1min\n")
+            open(os.path.join(d, "c.timer"), "w").write("[Timer]\nOnCalendar=daily\n")
+            os.makedirs(os.path.join(d, "c.timer.d"))
+            open(os.path.join(d, "c.timer.d", "schedule.conf"), "w").write("[Timer]\nOnCalendar=\nOnCalendar=Sat *-*-* 03:00\n")
+            with mock.patch.object(runners, "UNIT_DIR", d):
+                got = [runners.calendar(u) for u in ("a.timer", "b.timer", "c.timer", "none.timer")]
+        self.assertEqual(got, ["*-*-* 03:30 + hourly", "1min", "Sat *-*-* 03:00", ""])
+
+
 if __name__ == "__main__":
     unittest.main()

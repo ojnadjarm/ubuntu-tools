@@ -2,7 +2,9 @@
 """Time every dashboard GET endpoint and page on localhost, sequentially."""
 import argparse
 import http.client
+import os
 import statistics
+import sys
 import time
 
 HOST, PORT, RUNS = "127.0.0.1", 19998, 5
@@ -43,17 +45,29 @@ def stats(ms):
     return "%8.1f %8.1f %8.1f" % (min(ms), statistics.median(ms), max(ms))
 
 
+def cold(blocks):
+    """Compute time of each /api/status block fn, no cache: {name: ms}."""
+    out = {}
+    for name, row in blocks.items():
+        t = time.perf_counter()
+        row[0]()
+        out[name] = (time.perf_counter() - t) * 1000
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--cold", action="store_true", help="wait 31 s before the first /api/status sample")
+    ap.add_argument("--cold", action="store_true", help="time each /api/status block computed without the cache")
     args = ap.parse_args()
     start = time.perf_counter()
 
     if args.cold:
-        print("waiting 31 s for the /api/status cache to expire ...", flush=True)
-        time.sleep(31)
-        ms, code, _ = fresh("/api/status")
-        print("/api/status cold: %.1f ms (%d)\n" % (ms, code))
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from dash.services.system import BLOCKS
+        ms = cold(BLOCKS)
+        for name, m in sorted(ms.items(), key=lambda kv: -kv[1]):
+            print("cold block %-18s %8.1f ms" % (name, m))
+        print("/api/status cold (blocks fill in parallel, slowest bounds it): %.1f ms\n" % max(ms.values()))
 
     print("%-28s %-5s %26s %26s %9s %9s" % ("path", "code", "keep-alive min/med/max ms", "fresh min/med/max ms", "raw B", "gzip B"))
     for path in PATHS:

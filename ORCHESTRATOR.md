@@ -28,6 +28,10 @@ Every web page, screen or component, for every agent and ticket (exception: aile
 
 ## Delegation
 
+- **Audiovisual = xhigh reasoning (owner fleet rule 2026-10-30; max → xhigh 2026-11-01, max wasted tokens):** every art/content task (3D assets, motion videos, pixel
+  art, scenes, characters, illustration, music/sound design) runs at xhigh effort: `worker-max` (xhigh), or `EFFORT=xhigh` for
+  `agent-exec` runs (Discord jobs: `LIAISON_JOB_EFFORT`). Plain how-it-works screen videos with a basic narration stay `worker`.
+
 - **Visual/UI fixes need pre and post evidence (owner, 2026-10-08):** screenshots or a short video, whichever shows
   the issue (video for motion: scroll jumps, animations). Same screen, viewport and steps; bug visible before the
   fix, gone after; paired files in `~/drop/<ticket>/`. Every visual-fix brief carries this line.
@@ -48,17 +52,27 @@ Every web page, screen or component, for every agent and ticket (exception: aile
 ## Process rules from the T111 postmortem (2026-09-29)
 
 - **Read back the object.** Name it by colour and role ("grey guess needle or blue output needle?"); one either/or
-  question before queueing or cancelling. Never cancel a fix of a stated rule on an ambiguous "fine".
+  question before queueing or cancelling. Never cancel a fix of a stated rule on an ambiguous "fine". A verdict ("perfect") approves only the object
+  he named; read it back before it goes into DECISIONS (T1405 P3).
 - **Pick relay.** Read the letter back with its name ("B = Dimensioned?"). Write `PICK.md` after his yes or 60 s; collect
   a sketch conversation until he says it is final, then relay it once as a direction.
 - **Every brief:** owner quotes marked *intent* or *copy*; every budget names its source; test order is `tsc` + node
-  tests before the drop, `test:changed` after his OK; one time box per size (at 2× the target the agent reports and
-  stops); browser line "headless or Xvfb, `--mute-audio`, never headed".
+  tests before the drop, `test:changed` after his OK; one time box per size, a check-in, not a limit (at 2× the agent reports and
+  stops; never put his time estimate in a brief, 10-26); browser line "headless or Xvfb, `--mute-audio`, never headed".
 - **Follow-up on the same symptom:** ask him to retest the fresh drop first. Read UX changes back as trigger → effect, in his words.
 - **Scope = the named object (T392 #5).** For a voice line, or when the work reaches past the object he named, restate the
   intent in one line before briefing; the brief lists what is out of scope.
 - **Owner to-do last (T392 #7).** `owner-todo add` only when no agent path exists; each item is one paste-able command
   or one click path.
+
+## Project rules from the Mooblox postmortem (T1405, 2026-10-27)
+
+- **Plan first** for a project over 5 tickets: decisions page in his words, ticket table with a Verify column (= each
+  CHECK), one common-rules file every brief names (T1276: 26 tickets green in 2 h 37 min).
+- **Found bugs → fix ticket at once**; report, never ask (10-26).
+- **One deployer per live env:** deploy from committed HEAD, read the live version first, bump past it (T1394 over T1393).
+- **Play-test rounds:** log each item to `FLAWS<n>.md` as he sends it, close only on his word, spawn lanes by file area the
+  same hour; each lane fixes the class with a validator (`guide owner-playtest-rounds`).
 
 ## Projects with a PO (T1412, 2026-10-27)
 

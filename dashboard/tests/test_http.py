@@ -27,6 +27,7 @@ class Http(unittest.TestCase):
         cls.drop = server.DROP
         server.DROP = cls.tmp.name
         open(os.path.join(cls.tmp.name, "blob.bin"), "wb").write(bytes(range(256)) * 4)
+        open(os.path.join(cls.tmp.name, "empty.bin"), "wb").close()
         for i in range(40):
             open(os.path.join(cls.tmp.name, "note-%02d.txt" % i), "w").write("x")
         open(os.path.join(cls.tmp.name, "café—notes.txt"), "w").write("x")
@@ -113,6 +114,12 @@ class Http(unittest.TestCase):
         self.assertEqual(body, bytes(range(100)))
         r, body = self.get("/files/blob.bin", Range="bytes=-24")
         self.assertEqual((r.status, body), (206, bytes(range(232, 256))))
+        r, _ = self.get("/files/blob.bin", Range="bytes=2000-")
+        self.assertEqual((r.status, r.getheader("Content-Range")), (416, "bytes */1024"))
+
+    def test_range_on_empty_file(self):
+        r, body = self.get("/files/empty.bin", Range="bytes=0-")
+        self.assertEqual((r.status, body, r.getheader("Content-Range")), (200, b"", None))
 
     def test_download_non_latin1_name(self):
         r, body = self.get("/files/caf%C3%A9%E2%80%94notes.txt?dl=1")

@@ -1,6 +1,6 @@
 # Discord liaison: the agent that answers the #foro forum and @agents in #general, and turns requests into PRs
 
-Ticket: T1409, T1411, T1413, T1414, T1415, T1416, T1421 · Last verified: 2026-10-27 by 63 liaison fixture tests (T1421: 6 batch/supersede/stale tests) + a live nudge → wake run; before: 57 (T1416: 8 routing tests, job vs escalate); before: 49 (T1415: job media + reply); before: 47 liaison fixture tests (T1414: 7 job tests, a transient-unit probe, a live tick) and eval 57 fixtures on opus (T1413: old brief 45/57 twice, new brief + context 55/57 twice); before: 25 liaison fixture tests + 25 orchestrator-pulse checks + 31 discord-bot tests, live ticks on #foro and #general
+Ticket: T1409, T1411, T1413, T1414, T1415, T1416, T1421 · Last verified: 2026-10-31 (caps re-read from agent.env, F71); 2026-10-27 by 63 liaison fixture tests (T1421: 6 batch/supersede/stale tests) + a live nudge → wake run; before: 57 (T1416: 8 routing tests, job vs escalate); before: 49 (T1415: job media + reply); before: 47 liaison fixture tests (T1414: 7 job tests, a transient-unit probe, a live tick) and eval 57 fixtures on opus (T1413: old brief 45/57 twice, new brief + context 55/57 twice); before: 25 liaison fixture tests + 25 orchestrator-pulse checks + 31 discord-bot tests, live ticks on #foro and #general
 
 ## When to use
 Run, check, change or debug discord-liaison: the persistent agent that owns the conversation in the forum #foro
@@ -60,9 +60,10 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
   `state/jobs/<id>/job.json` (message, task, copied images + context.txt, status queued|running|done|failed);
   `dispatch` starts queued jobs oldest first up to `LIAISON_JOBS_MAX` (3) as transient units
   `systemd-run --user --unit discord-liaison-job-<id>` → `discord-liaison job-run <id>`: holds `jobs/<id>/lock`, runs
-  `agent-exec` (prompt = `JOB.md` + BRIEF.md's "## Rules" + the job, fleet preamble, `LIAISON_JOB_TIMEOUT` 1800,
-  logs `logs/jobs/<id>.*`), then starts the next queued job. The worker posts the result and ✅ itself; a non-zero exit,
-  a failed launch or a lost runner (no lock, > 120 s after start; reaped by every `tick`) gets a Spanish note in the
+  `agent-exec` (prompt = `JOB.md` + BRIEF.md's "## Rules" + the job, fleet preamble, `LIAISON_JOB_TIMEOUT` 10800,
+  `EFFORT=$LIAISON_JOB_EFFORT` (max), logs `logs/jobs/<id>.*`), then starts the next queued job. The worker posts the
+  result and ✅ itself; a non-zero exit, a failed launch or a lost runner (no lock, > 120 s after start; reaped by every
+  `tick`) gets a Spanish note in the
   thread + an escalation. `tick` dispatches before the run lock, which guards the triage run only.
 - One job per conversation (owner, T1421: "cada mensaje crea un nuevo agente… hace una petición de un mensaje
   anterior"): a conversation is a forum thread, or one author in #general (`liaison/threads.py` `key`). `inbox` prints
@@ -100,8 +101,9 @@ journalctl --user -u 'discord-liaison-job-*' -n 20; ls ~/agents/discord-liaison/
 discord-liaison test                # fixture tests (also bin/tests/discord-liaison.test.sh)
 journalctl --user -u discord-liaison-check -n 20; tail ~/agents/discord-liaison/logs/caps.log
 ```
-Caps: `LIAISON_RUNS_PER_DAY` (30), `LIAISON_PRS_PER_DAY` (3), `LIAISON_IMAGES_PER_DAY` (5), `LIAISON_JOBS_MAX` (3),
-`LIAISON_JOB_TIMEOUT` (1800) in `discord-liaison/agent.env`.
+Caps: `LIAISON_RUNS_PER_DAY` (100000, owner: no caps), `LIAISON_PRS_PER_DAY` (100000, owner 2026-10-28; only guards a
+runaway loop), `LIAISON_IMAGES_PER_DAY` (5), `LIAISON_JOBS_MAX` (3), `LIAISON_JOB_TIMEOUT` (10800),
+`LIAISON_JOB_EFFORT` (max, owner fleet rule 2026-10-30) in `discord-liaison/agent.env`.
 
 ## Pitfalls (measured)
 - The first tick with an empty cursor only seeds it: old history never wakes the LLM (#foro had 2 threads of old

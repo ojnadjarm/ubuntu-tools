@@ -1,7 +1,8 @@
 """Project tiles: todo parsing, tile state and git facts over fakes; nothing live is touched."""
-import os, shutil, tempfile, unittest
+import os, shutil, tempfile, time, unittest
 from unittest import mock
 
+from dash import cache
 from dash.services import projects as P
 
 DOCKER = [{"name": "moodle45-app-1", "state": "running", "status": "1 h", "ports": [8045]},
@@ -127,6 +128,16 @@ class TicketEdits(unittest.TestCase):
             self.assertEqual(P.edit_ticket(*args)[0], 400, args)
         self.assertEqual(self.text(), TICKETS)
 
+    def test_done_with_a_note_counts_done_and_close_keeps_the_note(self):
+        open(self.path, "a").write("\n## JIRA-7 — noted\n\n- **State:** done (owner committed, 2 files)\n"
+                                   "\n## JIRA-8 — open noted\n\n- **State:** waiting client (asked 10-30)\n")
+        self.assertEqual(P.open_tickets(self.path), 3)
+        self.assertEqual(P.edit_ticket("vass", "JIRA-8", "close")[0], 200)
+        self.assertTrue(self.text().endswith("- **State:** done (asked 10-30)\n"))
+        self.assertEqual(P.open_tickets(self.path), 2)
+        self.assertEqual(P.edit_ticket("vass", "JIRA-7", "delete")[0], 200)
+        self.assertNotIn("JIRA-7", self.text())
+
     def test_close_without_a_state_line_adds_one(self):
         open(self.path, "a").write("\n## JIRA-4 — bare\nbody\n")
         P.edit_ticket("vass", "JIRA-4", "close")
@@ -145,6 +156,15 @@ class TicketEdits(unittest.TestCase):
         self.assertEqual(P.edit_ticket("vass", "JIRA-6", "delete")[0], 200)
         self.assertEqual(self.text(), TICKETS)
 
+    def test_state_lines_inside_code_fences_are_not_the_ticket_state(self):
+        fence = "```yaml\nstate: done\n```\n"
+        open(self.path, "a").write("\n## JIRA-9 — fenced state\n\n" + fence + "- **State:** open\n")
+        self.assertEqual(P.open_tickets(self.path), 3)
+        self.assertEqual(P.edit_ticket("vass", "JIRA-9", "delete"), (400, {"error": "ticket is not done"}))
+        self.assertEqual(P.edit_ticket("vass", "JIRA-9", "close")[0], 200)
+        self.assertTrue(self.text().endswith(fence + "- **State:** done\n"))
+        self.assertEqual(P.open_tickets(self.path), 2)
+
     def test_backups_keep_the_newest_twenty(self):
         for _ in range(12):
             P.edit_ticket("vass", "JIRA-1", "close")
@@ -160,6 +180,35 @@ class TicketEdits(unittest.TestCase):
         self.assertIn('data-tk="close" data-id="JIRA-3"', page)
         self.assertEqual((page.count('data-tk="delete"'), page.count('data-tk="close"')), (1, 2))
         self.assertIn('src="/static/js/tickets.js"', page)
+
+
+class DockerOnce(unittest.TestCase):
+    def setUp(self):
+        self.saved = dict(cache._cache)
+        cache._cache.clear()
+
+    def tearDown(self):
+        cache._cache.clear()
+        cache._cache.update(self.saved)
+
+    def test_refresh_tick_runs_docker_ps_once(self):
+        calls = []
+
+        def docker_ps():
+            calls.append(1)
+            time.sleep(0.2)
+            return DOCKER
+
+        for k, v in (("docker", DOCKER), ("projects", [])):
+            cache._cache[k] = {"at": 1, "tried": 1, "val": v, "error": None}
+        blocks = {"docker": (docker_ps, []), "projects": (P.projects, [], 120)}
+        with mock.patch.object(P.sites, "docker_ps", docker_ps), mock.patch.object(P, "project", lambda k, p, d: k):
+            cache.swr(blocks)
+            for _ in range(200):
+                if not cache._refreshing:
+                    break
+                time.sleep(0.01)
+        self.assertEqual(len(calls), 1)
 
 
 if __name__ == "__main__":

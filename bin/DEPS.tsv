@@ -47,6 +47,7 @@ fwupdmgr	fwupd	pc-hw	advisory
 gcc	gcc libc6-dev	orchestrator-handover.test.sh	test
 gdbus	libglib2.0-bin	boot-check.sh,lockcheck.sh,pc-mode,pc-status	advisory
 gio	libglib2.0-bin	test_delete.py	test
+gh	gh	pr-daily-branch	advisory
 git	git	agent-preflight,ailearning-ci-daily,moodle-keep,push-ready,sites	advisory
 glslang	glslang-tools	shader-check.sh	optional:gamedev
 gltf_validator	-	asset-pipeline.sh	optional:gamedev

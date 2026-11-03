@@ -1,14 +1,8 @@
 // Band counts match their panels: Files band = the browser's ~/drop items (a failed /api/ls says "as of HH:MM" / "drop unreadable"), Services band timers = the timers panel, Overview owner line names its todo count "to do"; fixture API, no live services.
 // Run: node tests/test_counts.js   (PWC = path to playwright-core, defaults to the Playwright MCP copy under `npm root -g` of this node)
 "use strict";
-const fs = require("fs"), path = require("path"), http = require("http"), assert = require("assert");
-const pwc = () => {
-  const root = require("child_process").execFileSync("npm", ["root", "-g"], { encoding: "utf8", env: { ...process.env, PATH: path.dirname(process.execPath) + path.delimiter + process.env.PATH } }).trim();
-  return [path.join(root, "@playwright/mcp/node_modules/playwright-core"), path.join(root, "playwright-core")].find((d) => fs.existsSync(d));
-};
-const { chromium } = require(process.env.PWC || pwc());
-const STATIC = path.join(__dirname, "..", "static");
-const TYPES = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".json": "application/json", ".svg": "image/svg+xml" };
+const assert = require("assert");
+const { chromium, serveStatic } = require("./lib/browser");
 const now = new Date().toISOString(), sec = Date.now() / 1000;
 const timer = (unit) => ({ unit, every: "1h", next: now, last: now });
 const STATUS = {
@@ -26,15 +20,7 @@ const item = (name, dir) => ({ name, dir, bytes: dir ? null : 3, mtime: sec, kin
 const LS = { path: "", items: [item("T1", true), item("T2", true), item("one.txt", false)], count: 3, bytes: 3 };
 let lsFail = false;
 
-const srv = http.createServer((req, res) => {
-  const u = req.url.split("?")[0];
-  if (u === "/api/ls" && lsFail) { res.writeHead(500, { "Content-Type": "application/json" }); return res.end('{"error":"fixture ls down"}'); }
-  if (u.startsWith("/api/")) { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify(u === "/api/status" ? STATUS : u === "/api/ls" ? LS : u === "/api/agents" ? { agents: [], roster: [] } : {})); }
-  const file = u === "/" ? path.join(STATIC, "next", "index.html") : path.join(STATIC, u.replace(/^\/static\//, ""));
-  if (!file.startsWith(STATIC) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); return res.end(); }
-  res.writeHead(200, { "Content-Type": TYPES[path.extname(file)] || "application/octet-stream" });
-  fs.createReadStream(file).pipe(res);
-});
+const srv = serveStatic((u, res) => u === "/api/ls" && lsFail ? (res.writeHead(500, { "Content-Type": "application/json" }), res.end('{"error":"fixture ls down"}')) : u === "/api/status" ? STATUS : u === "/api/ls" ? LS : undefined);
 const num = (re, s, what) => { const m = re.exec(s || ""); assert.ok(m, what + ": no match in " + JSON.stringify(s)); return +m[1]; };
 
 (async () => {

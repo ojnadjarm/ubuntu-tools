@@ -81,7 +81,17 @@ class Delete(unittest.TestCase):
     def test_drop_cache_forgotten(self):
         server.cached("drop", 3600, server.drop)
         self.post("/api/files/delete", {"path": "linked.txt"})
-        self.assertEqual(server.cached("drop", 3600, server.drop)["count"], 0)
+        self.assertNotIn("linked.txt", [f["name"] for f in server.cached("drop", 3600, server.drop)["files"]])
+
+    def test_single_delete_refuses_owner_data(self):
+        os.makedirs(os.path.join(self.tmp.name, "owner"))
+        open(os.path.join(self.tmp.name, "owner", "b.txt"), "w").write("keep")
+        shutil.rmtree(self.drop)
+        os.symlink(os.path.join(self.tmp.name, "owner"), self.drop)
+        code, out = self.post("/api/files/delete", {"path": "b.txt"})
+        self.assertEqual(code, 400)
+        self.assertIn("owner data", out["error"])
+        self.assertTrue(os.path.isfile(os.path.join(self.tmp.name, "owner", "b.txt")))
 
     def test_doc(self):
         server.cached("plans", 3600, server.plans)

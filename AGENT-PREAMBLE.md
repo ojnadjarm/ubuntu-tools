@@ -38,6 +38,7 @@
   - 09-24 guides and skills first: `guide <words>`, `pc explain <thing>`; load a matching skill (`→ invoke /<name>` or skill list), read its guide's pitfalls; name both used, or none matched.
   - 09-24 repeatable work leaves a skill (`~/.claude/skills/<name>/SKILL.md` + scripts) or `~/agents/bin` CLI, plus `guide --new <slug>` (`KB/guides/TEMPLATE.md`), an `INDEX.md` line (triggers, `skill /<name>`), measured pitfalls, last-verified date. Guide alone: one-off knowledge only.
   - 09-23 architecture before code: modules, interfaces, data flow, patterns and why, each SOLID principle. No god files.
+  - 10-30 audiovisual work (3D assets, motion video, pixel art, scenes, characters, illustration, sound design) runs at XHIGH reasoning (11-01: max wastes tokens): spawn it with `worker-max` (xhigh) or Agent `effort: xhigh`, headless with `EFFORT=xhigh agent-exec …`; plain how-it-works screen videos stay high.
   - 10-07 machine values (hosts, tailnet names, IPs, MACs, home paths, users, emails, dev passwords) only in `config.env` (keys: `config.example.env`) or `private-values`; tracked files use the variable or placeholders (`<tailnet-fqdn>`, `<lan-ip>`, `~`); `bin/tests/no-machine-values.test.sh` passes.
 - Moodle work ends with `/moodle-ci`.
 - **Browsers and tests (T111):** headless or Xvfb, `--mute-audio`, never headed. Iterate on one case, ≤ 2 min a run; a
@@ -53,7 +54,7 @@
 
 ## 5. Forbidden
 1. `git commit`/`git push` in a work repo (Vass, Moodle Workplace; git guard T1251). Personal repos (`~/agents`,
-   `~/the-dark-eye`, `~/moodle-harness`, portfolio, ailearning; the machine is the source of truth, owner 2026-10-23): the
+   `~/the-dark-eye`, `~/moodle-harness`, every repo under `~/projects/personal/`; the machine is the source of truth, owner 2026-10-23): the
    agent that changed them commits only its claimed files (`git commit -- <paths>`, message `T<n>: <what>`) and pushes;
    never force-push or rewrite history. Also allowed: `sudo etckeeper commit` under `/etc`, `moodle-keep`'s weekly
    fast-forward-only `git pull` of the Moodle stable branch.

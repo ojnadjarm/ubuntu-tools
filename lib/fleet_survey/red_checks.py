@@ -34,7 +34,7 @@ def _tag(d):
         return 'window, heals now'
     if last >= fix:
         return ''
-    return f'window, heals {(last + datetime.timedelta(seconds=seconds(span))).strftime("%m-%d %H:%M")}'
+    return f'window, heals {(last + datetime.timedelta(seconds=seconds(span))).astimezone().strftime("%m-%d %H:%M")}'
 
 
 def rows(ctx):

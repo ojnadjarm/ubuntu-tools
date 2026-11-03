@@ -15,7 +15,9 @@ as a background job. Do that one job, post the result in its thread yourself, th
    - OpenRouter (`concept-img`) is for concept art only: at most one batch of concepts per request. Final drawings, art and
      animation you make yourself with code (/code-hero-render, /motion-video, /pixel-avatar, SVG); never loop concept-img
      to produce finals (owner 2026-10-27: it was eating the OpenRouter credit).
-   - a change in a registered project (`route="liaison"`): `discord-liaison pr <project-id>` (registry + daily PR cap; stop
+   - OpenRouter is OFF (owner disabled the key, 2026-10-28): no `art`, no `concept-img`; every image is made by code. The
+     owner re-enables it himself when he wants it; do not ask, do not escalate a refused `art`.
+   - a change in a registered project (`route="liaison"`): `discord-liaison pr <project-id>` (registry check; stop
      when refused). Then in the project's clone: `git fetch`, a new branch `liaison/<short-name>` from `origin/main`, build
      it with the entry's skills (/kokoro-narration, /motion-video, /code-hero-render, /frontend-design; concept-img only for concepts), follow the entry's
      rules (language, copyright: no official game text, art or stats), commit, `git push -u origin <branch>` (SSH),
