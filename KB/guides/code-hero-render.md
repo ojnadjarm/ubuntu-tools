@@ -1,6 +1,6 @@
 # Make an AAA hero shot or character loop 100% with code (Blender EEVEE by script, numpy audio, no AI image)
 
-Ticket: T1415, T1417, T1450, T1451, T1469 · Last verified: 2026-11-03 by T1469 (9 film scores made steady, `scripts/film-modcheck` 9/9 PASS, 18 cuts remuxed, video md5 unchanged); 2026-11-02 by T1451 (T1450 film remixed: calm score, remux only); by T1450 (61 s narrated film, 1464 frames at 1600x1125, `templates/film/`); before: 2026-10-27 by T1417: the Mooblox logo island 5 s loop rendered with the skill
+Ticket: T1415, T1417, T1450, T1451, T1469 · Last verified: 2026-11-03 by T1470 (`hero-audio` pad mono-safe, film-modcheck 0.01 dB, 8/8 skill tests green); by T1469 (9 film scores made steady, `scripts/film-modcheck` 9/9 PASS, 18 cuts remuxed, video md5 unchanged); 2026-11-02 by T1451 (T1450 film remixed: calm score, remux only); by T1450 (61 s narrated film, 1464 frames at 1600x1125, `templates/film/`); before: 2026-10-27 by T1417: the Mooblox logo island 5 s loop rendered with the skill
 (150 frames at 1080², 9.3 s/frame), `tests/loop.test.py` 5/5, `tests/audio.test.sh` 3/3, `tests/smoke.test.sh` 6/6, `tests/encode.test.sh` 2/2
 
 ## When to use
@@ -87,7 +87,9 @@ title, word-lit captions, end card) and `encode.sh` (open gate to 16:9 + 4:5, tw
   All three out: 0.27-0.89 dB. Keep partials identical in L and R, no vibrato, swell or drone tremolo; check with
   `scripts/film-modcheck audio/score.py`. Measure envelope as sqrt(low-passed x**2): 10 ms RMS blocks alias the 98-100 Hz
   difference tones of a chord to 2 Hz and a Hilbert envelope shows 1.8 Hz second-order beats that are not in the power.
-  `hero-audio` (loops) still detunes L/R ±0.1-0.4 Hz.
+  `hero-audio` (loops, T1470) had the same: L/R detune ±0.1-0.4 Hz, a 3-cycles-per-loop tremolo and `--swell`; all out
+  (flag removed), same partials in L and R with a 1 rad phase offset. Pad-only loops 5/8/12 s: worst 7.6/10.1/10.5 dB
+  (mono) -> 0.01 dB in L, R and mono; `tests/audio.test.sh` runs film-modcheck on a 5 s pad.
 
 ## Links
 - Skill: `~/.claude/skills/code-hero-render/` (SKILL.md, reference/recipe.md, scripts/, templates/shot.py, tests/)
