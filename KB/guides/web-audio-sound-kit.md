@@ -1,6 +1,6 @@
 # Add subtle UI sounds to a web page with procedural Web Audio (no samples, no speakers)
 
-Ticket: T57 · Last verified: 2026-10-20 (T846: paths, sound.js 286 lines, store key, 7 kHz low-pass, `PUBLIC` allowlist, 2 tests, T333 exports read); 2026-10-19 by `node --test test/remote-sound.test.js` (2/2), `./nosound node levels.js` on the :18657 stub (events −23.1 to −27.1, beds −33.7 dBFS) and `test -e` on every path
+Ticket: T57 · Last verified: 2026-11-03 (T1414 second pass: torch blow, measured below); 2026-10-20 (T846: paths, sound.js 286 lines, store key, 7 kHz low-pass, `PUBLIC` allowlist, 2 tests, T333 exports read); 2026-10-19 by `node --test test/remote-sound.test.js` (2/2), `./nosound node levels.js` on the :18657 stub (events −23.1 to −27.1, beds −33.7 dBFS) and `test -e` on every path
 
 ## When to use
 - A page needs soft UI sound: taps, chimes, whooshes, ambient beds that follow a live value (mic level, state).
@@ -66,3 +66,10 @@ cd ~/agent-work/research/2026-09-23/T57/build            # a stub Eye on :18657 
 - Chrome's `DynamicsCompressorNode` adds its own makeup gain: with the output gain before it, peaks stayed at −0.3 dBFS whatever the gain; put the level gain after the compressor (measured 2026-11-03).
 - `exponentialRampToValueAtTime(0.0001, t + d)` falls 78 dB in `d`: a "0.3 s" decay is audible for ~40 ms. Set decays about 3× longer than the sound you want.
 - Calibrated against the soundtrack (explora −21 LUFS): the blow at −14 LUFS momentary, peak −1.8 dBFS, sits 4–9 LU above the music in its second.
+
+## T1414 second pass (owner: "suena a notificación, no a golpe", 2026-11-03)
+- Pure sine modes read as a chime whatever their ratios: the first blow had 59–93 % of its >400 Hz tail energy in narrow peaks. Final: CC0 recorded hits (Kenney Impact Sounds, `~/.local/share/motion-video/sfx/kenney-impact/`) pitched ×0.5–0.8 over a saturated sub, 3–22 %. Measure with `tonal.py` (`LO=400`), `envl.py`, `phone.sh` (4th-order high-pass 250 Hz, a phone speaker) in `~/agents/discord-liaison/state/jobs/20261103T182715-1567243635680878604/tools/`.
+- Weight below 60 Hz is lost on phones: put the envelope after a hard tanh drive (a near-square thump keeps its 3rd/5th harmonics while it decays) and add a second thump at ~2.3× the sub.
+- Kenney impact takes carry ~60 % of their energy below 60 Hz; pitched down it turns into infrasound that eats the compressor's headroom. High-pass them at 70 Hz before use and the bus at 32 Hz.
+- A compressor with ratio 8 and 150 ms release pumped the tail back up (−5 dB at 200 ms); ratio 4 plus a tanh ceiling (0.94·tanh) after it gave −7 to −8 dB at 200 ms with peaks at −1.1 dBFS.
+- The fleet git guard allows collab commits only from worktrees under `~/projects/collab/`: one made in a job folder is refused; `git worktree move` it there (2026-11-03).
