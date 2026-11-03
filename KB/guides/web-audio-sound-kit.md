@@ -60,3 +60,9 @@ cd ~/agent-work/research/2026-09-23/T57/build            # a stub Eye on :18657 
 - Any periodic sound (a flicker every 5–14 s, eye blinks) keeps the context from napping; gate them on their element being on screen.
 - Noise-based sounds vary ±2 dB per render: calibrate trims on the worst of several renders, keep 1–2 dB under the ceiling.
 - The drop serves any file but `.html`/`.htm` as an attachment (T388); `<audio>` still plays attachment WAVs.
+
+## T1414 additions (Tiny Epic Narrator torch landing blow, 2026-11-03)
+- Third start point: `js/tracker/torch-sound.js` in the Tiny Epic Narrator clone (PR #40): a heavy impact made of layers (saturated sub glide, stone body, crack, 10 iron-plate modes, rattle, grit, procedural crypt IR through a ConvolverNode), 4 variants that never repeat in a row, ±1.5 semitone pitch. Offline render + per-hit analysis tools: `~/agents/discord-liaison/state/jobs/20261103T180938-1567239195993317479/tools/` (`render.mjs`, `an.py`, `mmax.sh`).
+- Chrome's `DynamicsCompressorNode` adds its own makeup gain: with the output gain before it, peaks stayed at −0.3 dBFS whatever the gain; put the level gain after the compressor (measured 2026-11-03).
+- `exponentialRampToValueAtTime(0.0001, t + d)` falls 78 dB in `d`: a "0.3 s" decay is audible for ~40 ms. Set decays about 3× longer than the sound you want.
+- Calibrated against the soundtrack (explora −21 LUFS): the blow at −14 LUFS momentary, peak −1.8 dBFS, sits 4–9 LU above the music in its second.
