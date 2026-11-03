@@ -1,6 +1,6 @@
 # Add subtle UI sounds to a web page with procedural Web Audio (no samples, no speakers)
 
-Ticket: T57 · Last verified: 2026-11-03 (T1414 second pass: torch blow, measured below); 2026-10-20 (T846: paths, sound.js 286 lines, store key, 7 kHz low-pass, `PUBLIC` allowlist, 2 tests, T333 exports read); 2026-10-19 by `node --test test/remote-sound.test.js` (2/2), `./nosound node levels.js` on the :18657 stub (events −23.1 to −27.1, beds −33.7 dBFS) and `test -e` on every path
+Ticket: T57 · Last verified: 2026-11-03 (T1414 third pass: 27 combat cues + ducking, PR #41; second pass: torch blow, measured below); 2026-10-20 (T846: paths, sound.js 286 lines, store key, 7 kHz low-pass, `PUBLIC` allowlist, 2 tests, T333 exports read); 2026-10-19 by `node --test test/remote-sound.test.js` (2/2), `./nosound node levels.js` on the :18657 stub (events −23.1 to −27.1, beds −33.7 dBFS) and `test -e` on every path
 
 ## When to use
 - A page needs soft UI sound: taps, chimes, whooshes, ambient beds that follow a live value (mic level, state).
@@ -73,3 +73,12 @@ cd ~/agent-work/research/2026-09-23/T57/build            # a stub Eye on :18657 
 - Kenney impact takes carry ~60 % of their energy below 60 Hz; pitched down it turns into infrasound that eats the compressor's headroom. High-pass them at 70 Hz before use and the bus at 32 Hz.
 - A compressor with ratio 8 and 150 ms release pumped the tail back up (−5 dB at 200 ms); ratio 4 plus a tanh ceiling (0.94·tanh) after it gave −7 to −8 dB at 200 ms with peaks at −1.1 dBFS.
 - The fleet git guard allows collab commits only from worktrees under `~/projects/collab/`: one made in a job folder is refused; `git worktree move` it there (2026-11-03).
+
+## T1414 third pass (owner: combat "se siente súper vacío", 2026-11-03, PR #41)
+- Fourth start point, data-driven: `combat-recipes.js` (cue → variants → steps: `take`/`thump`/`noise`/`swish`/`grit`, per-cue LEVEL dB), `sfx-kit.js` (bus + step runners), `combat-cues.js` (pure state→cue rules), `duck.js`. One concatenated CC0 MP3 (`build-combate.sh`), takes aligned by their loudest moment; Chrome trims the MP3 encoder delay, so offsets from the WAV match within 1 ms.
+- A compressor threshold of −14 dB flattened the per-cue level trims; −6 dB kept them (measured with ebur128 momentary).
+- Take choice alone moves a cue ±2 LU: measure levels as a seed sweep (`SEED=1..5`), not one render.
+- Separate AudioContexts sum unbounded at the OS: music (peaks −3 dBFS) + torch blow + combat bus clipped 776 samples at +3.1 dBFS where a torch landing and an omen hit 150 ms apart. A `ducker(ac, gain, depth)` (music 0.5, torch blow 0.3) called with each cue's span cut it to 2 samples.
+- Film with sound and a muted browser: stub the sound modules with Playwright `ctx.route` to log every call with its virtual time, then replay the log offline through the real modules on one `OfflineAudioContext` (`suspend(t)` per event, `globalThis.AudioContext` returning it), write float WAV, normalize, mux. Tools: `~/agents/discord-liaison/state/jobs/20261103T184609-1567248388091543614/tools/` (`film.mjs`, `replay.mjs`, `cuelevels.sh`).
+- A hash-only `page.goto` does not reload: the old store saved over the seeded state. Use `page.reload()` after seeding `localStorage`.
+
