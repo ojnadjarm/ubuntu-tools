@@ -1,6 +1,6 @@
 # Discord liaison: the agent that answers the #foro forum and @agents in #general, and turns requests into PRs
 
-Ticket: T1409, T1411, T1413, T1414, T1415, T1416, T1421 · Last verified: 2026-10-31 (caps re-read from agent.env, F71); 2026-10-27 by 63 liaison fixture tests (T1421: 6 batch/supersede/stale tests) + a live nudge → wake run; before: 57 (T1416: 8 routing tests, job vs escalate); before: 49 (T1415: job media + reply); before: 47 liaison fixture tests (T1414: 7 job tests, a transient-unit probe, a live tick) and eval 57 fixtures on opus (T1413: old brief 45/57 twice, new brief + context 55/57 twice); before: 25 liaison fixture tests + 25 orchestrator-pulse checks + 31 discord-bot tests, live ticks on #foro and #general
+Ticket: T1409, T1411, T1413, T1414, T1415, T1416, T1421, T1482 · Last verified: 2026-11-04 (T1482 postmortem of 119 jobs, lessons in `JOB.md`, guarded by `tests/test_lessons.py`); 2026-10-31 (caps re-read from agent.env, F71); 2026-10-27 by 63 liaison fixture tests (T1421: 6 batch/supersede/stale tests) + a live nudge → wake run; before: 57 (T1416: 8 routing tests, job vs escalate); before: 49 (T1415: job media + reply); before: 47 liaison fixture tests (T1414: 7 job tests, a transient-unit probe, a live tick) and eval 57 fixtures on opus (T1413: old brief 45/57 twice, new brief + context 55/57 twice); before: 25 liaison fixture tests + 25 orchestrator-pulse checks + 31 discord-bot tests, live ticks on #foro and #general
 
 ## When to use
 Run, check, change or debug discord-liaison: the persistent agent that owns the conversation in the forum #foro
@@ -157,6 +157,13 @@ runaway loop), `LIAISON_IMAGES_PER_DAY` (5), `LIAISON_JOBS_MAX` (3), `LIAISON_JO
 - `LIAISON_RUNS_PER_DAY` (30) was used up by 18:35 UTC on 2026-10-27 with one triage per message: 4 owner messages
   waited for the UTC day. The debounce batches a burst into one run.
 - A retry of a crashed worker runs inline: requeuing it would launch a transient unit with the running unit's name.
+
+- Postmortem T1482 (119 jobs, 2026-10-27..11-04, `~/drop/T1482/postmortem.md`): 82 done, 36 superseded, 1 lost;
+  median 16 min, p90 47 min; 5 escalations, none after 10-28. Superseded jobs had run 320 min (12 over 5 min, one 115 min)
+  and the next job did not know them: `JOB.md` now sends it to the predecessor's folder and branch. Process lessons
+  (every ask numbered, one subject first, sound by default, facts from the group's sources) live in `JOB.md` "Lessons";
+  craft lessons stayed in their guides (`hd2d-sprite-character`, `web-audio-sound-kit`). A new lesson: a `JOB.md` line
+  plus an anchor in `tests/test_lessons.py`.
 
 ## Links
 - Code: `~/agents/discord-liaison/` (`liaison/`, `projects.json`, `BRIEF.md`, `JOB.md`, `agent.env`), CLI `~/agents/bin/discord-liaison`,

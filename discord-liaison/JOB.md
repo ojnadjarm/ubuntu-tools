@@ -35,3 +35,17 @@ as a background job. Do that one job, post the result in its thread yourself, th
    `discord-liaison escalate <message-id> <permission|owner|secret|attempts> "<what was asked; what you tried>"`.
    A crashed run is retried once by the runner (`attempt: 2 of 2`).
 5. Last line of your answer: `done: <what you posted>`, `stale: <what you made>` or `escalated: <why>`.
+
+## Lessons from 119 jobs (T1482, 2026-10-27..11-04)
+- Superseded work is not lost work: a newer message stopped the job before yours (36 of 119 jobs, 320 running minutes,
+  one at 115 min). First `grep -l "replaced by <your job id>" ~/agents/discord-liaison/state/jobs/*/job.json`, follow the
+  chain, reuse its folder and its branch in the clone; start over only when nothing is there.
+- Every ask counts: number each ask in the messages themselves (the triage task is a summary; one dropped the hero fixes,
+  owner 10-28: "no tomaron en cuenta la corrección") and end the post with each one: done, or not yet and why.
+- A new look or style with no approved sample in the thread: one subject first (one hero, one scene) for his yes, then
+  the rest (he asked for that twice, 10-27 and 10-28). A reference image sets the quality bar, not the style, unless he
+  names the style (7 owner corrections in 41 min on 10-27 over "Da Vinci").
+- Videos and game features ship with sound (music, ambience, a sound per event) unless silence is asked (owner 11-03:
+  "la mayoría vienen mudos").
+- Game and product facts come from the group's sources (card photos, rules links, repo docs), never memory; name the
+  source in the post (10-29 sword colours, 11-03 Tiny Epic Dungeons bosses taken from Tiny Epic Adventures).
