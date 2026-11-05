@@ -48,6 +48,8 @@ Reference project: `~/agent-work/motion/T1408` (tools/timeline.py, edit/src/Main
 - `wait-for` has no `--timeout`; a killed capture can leave a hung node + ffmpeg: `pgrep -af '[t]ools/trailer/capture'` before the next run.
 - Remotion 143 s 1080p60 + mux: 6-7 min at concurrency 6; use `--gl=angle`; `--gl=swangle` while a capture holds the GPU.
 
+- Web app capture (T1414, 2026-11-05, Watchtower SVG radar): headless software raster drops tiles when the screenshot area is large at high DPR (960x540 CSS at DPR 2, 480x270 at DPR 4): every 2nd-3rd frame had black/missing regions (YAVG jumps of 5-10 per frame); a 120 ms real-time settle did not help, DPR 1 was clean. Fix: launch with `--use-gl=angle --use-angle=gl-egl --ignore-gpu-blocklist --force-gpu-mem-available-mb=4096 --enable-gpu-rasterization`; check with ffprobe signalstats YAVG outliers (|v - mean(neighbours)| > 0.8). Apps that pause CSS animations while the camera moves (`.moving * {animation:none}`) need still-camera shots; move in post (zoompan).
+
 ## Links
 - Code: `~/projects/personal/mooblox/client/tools/trailer/` (capture.mjs, session.mjs, shots.mjs, gameplay.mjs)
 - Project: `~/agent-work/motion/T1408`; result `~/drop/T1408/index.html`
