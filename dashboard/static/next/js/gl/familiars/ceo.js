@@ -22,7 +22,7 @@ export function build(g = {}) {
   let nv = 0;
   const add = (parent, geo, m, o) => { nv += geo.P.length / 3; return R.part(parent, geo, m, o); };
   const mNavy = toon(NAVY, NAVY_D), mCoral = toon(CORAL, CORAL_D), mCream = toon(CREAM, CREAM_D), mGold = toon(GOLD, GOLD_D), mWhite = toon(WHITE, [0.8, 0.74, 0.76]);
-  const mInk = toon(INKC, INKC, { rim: 0.3, flag: 0 }), mBoot = toon([0.09, 0.1, 0.2], [0.04, 0.045, 0.1]), mGlow = toon(CORAL, CORAL, { rim: 0, em: 0.3 }), mHalo = toon(CORAL, CORAL, { rim: 0, em: 0.45, flag: 0 }), mLid = toon(CREAM_D, CREAM_D.map((v) => v * 0.86)), mMask = toon(WHITE, CREAM);
+  const mInk = toon(INKC, INKC, { rim: 0.3, flag: 0 }), mBoot = toon([0.09, 0.1, 0.2], [0.04, 0.045, 0.1]), mGlow = toon(CORAL, CORAL, { rim: 0, em: 0.3 }), mHalo = toon(CORAL, CORAL, { rim: 0, em: 0.45, flag: 0 }), mMask = toon(WHITE, CREAM);
 
   add(root, torus(0.76, 0.022, 4, 40), lit([1, 1, 1], 3), { r: [Math.PI / 2, 0, 0], p: [0, 0.01, 0] });
   add(root, G.lo, lit([0.015, 0.03, 0.045]), { p: [0, 0.012, 0], s: [0.66, 0.01, 0.52] });
@@ -86,11 +86,11 @@ export function build(g = {}) {
   const eyes = [-1, 1].map((d) => {
     const x = d * 0.215, e = group(head, [x, HC + ey, surf(x, ey) - er * 0.25]); e.r[1] = x * 1.3;
     add(e, G.lo, mWhite, { s: [er, er, er * 0.5], outline: 1 });
-    const iris = add(e, G.lo, mGold, { p: [0, -er * 0.1, er * 0.3], s: [er * 0.76, er * 0.76, er * 0.3], bone: 1 });
+    const iris = add(e, G.lo, mGold, { p: [0, -er * 0.1, er * 0.3], s: [er * 0.86, er * 0.86, er * 0.3], bone: 1 });
     add(iris, G.lo, mInk, { p: [0, 0, 0.5], s: [0.6, 0.6, 0.7] });
-    add(iris, G.lo, lit([1, 1, 1]), { p: [0.34, 0.2, 1.1], s: 0.25 });
+    add(iris, G.lo, lit([1, 1, 1]), { p: [0.3, 0.22, 1.1], s: 0.2 });
     const lid = group(e, [0, er * LID, 0]);
-    add(lid, G.dome, mLid, { s: [er * 1.1, er * 0.9, er * 0.66] });
+    add(lid, G.dome, mCream, { s: [er * 1.08, er * 0.86, er * 0.62] });
     add(lid, torus(1, 0.13, 4, 10, Math.PI), mInk, { r: [Math.PI / 2, 0, 0], s: [er * 1.11, er * 0.68, er] });
     return { e, iris, lid, d };
   });
@@ -141,9 +141,9 @@ export function build(g = {}) {
     const bt = (t * 0.27 + (g.blink || 0)) % 1, blink = bt > 0.955 ? Math.abs(bt - 0.9775) / 0.0225 : 1, open = Math.max(0.07, blink * act + 0.07 * w.sleep);
     for (const e of eyes) {
       e.e.s[1] = open;
-      e.iris.p[0] = lx * er * 0.22; e.iris.p[1] = -er * 0.1 + ly * er * 0.14;
-      e.iris.s[0] = e.iris.s[1] = er * 0.76 * (1 - 0.25 * w.error);
-      e.lid.p[1] = er * (LID + 0.24 * w.error + 0.14 * w.talking + 0.06 * w.working - 0.12 * peek); e.lid.r[2] = -e.d * 0.22 * w.error;
+      e.iris.p[0] = lx * er * 0.13; e.iris.p[1] = -er * 0.1 + ly * er * 0.14;
+      e.iris.s[0] = e.iris.s[1] = er * 0.86 * (1 - 0.25 * w.error);
+      e.lid.p[1] = er * (LID + 0.1 * w.error + 0.14 * w.talking + 0.06 * w.working - 0.12 * peek); e.lid.r[2] = -e.d * 0.22 * w.error;
     }
     const talk = w.talking * env;
     mouth.s[0] = 0.04 + talk * 0.025 + w.error * 0.015; mouth.s[1] = 0.006 + talk * 0.06 + w.error * 0.035; mouth.vis = w.talking + w.error > 0.05; smile.vis = !mouth.vis;
