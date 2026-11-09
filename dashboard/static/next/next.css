@@ -32,7 +32,7 @@ body.nx { font-size: 1rem; min-height: 100svh; overflow-x: hidden; padding-botto
 .vd.bad { color: var(--gold); } .vd.bad:before { content: "▲ "; }
 .nnow .clear { color: var(--gold); font-size: .7rem; letter-spacing: .16em; text-transform: uppercase; border: 1px solid color-mix(in srgb, var(--gold) 40%, transparent); padding: .1rem .5rem; min-height: 2rem; }
 .dock { display: flex; gap: .3rem; }
-.sec { position: relative; display: grid; grid-template-columns: auto auto; align-items: center; gap: .1rem .55rem; padding: .45rem 1rem; color: var(--mute); border: 1px solid transparent; transition: color .18s, background-color .18s, transform .12s var(--ei); }
+.sec { position: relative; display: grid; grid-template-columns: auto auto; align-items: center; gap: .1rem .55rem; padding: .45rem 1rem; min-height: 32px; color: var(--mute); border: 1px solid transparent; transition: color .18s, background-color .18s, transform .12s var(--ei); }
 .sec .ic { width: 1.35rem; height: 1.35rem; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .sec span { font-size: .72rem; letter-spacing: .2em; text-transform: uppercase; }
 .sec kbd { display: none; }
@@ -303,8 +303,7 @@ body.nx { font-size: 1rem; min-height: 100svh; overflow-x: hidden; padding-botto
   .brand s { display: none; }
   .nnow { gap: .6rem; } .nnow .clear { min-height: 36px; }
   .nx .grid { gap: 8px; }
-  .band { grid-template-columns: minmax(0, 1fr); justify-items: center; text-align: center; }
-  .perch { width: clamp(9rem, 44vw, 13rem); }
+  .perch { width: clamp(7rem, 26vw, 10rem); }
 }
 @media (max-width: 380px) { .nnow .clk { display: none; } }
 @media (prefers-reduced-motion: reduce) {
