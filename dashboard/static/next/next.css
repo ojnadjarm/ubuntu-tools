@@ -264,7 +264,7 @@ body.nx { font-size: 1rem; min-height: 100svh; overflow-x: hidden; padding-botto
 
 /* roster: the sleeping eye and its countdown rings over one card per agent */
 .rhead { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); align-items: center; gap: 1rem clamp(1rem, 3vw, 3rem); margin-top: .4rem; }
-.shelf { height: clamp(16rem, 36vw, 32rem); }
+.shelf { height: clamp(14rem, min(36vw, 100svh - 40rem), 32rem); }
 .rt { min-width: 0; }
 .rcards { --cols: 1; display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); gap: 1rem; margin-top: 1rem; }
 @media (min-width: 761px) { .rcards { --cols: 2; } .rcards > :last-child:nth-child(2n+1) { grid-column: 1 / -1; } }
@@ -280,6 +280,7 @@ body.nx { font-size: 1rem; min-height: 100svh; overflow-x: hidden; padding-botto
 .ragent .meta .unit { overflow-wrap: anywhere; color: var(--mute); }
 .rcards .pane:nth-child(2) { --k: 1; } .rcards .pane:nth-child(3) { --k: 2; } .rcards .pane:nth-child(n+4) { --k: 3; }
 .soon { list-style: none; display: grid; gap: .1rem; margin-top: 1.2rem; max-width: 34rem; }
+@media (min-width: 1280px) { .soon { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 1.6rem; } }
 .soon li { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .8rem; padding: .45rem 0 .55rem; font-size: max(var(--fs-min), .86rem); }
 .soon b { color: var(--hi); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .soon span { color: var(--mid); font-variant-numeric: tabular-nums; }
 .soon i { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: linear-gradient(90deg, color-mix(in srgb, var(--g) 20%, transparent), var(--g) calc(var(--v) * 100%), var(--line) 0);
