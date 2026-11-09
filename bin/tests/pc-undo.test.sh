@@ -145,12 +145,12 @@ cat >"$D/bin/pc-conf" <<'EOF'
 EOF
 cat >"$D/bin/systemctl" <<'EOF'
 #!/usr/bin/env bash
-case "$*" in *".timer -p Type"*) echo;; *"-p Type"*) echo oneshot;; *"z.timer -p UnitFileState"*) cat "${0%/bin/*}/zufs";; *"-p UnitFileState"*) echo enabled;; *".timer -p ActiveState"*) echo active;; *) echo failed;; esac
+case "$*" in *fw?".service -p Type"*) echo dbus;; *fw?".service -p ActiveState"*) echo inactive;; *"fwb.service -p UnitFileState"*) echo enabled;; *fw?".service -p UnitFileState"*) echo static;; *fw?".service -p BusName"*) echo org.a;; *".timer -p Type"*) echo;; *"-p Type"*) echo oneshot;; *"z.timer -p UnitFileState"*) cat "${0%/bin/*}/zufs";; *"-p UnitFileState"*) echo enabled;; *".timer -p ActiveState"*) echo active;; *) echo failed;; esac
 EOF
 chmod +x "$D/bin/pc-conf" "$D/bin/systemctl"
 echo 0 >"$D/k1"; echo 5 >"$D/k2"; echo 1 >"$D/k3"; echo 500 >"$D/k4"; echo old >"$D/s.conf"
 sha_old=$("$D/bin/pc-conf" state "$D/s.conf"); echo new >"$D/s.conf"; sha_new=$("$D/bin/pc-conf" state "$D/s.conf")
-row() { jq -nc --arg id "$1" --arg t "$2" --arg a "$3" --arg r "$4" '{ts:"2026-01-01T00:00:00+0000",id:$id,cmd:"c",target:$t,before:"x",after:$a,rollback:"r",read:(if $r == "" then null else $r end)}'; }
+row() { jq -nc --arg id "$1" --arg t "$2" --arg a "$3" --arg r "$4" --arg ts "${5:-2026-01-01T00:00:00+0000}" '{ts:$ts,id:$id,cmd:"c",target:$t,before:"x",after:$a,rollback:"r",read:(if $r == "" then null else $r end)}'; }
 { row dold   t.same  old  'echo b'
   row dsame  t.same  b    'echo b'
   row dk1    k.one   "0 file=$sha_old" "echo \"\$(cat $D/k1) file=\$(pc-conf state $D/s.conf)\""
@@ -169,12 +169,19 @@ row() { jq -nc --arg id "$1" --arg t "$2" --arg a "$3" --arg r "$4" '{ts:"2026-0
   row dack   cups    active  'echo inactive'
   row dnone  tmp     done    ''
   row dsbin  k.ostype "$(cat /proc/sys/kernel/ostype)" 'sysctl -n kernel.ostype'
+  row dfwa   fwa.service active 'systemctl  show fwa.service -p ActiveState --value'
+  row dfwb   fwb.service active 'systemctl  show fwb.service -p ActiveState --value'
+  row dfwc   fwc.service active 'systemctl  show fwc.service -p ActiveState --value' 2026-07-01T00:00:00+0000
+  row dvola  vol.alsa_output.pci-0.analog-stereo 0% 'echo 35%'
+  row dvolb  vol.alsa_output.pci-9.analog-stereo 0% 'echo 34%'
+  row dvolc  mute.bluez_output.AA_BB.1 on 'echo off' 2026-07-01T00:00:00+0000
   echo '{"id":"dack","ack":true,"why":"off by hand"}'; } >"$DL"
+mkdir -p "$D/state/wireplumber"; printf '[default-routes]\nalsa_card.pci-0:output:analog-output-speaker={"mute":false}\nbluez_card.AA_BB:output:headset-output={"mute":false}\n' >"$D/state/wireplumber/default-routes"
 echo '[a, b]' >"$D/g"; echo enabled >"$D/zufs"
-dr() { env PATH="$D/bin:/usr/bin:/bin" PC_LEDGER="$DL" "$BIN/pc-undo" drift "$@"; }
+dr() { env PATH="$D/bin:/usr/bin:/bin" PC_LEDGER="$DL" XDG_STATE_HOME="$D/state" PC_BTIME="$(date -d 2026-06-01 +%s)" "$BIN/pc-undo" drift "$@"; }
 out=$(dr --json); rc=$?
 cls() { jq -r --arg t "$1" '.[] | select(.target == $t) | .class' <<<"$out"; }
-is 'drift --json is one row per target' "$(jq 'length' <<<"$out")" 17
+is 'drift --json is one row per target' "$(jq 'length' <<<"$out")" 23
 is 'drift takes the latest entry of a target' "$(jq -r '.[] | select(.target == "t.same") | .id' <<<"$out")" dsame
 is 'drift: read equals after → same'                   "$(cls t.same)" same
 is 'drift: file sha changed by a later entry → superseded' "$(cls k.one)" superseded
@@ -193,10 +200,17 @@ is 'drift: drift row carries now'                      "$(jq -r '.[] | select(.t
 is 'drift: acked id → acked'                           "$(cls cups)" acked
 is 'drift: no stored read → noread'                    "$(cls tmp)" noread
 is 'drift: reads get /usr/sbin on PATH'                "$(cls k.ostype)" same
+is 'drift: static D-Bus unit, row older than the boot → boot-restored' "$(cls fwa.service)" boot-restored
+is 'drift: enabled D-Bus unit → drift'                 "$(cls fwb.service)" drift
+is 'drift: static D-Bus unit changed after the boot → drift' "$(cls fwc.service)" drift
+is 'drift: volume with a wireplumber route, older than the boot → boot-restored' "$(cls vol.alsa_output.pci-0.analog-stereo)" boot-restored
+is 'drift: volume without a route → drift'             "$(cls vol.alsa_output.pci-9.analog-stereo)" drift
+is 'drift: mute changed after the boot → drift'        "$(cls mute.bluez_output.AA_BB.1)" drift
 is 'drift exits 1 on drift' "$rc" 1
-txt=$(dr); is 'drift text ends with the counts' "$(tail -1 <<<"$txt")" '4 same, 2 superseded, 6 transient, 1 acked, 1 noread, 3 drift'
+txt=$(dr); is 'drift text ends with the counts' "$(tail -1 <<<"$txt")" '4 same, 2 superseded, 6 transient, 2 boot-restored, 1 acked, 1 noread, 7 drift'
 echo 0 >"$D/k3"; echo 1500 >"$D/k4"; echo disabled >"$D/zufs"
-dr >/dev/null; is 'drift exits 0 when nothing drifts' "$?" 0
+grep -v -e dfwb -e dfwc -e dvolb -e dvolc "$DL" >"$DL.ok"; mv "$DL.ok" "$DL"
+dr >/dev/null; is 'drift exits 0 when only boot-restored rows differ' "$?" 0
 
 [ $bad = 0 ] && echo 'PASS pc-undo' || echo 'FAIL pc-undo'
 exit $bad

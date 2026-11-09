@@ -9,6 +9,7 @@ echo 'main' >"$W/slice/scripts/main.gd"
 printf '#!/bin/sh\necho fetched >>"%s/assets.calls"\nmkdir -p "$(dirname "$0")/assets"\n' "$W" >"$W/slice/assets.sh"
 cat >"$W/perfgate" <<'EOF'
 #!/bin/sh
+echo "$*" >>"$STUB_LOG.all"
 while [ $# -gt 1 ]; do [ "$1" = --csv ] && csv=$2; shift; done
 echo "args $csv $1" >>"$STUB_LOG"
 if [ -n "${STUB_HOLD:-}" ]; then touch "$STUB_HOLD.started"; while [ ! -e "$STUB_HOLD.release" ]; do sleep 0.1; done; fi
@@ -23,7 +24,8 @@ esac
 exit "$STUB_RC"
 EOF
 chmod +x "$W/slice/assets.sh" "$W/perfgate"
-export GAMEDEV_PERFGATE="$W/perfgate" GAMEDEV_SLICE="$W/slice" GAMEDEV_PERF_DIR="$W/state" STUB_LOG="$W/gate.log" \
+mkdir -p "$W/gt"; echo 1234 >"$W/gt/rps_RP0_freq_mhz"
+export PERFGATE_GT="$W/gt" GAMEDEV_PERFGATE="$W/perfgate" GAMEDEV_SLICE="$W/slice" GAMEDEV_PERF_DIR="$W/state" STUB_LOG="$W/gate.log" \
 	GAMEDEV_LOADAVG="$W/loadavg" GAMEDEV_PSI="$W/psi" GAMEDEV_LOAD_EVERY=0.1 GAMEDEV_GPU_EVERY=0.1 QUIET_FDINFO="$W/fd" GPU_BUSY="$W/fd-busy"
 # stub cpp-ci: STUB_CPP pass|regress|skip|buildfail; logs stages|out|project|sources|seeded csv lines; perf appends a cpp row like cpp-ci
 mkdir -p "$W/tpl/src"; echo 'int main() {}' >"$W/tpl/src/main.cpp"
@@ -67,6 +69,7 @@ ok "pass -> rc 0" '[ "$(cat "$W/rc")" = 0 ]'
 ok "pass appends a csv row" '[ "$(wc -l <"$W/state/perf.csv")" = 1 ]'
 ok "slice copied to a per-run dir, kept as last" '[ -f "$W/state/last/scripts/main.gd" ] && [ -d "$W/state/last/assets" ]'
 ok "gate gets the per-run dir and its csv copy" 'grep -Eqx "args $W/state/runs/[0-9]+/work/perf.csv $W/state/runs/[0-9]+/work" "$W/gate.log"'
+ok "T1495: gate is pinned to the GPU's RP0 clock" 'grep -q -- "--pin-gpu 1234 " "$W/gate.log.all"'
 run 3
 ok "skip -> rc 0" '[ "$(cat "$W/rc")" = 0 ]'
 ok "skip prints a skip line" 'grep -q "^skip " "$W/out"'

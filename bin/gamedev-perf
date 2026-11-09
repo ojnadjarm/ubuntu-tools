@@ -6,6 +6,7 @@
 # T902: --trend [N] [--json]: the last N (14) perf-cpp.csv rows per pass (post shadow skin scene frame p99 draws): sparkline, last, median of the earlier rows, % change, budget headroom; WARN + rc 1 when last > 1.15x median and > +0.02 ms; < 3 rows: `no trend yet`. Both modes: a row with extra fields -> rc 2, missing budgets -> WARN, NaN -> null.
 # T1001: a perf-budgets.json pass with ms <= 0 is refused by every mode that reads budgets (rc 2 naming the key).
 # T744: each cpp row is checked against the template's perf-budgets.json (the one place for pass budgets): `budget=ok|over:<pass>=<ms>/<budget>` on the line and in perf-cpp.csv's trailing budget column, a red creative-ci row when over; rc unchanged.
+# T1495: --collect pins the GPU clock to RP0 for the perfgate run (--pin-gpu, restored by the gate) when gt0 sysfs is readable.
 set -uo pipefail
 S=$HOME/.claude/skills/gamedev
 gate=${GAMEDEV_PERFGATE:-$S/scripts/godot-perfgate.sh}
@@ -293,7 +294,9 @@ sample() {
 sampler=$!
 (while qg_gpu_pct $$ >>"$run/.gpu"; do sleep "${GAMEDEV_GPU_EVERY:-4}"; done) 9>&- &
 gsampler=$!
-"$gate" --max-load "$maxload" --csv "$run/perf.csv" "$run" 9>&-
+gt=${PERFGATE_GT-$(for d in /sys/class/drm/card*/gt/gt0; do echo "$d"; break; done)}
+pin=(); rp0=$(cat "$gt/rps_RP0_freq_mhz" 2>/dev/null) && pin=(--pin-gpu "$rp0")
+"$gate" --max-load "$maxload" "${pin[@]}" --csv "$run/perf.csv" "$run" 9>&-
 rc=$?
 [ "$rc" != 3 ] && [ "$cfail" = 0 ] && "$cppci" --out "$cout" --stages "configure build perf" --perf-max-load "$maxload" "$cpp" >"$cout/perf.out" 2>&1 9>&-
 kill "$sampler" "$gsampler" 2>/dev/null; sampler="" gsampler=""; sample; qg_gpu_pct $$ >>"$run/.gpu"

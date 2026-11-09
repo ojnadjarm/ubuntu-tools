@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # GPU timing gate for the cpp timing tests (sourced): `gpu_timed TEST METRIC -- CMD...` decides busy / run / lavapipe / low clock and logs one skips.tsv row.
-# rc 0: measured, $gpu_value = METRIC from CMD's output (empty when CMD failed), $gpu_mhz = median clock; rc 3: skipped, one `skip` line printed; rc 130/143: interrupted, an `interrupted` skip row.
+# rc 0: measured, $gpu_value = METRIC from CMD's output (empty when CMD failed), $gpu_mhz = median clock; rc 3: skipped (busy, lavapipe, clock < 90 % of max, or throttle_reason_status set on > 20 % of the samples: the package power limit slows the GPU at full clock), one `skip` line printed; rc 130/143: interrupted, an `interrupted` skip row.
 # GT_SYSFS: a dir with gt_act/max/min/RP0_freq_mhz (default the first /sys/class/drm/card*/); GPU_LOG: keep CMD's output there; GAMEDEV_GPU_PIN=1: gt_min to RP0 for the run.
 declare -F ci_timing_skip > /dev/null || . "$(dirname "${BASH_SOURCE[0]}")/ci-lib.sh"
 
@@ -27,13 +27,13 @@ _gg_run() {  # GT SAMPLES LOG CMD... (in a subshell): CMD to LOG with a 0.2 s cl
 	fi
 	"$@" > "$log" 2>&1 &
 	_gg_jobs=$!
-	[ -n "$gt" ] && { while :; do cat "$gt/gt_act_freq_mhz" >> "$samples"; sleep 0.2; done & _gg_jobs+=" $!"; }
+	[ -n "$gt" ] && { while :; do echo "$(cat "$gt/gt_act_freq_mhz") $(cat "$gt/gt/gt0/throttle_reason_status" 2>/dev/null)" >> "$samples"; sleep 0.2; done & _gg_jobs+=" $!"; }
 	wait "${_gg_jobs%% *}"; rc=$?
 	return $rc
 }
 
 gpu_timed() {  # TEST METRIC -- CMD...: see the header
-	local test=$1 metric=$2 gt busy tmp log rc max
+	local test=$1 metric=$2 gt busy tmp log rc max thr
 	shift 2; [ "${1:-}" = -- ] && shift
 	gpu_value="" gpu_mhz=0
 	if ! busy=$(quiet-gate --max-per-cpu 0.5 --gpu 2>&1); then
@@ -49,7 +49,8 @@ gpu_timed() {  # TEST METRIC -- CMD...: see the header
 		ci_timing_skip "$test" "$metric" interrupted; rm -rf "$tmp"; return $rc
 	fi
 	gpu_value=$(grep -oE "(^| )$metric=[0-9.-]+" "$log" | tail -1 | cut -d= -f2)
-	gpu_mhz=$(awk '$1 > 0' "$tmp/mhz" 2>/dev/null | median | cut -d. -f1)
+	gpu_mhz=$(awk '$1 > 0 {print $1}' "$tmp/mhz" 2>/dev/null | median | cut -d. -f1)
+	thr=$(awk '{t += ($2 == 1)} END {printf "%.0f", NR ? 100 * t / NR : 0}' "$tmp/mhz" 2>/dev/null)
 	gpu_mhz=${gpu_mhz:-0} max=$([ -n "$gt" ] && cat "$gt/gt_max_freq_mhz" || echo 0)
 	if [ $rc != 0 ] || [ -z "$gpu_value" ]; then
 		echo "gpu_timed $test: rc=$rc $metric='$gpu_value'"; tail -15 "$log"
@@ -64,6 +65,10 @@ gpu_timed() {  # TEST METRIC -- CMD...: see the header
 	if [ "$max" -gt 0 ] && [ "$gpu_mhz" -lt $((max * 9 / 10)) ]; then
 		echo "skip $metric=$gpu_value: GPU clock $gpu_mhz of $max MHz"
 		ci_timing_skip "$test" "$metric" "gpu-clock $gpu_mhz of $max MHz"; return 3
+	fi
+	if [ "${thr:-0}" -gt 20 ]; then
+		echo "skip $metric=$gpu_value: GPU power-throttled $thr % of the run ($gpu_mhz MHz)"
+		ci_timing_skip "$test" "$metric" "gpu-throttle $thr %"; return 3
 	fi
 	ci_timing_ran "$test" "$metric"
 }

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Settle the GPU, run a Godot scene N times offscreen sampling gt0 clock/throttle and other GPU clients (exit 3, no rows, if > --max-gpu %), append one CSV row per run; exit 1 if the median p50 frame time > (1+tol) x the last 10 PASS rows' median, or median p99 > (1+p99-tol) x theirs.
+# Settle the GPU, run a Godot scene N times offscreen sampling gt0 clock/throttle and other GPU clients (exit 3, no rows, if > --max-gpu %), append one CSV row per run; exit 1 if the median p50 frame time > (1+tol) x the baseline (at least one 10 fps step above it), or median p99 > (1+p99-tol) x its baseline. Baseline: median of the last 10 PASS/FAIL rows of this kernel within 50 MHz of this run's clock; a kernel or clock without rows seeds itself, exit 0.
 set -euo pipefail
 usage() { echo "usage: godot-perfgate.sh [--runs N] [--max-load L (default 0.5 × nproc)] [--max-gpu PCT (default 15)] [--seconds S] [--csv FILE] [--tol PCT] [--p99-tol PCT] [--pin-gpu MHZ] [PROJECT_DIR]"; exit 0; }
 
 here=$(cd "$(dirname "$0")/.." && pwd)
 runs=5 seconds=6 csv="" tol=10 p99tol=25 maxload="" maxgpu=15 pin="" proj=""
 settle_cap=${PERFGATE_SETTLE_CAP:-10} noise_pct=20 keep=10
+kern=${PERFGATE_KERNEL:-$(uname -r)}
 gt=${PERFGATE_GT-$(for d in /sys/class/drm/card*/gt/gt0; do echo "$d"; break; done)}
 [ -d "$gt" ] || gt=""
 while [ $# -gt 0 ]; do
@@ -49,9 +50,11 @@ proj=$(cd "$proj" && pwd)
 csv=${csv:-$proj/perf.csv}
 cols="p50_ms,p95_ms,p99_ms,low1_fps" cols2="gpu_mhz_p50,throttle_pct,verdict"
 [ -s "$csv" ] || echo "date,project,seconds,avg_fps,frame_ms,min_fps,load1,adapter,$cols,$cols2" > "$csv"
-sed -i -e "1{/p99_ms/!s/\$/,$cols/}" -e "1{/verdict/!s/\$/,$cols2/}" "$csv"
-baseline=$(awk -F, '$15 == "PASS" {print ($9 != "" ? $9 : $5)}' "$csv" | tail -n "$keep" | median)
-base99=$(awk -F, '$15 == "PASS" && $11 != "" {print $11}' "$csv" | tail -n "$keep" | median)
+sed -i -e "1{/p99_ms/!s/\$/,$cols/}" -e "1{/verdict/!s/\$/,$cols2/}" -e "1{/kernel/!s/\$/,kernel/}" "$csv"
+measured() { awk -F, -v c="$1" '$15 == "PASS" || $15 == "FAIL" {v = $c; if (v == "" && c == 9) v = $5; if (v != "") print $16 "," $13 "," v}' "$csv"; }  # COL: kernel,MHz,value per PASS/FAIL row
+base() { measured "$1" | awk -F, -v k="$kern" -v g="$medgpu" '$1 == k && (g == "" || $2 == "" || ($2 - g <= 50 && g - $2 <= 50)) {print $3}' | tail -n "$keep" | median; }
+streak() { awk -F, -v k="$kern" -v t="$(date +%F)" '$15 == "PASS" {last = substr($1, 1, 10); n = 0; split("", seen)} $15 == "FAIL" && !(substr($1, 1, 10) in seen) {seen[substr($1, 1, 10)] = 1; n++}
+	END {printf "streak %d nights, last PASS %s, kernel %s", n + !(t in seen), (last == "" ? "never" : last), k}' "$csv"; }
 field() { sed -n "s/^SMOKE done .* $1=\([0-9.]*\).*/\1/p" <<< "$out"; }
 
 if ! busy=$(quiet-gate --max-per-cpu 0.5 --max-load1 "$maxload" --gpu "$maxgpu"); then
@@ -82,7 +85,7 @@ hard=()
 for n in thermal prochot ratl vr_thermalert vr_tdc pl4; do [ ! -f "$gt/throttle_reason_$n" ] || hard+=("$gt/throttle_reason_$n"); done
 sample_gt() { while :; do echo "$(cat "$gt/rps_act_freq_mhz") $(cat "${hard[@]}" /dev/null | tr -d '\n')"; sleep 0.1; done; }
 rows=() avgs=() mets=() p99s=() gpus=() noise=0 label=p50_ms
-flush() { [ ${#rows[@]} -eq 0 ] || printf '%s\n' "${rows[@]}" | sed "s/,\$/,$1/" | tee -a "$csv"; }
+flush() { [ ${#rows[@]} -eq 0 ] || printf '%s\n' "${rows[@]}" | sed -e "s/,\$/,$1/" -e "s/\$/,$kern/" | tee -a "$csv"; }
 for r in $(seq "$runs"); do
 	for attempt in 1 2; do
 		load=$(cut -d' ' -f1 /proc/loadavg)
@@ -127,17 +130,21 @@ medmet=$(printf '%s\n' "${mets[@]}" | median)
 med99=$( [ ${#p99s[@]} -gt 0 ] && printf '%s\n' "${p99s[@]}" | median || true)
 medgpu=$( [ ${#gpus[@]} -gt 0 ] && printf '%s\n' "${gpus[@]}" | median || true)
 spread="spread_fps=$(printf '%s\n' "${avgs[@]}" | sort -n | sed -n '1p;$p' | paste -sd-) median_p99_ms=${med99:-na} median_$label=$medmet gpu_mhz_p50=${medgpu:-na} noise_reruns=$noise"
+baseline=$(base 9) base99=$(base 11)
 if [ -z "$baseline" ]; then
-	flush PASS; echo "PERFGATE baseline set median_fps=$median csv=$csv $spread"; exit 0
+	pk=$(measured 9 | awk -F, -v k="$kern" '$1 != k {p = $1} END {print p}')
+	was=$(measured 9 | awk -F, -v k="$pk" '$1 == k {print $3}' | tail -n "$keep" | median)
+	flush PASS; echo "PERFGATE baseline set (kernel $kern, ${medgpu:-na} MHz${was:+; kernel ${pk:-unrecorded} was $label $was, now $medmet}) median_fps=$median csv=$csv $spread"; exit 0
 fi
-ceil=$(awk -v b="$baseline" -v t="$tol" 'BEGIN {printf "%.2f", b * (1 + t / 100)}')
+# p50 lands on 10 fps steps (8.33, 9.09, 10.00, 11.11 ms): the ceiling is never inside one step
+ceil=$(awk -v b="$baseline" -v t="$tol" -v l="$label" 'BEGIN {c = b * (1 + t / 100); f = int(100 / b + 0.5) * 10 - 10; if (l == "p50_ms" && f > 0 && 1000 / f > c) c = 1000 / f; printf "%.2f", c}')
 if awk -v m="$medmet" -v c="$ceil" 'BEGIN {exit !(m > c)}'; then
-	flush FAIL; echo "PERFGATE FAIL median_fps=$median $label=$medmet > ceil=$ceil ($label baseline $baseline of last $keep PASS rows, tol $tol%) $spread"; exit 1
+	flush FAIL; echo "PERFGATE FAIL median_fps=$median $label=$medmet > ceil=$ceil ($label baseline $baseline of last $keep rows, kernel $kern, tol $tol%) $spread $(streak)"; exit 1
 fi
 if [ -n "$base99" ] && [ -n "$med99" ]; then
 	ceil99=$(awk -v b="$base99" -v t="$p99tol" 'BEGIN {printf "%.2f", b * (1 + t / 100)}')
 	if awk -v m="$med99" -v c="$ceil99" 'BEGIN {exit !(m > c)}'; then
-		flush FAIL; echo "PERFGATE FAIL median_fps=$median p99_ms=$med99 > ceil=$ceil99 (p99 baseline $base99, tol $p99tol%) $spread"; exit 1
+		flush FAIL; echo "PERFGATE FAIL median_fps=$median p99_ms=$med99 > ceil=$ceil99 (p99 baseline $base99, tol $p99tol%) $spread $(streak)"; exit 1
 	fi
 fi
-flush PASS; echo "PERFGATE PASS median_fps=$median $label=$medmet <= ceil=$ceil ($label baseline $baseline of last $keep PASS rows, tol $tol%) $spread"
+flush PASS; echo "PERFGATE PASS median_fps=$median $label=$medmet <= ceil=$ceil ($label baseline $baseline of last $keep rows, kernel $kern, tol $tol%) $spread"

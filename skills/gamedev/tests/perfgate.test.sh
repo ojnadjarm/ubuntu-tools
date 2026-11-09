@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2016,SC2034  # ok() evals its single-quoted checks
-# T539/T551/T598: godot-perfgate.sh against a stub godot-smoke.sh, fake gt0 sysfs and a sudo shim: settle warm-up, 15-column rows, p50/p99 gates on the last 10 PASS rows, NOISE re-run on hard throttle only, --pin-gpu restore, old csv, SKIP.
+# T539/T551/T598: godot-perfgate.sh against a stub godot-smoke.sh, fake gt0 sysfs and a sudo shim: settle warm-up, 16-column rows, p50/p99 gates on the last 10 PASS/FAIL rows of this kernel within 50 MHz (a new kernel or clock seeds itself; tolerance at least one 10 fps step), NOISE re-run on hard throttle only, --pin-gpu restore, old csv, SKIP.
 set -uo pipefail
 SKILL=$(cd "$(dirname "$0")/.." && pwd)
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
@@ -31,47 +31,55 @@ chmod +x "$W/skill/scripts/"* "$W/bin/sudo"
 gtset() { echo "$1" >"$W/gt/rps_act_freq_mhz"; echo "$2" >"$W/gt/throttle_reason_thermal"; echo "${3:-0}" >"$W/gt/throttle_reason_pl1"; echo $(($2 | ${3:-0})) >"$W/gt/throttle_reason_status"; echo 100 >"$W/gt/rps_min_freq_mhz"; echo 1300 >"$W/gt/rps_max_freq_mhz"; }
 gtset 900 0
 mkdir -p "$W/fdinfo/a" "$W/fdinfo/b"
-export STUB_LOG="$W/smoke.log" SUDO_LOG="$W/sudo.log" PERFGATE_GT="$W/gt" PATH="$W/bin:$PATH" QUIET_FDINFO="$W/fdinfo"
+export PERFGATE_KERNEL=k1 STUB_LOG="$W/smoke.log" SUDO_LOG="$W/sudo.log" PERFGATE_GT="$W/gt" PATH="$W/bin:$PATH" QUIET_FDINFO="$W/fdinfo"
 G="$W/skill/scripts/godot-perfgate.sh"
 
 pass=0 fail=0
 ok() { if eval "$2"; then pass=$((pass + 1)); else fail=$((fail + 1)); r=""; [[ $2 == *'$(rc)'* ]] && r=" (rc $(rc))"; echo "FAIL: $1$r"; tail -n 3 "$W/out" "$W/err" 2>/dev/null | sed 's/^/  | /'; fi; }
 gate() { STUB_AVG=$1 STUB_P99=$2 "$G" --runs 3 --max-load 999 --csv "$3" "${@:4}" "$W/proj" >"$W/out" 2>"$W/err"; echo $? >"$W/rc"; }
 rc() { cat "$W/rc"; }
-H=date,project,seconds,avg_fps,frame_ms,min_fps,load1,adapter,p50_ms,p95_ms,p99_ms,low1_fps,gpu_mhz_p50,throttle_pct,verdict
+H=date,project,seconds,avg_fps,frame_ms,min_fps,load1,adapter,p50_ms,p95_ms,p99_ms,low1_fps,gpu_mhz_p50,throttle_pct,verdict,kernel
 
 C=$W/new.csv
 gate 100.0 14.00 "$C"
-ok "first call sets baseline rc 0" '[ "$(rc)" = 0 ] && grep -q "^PERFGATE baseline set median_fps=100.0 " "$W/out"'
-ok "header has 15 columns" '[ "$(head -1 "$C")" = "$H" ]'
+ok "first call sets baseline rc 0" '[ "$(rc)" = 0 ] && grep -q "^PERFGATE baseline set (kernel k1, 900 MHz) median_fps=100.0 " "$W/out"'
+ok "header has 16 columns" '[ "$(head -1 "$C")" = "$H" ]'
 ok "3 rows, warm-up row not written" '[ "$(wc -l <"$C")" = 4 ] && ! grep -q ",11.1," "$C"'
-ok "rows end p99,low1,gpu,throttle,PASS" '[ "$(awk -F, "NR > 1 && NF == 15 && \$11 == \"14.00\" && \$12 == \"60.0\" && \$13 == 900 && \$14 == 0 && \$15 == \"PASS\"" "$C" | wc -l)" = 3 ]'
+ok "rows end p99,low1,gpu,throttle,PASS" '[ "$(awk -F, "NR > 1 && NF == 16 && \$11 == \"14.00\" && \$12 == \"60.0\" && \$13 == 900 && \$14 == 0 && \$15 == \"PASS\" && \$16 == \"k1\"" "$C" | wc -l)" = 3 ]'
 ok "warm-up exports once, measured runs do not" '[ "$(grep -vc -- --no-export "$STUB_LOG")" = 1 ] && [ "$(grep -c -- --no-export "$STUB_LOG")" = 3 ]'
 ok "warm-up capped at 10 s, ends unsettled on 1 window" 'grep -q -- "--seconds 10 " "$STUB_LOG" && grep -q "warm-up ended unsettled" "$W/err"'
 
 gate 99.0 14.50 "$C"
-ok "steady run passes" '[ "$(rc)" = 0 ] && grep -q "^PERFGATE PASS median_fps=99.0 p50_ms=10.00 <= ceil=11.00 (p50_ms baseline 10.00 " "$W/out"'
+ok "steady run passes" '[ "$(rc)" = 0 ] && grep -q "^PERFGATE PASS median_fps=99.0 p50_ms=10.00 <= ceil=11.11 (p50_ms baseline 10.00 " "$W/out"'
 ok "spread, p99, p50, gpu in the PERFGATE line" 'grep -q "spread_fps=99.0-99.0 median_p99_ms=14.50 median_p50_ms=10.00 gpu_mhz_p50=900 noise_reruns=0" "$W/out"'
 ok "one median_fps token (game-ci parse)" '[ "$(grep "^PERFGATE" "$W/out" | grep -o "median_fps=[0-9.]*")" = "median_fps=99.0" ]'
 
 gate 98.0 42.00 "$C"
 ok "hitchy run (p99 x3, p50 in tol) fails" '[ "$(rc)" = 1 ] && grep -q "^PERFGATE FAIL median_fps=98.0 p99_ms=42.00 > ceil=" "$W/out"'
-ok "failed rows marked FAIL" '[ "$(grep -c ",FAIL$" "$C")" = 3 ]'
+ok "failed rows marked FAIL" '[ "$(grep -c ",FAIL,k1$" "$C")" = 3 ]'
 
+STUB_P50=11.11 gate 100.0 14.00 "$C"
+ok "one 10 fps step slower (100 -> 90 fps) passes" '[ "$(rc)" = 0 ] && grep -q "p50_ms=11.11 <= ceil=11.11 " "$W/out"'
 STUB_P50=12.00 gate 100.0 14.00 "$C"
-ok "slow p50 fails at the same avg fps" '[ "$(rc)" = 1 ] && grep -q "^PERFGATE FAIL median_fps=100.0 p50_ms=12.00 > ceil=11.00 " "$W/out"'
+ok "slow p50 fails at the same avg fps" '[ "$(rc)" = 1 ] && grep -q "^PERFGATE FAIL median_fps=100.0 p50_ms=12.00 > ceil=11.11 " "$W/out"'
+ok "FAIL line carries the streak and kernel" 'grep -q "streak 1 nights, last PASS $(date +%F), kernel k1" "$W/out"'
+PERFGATE_KERNEL=k2 STUB_P50=12.00 gate 100.0 14.00 "$C"
+ok "new kernel seeds its own baseline, rc 0, old one reported" '[ "$(rc)" = 0 ] && grep -q "^PERFGATE baseline set (kernel k2, 900 MHz; kernel k1 was p50_ms 11.11, now 12.00) median_fps=100.0 " "$W/out" && [ "$(grep -c ",PASS,k2$" "$C")" = 3 ]'
+gtset 1300 0; STUB_P50=8.00 gate 100.0 14.00 "$C"
+ok "clock 400 MHz away seeds its own baseline" '[ "$(rc)" = 0 ] && grep -q "^PERFGATE baseline set (kernel k1, 1300 MHz" "$W/out"'
+gtset 900 0
 
 B=$W/last10.csv
-{ echo "$H"; for _ in $(seq 5); do echo "d,w,6,40,25,40,1,G,25.00,,99.00,,,,PASS"; done
-  for _ in $(seq 4); do echo "d,w,6,40,25,40,1,G,25.00,,99.00,,,,FAIL"; echo "d,w,6,40,25,40,1,G,25.00,,99.00,,,90,NOISE"; done
-  for _ in $(seq 10); do echo "d,w,6,100,10,100,1,G,10.00,,14.00,,,,PASS"; done; } >"$B"
+{ echo "$H"; for _ in $(seq 12); do echo "d,w,6,40,25,40,1,G,25.00,,99.00,,900,,PASS,k1"; done
+  for _ in $(seq 4); do echo "d,w,6,100,10,100,1,G,10.00,,14.00,,900,,FAIL,k1"; echo "d,w,6,40,25,40,1,G,25.00,,99.00,,900,90,NOISE,k1"; echo "d,w,6,40,25,40,1,G,25.00,,99.00,,900,,PASS,k0"; done
+  for _ in $(seq 6); do echo "d,w,6,100,10,100,1,G,10.00,,14.00,,925,,PASS,k1"; done; } >"$B"
 STUB_P50=10.50 gate 100.0 14.00 "$B"
-ok "baseline = last 10 PASS rows only" '[ "$(rc)" = 0 ] && grep -q "(p50_ms baseline 10 of last 10 PASS rows" "$W/out"'
+ok "baseline = last 10 PASS and FAIL rows of this kernel and clock, no NOISE" '[ "$(rc)" = 0 ] && grep -q "(p50_ms baseline 10 of last 10 rows, kernel k1, " "$W/out"'
 
 : >"$STUB_LOG"; gtset 1100 1
 N2=$W/noise.csv
 gate 100.0 14.00 "$N2"
-ok "throttled runs: NOISE row + one re-run each" '[ "$(grep -c ",100,NOISE$" "$N2")" = 3 ] && [ "$(grep -c ",PASS$" "$N2")" = 3 ] && [ "$(grep -c -- --no-export "$STUB_LOG")" = 6 ]'
+ok "throttled runs: NOISE row + one re-run each" '[ "$(grep -c ",100,NOISE,k1$" "$N2")" = 3 ] && [ "$(grep -c ",PASS,k1$" "$N2")" = 3 ] && [ "$(grep -c -- --no-export "$STUB_LOG")" = 6 ]'
 ok "noise_reruns=3 in the PERFGATE line" 'grep -q "gpu_mhz_p50=1100 noise_reruns=3" "$W/out"'
 : >"$STUB_LOG"; gtset 600 0 1
 N3=$W/pl1.csv
@@ -95,7 +103,7 @@ ok "--pin-gpu without gt0 -> rc 2" '[ "$(rc)" = 2 ]'
 O=$W/old.csv
 printf '%s\n' date,project,seconds,avg_fps,frame_ms,min_fps,load1,adapter "d,work,6,90.0,11.11,80,3.0,GPU" "d,work,6,92.0,10.87,80,3.0,GPU" >"$O"
 gate 91.0 30.00 "$O"
-ok "old csv: legacy rows are not PASS rows, baseline set" '[ "$(rc)" = 0 ] && grep -q "^PERFGATE baseline set median_fps=91.0 " "$W/out"'
+ok "old csv: legacy rows are not PASS rows, baseline set" '[ "$(rc)" = 0 ] && grep -q "^PERFGATE baseline set (kernel k1, 900 MHz) median_fps=91.0 " "$W/out"'
 ok "old csv: header upgraded, old rows kept" '[ "$(head -1 "$O")" = "$H" ] && grep -qx "d,work,6,90.0,11.11,80,3.0,GPU" "$O"'
 STUB_P50=14.00 gate 70.0 30.00 "$O"
 ok "old csv: slow p50 fails against the new baseline" '[ "$(rc)" = 1 ]'

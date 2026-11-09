@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# T899: gpu_timed against a stub cpp-vk-run, stub quiet-gate/sudo and a fixture gt sysfs: busy, low clock, lavapipe -> skip row; full clock -> ran row + metric; failing command -> ran row, no value; pin set and restored (also on failure); refused sudo -> unpinned; INT to the group -> sampler and command killed, pin restored; T949: INT or TERM (rc 130/143) -> an `interrupted` skip row, never `ran`.
+# T899: gpu_timed against a stub cpp-vk-run, stub quiet-gate/sudo and a fixture gt sysfs: busy, low clock, lavapipe, power throttle (T1495) -> skip row; full clock -> ran row + metric; failing command -> ran row, no value; pin set and restored (also on failure); refused sudo -> unpinned; INT to the group -> sampler and command killed, pin restored; T949: INT or TERM (rc 130/143) -> an `interrupted` skip row, never `ran`.
 set -u
 G=$(cd "$(dirname "$0")/.." && pwd)
 # shellcheck source=/dev/null
@@ -30,7 +30,7 @@ EOF
 chmod +x "$W/bin/"*
 # shellcheck source=SCRIPTDIR/../scripts/gpu-gate.sh
 . "$G/scripts/gpu-gate.sh"
-gt() { echo "$1" > "$W/gt/gt_act_freq_mhz"; echo 1300 > "$W/gt/gt_max_freq_mhz"; echo 1300 > "$W/gt/gt_RP0_freq_mhz"; echo 100 > "$W/gt/gt_min_freq_mhz"; rm -f "$W/gt/seen" "$W/gt/sudo.log"; }
+gt() { echo "$1" > "$W/gt/gt_act_freq_mhz"; echo 1300 > "$W/gt/gt_max_freq_mhz"; echo 1300 > "$W/gt/gt_RP0_freq_mhz"; echo 100 > "$W/gt/gt_min_freq_mhz"; rm -f "$W/gt/seen" "$W/gt/sudo.log"; mkdir -p "$W/gt/gt/gt0"; echo "${2:-0}" > "$W/gt/gt/gt0/throttle_reason_status"; }
 row() { tail -1 "$W/perf/skips.tsv" | cut -f2-4; }  # last skips.tsv row: test, metric, why
 timed() { gpu_timed cpp-x post_ms_p50 -- cpp-vk-run.sh --frames 600 game > "$W/out" 2>&1; rc=$?; out=$(cat "$W/out"); }
 
@@ -53,6 +53,11 @@ is "full clock: metric returned" "$gpu_value" 0.512
 is "full clock: median clock" "$gpu_mhz" 1300
 GPU_LOG=$W/kept.log gpu_timed cpp-x post_ms_p50 -- cpp-vk-run.sh > /dev/null 2>&1
 grep -q '^DONE ' "$W/kept.log" && ok "GPU_LOG keeps the output" || nok "GPU_LOG keeps the output" "no DONE"
+
+gt 1300 1; timed
+is "throttled at full clock: rc 3" "$rc" 3
+is "throttled: skip row" "$(row)" "$(printf 'cpp-x\tpost_ms_p50\tgpu-throttle 100 %%')"
+grep -q 'skip post_ms_p50=0.512: GPU power-throttled 100 % of the run' <<< "$out" && ok "throttled: skip line" || nok "throttled: skip line" "$out"
 
 gt 1300; STUB_DEVICE="llvmpipe (LLVM 20.1, 256 bits)" timed
 is "lavapipe: rc 3" "$rc" 3

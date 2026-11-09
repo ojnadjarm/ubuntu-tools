@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cpp-vulkan HDR post chain on a throwaway copy of the template (real build, Iris Xe under headless weston): 0 validation errors (sync + best practices), --exposure +2 EV brighter than -2 EV, post_ms_p50 <= 0.6 ms at 1920x1080 with --aa off when the machine is quiet and the GPU holds >= 90 % of its max clock (T674: B10G11R11 bloom, measured 0.49-0.54 ms at 1300 MHz before T688 put FXAA in the post zone; FXAA's cost is cpp-aa.test's fxaa_post_delta_ms guard).
+# cpp-vulkan HDR post chain on a throwaway copy of the template (real build, Iris Xe under headless weston): 0 validation errors (sync + best practices), --exposure +2 EV brighter than -2 EV, post_ms_p50 <= 0.6 ms at 1920x1080 with --aa off when the machine is quiet, the GPU holds >= 90 % of its max clock and is power-throttled <= 20 % of the run (T1495: 0.54 ms unthrottled, 0.62-0.98 ms under the package power limit at the same 1300 MHz) (T674: B10G11R11 bloom, measured 0.49-0.54 ms at 1300 MHz before T688 put FXAA in the post zone; FXAA's cost is cpp-aa.test's fxaa_post_delta_ms guard).
 set -u
 G=$(cd "$(dirname "$0")/.." && pwd)
 # shellcheck source=SCRIPTDIR/../scripts/gpu-gate.sh
