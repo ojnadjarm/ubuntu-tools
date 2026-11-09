@@ -61,5 +61,10 @@ timeout 3 "$WF" --until "! pgrep -f '[${name:0:1}]${name:1}'" --every 0.2 >/dev/
 timeout 3 "$WF" --until "! pgrep -A -f $name" --every 0.2 >/dev/null 2>&1; eq "until: pgrep -A (ignore ancestors) runs" 0 $?
 timeout 3 "$WF" --until "! pgrep -x $name" --every 0.2 >/dev/null 2>&1; eq "until: pgrep without -f runs" 0 $?
 
+timeout 3 "$WF" --until false --every abc >/dev/null 2>&1; eq "every: a non-number is refused, no busy loop" 2 $?
+timeout 3 "$WF" --until false --every 0 >/dev/null 2>&1; eq "every: 0 is refused" 2 $?
+"$WF" --until true --label >/dev/null 2>&1; eq "a flag without its value is a usage error" 2 $?
+"$WF" --pid abc >/dev/null 2>&1; eq "pid: a non-number is refused, not reported done" 2 $?
+
 [ "$bad" = 0 ] && echo "all wait-for fixtures pass"
 exit $bad

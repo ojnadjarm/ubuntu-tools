@@ -14,6 +14,7 @@ usage() {
 prompt=; system=; model=; cwd=.; name=; tmo=; raw=; meta=; pidfile=
 while [ $# -gt 0 ]; do
   case "$1" in
+    --*-file|--model|--cwd|--name|--timeout|--budget-usd|--*-out) [ $# -ge 2 ] || { echo "agent-exec: $1 needs a value" >&2; usage; } ;;&
     --prompt-file) prompt="${2:-}"; shift 2 ;;
     --system-file) system="${2:-}"; shift 2 ;;
     --model)       model="${2:-}";  shift 2 ;;
@@ -36,6 +37,9 @@ adapter="$HARNESS_HOME/adapters/${HARNESS_AGENT:-generic}/run"
 
 : "${raw:=$cwd/raw.json}"
 : "${meta:=$cwd/meta.json}"
+prompt=$(realpath -m -- "$prompt"); raw=$(realpath -m -- "$raw"); meta=$(realpath -m -- "$meta")
+[ -z "$system" ] || system=$(realpath -m -- "$system")
+[ -z "$pidfile" ] || pidfile=$(realpath -m -- "$pidfile")
 : >"$raw"; : >"$meta"
 
 export PROMPT_FILE="$prompt" SYSTEM_FILE="$system" MODEL="$model" AGENT_NAME="$name" \

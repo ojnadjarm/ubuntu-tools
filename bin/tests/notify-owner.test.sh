@@ -86,6 +86,8 @@ n=$(sent); HOME="$FH" "$NO" -p high "old cause"; is 'dup: a key older than 24 h 
 printf 'NTFY_URL=http://127.0.0.1:1\nNTFY_TOPIC=fixture\n' >"$WORK/dead.env"
 NTFY_ENV_FILE="$WORK/dead.env" HOME="$FH" "$NO" -p high "lost cause" 2>/dev/null
 n=$(sent); HOME="$FH" "$NO" -p high "lost cause"; is 'dup: a failed send does not block the retry' "$(( $(sent) - n ))" 1
+n=$(sent); HOME="$FH" "$NO" -p high 'C:\\temp broke'; HOME="$FH" "$NO" -p high 'C:\\temp broke' 2>/dev/null
+is 'dup: a key with a backslash is still deduplicated' "$(( $(sent) - n ))" 1
 unset NTFY_KEYS_FILE
 
 # 7. the netdata drain, paths swapped to fixtures, delivers a spooled alarm with HOME unset

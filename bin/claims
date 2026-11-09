@@ -216,6 +216,7 @@ def paths_of(field):
 
 
 def overlaps(a, b):
+    a, b = absolute(a), absolute(b)
     return a == b or a.startswith(b + "/") or b.startswith(a + "/")
 
 

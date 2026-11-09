@@ -47,7 +47,7 @@ mkdir -p "$(dirname "$LOG_FILE")" "$(dirname "$KEYS_FILE")"
 if [ "$prio" = high ]; then
   key=$(printf '%s' "${key:-$msg}" | tr '\n[:upper:]' ' [:lower:]' | sed -E 's/ · [^·]*$//; s/[0-9]+//g; s/[[:space:]]+/ /g; s/^ | $//g')
   now=$(date +%s)
-  if [ -r "$KEYS_FILE" ] && awk -F'\t' -v k="$key" -v c=$((now - 86400)) '$1 >= c && $2 == "sent" && $3 == k {f=1} END {exit !f}' "$KEYS_FILE" \
+  if [ -r "$KEYS_FILE" ] && k="$key" awk -F'\t' -v c=$((now - 86400)) '$1 >= c && $2 == "sent" && $3 == ENVIRON["k"] {f=1} END {exit !f}' "$KEYS_FILE" \
     && ! python3 - "$KEYS_FILE" "$LOG_FILE" "${NTFY_RESOLVED_FILE:-$HOME/agents/log/notify-resolved.jsonl}" "$key" 2>/dev/null <<'PY'
 # Exit 0 when the last push sent for this key was resolved with `pc need` (dashboard push_key), so it may page again.
 import hashlib, json, sys

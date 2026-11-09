@@ -40,6 +40,7 @@ list() {
 label="" every=10 kind="" target="" match="" job=""
 while [ $# -gt 0 ]; do
   case "$1" in
+    --label|--every|--pid|--file|--until|--match|--job) [ $# -ge 2 ] || { usage >&2; exit 2; } ;;&
     --list) list "${2:-}"; exit 0 ;;
     --label) label=$2; shift ;;
     --every) every=$2; shift ;;
@@ -53,6 +54,8 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$kind" ] && [ -n "$target" ] || { usage >&2; exit 2; }
 [ "$kind" != file ] || [ -n "$match" ] || { usage >&2; exit 2; }
+[[ $every =~ ^[0-9]*\.?[0-9]+$ && $every =~ [1-9] ]] || { echo "wait-for: --every takes a number of seconds above 0, got '$every' (exit 2)" >&2; exit 2; }
+[ "$kind" != pid ] || [[ $target =~ ^[0-9]+$ ]] || { echo "wait-for: --pid takes a process id, got '$target' (exit 2)" >&2; exit 2; }
 [ "$kind" = file ] && target=$(realpath -m -- "$target")
 label=${label:-$kind $target}
 
