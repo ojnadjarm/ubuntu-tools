@@ -82,5 +82,8 @@ else
   ok 'live checks skipped (org.bluez is not on the system bus)'
 fi
 
+fx info >/dev/null 2>&1;    is 'info without a device exits 2' "$?" 2
+fx connect >/dev/null 2>&1; is 'connect without a device exits 2' "$?" 2
+
 [ $bad = 0 ] && echo 'PASS pc-bt' || echo 'FAIL pc-bt'
 exit $bad

@@ -35,14 +35,7 @@ mv-lut bogus
 notify-owner help
 orbit-hook help bogus
 orchestrator-pulse help bogus
-pc-a11y-click bogus
-pc-click-text bogus
-pc-clip help
 pc_dbus.py help bogus
-pc-find bogus
-pc-move bogus
-pc-notify bogus
-pc-open bogus
 pc-selftest bogus
 pc-wait bogus
 plan-usage bogus

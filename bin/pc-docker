@@ -142,6 +142,11 @@ stack_state_str() {
     | awk '{t++; if($0=="running")u++} END{print u+0, t+0}')
   printf 'up=%s/%s' "$up" "$tot"
 }
+# stack_updown <project> — up when every container runs, down when none does, else up=<n>/<total>.
+stack_updown() {
+  local s; s=$(stack_state_str "$1")
+  case $s in up=0/*) echo down;; *) [ "${s#up=}" = "${s#*/}/${s#*/}" ] && echo up || echo "$s";; esac
+}
 
 # stack_logcap_str <project> — how many of the project's containers log to json-file without a max-size cap.
 stack_logcap_str() {
@@ -206,7 +211,8 @@ http_code() { curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://localh
 do_mutation() {
   local verb=$1 target=$2
   local SELF; SELF=$(readlink -f "$0")
-  local proj dir line
+  local proj dir line inv=$verb
+  case $verb in start) inv=stop;; stop) inv=start;; esac
   if line=$(resolve_stack "$target" 2>/dev/null) && [ -n "$line" ]; then
     IFS=$'\t' read -r proj dir <<<"$line"
     if [ "$proj" = moodle-shared ] && { [ "$verb" = stop ] || [ "$verb" = restart ]; }; then
@@ -219,15 +225,15 @@ do_mutation() {
       fi
     fi
     local before after composecmd
-    before=$(stack_state_str "$proj")
+    before=$(stack_updown "$proj")
     case "$verb" in
       start) after='up'; composecmd=(docker compose -f "$dir/docker-compose.yml" up -d);;
       stop) after='down'; composecmd=(docker compose -f "$dir/docker-compose.yml" stop);;
       restart) after='up'; composecmd=(docker compose -f "$dir/docker-compose.yml" restart);;
     esac
-    PC_READ_CMD="stack_state_str $proj | grep -q '${after}=' && echo $after || stack_state_str $proj" \
+    PC_READ_CMD="$(printf '%q _stack-state %q' "$SELF" "$proj")" \
       pc_apply "stack:$proj" "$before" "$after" \
-      "$(printf '%q %q %q --apply' "$SELF" "$verb" "$target")" \
+      "$(printf '%q %q %q --apply' "$SELF" "$inv" "$target")" \
       "${composecmd[@]}"
     exit $?
   fi
@@ -240,7 +246,7 @@ do_mutation() {
   esac
   PC_READ_CMD="docker inspect -f '{{.State.Status}}' $target" \
     pc_apply "container:$target" "$before" "$after" \
-    "$(printf '%q %q %q --apply' "$SELF" "$verb" "$target")" \
+    "$(printf '%q %q %q --apply' "$SELF" "$inv" "$target")" \
     docker "$verb" "$target"
   exit $?
 }
@@ -328,6 +334,7 @@ case "$sub" in
   recreate)
     [ -n "$arg" ] || { printf 'pc docker recreate: needs a stack name (see -h)\n' >&2; exit 2; }
     do_recreate "$arg";;
+  _stack-state) stack_updown "$arg";;
   idle-stop)
     [ -n "$arg" ] || { printf 'pc docker idle-stop: needs selenium (see -h)\n' >&2; exit 2; }
     do_idle_stop "$arg";;

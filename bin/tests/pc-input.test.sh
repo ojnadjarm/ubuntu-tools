@@ -112,5 +112,7 @@ else
   ok 'live reads skipped (no sudo -n)'
 fi
 
+is 'rel takes a negative step' "$(fx inject rel REL_X -5 --dry-run --json | jq -r .after)" '-5'
+
 [ $bad = 0 ] && echo 'PASS pc-input' || echo 'FAIL pc-input'
 exit $bad

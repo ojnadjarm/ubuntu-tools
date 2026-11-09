@@ -127,7 +127,7 @@ devices)
   fi;;
 
 info)
-  IFS=$'\t' read -r mac path name < <(resolve_dev "$arg") || exit $?
+  r=$(resolve_dev "$arg") || exit $?; IFS=$'\t' read -r mac path name <<<"$r"
   card=$(card_of "$mac"); cj=$(card_json "$card")
   dev=$(devices | jq -c --arg m "$mac" '.[]|select(.mac==$m)')
   if [ -n "$cj" ]; then
@@ -148,7 +148,7 @@ battery)
   fi;;
 
 profile)
-  IFS=$'\t' read -r mac path name < <(resolve_dev "$arg") || exit $?
+  r=$(resolve_dev "$arg") || exit $?; IFS=$'\t' read -r mac path name <<<"$r"
   want="${PC_ARGS[2]:-}"
   card=$(card_of "$mac"); cj=$(card_json "$card")
   [ -n "$cj" ] || die "no PipeWire card $card (the device is not connected)"
@@ -169,7 +169,7 @@ profile)
     pactl set-card-profile "$card" "$p";;
 
 connect|disconnect)
-  IFS=$'\t' read -r mac path name < <(resolve_dev "$arg") || exit $?
+  r=$(resolve_dev "$arg") || exit $?; IFS=$'\t' read -r mac path name <<<"$r"
   now=$(devices | jq -r --arg m "$mac" '.[]|select(.mac==$m)|if .connected then "connected" else "disconnected" end')
   [ "$now" = "${sub}ed" ] && { printf 'already: %s %s\n' "$mac" "$now"; exit 0; }
   inv=connect; [ "$sub" = connect ] && inv=disconnect

@@ -36,6 +36,7 @@ agent-verify scope, or in a run-* scope of the user manager inside a container (
 PC_SUB='pc kernel'; PC_EXTRA_FLAGS=(--digest --user --force --persist --level: --since: --why: -n:)
 pc_opt "$@"; ARGS=("${PC_ARGS[@]}")
 LEVEL=${PC_OPT[--level]-err,warn}; SINCE=${PC_OPT[--since]-}; N=${PC_OPT[-n]-30}; WHY=${PC_OPT[--why]-}
+case $N in ''|*[!0-9]*) echo "pc kernel: -n needs a number, not '$N'" >&2; exit 2;; esac
 DIGEST=${PC_OPT[--digest]-0}; USERMODE=${PC_OPT[--user]-0}; FORCE=${PC_OPT[--force]-0}; PERSIST=${PC_OPT[--persist]-0}
 TMPFILES=${PC_TMPFILES:-/etc/tmpfiles.d/90-agents-mm.conf}; PC_CONF_BIN=${PC_CONF_BIN:-$BIN/pc-conf}
 SYSCTL_CONF=${PC_SYSCTL_CONF:-/etc/sysctl.d/91-pc.conf}
@@ -274,7 +275,7 @@ sysctl_persist() {
 }
 
 do_sysctl_set() {
-  local key=$1 val=$2 before out id rc
+  local key=${1//\//.} val=$2 before out id rc
   if guarded "$key" && { [ "$FORCE" != 1 ] || [ -z "$WHY" ]; }; then
     printf 'pc kernel: refused (%s is on the sysctl guard list) — pass --force and --why "<reason>" to override.\n' "$key" >&2
     exit 3
@@ -286,7 +287,7 @@ do_sysctl_set() {
     [ $rc = 0 ] || { [ -n "$out" ] && printf '%s\n' "$out"; exit $rc; }
   else
     out=$(PC_READ_CMD="sysctl -n $key" pc_apply "$key" "$before" "$val" \
-          "timeout $PC_ROOT_TIMEOUT sudo -n sysctl -qw $key=$before" \
+          "timeout $PC_ROOT_TIMEOUT sudo -n sysctl -qw $(printf %q "$key=$before")" \
           timeout "$PC_ROOT_TIMEOUT" sudo -n sysctl -qw "$key=$val") || { printf '%s\n' "$out"; exit 1; }
   fi
   printf '%s\n' "$out"

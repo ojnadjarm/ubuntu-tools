@@ -64,6 +64,7 @@ pc_opt() {
       --seconds) SECONDS_=$2; shift;; --seconds=*) SECONDS_=${1#*=};;
       -h|--help) printf '%s\n' "$PC_USAGE"; exit 0;;
       --) shift; PC_ARGS+=("$@"); break;;
+      -[0-9]*) PC_ARGS+=("$1");;
       -?*)
         f=
         for d in ${PC_EXTRA_FLAGS[@]+"${PC_EXTRA_FLAGS[@]}"}; do

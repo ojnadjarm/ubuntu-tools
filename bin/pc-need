@@ -54,9 +54,9 @@ case "${ARGS[0]:-list}" in
       '.[] | select(.id == $q or (.text | ascii_downcase | contains($q | ascii_downcase))) | .id')
     [ ${#ids[@]} -gt 0 ] || { echo "pc need: no open push matches '$q'" >&2; exit 1; }
     for id in "${ids[@]}"; do
-      PC_READ_CMD="$SELF state $id" PC_REDO="$(printf '%q ' "$SELF" mark "$id" resolved "$FIXED" "$BY")" \
+      PC_READ_CMD="$SELF state $id" PC_REDO="$(printf '%q ' "$SELF" -- mark "$id" resolved "$FIXED" "$BY")" \
         pc_apply "need:$id" open resolved "$(printf '%q ' "$SELF" mark "$id" open "undo" "$BY")" \
-        "$SELF" mark "$id" resolved "$FIXED" "$BY"
+        "$SELF" -- mark "$id" resolved "$FIXED" "$BY"
     done
     ;;
   *) printf '%s\n' "$PC_USAGE" >&2; exit 2;;

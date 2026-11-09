@@ -208,7 +208,7 @@ call)
   [ "$sig" = "-" ] && sig=""
   build_args ${ARGS[@]+"${ARGS[@]}"}
   mutating=1
-  case $m in Get*|List*|Introspect*|Ping*|Describe*|Query*|Read*|Can*|Is*|Has*) mutating=0;; esac
+  case $m in Get*|List*|Introspect*|Ping*|Describe*|Query*|Read*|Can[A-Z]*|Is[A-Z]*|Has[A-Z]*) mutating=0;; esac
   if [ "$mutating" = 1 ] && [ "$APPLY" != 1 ]; then
     printf 'would: call %s:%s%s %s.%s(%s) — rerun with --apply\n' "$BUS" "$NAME" "$PATH_" "$i" "$m" "${BARGS[*]:-}"
     exit 0

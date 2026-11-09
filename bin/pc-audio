@@ -172,7 +172,7 @@ do_default() {
   id=$(node_id_by_name "$name")
   [ -n "$id" ] || { printf 'pc audio: no %s named %s\n' "$kind" "$name" >&2; exit 1; }
   PC_READ_CMD="pactl get-default-$kind" pc_apply "default.$kind" "$before" "$name" \
-    "$SELF default $kind $before --apply" wpctl set-default "$id"
+    "$(printf '%q default %s %q --apply' "$SELF" "$kind" "$before")" wpctl set-default "$id"
 }
 
 do_move() {
@@ -188,7 +188,7 @@ do_move() {
   before=$("$SELF" _sink-of "$idx")
   [ "$before" = "$sink_name" ] && { printf 'already: stream.%s %s\n' "$target" "$sink_name"; return 0; }
   PC_READ_CMD="$SELF _sink-of $idx" pc_apply "stream.$target" "$before" "$sink_name" \
-    "$SELF move $target $before --apply" pactl move-sink-input "$idx" "$sink_name"
+    "$(printf '%q move %q %q --apply' "$SELF" "$target" "$before")" pactl move-sink-input "$idx" "$sink_name"
 }
 
 do_vol() {
@@ -208,7 +208,7 @@ do_vol() {
   [ "$after_pct" -gt 150 ] && after_pct=150
   [ "$cur_pct" = "$after_pct" ] && { printf 'already: vol.%s %s%%\n' "$name" "$after_pct"; return 0; }
   PC_READ_CMD="$SELF _vol-of $id" pc_apply "vol.$name" "${cur_pct}%" "${after_pct}%" \
-    "$SELF vol $name ${cur_pct}% --apply" wpctl set-volume "$id" "${after_pct}%"
+    "$(printf '%q vol %q %s%% --apply' "$SELF" "$name" "$cur_pct")" wpctl set-volume "$id" "${after_pct}%"
 }
 
 do_mute() {
@@ -225,7 +225,7 @@ do_mute() {
   [ "$cur" = "$after" ] && { printf 'already: mute.%s %s\n' "$name" "$after"; return 0; }
   local wire; [ "$after" = on ] && wire=1 || wire=0
   PC_READ_CMD="$SELF _mute-of $id" pc_apply "mute.$name" "$cur" "$after" \
-    "$SELF mute $name $cur --apply" wpctl set-mute "$id" "$wire"
+    "$(printf '%q mute %q %s --apply' "$SELF" "$name" "$cur")" wpctl set-mute "$id" "$wire"
 }
 
 do_loglevel() {

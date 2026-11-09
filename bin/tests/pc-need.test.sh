@@ -32,5 +32,7 @@ pc resolve 'ci failed' --fixed again --apply >/dev/null
 printf '%s\tok\thigh\tci failed at ci (rc 1)\n' "$(date -d '-1 minutes' +%Y-%m-%dT%H:%M:%S%:z)" >>"$WORK/agents/log/notify.log"
 is 'a new push with the same text shows again' "$(pc list --json | jq '[.[] | select(.text | startswith("ci failed"))] | length')" 1
 pc resolve nomatch --fixed x --apply >/dev/null 2>&1; is 'no match exits 1' $? 1
+pc resolve 'disk full' --fixed '-x restarted' --apply >/dev/null 2>&1; is 'a note starting with a dash resolves' $? 0
+is 'the dashed note is recorded' "$(jq -r 'select(.fixed=="-x restarted").fixed' "$WORK/agents/log/notify-resolved.jsonl")" '-x restarted'
 HOME=$REAL_HOME; is 'real notify.log, resolved ledger and changes.jsonl untouched' "$(real_sum)" "$before"
 exit $bad

@@ -1,6 +1,7 @@
 #!/bin/bash
 # pc move X Y — absolute pointer move.
 . "$(dirname "$(readlink -f "$0")")/env.sh"
-[ "${1:-}" = -h ] || [ $# -lt 2 ] && { echo "usage: pc move X Y"; exit 0; }
+[ "${1:-}" = -h ] || [ "${1:-}" = --help ] && { echo "usage: pc move X Y"; exit 0; }
+[ $# -eq 2 ] || { echo "usage: pc move X Y" >&2; exit 2; }
 pc_xy "$1" "$2"
 exec ydotool mousemove --absolute -x "$1" -y "$2"

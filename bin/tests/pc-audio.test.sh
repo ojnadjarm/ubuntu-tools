@@ -86,5 +86,18 @@ else
 fi
 fi
 
+## --- 6. negative steps and names with a space, on stubs (no PipeWire contact) -------
+fx vol speech-dispatcher-dummy -5 >/dev/null 2>&1; is 'vol -5 is a step down, not an unknown option' "$?" 0
+SF="$WORK/sfix"; cp -r "$FIX" "$SF"; mkdir -p "$WORK/sbin"
+jq '(.[] | select(.info.props["node.name"]=="speech-dispatcher-dummy") | .info.props["application.name"]) = "Two Words"' \
+  "$FIX/pw-dump.json" >"$SF/pw-dump.json"
+printf '#!/bin/sh\necho "$*" >>"%s/stub.log"\n' "$WORK" >"$WORK/sbin/wpctl"; cp "$WORK/sbin/wpctl" "$WORK/sbin/pactl"
+chmod +x "$WORK/sbin/wpctl" "$WORK/sbin/pactl"
+PATH="$WORK/sbin:$PATH" PC_FIXTURE="$SF" XDG_RUNTIME_DIR="$WORK" PC_LEDGER="$WORK/s.jsonl" \
+  "$BIN/pc-audio" vol 'Two Words' 40% --apply >/dev/null 2>&1
+grep -q '^set-volume ' "$WORK/stub.log" 2>/dev/null && ok 'the stub took the volume call' || nok 'the stub took the volume call' "$(cat "$WORK/stub.log" 2>&1)"
+rb=$(jq -r 'select(has("rollback")).rollback' "$WORK/s.jsonl" 2>/dev/null | head -1)
+is 'the rollback keeps a name with a space as one argument' "$(bash -c "set -- $rb; echo \"\$3\"")" 'Two Words'
+
 [ $bad = 0 ] && echo 'PASS pc-audio' || echo 'FAIL pc-audio'
 exit $bad

@@ -141,5 +141,12 @@ is 'no gdbus call from any verb' "$(grep -c '^gdbus' "$WORK/all.log")" 0
 is 'every recorded call is a shim or recorder' \
   "$(grep -vcE '^(ydotool|gdbus|xrandr|pc-win|portal_shot\.py|ocr_find\.py|a11y_tree\.py|rd_type\.py) ' "$WORK/all.log")" 0
 
+# option typos exit 2 instead of becoming the search text; a regex metacharacter is not a key name.
+argerr 'find --bogus'       "$W/pc-find" --bogus
+argerr 'click-text --bogus' "$W/pc-click-text" --bogus
+argerr 'a11y-click --bogus' "$W/pc-a11y-click" --bogus
+calls "$W/pc-key" --force . >/dev/null; [ "$(rc)" != 0 ] && ok 'pc key rejects "." as a key name' || nok 'pc key rejects "." as a key name' "rc $(rc)"
+is 'pc key "." presses nothing' "$(grep -c '^ydotool' "$SHIM_LOG")" 0
+
 [ $bad = 0 ] && echo 'PASS pc-input-verbs' || echo 'FAIL pc-input-verbs'
 exit $bad

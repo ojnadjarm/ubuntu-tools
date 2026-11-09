@@ -20,7 +20,7 @@ so a burst of the same warning collapses to one row: unit · count · first · l
 
 PC_SUB='pc journal'; PC_EXTRA_FLAGS=(-f -n: --since:); SECONDS_=5
 pc_opt "$@"; ARGS=("${PC_ARGS[@]}")
-N=${PC_OPT[-n]-50}; SINCE=${PC_OPT[--since]-}; FOLLOW=${PC_OPT[-f]-0}
+N=${PC_OPT[-n]-50}; SINCE=${PC_OPT[--since]-}; SINCE=${SINCE#-}; FOLLOW=${PC_OPT[-f]-0}
 
 # ident_expr — the jq expression naming the source of a journal entry.
 IDENT_EXPR='(._SYSTEMD_USER_UNIT // ._SYSTEMD_UNIT // .SYSLOG_IDENTIFIER // "unknown")'

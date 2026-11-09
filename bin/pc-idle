@@ -22,6 +22,7 @@ largest browser tree as <cgroup leaf>:<playwright-mcp|chrome-headless>:<age_s>:<
 PC_EXTRA_FLAGS=(--tsv)
 pc_opt "$@"
 TSV=0; [ -n "${PC_OPT[--tsv]:-}" ] && TSV=1
+[ ${#PC_ARGS[@]} -eq 0 ] || { echo "pc idle: unknown argument ${PC_ARGS[0]}" >&2; exit 2; }
 
 SECS=$SECONDS_
 case "$SECS" in ""|*[!0-9]*) SECS=60;; 0) SECS=60;; esac

@@ -198,5 +198,7 @@ if command -v /usr/bin/time >/dev/null; then
   awk -v t="$t" -v b="$b" 'BEGIN{exit !(t<=b)}' && ok "wall $t s <= $b s budget" || nok "wall $b s budget" "$t s"
 fi
 
+fx who abc >/dev/null 2>&1; is 'who with a non-numeric port exits 2' "$?" 2
+
 [ $bad = 0 ] && echo 'PASS pc-net' || echo 'FAIL pc-net'
 exit $bad

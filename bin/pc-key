@@ -14,6 +14,7 @@ code() {
     RETURN|ENTER) n=ENTER;; ESCAPE) n=ESC;; PRINT) n=SYSRQ;; PLUS) n=KPPLUS;; EQUAL|EQUALS) n=EQUAL;;
     PGUP) n=PAGEUP;; PGDN) n=PAGEDOWN;; DEL) n=DELETE;;
   esac
+  case "$n" in ''|*[!A-Z0-9_]*) return;; esac
   grep -m1 -E "^#define KEY_$n[[:space:]]" $h | awk '{print $3}'
 }
 for combo in "$@"; do

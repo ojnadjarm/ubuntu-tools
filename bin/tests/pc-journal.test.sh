@@ -41,5 +41,8 @@ is 'size shows the journald SystemMaxUse cap' "$?" 0
 "$J" grep 'UFW BLOCK' --since 1h --json | jq -e 'type=="array"' >/dev/null
 is 'grep --json is valid JSON' "$?" 0
 
+is '--since -1h reads the same window as --since 1h' \
+  "$("$J" errors --since -1h -n 5 --json | jq length)" "$("$J" errors --since 1h -n 5 --json | jq length)"
+
 [ $bad = 0 ] && echo 'PASS pc-journal' || echo 'FAIL pc-journal'
 exit $bad

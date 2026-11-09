@@ -94,5 +94,8 @@ grep -q '^  pc idle ' <<<"$("$BIN/pc" help)" && ok 'pc help lists pc idle' \
 [ -e "$WORK/l.jsonl" ] && nok 'pc idle writes no ledger entry' 'ledger exists' \
                        || ok 'pc idle writes no ledger entry'
 
+timeout 5 env PC_FIXTURE="$FIX" PC_STUB_STATE="$WORK/n" PC_IDLE_INTERVAL=1 XDG_RUNTIME_DIR="$WORK" \
+  PC_LEDGER="$WORK/l.jsonl" "$BIN/pc-idle" nosuch >/dev/null 2>&1; is 'an unknown argument exits 2' "$?" 2
+
 [ $bad = 0 ] && echo 'PASS pc-idle' || echo 'FAIL pc-idle'
 exit $bad

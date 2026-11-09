@@ -242,5 +242,27 @@ else
   ok 'live checks skipped (no docker daemon)'
 fi
 
+# 9. stop/start on a stateful stub docker: the rollback is the inverse verb and the read-back reads the stack.
+MB="$WORK/mbin"; mkdir -p "$MB" "$WORK/mrun"; echo running >"$WORK/mstack"; echo running >"$WORK/mctr"
+cat >"$MB/docker" <<'STUB'
+#!/bin/sh
+case "$1 $*" in
+  "compose "*" up -d") echo running >"$M/mstack";;
+  "compose "*" stop") echo exited >"$M/mstack";;
+  "ps "*"-a "*project=*) cat "$M/mstack";;
+  "inspect "*"-f "*) cat "$M/mctr";;
+  "stop "*) echo exited >"$M/mctr";;
+  "start "*) echo running >"$M/mctr";;
+esac
+STUB
+chmod +x "$MB/docker"
+md() { M=$WORK PATH="$MB:$PATH" PC_ENVS="$FIX/moodle-envs" XDG_RUNTIME_DIR="$WORK/mrun" PC_LEDGER="$WORK/m.jsonl" "$BIN/pc-docker" "$@"; }
+is 'stack stop dry run reads up → down' "$(md stop 5.2)" 'would: stack:moodle52 up → down'
+md stop 5.2 --apply >/dev/null 2>&1; is 'stack stop applies' "$?" 0
+is 'stack stop is read back as down' "$(jq -r 'select(has("verified")) | "\(.verified) \(.observed)"' "$WORK/m.jsonl")" 'true down'
+case "$(jq -r 'select(has("rollback")).rollback' "$WORK/m.jsonl")" in *' start 5.2 --apply') ok 'the rollback of a stack stop is start';; *) nok 'the rollback of a stack stop is start' "$(cat "$WORK/m.jsonl")";; esac
+: >"$WORK/m.jsonl"; md stop c1 --apply >/dev/null 2>&1
+case "$(jq -r 'select(has("rollback")).rollback' "$WORK/m.jsonl")" in *' start c1 --apply') ok 'the rollback of a container stop is start';; *) nok 'the rollback of a container stop is start' "$(cat "$WORK/m.jsonl")";; esac
+
 [ $bad = 0 ] && echo 'PASS pc-docker' || echo 'FAIL pc-docker'
 exit $bad

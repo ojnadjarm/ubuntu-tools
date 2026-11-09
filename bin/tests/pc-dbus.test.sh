@@ -157,5 +157,16 @@ PY
 else
   ok 'private-bus mutation skipped (no dbus-run-session or python3 gi)'
 fi
+# 7. a method that only starts like a read-only prefix (CancelJob) is still a dry run without --apply.
+CF="$WORK/cfix"; mkdir -p "$CF/bin"
+cat >"$CF/bin/busctl" <<'STUB'
+#!/bin/sh
+echo "$*" >>"${0%/*}/../log"
+case "$*" in *introspect*) printf 'NAME TYPE SIGNATURE RESULT/VALUE FLAGS\norg.x.Y interface - - -\n.CancelJob method u - -\n';; esac
+STUB
+chmod +x "$CF/bin/busctl"
+out=$(PC_FIXTURE="$CF" XDG_RUNTIME_DIR="$WORK" "$PC" call org.x /org/x org.x.Y.CancelJob 1 2>&1)
+case "$out" in would:*) ok 'CancelJob without --apply is a dry run';; *) nok 'CancelJob without --apply is a dry run' "$out";; esac
+grep -q ' call ' "$CF/log" && nok 'the dry run sends no call' "$(cat "$CF/log")" || ok 'the dry run sends no call'
 [ $bad = 0 ] && echo 'PASS pc-dbus' || echo 'FAIL pc-dbus'
 exit $bad

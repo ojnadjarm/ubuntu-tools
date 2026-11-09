@@ -143,5 +143,8 @@ sm >"$WORK/sm/a" & sm >"$WORK/sm/b"; wait
 is 'two cold SMART readers run one sudo' "$(wc -l <"$WORK/sm/calls")" 1
 is 'the waiting reader serves the same JSON' "$(cat "$WORK/sm/a" "$WORK/sm/b")" $'{"ok":1}\n{"ok":1}'
 
+is 'pc_opt keeps a negative number as an argument' "$(run 'pc_opt vol sink -5 --apply; echo "$APPLY ${PC_ARGS[*]}"')" '1 vol sink -5'
+run 'pc_opt -x' >/dev/null 2>&1; is 'pc_opt still rejects an unknown short flag' "$?" 2
+
 [ $bad = 0 ] && echo 'PASS pclib' || echo 'FAIL pclib'
 exit $bad

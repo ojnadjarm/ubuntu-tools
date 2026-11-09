@@ -172,7 +172,7 @@ do_sockets() {
 ## --- who ----------------------------------------------------------------
 do_who() {
   local port=$1 row
-  [ -n "$port" ] || { echo 'pc net who: needs a port (see -h)' >&2; exit 2; }
+  case $port in ''|*[!0-9]*) echo 'pc net who: needs a port (see -h)' >&2; exit 2;; esac
   row=$(listeners_json | jq -c --argjson p "$port" 'map(select(.port==$p)) | .[0] // empty')
   [ -n "$row" ] || { printf 'pc net who: nothing listens on %s\n' "$port" >&2; exit 1; }
   jq -r '"\(.pid)\t\(.comm)\t\(.unit)\t\(.scope)"' <<<"$row" | column -t -s $'\t' -N PID,COMM,UNIT,SCOPE

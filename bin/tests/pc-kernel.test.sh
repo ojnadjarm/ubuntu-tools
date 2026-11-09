@@ -351,5 +351,15 @@ is 'mutation selftest: the mutant skips the fold' "$(grep -c '| fold |' "$WORK/k
 is 'mutation: without the fold, frames are rows again' \
   "$(KJ="$WORK/km/pc-kernel" jk dmesg --since -2h --digest --json | jq '[.digest[].sample|select(test("\\+0x"))]|length > 0')" true
 
+# sysctl edge input: a slash-form key meets the guard, -n takes a number, a multi-value key rolls back whole.
+k sysctl set kernel/sysrq 1 >/dev/null 2>&1; is 'the guard also catches the slash form of a key' "$?" 3
+k dmesg -n x >/dev/null 2>&1;                is 'dmesg -n rejects a non-number' "$?" 2
+if [ "$SANDBOX" = 1 ]; then
+  printf '4\t4\t1\t7\n' >"$FAKE/kernel/printk"
+  sb env PC_LEDGER="$WORK/mv.jsonl" "$K" sysctl set kernel.printk '5 4 1 7' --apply >/dev/null 2>&1
+  sb env PC_LEDGER="$WORK/mv.jsonl" "$BIN/pc-undo" --last --apply >/dev/null 2>&1
+  is 'undo restores every field of a multi-value key' "$(tr '\t' ' ' <"$FAKE/kernel/printk")" '4 4 1 7'
+fi
+
 [ $bad = 0 ] && echo 'PASS pc-kernel' || echo 'FAIL pc-kernel'
 exit $bad
