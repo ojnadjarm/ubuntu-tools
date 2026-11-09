@@ -85,6 +85,19 @@ for c in "pushd ~/work/repo && git push --no-verify" "cd -- ~/work/repo && git p
          "cd ~/work/repo && nohup git push --no-verify &"; do
   deny "$c" "$P"; check "PreToolUse denies: $c" $?
 done
+for c in "env -C ~/work/repo git push --no-verify" "env --chdir=\$HOME/work/repo git push --no-verify" \
+         "cd ~/work/repo && echo origin | xargs git push --no-verify" "echo origin | xargs -I {} git -C ~/work/repo push --no-verify {}" \
+         "export GIT_DIR=~/work/repo/.git; git push --no-verify" "export GIT_DIR=\$HOME/work/repo/.git && bash -c \"git push --no-verify\"" \
+         "GIT_DIR=~/work/repo/.git; export GIT_DIR; git push --no-verify"; do
+  deny "$c" "$P"; check "PreToolUse denies: $c" $?
+done
+for c in "env -C ~/personal/repo git push" "export GIT_DIR=$P/.git; git push"; do
+  ! deny "$c" "$W"; check "PreToolUse allows from the work repo: $c" $?
+done
+for c in "export GIT_DIR=~/work/repo/.git; git log; unset GIT_DIR; git push" "GIT_DIR=~/work/repo/.git; git push" \
+         "ls ~/work/repo | xargs echo git push" "sudo -C 5 git push"; do
+  ! deny "$c" "$P"; check "PreToolUse allows: $c" $?
+done
 for c in "git -C $P commit -m x" "git commit -m x" "git -C ~/work/repo log | grep commit" "git -C ~/personal/repo push" \
          "T=\$(mktemp -d); cd \$T && git commit -qm init; ls ~/work/repo" \
          "cd ~/work/repo && ls; cd -- $P && git commit -m x" "pushd ~/work/repo; popd; git push" "MSG=\"see ~/work/repo\" git push"; do

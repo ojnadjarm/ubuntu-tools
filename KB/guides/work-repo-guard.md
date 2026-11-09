@@ -1,6 +1,6 @@
 # Block agent git commit/push in work repos (work-repo-guard)
 
-Ticket: T1251 · Last verified: 2026-10-23 by `bash ~/agents/bin/tests/work-repo-guard.test.sh` (38 ok) and `git hook run` on the real repos
+Ticket: T1251 · Last verified: 2026-11-09 by `bash ~/agents/bin/tests/work-repo-guard.test.sh` (60 ok) and `git hook run` on the real repos
 
 ## When to use
 An agent must never commit, push, merge or rebase in the owner's work repos (roots in `WORK_REPO_ROOTS`, config.env),
@@ -13,7 +13,7 @@ Two layers, no file written inside a work repo:
 | Layer | Where | Catches | Misses |
 |---|---|---|---|
 | 1 git hooks | `~/.gitconfig` `includeIf "gitdir:<root>/".path` → `~/.config/pc-harness/work-repo-guard.gitconfig` → `core.hooksPath = ~/agents/git-guard/hooks` | any process with an agent marker: pre-commit, pre-merge-commit, pre-push, pre-rebase, and reference-transaction (refs/heads/* or HEAD to a new oid) so `commit --no-verify`, cherry-pick, reset, `checkout -b` fail too | `push --no-verify`, `-c core.hooksPath=…`, `GIT_CONFIG_GLOBAL=/dev/null`, repo-local core.hooksPath (husky), libgit2/IDE git, raw .git writes |
-| 2 PreToolUse | `~/agents/hooks/sleep-loop-block-impl.py` (`work_repo_git`), already registered for Bash | Claude Bash `git commit/push` whose dir (cwd, `cd`, `x=dir`, `-C`, `--git-dir`, `GIT_DIR=`, `bash -c "…"`) resolves under a root, any flags | dirs built at run time (`$(…)`, scripts), other agent CLIs |
+| 2 PreToolUse | `~/agents/hooks/sleep-loop-block-impl.py` (`work_repo_git`), already registered for Bash | Claude Bash `git commit/push` whose dir (cwd, `cd`, `pushd`, `x=dir`, `-C`, `--git-dir`, `GIT_DIR=`, `export GIT_DIR=`, `env -C`, `xargs git`, `bash -c "…"`) resolves under a root, any flags | dirs built at run time (`$(…)`, scripts), other agent CLIs |
 
 Markers (`git-guard/guard.sh`): CLAUDECODE, HARNESS_AGENT (env.sh exports it to every fleet script), OPENCODE,
 GEMINI_CLI, CODEX_SANDBOX, CODEX_THREAD_ID. Codex and Gemini markers are unverified (CLIs not installed).
@@ -38,6 +38,7 @@ bash ~/agents/bin/tests/work-repo-guard.test.sh
 - A repo-local core.hooksPath (husky `prepare`) overrides the include: `status` prints `BAD … file:.git/config`. None of the 3 work repos had one on 2026-10-23.
 - `git commit --dry-run` runs no hook, so it proves nothing; use `git hook run <name>`.
 - Layer 2 replay over 217 logged git commit/push commands: 1 deny, a quoted test string naming a work-repo commit (p50 22 ms, p95 27 ms). The first draft denied any unresolved `cd $T` when a root path appeared anywhere: dropped, unresolved dirs are layer 1's job.
+- T1501 replay over 647 logged git commit/push commands, old hook against new: 1 deny each, 0 changed. A plain `GIT_DIR=W/.git; git push` (not exported) is allowed: git never sees it.
 - The owner typing `!git commit` inside a Claude session carries CLAUDECODE and is refused; his own terminal is not.
 
 ## Links

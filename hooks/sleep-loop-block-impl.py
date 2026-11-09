@@ -36,7 +36,7 @@ AUDIO = {'set-default-sink': 'pc audio default sink <name> --apply', 'set-defaul
          'set-source-mute': 'pc audio mute <node> on|off|toggle --apply',
          'move-sink-input': 'pc audio move <stream-id|app-name> <sink-name|earbuds|tv> --apply'}
 PREFIX = re.compile(r'^(?:sudo|nice|nohup|timeout|env|exec|command|builtin|-\S*|\d+[smhd]?|\w+=.*)$', re.S)
-PREFIX_ARG = {'-u', '-g', '--user', '--group', '-s', '--signal', '-k', '--kill-after'}
+PREFIX_ARG = {'-u', '-g', '--user', '--group', '-s', '--signal', '-k', '--kill-after', '-C', '--chdir', '-I'}
 KEYWORD = {'do', 'then', 'else', 'elif', 'if', 'while', 'until', 'time', '{', '!'}
 READ_ONLY = ('list', 'get', 'info', 'stat', 'subscribe', 'version')
 REMOTE = ('-H', '--host', '-M', '--machine')
@@ -58,6 +58,8 @@ SUDO_HINT = ('sudo-loop nudge (T1147): `sudo` in a loop body or after xargs runs
              '`sudo -n find … -exec du -sk {} +`')
 XARGS_ARG = {'-I', '-n', '-P', '-d', '-L', '-s', '-E', '-a', '--max-args', '--max-procs', '--delimiter', '--arg-file'}
 ASSIGN = re.compile(r'^\w+=.*$', re.S)
+GIT_PREFIX = re.compile(PREFIX.pattern[:-2] + r'|xargs)$', re.S)
+GIT_ENV = ('GIT_DIR', 'GIT_WORK_TREE')
 GIT_OPT_ARG = {'-c', '--exec-path', '--namespace', '--config-env', '--super-prefix', '--list-cmds', '--attr-source'}
 WORK_REASON = ('work-repo guard (T1251, decisions/vass.md): `git {}` targets work repo {}; agents never commit or push '
                'there, the owner does it by hand. Read-only git (status, diff, log) is fine.')
@@ -388,39 +390,57 @@ def resolve(base, p, env):
 
 
 def git_writes(toks, cwd, env, depth=0):
-    """(subcommand, target dir or None) of each git commit/push in toks, following cd, pushd, x=dir, -C, --git-dir, GIT_DIR= and bash -c strings."""
+    """(subcommand, target dir or None) of each git commit/push in toks, following cd, pushd, x=dir, export, env -C, xargs, -C, --git-dir, GIT_DIR= and bash -c strings."""
     out, cur = [], cwd
     for i, t in enumerate(toks):
         if depth < 3 and 'git' in t and any(c in t for c in ' \n;&|'):
             out += git_writes(shell_words(t) or [], cur, env, depth + 1)
             continue
-        if not at_command(toks, i, PREFIX):
+        if not at_command(toks, i, GIT_PREFIX):
             continue
         if ASSIGN.match(t):
             k, v = t.split('=', 1)
             env[k] = os.path.expanduser(v) if v.startswith('~') else v
             continue
         args = args_of(toks, i)
+        if t in ('export', 'unset'):
+            for a in args:
+                k, _, v = a.partition('=')
+                if '=' in a:
+                    env[k] = os.path.expanduser(v) if v.startswith('~') else v
+                if k in GIT_ENV:
+                    env.pop('export ' + k, None)
+                    if t == 'export' and k in env:
+                        env['export ' + k] = resolve(cur, env[k], env)
+            continue
         if t in ('cd', 'pushd', 'popd'):
             args = [a for a in args if a == '-' or not a.startswith('-')]
             cur = None if t == 'popd' else resolve(cur, args[0], env) if args else os.path.expanduser('~')
             continue
         if os.path.basename(t) != 'git':
             continue
-        d, k = cur, i - 1
-        while k >= 0 and ASSIGN.match(toks[k]):
-            if toks[k].startswith(('GIT_DIR=', 'GIT_WORK_TREE=')):
-                d = resolve(cur, toks[k].split('=', 1)[1], env)
+        k = i
+        while k > 0 and toks[k - 1] not in ';&|()\n':
             k -= 1
+        pre, base = toks[k:i], cur
+        for n, a in enumerate(pre):
+            if 'env' in pre[:n] and a in ('-C', '--chdir') and n + 1 < len(pre):
+                base = resolve(base, pre[n + 1], env)
+            elif 'env' in pre[:n] and a.startswith('--chdir='):
+                base = resolve(base, a[8:], env)
+        d = next((env['export ' + g] for g in GIT_ENV if 'export ' + g in env), base)
+        for a in pre:
+            if a.startswith(('GIT_DIR=', 'GIT_WORK_TREE=')):
+                d = resolve(base, a.split('=', 1)[1], env)
         j = 0
         while j < len(args) and args[j].startswith('-'):
             a = args[j]
             if a == '-C' and j + 1 < len(args):
                 d, j = resolve(d, args[j + 1], env), j + 2
             elif a in ('--git-dir', '--work-tree') and j + 1 < len(args):
-                d, j = resolve(cur, args[j + 1], env), j + 2
+                d, j = resolve(base, args[j + 1], env), j + 2
             elif a.startswith(('--git-dir=', '--work-tree=')):
-                d, j = resolve(cur, a.split('=', 1)[1], env), j + 1
+                d, j = resolve(base, a.split('=', 1)[1], env), j + 1
             else:
                 j += 2 if a in GIT_OPT_ARG else 1
         if j < len(args) and args[j] in ('commit', 'push'):
