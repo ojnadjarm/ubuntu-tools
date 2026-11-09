@@ -81,7 +81,7 @@ class Serve(Fixture):
     def test_lan_is_403(self):
         sent = []
         for ip, code in (("192.0.2.10", 403), ("::ffff:10.0.0.4", 403), ("100.101.102.103", 200), ("::1", 200)):
-            h = type("H", (), {"client_address": (ip, 0), "send": lambda self, c, *a, **k: sent.append(c)})()
+            h = type("H", (), {"client_address": (ip, 0), "headers": {}, "send": lambda self, c, *a, **k: sent.append(c)})()
             reports.report_route(h, "/report/agents/log/ci.log")
             self.assertEqual(sent[-1], code, ip)
 

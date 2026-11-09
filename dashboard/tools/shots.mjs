@@ -22,7 +22,7 @@ for (const [w, h] of sizes) for (const s of screens) {
   await p.route('**/*', (r) => (r.request().method() === 'GET' ? r.continue() : r.abort()));
   const t0 = Date.now();
   await p.goto(`${base}/#${s}`, { waitUntil: 'load', timeout: 60000 }).catch((e) => errs.push('goto ' + e.message.slice(0, 80)));
-  await p.waitForFunction(() => !document.querySelector('#grid .empty, .skel'), null, { timeout: 15000 }).catch(() => errs.push('still loading at 15 s'));
+  await p.waitForFunction(() => !document.querySelector('.skel') && ![...document.querySelectorAll('#grid .empty')].some((e) => /…$|not answering/.test(e.textContent.trim())), null, { timeout: 15000 }).catch(() => errs.push('still loading at 15 s'));
   const ready = Date.now() - t0;
   await p.waitForTimeout(3500);
   const m = await p.evaluate(() => {

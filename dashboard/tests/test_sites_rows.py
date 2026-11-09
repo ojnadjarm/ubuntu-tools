@@ -148,7 +148,7 @@ class Fake:
     """Handler stand-in: records the response of a route."""
 
     def __init__(self, ip):
-        self.client_address, self.code, self.headers_out = (ip, 0), None, {}
+        self.client_address, self.code, self.headers_out, self.headers = (ip, 0), None, {}, {}
 
     def send(self, code, body, ctype):
         self.code = code

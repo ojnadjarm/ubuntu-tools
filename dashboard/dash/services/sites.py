@@ -226,16 +226,21 @@ def secret_link(path):
     return out if out.startswith("https://") else ""
 
 
-def trusted(ip):
-    """True for loopback (the tailnet https front proxies from there) or a tailnet address; the LAN is not."""
-    a = ipaddress.ip_address(ip.split("%")[0])
+def trusted(ip, fwd=None):
+    """True for a tailnet address or loopback; behind the loopback tailnet front, the last X-Forwarded-For hop (fwd) is judged instead; the LAN is not."""
+    try:
+        a = ipaddress.ip_address(ip.strip().split("%")[0])
+    except ValueError:
+        return False
     a = getattr(a, "ipv4_mapped", None) or a
+    if a.is_loopback and fwd:
+        return trusted(fwd.split(",")[-1])
     return a.is_loopback or any(a in n for n in TAILNET if n.version == a.version)
 
 
 def secret_route(h, path):
     """302 to the secret link for a tailnet or local request, 403 for anyone else, 503 when the CLI has no link."""
-    if not trusted(h.client_address[0]):
+    if not trusted(h.client_address[0], h.headers.get("X-Forwarded-For")):
         return h.send(403, b"tailnet only\n", "text/plain")
     link = secret_link(path)
     if not link:

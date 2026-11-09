@@ -66,7 +66,7 @@ def render(full, rel):
 
 @route("GET", "/report/", prefix=True)
 def report_route(h, path):
-    if not trusted(h.client_address[0]):
+    if not trusted(h.client_address[0], h.headers.get("X-Forwarded-For")):
         return h.send(403, b"tailnet only\n", "text/plain")
     raw = path[len("/report/"):]
     full = raw.startswith("agents/") and report_path(raw[len("agents/"):])

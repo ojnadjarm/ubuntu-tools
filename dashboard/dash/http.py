@@ -5,6 +5,7 @@ from dash import routes
 from dash.env import BINDS, BRAND, HERE, PORT
 from dash.routes import route
 from dash.services.files import MIME
+from dash.services.sites import trusted
 
 GZ_MIN = 1024
 STATIC_CACHE = "max-age=60"
@@ -97,6 +98,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(404, b"not found\n", "text/plain")
         if method == "POST" and self.cross_site():
             return self.json({"error": "cross-site request refused"}, 403)
+        if method == "POST" and not trusted(self.client_address[0], self.headers.get("X-Forwarded-For")):
+            return self.json({"error": "tailnet only"}, 403)
         fn(self, path)
 
     def cross_site(self):
