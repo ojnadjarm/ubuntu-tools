@@ -23,7 +23,7 @@ cat >"$WORK/stubs/agent-run" <<'STUB'
 #!/usr/bin/env bash
 d="$HARNESS_HOME/$1"
 mkdir "$WORK/running" 2>/dev/null || echo overlap >>"$WORK/runs.log"
-echo "start $(ls "$d/current" | wc -l)" >>"$WORK/runs.log"; echo "$PO_BUDGET" >>"$WORK/budget.log"
+echo "start $(ls "$d/current" | wc -l)" >>"$WORK/runs.log"; echo "$PO_BUDGET" >>"$WORK/budget.log"; echo "$CHAT_SEAT" >"$WORK/seat.log"
 [ -e "$WORK/drop" ] && { rm -f "$WORK/drop"; po-ask fx "arrived mid-run" >/dev/null; }
 [ -e "$WORK/hold" ] && while [ -e "$WORK/hold" ]; do sleep 0.05; done
 if [ ! -e "$WORK/leave" ]; then
@@ -89,6 +89,8 @@ is 'po-ask: inbox holds 2' "$(ls "$P/inbox" | wc -l)" 2
 ev 'po-ask: front matter + verbatim text' 'grep -qx "from: owner" "$a" && grep -qx "thread: 123" "$a" && grep -qx "quote: copy" "$a" && grep -qx "first, verbatim" "$a"'
 echo "from stdin" | po-ask fx - >/dev/null; is 'po-ask: stdin text' "$(grep -lx 'from stdin' "$P"/inbox/*.md | wc -l)" 1
 po-ask fx --from boss "x" >/dev/null 2>&1; is 'po-ask: bad --from exits 2' "$?" 2
+c=$(po-ask fx --from chat --channel chat --thread 1700000000000 "a chat batch")
+ev 'po-ask: --from chat (T1515-P12)' 'grep -qx "from: chat" "$c" && grep -qx "thread: 1700000000000" "$c"'
 ev 'po-ask: no temp file left in the inbox' '[ -z "$(ls -A "$P/.inbox-tmp")" ]'
 
 # po-run (review focus 2): a request during a run is queued for one more run, never a parallel one
@@ -98,9 +100,10 @@ timeout 10 wait-for --every 0.05 --until "grep -q start '$WORK/runs.log'" >/dev/
 out=$(po-run fx); is 'po-run: second call exits 0' "$?" 0
 case "$out" in *"already running"*) ok 'po-run: second call says already running';; *) nok 'po-run: second call' "$out";; esac
 rm -f "$WORK/hold"; wait "$R"; is 'po-run: exit 0' "$?" 0
-is 'po-run: two runs, first with 3 requests, second with the mid-run one' "$(paste -sd' ' "$WORK/runs.log")" 'start 3 end start 1 end'
+is 'po-run: the run gets CHAT_SEAT=<p> (T1515-P12)' "$(cat "$WORK/seat.log")" fx
+is 'po-run: two runs, first with 4 requests, second with the mid-run one' "$(paste -sd' ' "$WORK/runs.log")" 'start 4 end start 1 end'
 is 'po-run: inbox empty' "$(ls "$P/inbox" | wc -l)" 0
-is 'po-run: 4 requests in done/' "$(ls "$P/done" | wc -l)" 4
+is 'po-run: 5 requests in done/' "$(ls "$P/done" | wc -l)" 5
 touch "$WORK/leave"; po-ask fx "unfiled" >/dev/null; po-run fx >/dev/null 2>&1; rm -f "$WORK/leave"
 ev 'po-run: a request the run left gets an outcome line' 'grep -l unfiled "$P"/done/*.md | xargs grep -q "^outcome: left in current/"'
 is 'po-run: current/ empty after' "$(ls "$P/current" | wc -l)" 0

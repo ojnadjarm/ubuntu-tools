@@ -227,7 +227,7 @@ PY
   a=$(CHAT_SEAT=gx chat post @fx 'one')
   is 'wake-po: first message arms one timer, nothing filed yet' "$(timers) $(inbox)" '1 0'
   ev 'wake-po: timer is a 20 s transient unit that flushes fx' \
-     'grep -qE -- "^--user --quiet --collect --unit=chat-wake-fx-[0-9]+ --on-active=20 --timer-property=RemainAfterElapse=no --setenv=HARNESS_HOME=$HARNESS_HOME .*chat_wake_po.py flush fx$" "$WORK/systemd-run.log"'
+     'grep -qE -- "^--user --quiet --collect --unit=chat-wake-fx-[0-9]+ --on-active=20 --timer-property=RemainAfterElapse=no --setenv=HARNESS_HOME=$HARNESS_HOME .*chat_wake.py flush fx$" "$WORK/systemd-run.log"'
   b=$(CHAT_SEAT=gx chat post fx '@fx two')
   c=$(CHAT_SEAT=orchestrator chat post harness $'@fx three\nsecond line')
   is 'wake-po: a burst joins the armed batch (no second timer)' "$(timers) $(inbox)" '1 0'
@@ -260,14 +260,17 @@ PY
 
   CHAT_SEAT=fx chat post @gx 'no po-gx folder' >/dev/null
   is 'wake-po: seat without a PO folder refused, no timer' "$(outcomes gx) $(timers)" 'refused 3'
-  python3 -c "import json, glob; p = glob.glob('$ST/counters/20*.json')[0]; json.dump({'fx': 12}, open(p, 'w'))"
+  for i in $(seq "$((12 - $(today)))"); do CHAT_SEAT=gx chat post @fx "wake $i" >/dev/null; $flush; done
+  is 'wake-po: 12 agent wakes from real posts: 12 timers, 13 requests' "$(today) $(timers) $(inbox)" '12 12 13'
   CHAT_SEAT=gx chat post @fx 'thirteenth' >/dev/null
   echo 1 >"$WORK/plan.rc"; CHAT_SEAT=gx chat post @fx 'plan full' >/dev/null; rm "$WORK/plan.rc"
   touch "$ST/PAUSED"; CHAT_SEAT=gx chat post @fx 'paused' >/dev/null; rm "$ST/PAUSED"
   is 'wake-po: cap, plan 95 %, pause: queued by the router, no timer, nothing filed' \
-     "$(outcomes fx | awk '{print $(NF-2), $(NF-1), $NF}') $(timers) $(inbox)" 'cap plan paused 3 4'
+     "$(outcomes fx | awk '{print $(NF-2), $(NF-1), $NF}') $(timers) $(inbox)" 'cap plan paused 12 13'
   echo 1 >"$WORK/plan.rc"; owner 'owner at full plan' >/dev/null; rm "$WORK/plan.rc"
-  is 'wake-po: the owner still goes at full plan' "$(inbox)" 5
+  is 'wake-po: the owner still goes at full plan' "$(inbox)" 14
+  parked() { python3 -c "import json; print(' '.join(r['why'] for r in map(json.loads, open('$ST/queue/$1.jsonl'))))"; }
+  is 'wake-po: undelivered wakes parked per seat' "$(parked fx) / $(parked gx)" 'cap plan paused / refused'
 }
 
 [ $# -gt 0 ] || set -- post read wake-ceo wake-po
