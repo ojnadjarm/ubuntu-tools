@@ -46,6 +46,7 @@ is 'sockets --json is an array' "$(fx sockets --json | jq -e 'type')" '"array"'
 is 'sockets --pid filters'      "$(fx sockets --pid 1004 --json | jq -e 'all(.pid==1004)')" true
 is 'wifi --json reports the SSID' "$(fx wifi --json | jq -r .ssid)" HomeNet
 is 'dns --json is an array'     "$(fx dns --json | jq -e 'type')" '"array"'
+fx top --seconds abc >/dev/null 2>&1; is 'bad --seconds exits 2' "$?" 2
 out=$(fx top --seconds 2 | head -5); [ -n "$out" ] && ok 'top produces output' || nok 'top produces output' empty
 
 # 5b. wifi roams from the wpa.log fixture: ping-pong pair, plain roam, disconnect reason, empty, mutation.

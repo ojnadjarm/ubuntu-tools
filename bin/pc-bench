@@ -35,6 +35,7 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+case $RUNS in ''|0|*[!0-9]*) echo 'pc bench: --runs takes a positive integer' >&2; exit 2;; esac
 # `--only a b c`: the extra names land in PC_ARGS as bare words.
 ONLY+=(${PC_ARGS[@]+"${PC_ARGS[@]}"})
 

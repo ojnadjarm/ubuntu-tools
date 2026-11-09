@@ -28,6 +28,8 @@ if command -v bwrap >/dev/null && sb test -e /proc/sys/.pt05-fake 2>/dev/null &&
 sk() { sb env PC_FIXTURE="$FIX" PC_LEDGER="$WORK/changes.jsonl" "$K" "$@"; }
 
 # 1. dmesg: the digest collapses the 180 SSDP warnings to one masked row.
+k dmesg --since bogus >/dev/null 2>&1; is 'dmesg: bad --since exits 2' "$?" 2
+k oom --since bogus >/dev/null 2>&1; is 'oom: bad --since exits 2' "$?" 2
 d=$(k dmesg --digest --since -1h --json)
 is 'digest collapses the UFW flood'   "$(jq -r '.digest[0].count' <<<"$d")" 180
 is 'digest keeps the other shapes'    "$(jq -r '.digest|length' <<<"$d")" 4
@@ -359,6 +361,11 @@ if [ "$SANDBOX" = 1 ]; then
   sb env PC_LEDGER="$WORK/mv.jsonl" "$K" sysctl set kernel.printk '5 4 1 7' --apply >/dev/null 2>&1
   sb env PC_LEDGER="$WORK/mv.jsonl" "$BIN/pc-undo" --last --apply >/dev/null 2>&1
   is 'undo restores every field of a multi-value key' "$(tr '\t' ' ' <"$FAKE/kernel/printk")" '4 4 1 7'
+  mkdir -p "$WORK/shim2"   # a sysctl that stores a write tab-separated, as the kernel does
+  printf '#!/bin/sh\n/usr/sbin/sysctl "$@"; rc=$?\ncase "$*" in *-qw*) sed -i "s/ /\\t/g" /proc/sys/kernel/printk;; esac\nexit $rc\n' >"$WORK/shim2/sysctl"; chmod +x "$WORK/shim2/sysctl"
+  sb env PATH="$WORK/shim2:$WORK/shim:/usr/sbin:/usr/bin:/bin" PC_LEDGER="$WORK/mv2.jsonl" "$K" sysctl set kernel.printk '6 4 1 7' --apply >/dev/null 2>&1
+  is 'a multi-value set is verified against the tab-separated read-back' \
+    "$(grep -c $'\t' "$FAKE/kernel/printk") $(jq -s -r 'map(select(.verified!=null))|last|.verified' "$WORK/mv2.jsonl")" '1 true'
 fi
 
 [ $bad = 0 ] && echo 'PASS pc-kernel' || echo 'FAIL pc-kernel'

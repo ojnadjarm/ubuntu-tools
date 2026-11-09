@@ -26,6 +26,7 @@ sentinel sees — and the cache age is reported with it.' "$@"
 QUICK=0; BRIEF=0
 PC_EXTRA_FLAGS=(--quick --brief)
 pc_opt "$@"
+[ ${#PC_ARGS[@]} = 0 ] || { echo "pc doctor: unknown argument ${PC_ARGS[0]}" >&2; exit 2; }
 for f in ${PC_EXTRA[@]+"${PC_EXTRA[@]}"}; do [ "$f" = --quick ] && QUICK=1; [ "$f" = --brief ] && BRIEF=1; done
 
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT

@@ -62,6 +62,10 @@ out=$(fx fan 2>&1); rc=$?
 is 'pc power fan exits 3' "$rc" 3
 case "$out" in *FLEET*) ok 'pc power fan prints the FLEET line';; *) nok 'pc power fan prints the FLEET line' "$out";; esac
 fx charge-limit 30 >/dev/null 2>&1; is 'charge-limit rejects 30' "$?" 2
+is 'charge-limit 060 is decimal 60, not an octal string' "$(fx charge-limit 060)" 'would: charge-limit 80 → 60'
+fx --seconds abc >/dev/null 2>&1; is '--seconds abc exits 2' "$?" 2
+mkdir -p "$WORK/stub"; printf '#!/bin/sh\nexit 0\n' >"$WORK/stub/sleep"; chmod +x "$WORK/stub/sleep"
+PATH="$WORK/stub:$PATH" fx rapl --seconds 1e3 >/dev/null 2>&1; is '--seconds 1e3 exits 2 (was a 1000 s sleep)' "$?" 2
 fx epp nope        >/dev/null 2>&1; is 'epp rejects an unknown preference' "$?" 2
 fx nosuchverb      >/dev/null 2>&1; is 'unknown verb exits 2' "$?" 2
 fx --nosuchflag    >/dev/null 2>&1; is 'unknown option exits 2' "$?" 2

@@ -49,7 +49,9 @@ ok "$(near "${at:-0}" "$(jq '.clips.beats.marks.beat8' "$j")" 0.02)" "mv-mix --s
 
 ok "$(is "$(rc "$BIN/mv-beats" "$FX/missing.wav")" 2)" "missing input -> rc 2"
 ok "$(is "$(rc "$BIN/mv-beats" "$FX/c97.wav" --bogus)" 2)" "unknown option -> rc 2"
-ok "$(is "$(MV_BEATS_VENV=$FX/none rc "$BIN/mv-beats" -h)" 3)" "no venv -> rc 3 with the install line"
+ok "$(is "$(MV_BEATS_VENV=$FX/none rc "$BIN/mv-beats" "$FX/c97.wav")" 3)" "no venv -> rc 3 with the install line"
+ok "$(is "$(MV_BEATS_VENV=$FX/none "$BIN/mv-beats" -h | head -1 | cut -c1-15)" 'usage: mv-beats')" "no venv: -h prints the usage"
+ok "$(is "$(MV_BEATS_VENV=$FX/none rc "$BIN/mv-beats" --bogus)" 2)" "no venv: unknown option -> rc 2"
 
 echo "mv-beats.test: $((n - bad))/$n passed"
 [[ $bad == 0 ]]

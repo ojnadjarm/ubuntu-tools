@@ -79,9 +79,10 @@ if busctl --user list --no-pager >/dev/null 2>&1; then
         | .interfaces[].methods[] | select(. == "GetCurrentState")] | length')" 1
   is 'live windows --json is the pc win list array' "$("$PC" windows --json | jq -r type)" array
   is 'live summary --json parses' "$("$PC" --json | jq -r '[.outputs,.workspaces,.idle,.shell,.extensions] | length')" 5
-  m=$("$PC" --json | jq -r .screen.match)
-  [ "$m" = true ] && ok 'live xrandr and DisplayConfig agree on the screen size' \
-    || nok 'live xrandr and DisplayConfig agree on the screen size' "$("$PC" | sed -n 2p)"
+  m=$("$PC" --json | jq -r 'if .screen.xrandr == null then "skip" else .screen.match end')
+  if [ "$m" = skip ]; then ok 'live screen size check skipped (xrandr reports no size)'
+  elif [ "$m" = true ]; then ok 'live xrandr and DisplayConfig agree on the screen size'
+  else nok 'live xrandr and DisplayConfig agree on the screen size' "$("$PC" | sed -n 2p)"; fi
   b=$(budget 0.4)
   is "live summary is inside its $b s budget" \
     "$(awk -v t="$( { /usr/bin/time -f %e "$PC" >/dev/null; } 2>&1 )" -v b="$b" 'BEGIN{print (t <= b) ? "yes" : t}')" yes

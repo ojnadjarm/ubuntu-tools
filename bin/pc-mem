@@ -167,7 +167,7 @@ cpu() {
 
 growth() {
   local days=${PC_OPT[--days]:-3} n=${PC_OPT[-n]:-15} now
-  case $days in ""|*[!0-9.]*) days=3;; esac
+  case $days in ""|*[!0-9.]*) echo "pc mem growth: --days takes a number, got '$days'" >&2; exit 2;; esac
   case $n in ""|*[!0-9]*) n=15;; esac
   printf -v now '%(%s)T' -1; now=${PC_MEM_NOW:-$now}
   [ -r "$PC_MEM_LOG" ] || { echo "pc mem: no samples yet ($PC_MEM_LOG); run: pc mem sample" >&2; exit 1; }

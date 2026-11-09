@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # mv-otio: a film build's out/build.json -> editable timeline (.otio, .kdenlive, .fcpxml when the adapter loads) on its kept sources.
 set -euo pipefail
+for a in "$@"; do case $a in
+  -h|--help) echo "usage: mv-otio OUTDIR   (the build's out/ with build.json; writes <name>.otio, .kdenlive, .fcpxml there)"; exit 0;;
+  -*) echo "mv-otio: unknown option $a" >&2; exit 2;;
+esac; done
 VENV=${MV_OTIO_VENV:-$HOME/.local/opt/mv-otio}
 [[ -x $VENV/bin/python ]] || {
   echo "mv-otio: no venv at $VENV; create it with:" >&2

@@ -40,6 +40,7 @@ pc_opt ${ARGV[@]+"${ARGV[@]}"}
 SINCE=${PC_OPT[--since]-}
 sub="${PC_ARGS[0]:-}"
 arg="${PC_ARGS[1]:-}"
+case $SECONDS_ in ''|*[!0-9]*) echo 'pc net: --seconds takes whole seconds' >&2; exit 2;; esac
 secs=$SECONDS_; [ "$secs" = 0 ] && secs=3
 
 ## --- helpers ------------------------------------------------------------

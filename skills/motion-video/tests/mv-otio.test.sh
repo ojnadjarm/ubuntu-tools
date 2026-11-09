@@ -8,6 +8,10 @@ trap 'rm -rf "$FX"' EXIT
 bad=0 n=0
 ok() { n=$((n + 1)); if [[ $1 == 1 ]]; then echo "PASS $2"; else echo "FAIL $2"; bad=$((bad + 1)); fi; }
 
+ok "$([[ $(MV_OTIO_VENV=$FX/none "$HERE/../scripts/mv-otio" -h) == 'usage: mv-otio '* ]] && echo 1 || echo 0)" "no venv: -h prints the usage"
+MV_OTIO_VENV=$FX/none "$HERE/../scripts/mv-otio" --bogus 2>/dev/null; ok "$([[ $? == 2 ]] && echo 1 || echo 0)" "no venv: unknown option -> rc 2"
+MV_OTIO_VENV=$FX/none "$HERE/../scripts/mv-otio" "$FX" 2>/dev/null; ok "$([[ $? == 3 ]] && echo 1 || echo 0)" "no venv -> rc 3"
+
 if [[ -z ${OUT:-} && ${MV_OTIO_FULL:-0} == 1 ]]; then
   export CREATIVE_CI_LOG=$FX/creative-ci.jsonl
   "$HERE/../scripts/mv-new" "$FX/demo" --kind film >/dev/null

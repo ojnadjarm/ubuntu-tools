@@ -25,9 +25,10 @@ on every CPU (root, read-only; --window N samples N s at 10 Hz) and prints each 
 
 PC_EXTRA_FLAGS=(--record --reasons --window:)
 pc_opt "$@"
+case $SECONDS_ in ''|*[!0-9.]*|*.*.*|.) printf '%s: --seconds takes a number\n' 'pc thermal' >&2; exit 2;; esac
 : "${PC_THERMAL_LOG:=$HOME/agents/log/thermal.tsv}" "${PC_MEM_NAMES:=$HOME/agents/state/docker-names.tsv}"
 UNITS_STATE="${PC_THERMAL_LOG%.tsv}.units"
-c_of() { printf '%d.%d' $(( ${1:-0} / 1000 )) $(( (${1:-0} % 1000) / 100 )); }
+c_of() { local v=${1:-0} s=; [ "$v" -lt 0 ] && { s=-; v=$(( -v )); }; printf '%s%d.%d' "$s" $(( v / 1000 )) $(( (v % 1000) / 100 )); }
 
 ## --- zones ------------------------------------------------------------------
 zones_json() {
@@ -183,7 +184,7 @@ case $LAST_TS in ''|*[!0-9]*) LAST_TS= LAST_PKG= LAST_CORE=;; esac
 counters_json() {
   local now pkg core wp=null wc=null n=$SECONDS_
   now=$(date +%s); pkg=$(thr_sum package); core=$(thr_sum core)
-  if [ "$n" -gt 0 ] 2>/dev/null; then
+  if [ -n "${n//[0.]/}" ]; then
     sleep "$n"
     local p2 c2; p2=$(thr_sum package); c2=$(thr_sum core)
     [ "$pkg" != n/a ] && { wp=$((p2 - pkg)); pkg=$p2; }
@@ -248,6 +249,7 @@ case "$sub" in
     else t_thr; t_counters; fi;;
   watch)
     n=$SECONDS_; [ "$n" = 0 ] && n=5
+    case $n in *.*) printf 'pc thermal: watch --seconds takes whole seconds\n' >&2; exit 2;; esac
     i=0
     while [ "$i" -lt "$n" ]; do
       [ "$i" = 0 ] || sleep 1

@@ -24,11 +24,13 @@ pc_usage 'usage: pc io [disks|procs|units|smart [--record|--trend]|sample|histor
 
 PC_SUB='pc io'; PC_EXTRA_FLAGS=(-n: --record --trend --since:); SECONDS_=0.3
 pc_opt "$@"
+case $SECONDS_ in ''|*[!0-9.]*|*.*.*|.) echo 'pc io: --seconds takes a number' >&2; exit 2;; esac
 SECONDS_W=$SECONDS_; VERB=disks_and_procs
 for a in ${PC_ARGS[@]+"${PC_ARGS[@]}"}; do
   case $a in disks|procs|units|smart|sample|history) VERB=$a;; *) echo "pc io: unknown argument $a" >&2; exit 2;; esac
 done
 N=${PC_OPT[-n]-$([ "$VERB" = units ] && echo 10 || echo 5)}
+case $N in ''|*[!0-9]*) echo 'pc io: -n takes a number' >&2; exit 2;; esac
 SMART_LOG=${PC_SMART_LOG:-$HOME/agents/log/smart.tsv}
 IO_LOG=${PC_IO_LOG:-$HOME/agents/log/io-history.tsv}
 

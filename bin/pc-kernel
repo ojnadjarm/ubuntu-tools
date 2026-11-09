@@ -53,7 +53,7 @@ since_epoch() {
     -[0-9]*[smhd]|[0-9]*[smhd]) n=${s#-}; u=${n: -1}; n=${n%?}
       case $u in s) m=1;; m) m=60;; h) m=3600;; d) m=86400;; esac
       printf '%s\n' $((NOW - n * m));;
-    *) date -d "$s" +%s 2>/dev/null;;
+    *) date -d "$s" +%s 2>/dev/null || { printf "pc kernel: bad --since '%s'\n" "$s" >&2; return 2; };;
   esac
 }
 
@@ -148,7 +148,7 @@ dmesg_model() {
 do_dmesg() {
   local cut dcut model
   LVJSON=$(levels_json "$LEVEL") || exit 2
-  cut=$(since_epoch "$SINCE"); : "${cut:=0}"
+  cut=$(since_epoch "$SINCE") || exit 2; : "${cut:=0}"
   if [ -n "$SINCE" ]; then dcut=$cut; else dcut=$((NOW - 3600)); fi
   model=$(dmesg_model "$cut" "$dcut") || exit 1
   [ "$JSON" = 1 ] && { printf '%s\n' "$model"; return 0; }
@@ -286,7 +286,8 @@ do_sysctl_set() {
     out=$(sysctl_persist "$key" "$val" "$before"); rc=$?
     [ $rc = 0 ] || { [ -n "$out" ] && printf '%s\n' "$out"; exit $rc; }
   else
-    out=$(PC_READ_CMD="sysctl -n $key" pc_apply "$key" "$before" "$val" \
+    before=${before//$'\t'/ }
+    out=$(PC_READ_CMD="sysctl -n $key | tr '\t' ' '" pc_apply "$key" "$before" "$val" \
           "timeout $PC_ROOT_TIMEOUT sudo -n sysctl -qw $(printf %q "$key=$before")" \
           timeout "$PC_ROOT_TIMEOUT" sudo -n sysctl -qw "$key=$val") || { printf '%s\n' "$out"; exit 1; }
   fi
@@ -584,7 +585,7 @@ oom_classified() {
 
 do_oom() {
   local cut rows
-  cut=$(since_epoch "$SINCE"); : "${cut:=$BTIME}"
+  cut=$(since_epoch "$SINCE") || exit 2; : "${cut:=$BTIME}"
   rows=$(oom_classified "$cut")
   if [ "$JSON" = 1 ]; then
     printf '%s\n' "$rows" | jq -R -s -c --argjson cut "$cut" 'split("\n") | map(select(length > 0) | split("\t")

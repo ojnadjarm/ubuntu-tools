@@ -168,5 +168,7 @@ chmod +x "$CF/bin/busctl"
 out=$(PC_FIXTURE="$CF" XDG_RUNTIME_DIR="$WORK" "$PC" call org.x /org/x org.x.Y.CancelJob 1 2>&1)
 case "$out" in would:*) ok 'CancelJob without --apply is a dry run';; *) nok 'CancelJob without --apply is a dry run' "$out";; esac
 grep -q ' call ' "$CF/log" && nok 'the dry run sends no call' "$(cat "$CF/log")" || ok 'the dry run sends no call'
+out=$(PC_FIXTURE="$CF" XDG_RUNTIME_DIR="$WORK" "$PC" call org.x /org/x org.x.Y.CancelJob -5 2>&1)
+case "$out" in would:*'(-5)'*) ok 'a negative number is an argument, not an option';; *) nok 'a negative number is an argument, not an option' "$out";; esac
 [ $bad = 0 ] && echo 'PASS pc-dbus' || echo 'FAIL pc-dbus'
 exit $bad

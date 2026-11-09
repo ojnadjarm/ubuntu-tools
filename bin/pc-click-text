@@ -12,6 +12,7 @@ while [ $# -gt 0 ]; do
     *) q="$1"; shift;;
   esac
 done
+case $idx in ''|*[!0-9]*) echo "pc click-text: --index takes a number, got '$idx'" >&2; exit 2;; esac
 [ -n "$q" ] || { echo 'usage: pc click-text "text" [--index N]' >&2; exit 2; }
 if [ -n "$region" ]; then hits="$("$d/pc-find" "$q" --all --region "$region")"; else hits="$("$d/pc-find" "$q" --all)"; fi
 [ -n "$hits" ] || { echo "click-text: '$q' not found on screen" >&2; exit 1; }

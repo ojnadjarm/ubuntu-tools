@@ -45,6 +45,7 @@ while [ $# -gt 0 ]; do
     --seconds) SECS=$2; shift;; --seconds=*) SECS=${1#*=};;
     -h|--help) printf '%s\n' "$PC_USAGE"; exit 0;;
     --) shift; ARGS+=("$@"); break;;
+    -[0-9]*) ARGS+=("$1");;
     -?*) echo "pc dbus: unknown option $1" >&2; exit 2;;
     *) ARGS+=("$1");;
   esac

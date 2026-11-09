@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # mv-beats: beat grid, downbeats and onsets of a music bed as cues.json marks (essentia RhythmExtractor2013 + fine phase).
 set -euo pipefail
+for a in "$@"; do case $a in
+  -h|--help) sed -n '/^USAGE = """/,/"""$/{s/^USAGE = """//;s/"""$//;p}' "$0"; exit 0;;
+  --out*|--every*|--downbeats|--meter*|--snap*) ;;
+  -[!0-9]*) echo "mv-beats: bad arguments $a" >&2; exit 2;;
+esac; done
 VENV=${MV_BEATS_VENV:-$HOME/.local/opt/mv-beats}
 [[ -x $VENV/bin/python ]] || {
   echo "mv-beats: no venv at $VENV; create it with:" >&2

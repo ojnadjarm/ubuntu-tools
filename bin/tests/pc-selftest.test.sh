@@ -83,7 +83,7 @@ logged 'gtk-launch org.gnome.Calculator' && ok 'open app.desktop goes to gtk-lau
 logged 'fakeapp ' && ok 'a failing gtk-launch falls back to the binary' || nok 'a failing gtk-launch falls back to the binary' "$(cat "$LOG")"
 
 # 4. pc notify.
-is 'notify with no args prints usage' "$(st "$BIN/pc-notify")" 'usage: pc notify "msg" [title]'
+is 'notify with no args prints usage on stderr, exit 2' "$(st "$BIN/pc-notify" 2>&1; echo $?)" $'usage: pc notify "msg" [title]\n2'
 : >"$LOG"; st "$BIN/pc-notify" 'hi there'
 is 'notify defaults the title to Claude' "$(cat "$LOG")" 'notify-send Claude hi there'
 : >"$LOG"; st "$BIN/pc-notify" body Title; is 'notify passes the title first' "$(cat "$LOG")" 'notify-send Title body'

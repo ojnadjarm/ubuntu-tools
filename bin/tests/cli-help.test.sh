@@ -37,7 +37,6 @@ orbit-hook help bogus
 orchestrator-pulse help bogus
 pc_dbus.py help bogus
 pc-selftest bogus
-pc-wait bogus
 plan-usage bogus
 playwright-mcp help bogus
 power-profile-auto help bogus

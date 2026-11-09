@@ -35,4 +35,5 @@ pc resolve nomatch --fixed x --apply >/dev/null 2>&1; is 'no match exits 1' $? 1
 pc resolve 'disk full' --fixed '-x restarted' --apply >/dev/null 2>&1; is 'a note starting with a dash resolves' $? 0
 is 'the dashed note is recorded' "$(jq -r 'select(.fixed=="-x restarted").fixed' "$WORK/agents/log/notify-resolved.jsonl")" '-x restarted'
 HOME=$REAL_HOME; is 'real notify.log, resolved ledger and changes.jsonl untouched' "$(real_sum)" "$before"
+[ $bad = 0 ] && echo 'PASS pc-need' || echo 'FAIL pc-need'
 exit $bad

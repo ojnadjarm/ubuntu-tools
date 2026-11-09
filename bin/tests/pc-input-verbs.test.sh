@@ -93,6 +93,7 @@ is 'pc-find --shot skips the portal' "$(calls "$W/pc-find" OK --shot "$WORK/a.pn
 # pc-click-text
 argerr 'pc-click-text with no text' "$W/pc-click-text" --index 1
 argerr 'pc-click-text --index without a value' "$W/pc-click-text" Save --index
+argerr 'pc-click-text --index abc' "$W/pc-click-text" Save --index abc
 is 'pc-click-text Save: OCR then move and left click' "$(calls "$W/pc-click-text" Save | grep -v '^portal\|^ocr\|^xrandr')" \
   "$(printf '%s\n' 'ydotool mousemove --absolute -x 120 -y 40' 'ydotool click 0xC0')"
 is 'pc-click-text reports the point' "$(cat "$WORK/out")" "clicked 'Save' at 120 40"

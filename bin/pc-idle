@@ -72,7 +72,7 @@ other_rss() {
   printf -v now '%(%s)T' -1
   { while read -r k v _; do [ "$k" = btime ] && { btime=$v; break; }; done <"$PC_PROC/stat"; } 2>/dev/null
   for d in "$PC_PROC"/[0-9]*; do
-    mapfile -d '' args <"$d/cmdline" 2>/dev/null || continue
+    mapfile -d '' args 2>/dev/null <"$d/cmdline" || continue
     cmd="${args[*]}"
     case $cmd in
       *playwright-mcp*) comm=playwright-mcp;;

@@ -25,7 +25,7 @@ PC_SUB='pc timers'; PC_EXTRA_FLAGS=(--overlap --since: --free:)
 pc_opt "$@"
 SINCE=${PC_OPT[--since]-7d}; FREE=${PC_OPT[--free]-}; MODE=list
 [ -n "${PC_OPT[--overlap]-}" ] && MODE=overlap
-[ -n "$FREE" ] && MODE=free
+[ -n "${PC_OPT[--free]+x}" ] && MODE=free
 CI=${CI_WINDOW:-00:50-01:50}
 
 # secs <span> — seconds in Nd/Nh/Nmin/Nm/Ns.

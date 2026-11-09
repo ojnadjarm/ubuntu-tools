@@ -11,6 +11,8 @@ WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 
 # 1. disks: Δ over a 1 s window (100 sectors*512=51200B read/write delta -> 10.24 MB/s each).
 run_disks() { PC_PROC="$FIX/proc" PC_FIXTURE="$FIX" XDG_RUNTIME_DIR="$WORK" "$BIN/pc-io" disks --seconds 1 "$@"; }
+run_disks --seconds abc >/dev/null 2>&1; is 'bad --seconds exits 2' "$?" 2
+PC_PROC="$TOPFIX/proc" PC_FIXTURE="$TOPFIX" "$BIN/pc-io" procs -n abc >/dev/null 2>&1; is 'bad -n exits 2' "$?" 2
 is 'read MB/s from the diskstats Δ' "$(run_disks --json | jq -r '.nvme0n1.read_mb_s')" 10.24
 is 'write MB/s from the diskstats Δ' "$(run_disks --json | jq -r '.nvme0n1.write_mb_s')" 10.24
 is 'read IOPS from the diskstats Δ' "$(run_disks --json | jq -r '.nvme0n1.read_iops')" 100.0

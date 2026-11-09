@@ -4,5 +4,6 @@ d="$(dirname "$(readlink -f "$0")")"
 [ "${1:-}" = -h ] || [ "${1:-}" = --help ] && { echo "usage: pc wait SECONDS [shot args]"; exit 0; }
 [ $# -eq 0 ] && { echo "usage: pc wait SECONDS [shot args]" >&2; exit 2; }
 s="$1"; shift
+case $s in *[!0-9.]*|*.*.*|.) echo "pc wait: SECONDS must be a number, got '$s'" >&2; exit 2;; esac
 sleep "$s"
 exec "$d/pc-shot" "$@"

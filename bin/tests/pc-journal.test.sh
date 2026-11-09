@@ -41,6 +41,7 @@ is 'size shows the journald SystemMaxUse cap' "$?" 0
 "$J" grep 'UFW BLOCK' --since 1h --json | jq -e 'type=="array"' >/dev/null
 is 'grep --json is valid JSON' "$?" 0
 
+"$J" errors --since bogus >/dev/null 2>&1; is 'bad --since exits 2' "$?" 2
 is '--since -1h reads the same window as --since 1h' \
   "$("$J" errors --since -1h -n 5 --json | jq length)" "$("$J" errors --since 1h -n 5 --json | jq length)"
 

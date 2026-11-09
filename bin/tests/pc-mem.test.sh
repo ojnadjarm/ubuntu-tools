@@ -99,6 +99,7 @@ is 'Vass container keeps its owner-only tag' "$(grep -c 'moodle45-app-1 (Vass, o
 is 'unknown docker id stays the id' "$(grep -c "docker-$I3.scope" <<<"$G")" 1
 is 'span under 1 h left out' "$(grep -c blip <<<"$G")" 0
 is 'rows older than the window left out' "$(grep -c old.service <<<"$G")" 0
+is 'growth: bad --days exits 2' "$(PC_MEM_LOG="$L" PC_MEM_NOW=$N "$BIN/pc-mem" growth --days x >/dev/null 2>&1; echo $?)" 2
 is 'old rows count with a wider window' "$(PC_MEM_LOG="$L" PC_MEM_NOW=$N "$BIN/pc-mem" growth --days 10 | grep -c old.service)" 1
 head -12 "$L" >"$L.r.1"; { head -1 "$L"; sed -n 13,999p "$L"; } >"$L.r"
 is 'growth reads the rotated <log>.1 too' "$(PC_MEM_LOG="$L.r" PC_MEM_NOW=$N "$BIN/pc-mem" growth --days 3)" "$G"

@@ -382,9 +382,9 @@ case "${ARGS[0]:-}" in
       }
     fi
     case "$verb" in
-      start) rollback="pc units stop $(printf '%q' "$u")${flag:+ $flag} --apply";;
-      stop) rollback="pc units start $(printf '%q' "$u")${flag:+ $flag} --apply";;
-      restart) rollback="pc units restart $(printf '%q' "$u")${flag:+ $flag} --apply  # noted as such: restart's rollback is restart";;
+      start) rollback="pc units stop $(printf '%q' "$u") --$s --apply";;
+      stop) rollback="pc units start $(printf '%q' "$u") --$s --apply";;
+      restart) rollback="pc units restart $(printf '%q' "$u") --$s --apply  # noted as such: restart's rollback is restart";;
     esac
     export PC_READ_CMD="$read_cmd"
     pc_apply "$u" "$before" "$after" "$rollback" \

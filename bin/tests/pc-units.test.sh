@@ -364,6 +364,10 @@ grep -q '^note: fx-trig is also started by fx-trig.socket' <<<"$(dm mask fx-trig
 : >"$DM/argv"
 o=$(dm restart fx-enabled --system --apply)
 grep -q '^rollback: pc undo ' <<<"$o" && grep -qx 'sudo systemctl restart -- fx-enabled' "$DM/argv" && ok 'restart of a system unit goes through sudo -n' || nok 'system restart sudo' "$o $(cat "$DM/argv")"
+r=$(row "$(sed -n 's/^rollback: pc undo //p' <<<"$o")")
+is 'restart --system: the rollback keeps the scope' "$(jq -r .rollback <<<"$r" | cut -d' ' -f1-6)" 'pc units restart fx-enabled --system --apply'
+o=$(PATH="$DM/bin:$PATH" "$BIN/pc-undo" undo "$(jq -r .id <<<"$r")" --apply 2>&1)
+grep -q ambiguous <<<"$o" && nok 'pc undo of a --system restart resolves the unit' "$o" || ok 'pc undo of a --system restart resolves the unit'
 dm restart fx-run --user --apply >/dev/null
 ! grep -q '^sudo .*fx-run' "$DM/argv" && grep -q 'restart -- fx-run' "$DM/argv" && ok 'restart of a user unit never goes through sudo' || nok 'user restart sudo' "$(cat "$DM/argv")"
 printf 'enabled\nfailed\n\n' >"$DM/u/fx-failed.service"

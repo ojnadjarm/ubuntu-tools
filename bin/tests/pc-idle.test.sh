@@ -68,7 +68,8 @@ case "$(jq -r '.other_top' <<<"$J2")" in
 esac
 FX3="$WORK/fix3"; cp -r "$FIX" "$FX3"; rm -rf "$FX3/proc/"*
 is 'no browser tree: other_top is -' "$(PC_FIXTURE="$FX3" PC_STUB_STATE="$WORK/n" PC_IDLE_INTERVAL=1 XDG_RUNTIME_DIR="$WORK" \
-  PC_LEDGER="$WORK/l.jsonl" "$BIN/pc-idle" --seconds 1 --json | jq -r '[.other_rss_mb,.other_top]|@tsv')" "$(printf '0\t-')"
+  PC_LEDGER="$WORK/l.jsonl" "$BIN/pc-idle" --seconds 1 --json 2>"$WORK/err3" | jq -r '[.other_rss_mb,.other_top]|@tsv')" "$(printf '0\t-')"
+is 'a process gone before its cmdline is read prints nothing on stderr' "$(cat "$WORK/err3")" ''
 
 # 5. --tsv: the row pcbench-weekly appends, matching BASELINE-IDLE.tsv's header.
 R=$(fx --seconds 3 --tsv)

@@ -31,6 +31,7 @@ DEEP=0; ARGV=()
 for a in "$@"; do case $a in --deep) DEEP=1;; *) ARGV+=("$a");; esac; done
 PC_EXTRA_FLAGS=(--window: --owner-ok)
 pc_opt ${ARGV[@]+"${ARGV[@]}"}
+case $SECONDS_ in ''|*[!0-9.]*|*.*.*|.) printf '%s: --seconds takes a number\n' 'pc power' >&2; exit 2;; esac
 secs=$SECONDS_; [ "$secs" = 0 ] && secs=0.3
 # to_ms 0.3 -> 300; integer milliseconds keep the watt arithmetic in bash (no awk/bc fork).
 to_ms() { local s=$1 i=${1%%.*} f; f=${s#*.}; [ "$f" = "$s" ] && f=0; f="${f}00"; printf '%d' $((10#${i:-0} * 1000 + 10#${f:0:3})); }
@@ -250,7 +251,7 @@ case "$sub" in
       write_all "$v" "$PSTATE/no_turbo"; exit $?;;
   charge-limit)
     need_arg "$arg" charge-limit
-    case $arg in ''|*[!0-9]*) arg=0;; esac
+    case $arg in ''|*[!0-9]*) arg=0;; *) arg=$((10#$arg));; esac
     [ "$arg" -ge 40 ] && [ "$arg" -le 100 ] || { echo 'pc power: charge-limit takes 40..100' >&2; exit 2; }
     f="$PC_BAT/charge_control_end_threshold"
     apply_change charge-limit "$(pc_rd "$f")" "$arg" charge-limit "cat $f" write_all "$arg" "$f"; exit $?;;

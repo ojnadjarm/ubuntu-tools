@@ -21,6 +21,7 @@ NOBUDGET='map(select(.status=="FAIL" and (.detail|test("over budget")|not)))'
 # ge <name> <text> <ERE with one ([0-9]+) group> <min> — the text matches and the number is >= min.
 ge() { [[ $2 =~ $3 ]] && [ "${BASH_REMATCH[1]}" -ge "$4" ] && ok "$1" || nok "$1" "$2"; }
 
+"$BIN/pc-doctor" nosuchverb >/dev/null 2>&1; is 'a stray argument exits 2, no check runs' "$?" 2
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 SHOTS="$HOME/Pictures/Screenshots"
 

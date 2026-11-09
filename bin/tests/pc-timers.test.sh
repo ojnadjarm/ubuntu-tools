@@ -95,6 +95,7 @@ run_cases() {
   printf 'timer: 05:30-06:00\n' >"$FX/snap.txt"
   is 'overlap: none' "$("$P" --overlap --since 1d)" 'nothing: no two jobs overlapped in the last 1d'
   "$P" --since 2x >/dev/null 2>&1; is 'bad --since exits 2' "$?" 2
+  "$P" --since 1d --free >/dev/null 2>&1; is '--free without a length exits 2, not list mode' "$?" 2
 }
 
 T_OUT=$(run_cases "$BIN/pc-timers"); printf '%s\n' "$T_OUT"; grep -q '^FAIL' <<<"$T_OUT" && bad=1

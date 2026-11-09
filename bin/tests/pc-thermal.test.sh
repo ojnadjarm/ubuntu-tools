@@ -80,6 +80,12 @@ is 'docker scope named from docker-names.tsv' "$(tail -1 "$LOG" | cut -f6)" 'doc
 cnt 0 5 1; cnt 1 5 1
 tx throttle | grep -q '^package_throttle 10 (+10 since boot' && ok 'counter reset counts from boot' || nok 'counter reset counts from boot' "$(tx throttle)"
 is '--seconds window delta' "$(tx throttle --seconds 1 --json | jq -c '[.package_throttle_window,.window_s]')" '[0,1]'
+is '--seconds 0.5 is a window, not ignored' "$(tx throttle --seconds 0.5 --json | jq -c '[.package_throttle_window,.window_s]')" '[0,0.5]'
+tx throttle --seconds abc >/dev/null 2>&1; is 'throttle --seconds abc exits 2' "$?" 2
+tx watch --seconds 0.5 >/dev/null 2>&1; is 'watch --seconds 0.5 exits 2' "$?" 2
+echo -500 >"$S/sys/class/thermal/thermal_zone0/temp"; echo -273200 >"$S/sys/class/thermal/thermal_zone0/trip_point_0_temp"
+[ -e "$S/sys/class/thermal/thermal_zone0/trip_point_0_type" ] || echo critical >"$S/sys/class/thermal/thermal_zone0/trip_point_0_type"
+is 'negative millidegrees stay valid numbers' "$(tx zones --json | jq -c '.[] | select(.zone=="thermal_zone0") | [.c, .trips[0].c]')" '[-0.5,-273.2]'
 [ -e "$WORK/l.jsonl" ] && nok 'record writes no ledger entry' 'ledger exists' || ok 'record writes no ledger entry'
 
 # 4c. --reasons: perf-limit (0x64F) and package therm status (0x1B1) bits named from a recorded MSR table.
