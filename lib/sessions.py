@@ -25,6 +25,25 @@ def _alive(pid, proc_start):
         return False
 
 
+def _ppid(pid):
+    """The parent pid in /proc/<pid>/stat, 0 when the process is gone."""
+    try:
+        with open(f"/proc/{int(pid)}/stat") as f:
+            return int(f.read().rsplit(")", 1)[1].split()[1])
+    except (OSError, ValueError, IndexError):
+        return 0
+
+
+def _ancestors(pid, pids):
+    """The pids of pids above pid in the process tree, nearest first."""
+    out, p = [], _ppid(pid)
+    while p > 1:
+        if p in pids:
+            out.append(p)
+        p = _ppid(p)
+    return out
+
+
 def _under(cwd, folder):
     return cwd == folder or cwd.startswith(folder.rstrip("/") + "/")
 
@@ -67,13 +86,14 @@ def _started_by(reg):
 
 def live(directory=None, seats=None):
     """Live sessions sorted by pid; a session in a protected folder (or any, if the matcher fails) is {seat, state, since},
-    its seat the pull seat named after the project; on/off comes from the registry and /proc only."""
+    its seat the pull seat named after the project; on/off comes from the registry and /proc only. Any other session sits
+    under the seat of its nearest session ancestor holding one (the seat that started it), else is placed by folder."""
     seats = org.seats() if seats is None else seats
     try:
         protected = protectedlib.eres("path")
     except Exception:
         protected = None
-    rows = []
+    rows, free = [], {}
     for f in sorted(glob.glob(os.path.join(directory or registry_dir(), "*.json"))):
         try:
             with open(f) as fh:
@@ -90,7 +110,14 @@ def live(directory=None, seats=None):
             row["seat"] = _pull_seat(project, seats) or _place(cwd, seats)[0]
             rows.append((pid, row))
             continue
-        row["seat"], parent = _place(cwd, seats)
-        row.update(pid=pid, parent=parent, name=reg.get("name"), cwd=cwd, started_by=_started_by(reg))
+        row.update(pid=pid, parent=None, name=reg.get("name"), cwd=cwd, started_by=_started_by(reg))
+        free[pid] = row
+    chains = {pid: _ancestors(pid, free) for pid in free}
+    for pid in sorted(free, key=lambda p: len(chains[p])):
+        row = free[pid]
+        row["seat"], row["parent"] = _place(row["cwd"], seats)
+        starter = next((free[p]["seat"] for p in chains[pid] if free[p]["seat"]), None)
+        if starter and row["seat"] in (None, starter):
+            row["seat"], row["parent"] = None, starter
         rows.append((pid, row))
     return [r for _, r in sorted(rows, key=lambda x: x[0])]

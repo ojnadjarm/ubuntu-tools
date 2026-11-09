@@ -7,18 +7,22 @@ WORK=$(mktemp -d); PIDS=()
 trap 'kill "${PIDS[@]}" 2>/dev/null; rm -rf "$WORK"' EXIT
 . "$AG/bin/tests/lib/assert.sh"
 unset PROTECTED_PROJECTS WORK_REPO_ROOTS PC_NOT_OURS HARNESS_ENV_LOADED ORG_FILE CLAUDE_SESSIONS_DIR
-H="$WORK/home"; mkdir -p "$H/agents/po-fx" "$H/agents/job" "$H/acme/sub" "$WORK/reg"
+H="$WORK/home"; mkdir -p "$H/agents/po-fx" "$H/agents/po-gx" "$H/agents/job" "$H/outside" "$H/acme/sub" "$WORK/reg"
 ln -s "$H/acme/sub" "$H/link-to-acme"
 export HARNESS_CONFIG="$WORK/config.env"
 printf 'PROTECTED_PROJECTS="acme"\nPROTECTED_ACME_PATHS="%s/acme"\n' "$H" >"$HARNESS_CONFIG"
 
 for _ in 1 2 3 4 5 6; do tail -f /dev/null & PIDS+=($!); done
 bash -c 'exit 0' & dead=$!; wait "$dead"
+# T1515-P37: two real 3-level process chains (bash -> bash -> tail); each prints its 3 pids, top first.
+chain() { exec {fd}< <(bash -c 'echo $$; bash -c "echo \$\$; tail -f /dev/null & echo \$!; wait"; :'); read -ru $fd a; read -ru $fd b; read -ru $fd c; PIDS+=("$a" "$b" "$c"); }
+chain; chain
 
 python3 - "$AG" "$H" "$WORK" "$dead" "${PIDS[@]}" <<'PY'
 import json, os, sys
 ag, home, work, dead, *live = sys.argv[1:]
 live = [int(p) for p in live]
+a0, a1, a2, b0, b1, b2 = live[6:12]
 tpl = json.load(open(f"{ag}/bin/tests/fixtures/sessions/registry-2.1.321.json"))
 start = lambda pid: open(f"/proc/{pid}/stat").read().rsplit(")", 1)[1].split()[19]
 def put(pid, cwd, status="busy", ps=None, **kw):
@@ -32,6 +36,12 @@ put(live[4], f"{home}/link-to-acme", "idle", name="via a symlink")
 put(live[5], f"{home}/agents/job", "busy", ps="1", name="pid reused")
 put(int(dead), home, "busy", ps="1", name="ended")
 put(live[1] + 900000, home, ps="1", name=None)
+put(a0, home, "busy", name="orch-a", entrypoint="cli")
+put(a1, f"{home}/agents/po-gx", "busy", name="agent-po-gx")
+put(a2, f"{home}/outside", "busy", name="agent-T1-gx")
+put(b0, home, "busy", name="orch-b", entrypoint="cli")
+put(b1, f"{home}/outside", "busy", name="agent-T2-orch")
+put(b2, home, "busy", name="agent-T3-nested")
 open(f"{work}/reg/broken.json", "w").write("{not json")
 open(f"{work}/reg/{live[0]}.key", "w").write("not a session")
 PY
@@ -87,7 +97,7 @@ invalid("machine path in match", [O, dict(C, match="/" + "home/someone/x")], "ma
 
 rows = sessions.live()
 by = {r.get("name"): r for r in rows}
-check("live: 5 sessions (dead pid, reused pid, missing pid file, broken json dropped)", len(rows) == 5, [r.get("name") for r in rows])
+check("live: 11 sessions (dead pid, reused pid, missing pid file, broken json dropped)", len(rows) == 11, [r.get("name") for r in rows])
 o = by.get("Orchestrator session", {})
 check("live: orchestrator by exact folder", o.get("seat") == "ceo" and o.get("parent") == "owner", o)
 check("live: busy is working", o.get("state") == "working", o)
@@ -98,6 +108,12 @@ p = by.get("agent-po-fx", {})
 check("live: po seat, idle, started by agent-run", (p.get("seat"), p.get("parent"), p.get("state"), p.get("started_by")) == ("fx", "ceo", "idle", "po-fx"), p)
 j = by.get("agent-fx-job", {})
 check("live: seatless job: no seat, parent = deepest seat folder", j.get("seat") is None and j.get("parent") == "ceo", j)
+seat = lambda n: (by.get(n, {}).get("seat"), by.get(n, {}).get("parent"))
+check("ancestry: worker a manager started in an outside folder sits under the manager", seat("agent-T1-gx") == (None, "gx"), seat("agent-T1-gx"))
+check("ancestry: a seat run started by the orchestrator keeps its seat", seat("agent-po-gx") == ("gx", "ceo"), seat("agent-po-gx"))
+check("ancestry: worker the orchestrator started in an outside folder sits under the orchestrator", seat("agent-T2-orch") == (None, "ceo"), seat("agent-T2-orch"))
+check("ancestry: a seatless worker's worker in the seat folder sits under that seat, not as it", seat("agent-T3-nested") == (None, "ceo"), seat("agent-T3-nested"))
+check("ancestry: no session ancestor falls back to the folder", seat("orch-a") == ("ceo", "owner") and seat("agent-fx-job") == (None, "ceo"), (seat("orch-a"), seat("agent-fx-job")))
 prot = [r for r in rows if "name" not in r]
 check("live: 2 protected rows (one via symlink)", len(prot) == 2, rows)
 check("live: protected row has exactly 3 keys", all(set(r) == {"seat", "state", "since"} for r in prot), prot)
@@ -111,7 +127,7 @@ import protectedlib
 def boom(kind): raise RuntimeError("matcher down")
 protectedlib.eres = boom
 rows = sessions.live()
-check("live: matcher error strips every row (fail closed)", len(rows) == 5 and all(set(r) == {"seat", "state", "since"} for r in rows), rows)
+check("live: matcher error strips every row (fail closed)", len(rows) == 11 and all(set(r) == {"seat", "state", "since"} for r in rows), rows)
 check("live: missing registry dir gives []", sessions.live(f"{work}/nope") == [])
 check("locate: matcher down fails closed, no resolve", sessions.locate("/x/../y", None) == ("", "/y"))
 sys.exit(bad)
