@@ -23,6 +23,8 @@ printf '%s\n' '# test-also: zzfake2' '# gamedev-cpp: aa  bb cc' \
 printf '[Timer]\nOnCalendar=daily\n' >"$H/units/demo.timer"
 printf '[Service]\nExecStart=/bin/true\n[Install]\nWantedBy=default.target\n' >"$H/units/demo.service"
 printf '[Service]\nExecStart=/bin/true\n' >"$H/units/agent@.service"
+printf '[Path]\nPathModified=/x\n[Install]\nWantedBy=paths.target\n' >"$H/units/demo.path"
+printf '[Path]\nPathModified=/%%i\n[Install]\nWantedBy=paths.target\n' >"$H/units/tpl@.path"
 echo brief >"$H/agentx/BRIEF.md"; printf 'SCHEDULE=daily\nENABLED=yes\nUNIT_TIMEOUT=60\n' >"$H/agentx/agent.env"
 echo '{"builtin-baseline":"abc123"}' >"$H/skills/gamedev/templates/cpp-vulkan/vcpkg.json"
 
@@ -54,13 +56,15 @@ snap() { (cd "$W" && find h home -printf '%p %s %l\n' | sort; find h home -type 
 
 before="$(snap)"; out="$(run "$S" --plan)"; rc=$?
 is "plan rc" "$rc" 0
-is "plan last line" "$(tail -1 <<<"$out")" "plan: 13 changes"
-is "plan would lines" "$(grep -c '^would: ' <<<"$out")" 13
+is "plan last line" "$(tail -1 <<<"$out")" "plan: 16 changes"
+is "plan would lines" "$(grep -c '^would: ' <<<"$out")" 16
 for l in "would: config $FH/.config/pc-harness/config.env" "would: link toolx" "would: link pc" "would: unit demo.timer" \
          "would: unit agent@agentx.timer.d/schedule.conf = daily" "would: unit agent@agentx.service.d/timeout.conf = 60 s" \
          "would: unit daemon-reload" "would: unit enable agent@agentx.timer" "would: config $H/KB/machine.md"; do
   grep -qxF "$l" <<<"$out" && ok "$l" || nok "$l" "missing"
 done
+grep -qxF 'would: unit enable demo.path' <<<"$out" && ok "path unit with [Install] enabled" || nok "path unit with [Install] enabled" "missing"
+grep -q 'would: unit enable tpl@.path' <<<"$out" && nok "template path unit not enabled" "planned" || ok "template path unit not enabled"
 grep -q 'would: link pc-foo' <<<"$out" && nok "pc-* not linked" "planned" || ok "pc-* not linked"
 is "plan wrote nothing" "$(snap)" "$before"
 is "plan called no writer" "$(cat "$CALLED" 2>/dev/null)" ""
@@ -77,7 +81,7 @@ is "flag plans wrote nothing" "$(snap)" "$before"
 is "flag plans called no writer" "$(cat "$CALLED" 2>/dev/null)" ""
 
 applied="$(run "$A" | grep -oE '^install.sh: [0-9]+ change')"
-is "apply count = plan count" "$applied" "install.sh: 13 change"
+is "apply count = plan count" "$applied" "install.sh: 16 change"
 out="$(run "$S" --plan)"
 is "second plan" "$(tail -1 <<<"$out")" "plan: 0 changes"
 is "second plan called no writer" "$(cat "$CALLED" 2>/dev/null)" ""

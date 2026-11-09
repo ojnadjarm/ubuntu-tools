@@ -99,6 +99,11 @@ for v in 4.5 moodle45 vass-services vass; do
   rc "$v" --apply >/dev/null 2>&1; is "recreate $v refused (exit 3)" "$?" 3
 done
 is 'Vass refusals call no docker at all' "$(wc -c <"$WORK/docker.log")" 0
+for verb in stop start restart; do for v in 4.5 moodle45 vass-services vass moodle45-app-1 vass-db-1; do
+  STUB_DIR=$WORK PATH="$WORK/bin:$PATH" PC_ENVS="$ENVS" XDG_RUNTIME_DIR="$WORK" PC_LEDGER="$WORK/rc.jsonl" \
+    "$BIN/pc-docker" "$verb" "$v" --apply --force >/dev/null 2>&1; is "$verb $v refused (exit 3)" "$?" 3
+done; done
+is 'Vass stop/start/restart refusals call no docker at all' "$(wc -c <"$WORK/docker.log")" 0
 OTHERS=moodle52 rc shared --apply >/dev/null 2>&1; is 'recreate shared refused while moodle52 up' "$?" 3
 grep -q "^compose" "$WORK/docker.log" && nok 'refused shared runs no compose' called || ok 'refused shared runs no compose'
 case "$(OTHERS=moodle52 rc shared --force)" in would:*) ok 'recreate shared --force passes the guard';; *) nok 'shared --force' x;; esac

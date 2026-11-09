@@ -21,7 +21,7 @@ pc_usage 'usage: pc docker [stacks] [--json]                    compose project 
 
 A stack is a compose project (its dir under ~/moodle-envs, or the project name itself, e.g.
 "shared" or "moodle-shared"). `stop`/`restart` on the shared stack is refused while any other
-env is up, unless --force; so is `recreate`, and Vass (vass*, 4.5, moodle45) is refused by name. No `prune` verb (moodle-keeper/maintenance own that); the daemon is
+env is up, unless --force; so is `recreate`. Vass (vass*, 4.5, moodle45*) is refused by name for `stop`/`start`/`restart`/`recreate`. No `prune` verb (moodle-keeper/maintenance own that); the daemon is
 never restarted. Mutating verbs print `would: …` and change nothing without --apply; with it
 the change is ledgered and undoable with `pc undo`. `idle-stop` is refused while a behat process or a browser runs; it
 prints `nothing:` when the container is down or had a session within --after.' "$@"
@@ -213,8 +213,14 @@ do_mutation() {
   local SELF; SELF=$(readlink -f "$0")
   local proj dir line inv=$verb
   case $verb in start) inv=stop;; stop) inv=start;; esac
+  case "$target" in
+    vass*|4.5|moodle45*) printf 'pc docker: refused — %s is Vass (never touched by agents)\n' "$target" >&2; exit 3;;
+  esac
   if line=$(resolve_stack "$target" 2>/dev/null) && [ -n "$line" ]; then
     IFS=$'\t' read -r proj dir <<<"$line"
+    case "$proj ${dir##*/}" in
+      vass*|*" vass"*|*" 4.5"|moodle45*) printf 'pc docker: refused — %s is Vass (never touched by agents)\n' "$proj" >&2; exit 3;;
+    esac
     if [ "$proj" = moodle-shared ] && { [ "$verb" = stop ] || [ "$verb" = restart ]; }; then
       local others; others=$(docker ps --format '{{.Label "com.docker.compose.project"}}' \
         | grep -v '^$' | grep -vFx "$proj" | sort -u)

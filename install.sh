@@ -232,9 +232,9 @@ for d in "$HARNESS_DIR"/*/; do
 done
 
 # Units this repo ships that are not agent templates: enable them alongside the roster, except UNITS_OFF.
-for u in "$HARNESS_DIR"/units/*.timer "$HARNESS_DIR"/units/*.service; do
+for u in "$HARNESS_DIR"/units/*.timer "$HARNESS_DIR"/units/*.service "$HARNESS_DIR"/units/*.path; do
   n="$(basename "$u")"
-  case "$n" in agent@*) continue;; esac
+  case "$n" in *@.*) continue;; esac
   case " ${UNITS_OFF-orchestrator-pulse.timer} " in *" $n "*) skip "off $n"; continue;; esac
   case "$n" in *.timer) roster_units="$roster_units $n";;
                  *) grep -q '^\[Install\]' "$u" && roster_units="$roster_units $n";;

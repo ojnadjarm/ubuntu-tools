@@ -7,7 +7,7 @@ the other adapters are measured against it.
 
 | File | What |
 |---|---|
-| `run` | the `agent-exec` contract → `claude -p … --output-format json`; writes `cost_usd` and `tokens` to `$META_OUT` |
+| `run` | the `agent-exec` contract → `claude -p … --output-format stream-json --verbose`; writes `cost_usd` and `tokens` to `$META_OUT` |
 | `install` | symlinks `skills/*`, merges the hooks into `~/.claude/settings.json`, adds the `@AGENTS.md` include to `~/CLAUDE.md` |
 | `uninstall` | reverses exactly those three, and nothing else |
 | `merge-settings.py` | the idempotent JSON merge both use |

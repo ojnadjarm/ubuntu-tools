@@ -242,6 +242,10 @@ if [ -n "$RECORD" ]; then cp "$out" "$RECORD"; echo "recorded $RECORD"; exit 0; 
 if [ ! -r "$EXPECT" ]; then
   echo "sentinel-check.test.sh: no $EXPECT — record it with --record $EXPECT" >&2; exit 2
 fi
+# The unit must outlast the escalated agent run (sentinel TIMEOUT) yet never hang forever: a stuck oneshot stops its timer.
+ut=$(sed -n 's/^TimeoutStartSec=//p' "$(dirname "$here")/../units/sentinel-check.service")
+at=$(sed -n 's/^TIMEOUT=//p' "$(dirname "$here")/../sentinel/agent.env")
+[[ $ut =~ ^[0-9]+$ ]] && [ "$ut" -gt "${at:-0}" ] || { echo "sentinel-check: FAIL — unit TimeoutStartSec '${ut}' is not above the agent TIMEOUT '${at}'" >&2; exit 1; }
 if diff -u "$EXPECT" "$out"; then
   echo "sentinel-check: replay of $(grep -cvE '^#|^$' "$EVENTS") recorded events matches"
   exit 0
