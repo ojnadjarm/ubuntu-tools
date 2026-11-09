@@ -55,6 +55,8 @@ def folder_info(path, rel):
         else:
             text = next((l.strip() for l in text.splitlines() if l.strip()), "").lstrip("# ")
         about = " ".join(text.split())
+        if about.lower() == os.path.basename(rel).lower():
+            about = ""
         if about:
             break
     return {"site": site, "about": about if len(about) <= 160 else about[:159] + "…"}

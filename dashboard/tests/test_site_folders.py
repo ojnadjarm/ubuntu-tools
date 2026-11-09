@@ -47,6 +47,10 @@ class SiteFolders(unittest.TestCase):
         self.put("t/index.html", "<html><head><TITLE>\n Mary&#x27;s room </TITLE>")
         self.assertEqual((self.item("r")["about"], self.item("t")["about"]), ("Notes &amp; more", "Mary's room"))
 
+    def test_title_that_repeats_the_name_is_dropped(self):
+        self.put("Site9/index.html", "<title>SITE9</title>")
+        self.assertEqual(self.item("Site9")["about"], "")
+
     def test_long_about_is_cut(self):
         self.put("l/.about", "x" * 400)
         self.assertEqual(len(self.item("l")["about"]), 160)
