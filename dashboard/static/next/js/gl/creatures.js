@@ -34,7 +34,7 @@ void main(){
 const PER = 26;
 const easeBack = (x) => { const c = 1.5; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
 /* Screen box [l, t, r, b] a creature of drawn size s at (x, y) covers, badge and pad included. */
-const footprint = (x, y, s) => [x - 0.65 * s, y - 0.88 * s, x + 0.65 * s, y + 0.76 * s];
+const footprint = (x, y, s, up = 0.88) => [x - 0.65 * s, y - up * s, x + 0.65 * s, y + 0.76 * s];
 const hits = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
 /* Top-left of a w×h tag for the creature at (x, y, s): below, above, right or left, the first side clear of every box and inside span [lo, hi]; null when none is. */
 export function tagSpot(x, y, s, w, h, boxes, [lo, hi]) {
@@ -46,7 +46,7 @@ export function tagSpot(x, y, s, w, h, boxes, [lo, hi]) {
   return null;
 }
 
-/* The creature layer: set(list) with {id, state, ring: {r, a}, size, min, tag}; a hook for the stage (step, back, front). */
+/* The creature layer: set(list) with {id, state, role, live, ring: {r, a}, dir, up, size, min, tag}; a hook for the stage (step, back, front). */
 export function createCreatures(ctx, tex, st) {
   const { T, r } = ctx, fam = createFamiliars(ctx);
   const U = { uRes: { value: new T.Vector2() }, uTime: { value: 0 }, uAtlas: { value: tex } };
@@ -113,7 +113,7 @@ export function createCreatures(ctx, tex, st) {
     for (const c of all.values()) {
       const s = c.spec, e = c.e, ee = easeBack(Math.min(1, e));
       if (e <= 0.001 || !s.ring) continue;
-      const p0 = ringPoint(s.ring.r, s.ring.a + turn * (s.dir || 1), n), p = [p0[0] * ee, p0[1] * ee + (1 - ee) * 0.05, p0[2] * ee];
+      const p0 = ringPoint(s.ring.r, s.ring.a + turn * (s.dir ?? 1), n), p = [p0[0] * ee, p0[1] * ee + (1 - ee) * 0.05, p0[2] * ee];
       const q = project(p, E, cam), size = Math.max(s.min || 0, (s.size || 0.5) * q.s) * Math.min(1, e * 1.4);
       const dx = E.x - q.x, dy = q.y - E.y, dl = Math.hypot(dx, dy) || 1, dir = [dx / dl, -dy / dl];
       const jf = (t - c.jump) / 0.75, jump = jf >= 0 && jf < 1 ? Math.sin(Math.PI * jf) * 0.62 : 0;
@@ -136,13 +136,13 @@ export function createCreatures(ctx, tex, st) {
   /* Hands one depth-sorted pass of creatures to the Familiars layer, in HDR pixels. */
   function draw(arr, S) {
     const k = S.k, H = innerHeight;
-    fam.draw(arr.map((o) => ({ id: o.c.id, role: o.c.spec.role || (o.c.spec.big ? "worker" : "crew"), state: o.c.state, x: o.q.x * k, y: (H - o.q.y) * k, size: o.size * k, yaw: o.yaw, lift: o.jump * o.size * 0.5 * k, squash: o.squash,
+    fam.draw(arr.map((o) => ({ id: o.c.id, role: o.c.spec.role || (o.c.spec.big ? "worker" : "crew"), state: o.c.state, live: o.c.spec.live, x: o.q.x * k, y: (H - o.q.y) * k, size: o.size * k, yaw: o.yaw, lift: o.jump * o.size * 0.5 * k, squash: o.squash,
       fade: Math.min(1, o.e * 1.6) * (o.q.z > D ? Math.max(0.55, 1 - (o.q.z - D) * 0.12) : 1) })), S, lastT, st.still() ? 1 : lastDt);
   }
   /* Tags sit on the first side clear of every creature and earlier tag (run tags first), hidden when no side is clear. */
   function tags(arr) {
     if (!fx) return;
-    const W = innerWidth, span = st.E.span || [0, W], boxes = arr.filter((o) => o.e > 0.3).map((o) => footprint(o.q.x, o.q.y, o.size));
+    const W = innerWidth, span = st.E.span || [0, W], boxes = arr.filter((o) => o.e > 0.3).map((o) => footprint(o.q.x, o.q.y, o.size, o.c.spec.up));
     for (const o of [...arr].sort((a, b) => !!b.c.spec.big - !!a.c.spec.big)) {
       const c = o.c, s = c.spec;
       if (!s.tag) continue;

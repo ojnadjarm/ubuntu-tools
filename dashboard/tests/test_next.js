@@ -28,6 +28,9 @@ const ROOT = path.join(__dirname, "..", "static"), NEXT = path.join(ROOT, "next"
   assert.notStrictEqual(creature("a74c1565312ee1986", "working"), creature("a8dd3c7ddd7003334", "working"), "different ids differ");
   assert.ok(/<svg[^>]*class="cr done"/.test(creature("x", "done")) && !/class="lid"/.test(creature("x", "done")), "done creatures sleep");
   assert.ok(/class="lid"/.test(creature("x", "working")), "working creatures have open eyes");
+  assert.ok(creature("a", "working", "ceo") === creature("b", "working", "ceo") && /class="cr ceo working"/.test(creature("a", "working", "ceo")), "the ceo is one fixed creature whatever the id");
+  assert.ok(!/class="lid"/.test(creature("a", "off", "ceo")) && creature("a", "working", "ceo", { motes: [152, 44] }).split("<circle").length === creature("a", "working", "ceo").split("<circle").length + 2, "the ceo sleeps when off and shows one mote per agent hue");
+  assert.ok(!/hsl\(24 /.test(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t"].map((id) => creature(id, "idle")).join("")), "coral is kept for the ceo");
 
   const { verdict } = await import(pathToFileURL(path.join(NEXT, "js", "verdict.js")));
   const clear = verdict({ verdict: { ok: true, problems: [], asks: [], needs: [] }, events: [{ kind: "push", text: "5. Nothing needs you." }] });

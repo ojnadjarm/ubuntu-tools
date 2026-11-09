@@ -1,5 +1,6 @@
 /* The Familiars on the GPU: each creature is one skinned mesh and its ink hull (2 draws), drawn with depth and 4× MSAA into their own target, then laid over the HDR scene. */
 import { build, BONES, PITCH } from "./body.js";
+import * as ceo from "./ceo.js";
 import { compose, mul } from "./geo.js";
 import { body, hull, BODY_FS, HULL_FS, COMP } from "./glsl.js";
 import { genome, pose, POSES } from "../../familiars/genome.js";
@@ -9,7 +10,7 @@ export const PAD = { working: [0.3, 1, 0.63], idle: [0.45, 0.62, 0.55], talking:
 export const UNIT = 0.7, FEET = 0.58;
 const BACK = 1, DOUBLE = 2;
 
-/* draw(list, S, t, dt) with list far to near of {id, role, state, x, y, size, yaw, lift, squash, fade} in HDR pixels; drop(id); busy while a pose still blends. */
+/* draw(list, S, t, dt) with list far to near of {id, role, state, live, x, y, size, yaw, lift, squash, fade} in HDR pixels; drop(id); busy while a pose still blends. */
 export function createFamiliars({ T, r, cam, quad }) {
   const scene = new T.Scene(), all = new Map(), tilt = compose(new Float32Array(16), [0, 0, 0], [PITCH, 0, 0], [1, 1, 1]), m0 = new Float32Array(16), m1 = new Float32Array(16);
   const CU = { uTex: { value: null }, uRes: { value: new T.Vector2() }, uGain: { value: 1 } };
@@ -18,12 +19,12 @@ export function createFamiliars({ T, r, cam, quad }) {
   let rt = null;
 
   function make(id, role, state) {
-    const b = build(genome(id, role)), geo = new T.BufferGeometry(), p = pose(state);
+    const boss = role === "ceo", n = boss ? ceo.BONES : BONES, b = (boss ? ceo.build : build)(genome(id, role)), geo = new T.BufferGeometry(), p = pose(state);
     for (const [k, n] of [["position", 3], ["normal", 3], ["aCol", 3], ["aShade", 3], ["aP", 4], ["aO", 1]]) geo.setAttribute(k, new T.BufferAttribute(b.mesh[k], n));
     geo.setIndex(new T.BufferAttribute(b.mesh.index, 1));
-    const U = { uB: { value: new Float32Array(BONES * 16) }, uRes: { value: res }, uZ: { value: new T.Vector3() }, uTint: { value: new T.Vector4(1, 0.2, 0.2, 0) }, uPad: { value: new T.Vector3() }, uDim: { value: 1 }, uScr: { value: 1 }, uFade: { value: 1 } };
+    const U = { uB: { value: new Float32Array(n * 16) }, uRes: { value: res }, uZ: { value: new T.Vector3() }, uTint: { value: new T.Vector4(1, 0.2, 0.2, 0) }, uPad: { value: new T.Vector3() }, uDim: { value: 1 }, uScr: { value: 1 }, uFade: { value: 1 } };
     const mat = (vs, fs, side) => new T.RawShaderMaterial({ glslVersion: T.GLSL3, vertexShader: vs, fragmentShader: fs, uniforms: U, side, blending: T.NoBlending });
-    const meshes = [new T.Mesh(geo, mat(body(BONES), BODY_FS, DOUBLE)), new T.Mesh(geo, mat(hull(BONES), HULL_FS, BACK))];
+    const meshes = [new T.Mesh(geo, mat(body(n), BODY_FS, DOUBLE)), new T.Mesh(geo, mat(hull(n), HULL_FS, BACK))];
     meshes.forEach((m) => { m.frustumCulled = false; m.matrixAutoUpdate = false; scene.add(m); });
     return { b, geo, U, meshes, role, w: Object.fromEntries(POSES.map((s) => [s, s === p ? 1 : 0])), settled: false };
   }
@@ -58,9 +59,10 @@ export function createFamiliars({ T, r, cam, quad }) {
       const moving = blend(c, o.state, dt), awake = c.w.sleep < 1;
       busy = busy || moving;
       if (moving || awake || !c.settled) {
-        const a = c.b.update(t, c.w), pad = c.U.uPad.value.set(0, 0, 0);
+        const a = c.b.update(t, c.w, o.live), pad = c.U.uPad.value.set(0, 0, 0);
         for (const s of POSES) { pad.x += PAD[s][0] * c.w[s]; pad.y += PAD[s][1] * c.w[s]; pad.z += PAD[s][2] * c.w[s]; }
         c.U.uDim.value = a.dim; c.U.uTint.value.w = a.tint; c.U.uScr.value = a.screen;
+        if (a.recolor) c.geo.attributes.aCol.needsUpdate = c.geo.attributes.aShade.needsUpdate = true;
         c.settled = !moving && !awake;
       }
       const u = o.size * UNIT;

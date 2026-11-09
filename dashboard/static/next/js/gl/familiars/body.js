@@ -3,7 +3,7 @@ import { G, capsule, cyl, torus, rig } from "./geo.js";
 import { hsl } from "../../familiars/genome.js";
 
 export const BONES = 28, PITCH = 0.4;
-const GOLD = [1, 0.82, 0.36], WHITE = [0.96, 1, 0.97], INKC = [0.03, 0.08, 0.06], SLATE = [0.2, 0.25, 0.28], MINT = [0.3, 1, 0.63];
+const WHITE = [0.96, 1, 0.97], INKC = [0.03, 0.08, 0.06], SLATE = [0.2, 0.25, 0.28], MINT = [0.3, 1, 0.63];
 /* Vertex flags: 1 dims and tints with the pose, 2 flickers as a screen, 3 takes the pad colour. */
 const toon = (col, { shade = col.map((c, i) => c * [0.42, 0.5, 0.58][i]), rim = 1, em = 0, flag = 0 } = {}) => ({ col, shade, rim, em, flag });
 const lit = (col, flag = 0) => ({ col, shade: col, rim: 0, em: 0, flag });
@@ -12,7 +12,7 @@ export function build(g) {
   const R = rig(BONES), { group, part: add } = R, root = group(null);
   const base = hsl(g.hue, 0.7, 0.6), dark = hsl(g.hue + 14, 0.6, 0.34), lite = hsl(g.hue - 8, 0.85, 0.82);
   const mBody = toon(base, { shade: dark, flag: 1 }), mLite = toon(lite, { shade: base, flag: 1 }), mDark = toon(dark, { flag: 1 }), mWhite = toon(WHITE, { shade: [0.66, 0.8, 0.86], flag: 1 });
-  const mInk = toon(INKC, { rim: 0.35 }), mPink = toon([1, 0.62, 0.77], { shade: [0.85, 0.4, 0.6], rim: 0, flag: 1 }), mGold = toon(GOLD, { shade: [0.75, 0.48, 0.12], flag: 1 }), mSet = toon(SLATE, { shade: [0.07, 0.1, 0.12] });
+  const mInk = toon(INKC, { rim: 0.35 }), mPink = toon([1, 0.62, 0.77], { shade: [0.85, 0.4, 0.6], rim: 0, flag: 1 }), mSet = toon(SLATE, { shade: [0.07, 0.1, 0.12] });
   const W = g.wide, HT = 0.44 * g.tall;
 
   add(root, torus(0.62, 0.022, 4, 36), lit([1, 1, 1], 3), { r: [Math.PI / 2, 0, 0], p: [0, 0.01, 0] });
@@ -63,14 +63,6 @@ export function build(g) {
     e.d = d; ears.push(e);
   });
 
-  if (g.role === "ceo") {
-    const crown = group(head, [0, top - 0.02, 0], true);
-    add(crown, cyl(0.2, 0.17, 0.1, 10, true), mGold, { p: [0, 0.05, 0], outline: 1 });
-    for (let i = 0; i < 5; i++) { const a = (i / 5) * 6.283; add(crown, G.cone4, mGold, { p: [Math.sin(a) * 0.185, 0.15, Math.cos(a) * 0.185], s: [0.045, 0.12, 0.045] }); }
-    add(crown, G.lo, toon([1, 0.3, 0.4]), { p: [0, 0.06, 0.2], s: 0.035 });
-    add(hip, cyl(0.3 * W, 0.56 * W, 0.72, 12, true, Math.PI / 2, Math.PI), toon([0.5, 0.12, 0.3], { shade: [0.24, 0.05, 0.2] }), { p: [0, -0.08, -0.05] });
-    add(hip, G.lo, mGold, { p: [0, 0.22, 0.3 * W], s: 0.05, outline: 1 });
-  }
   if (g.role === "po") {
     add(head, torus(A + 0.02, 0.028, 5, 16, Math.PI), mSet, { p: [0, HC, 0] });
     [-1, 1].forEach((d) => add(head, G.lo, mSet, { p: [d * (A + 0.01), HC - 0.02, 0], s: [0.05, 0.1, 0.1], outline: 1 }));

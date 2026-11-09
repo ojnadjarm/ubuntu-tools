@@ -6,9 +6,11 @@ import { fitEye, ORBIT } from "../gl/cam.js";
 import { odo } from "../ui/num.js";
 import { store } from "../store.js";
 import { claimRow } from "../claims.js";
+import { genome } from "../familiars/genome.js";
+import { verdict } from "../verdict.js";
 
 export const own = true;
-const R1 = 1.9, R2 = 2.75;
+const R1 = 1.9, R2 = 2.75, R0 = 1.25, POSE = { running: "working", idle: "idle" };
 const PILL = { working: "running", idle: "idle", done: "idle", error: "warn", stale: "stray" };
 let open = true, recent = false;
 
@@ -41,17 +43,19 @@ export function render(grid, D) {
     `<h2 class="sub2"><span data-dec>claims board</span><s>${(A.claims || []).length}</s></h2><ul class="claims">${(A.claims || []).map(claimRow).map((c) => `<li><b>${esc(c.who)}</b><em>${esc(c.note)}</em>${c.paths.map((p) => `<span title="${esc(p.full)}">${esc(p.short)}</span>`).join("")}</li>`).join("") || `<li><span>empty · nobody holds a file</span></li>`}</ul></section></div>`;
 }
 
-/* Live agents ride the inner ring from the front-right, the persistent crew spreads round the outer ring, asleep while idle; the rings turn only while someone works. */
-function crowd(A, narrow) {
-  const { live } = split(A), P = crew(A);
+/* The Conductor stands in front of the eye with one mote per live agent; live agents ride the inner ring from the front-right, the persistent crew spreads round the outer ring, asleep while idle; the rings turn only while someone works. */
+function crowd(A, narrow, D) {
+  const { live } = split(A), P = crew(A), O = A.orchestrator || {}, bad = (A.subagents || []).find((s) => s.state === "error" && mins(s.last) < 10);
   return [
+    { id: "orchestrator", role: "ceo", state: bad ? "error" : POSE[O.state] || "sleep", live: { motes: live.map((s) => ({ id: s.id, hue: genome(s.id).hue })), lamp: verdict(D).bad ? "needs" : "ok", failing: bad && bad.id },
+      ring: { r: R0, a: 0.5 }, dir: 0, up: 1.5, size: 0.72, min: narrow ? 44 : 56, big: true, tag: `<b>${esc(O.name || "DarkSaddler")}</b>` },
     ...live.map((s, i) => ({ id: s.id, state: s.state, ring: { r: R1, a: 0.36 + i / Math.max(1, live.length) }, dir: 1, size: 0.72, min: narrow ? 44 : 56, big: true, tag: `<b>${esc(tk(s.label))}</b> · ${ago(s.started)}` })),
     ...P.map((r, i) => ({ id: r.name, state: r.state === "running" ? "working" : "sleep", ring: { r: R2, a: 0.1 + i / P.length }, dir: -1, size: 0.5, min: narrow ? 26 : 36, tag: `<b>${esc(r.name)}</b>` })),
   ];
 }
 
 export function scene(D) {
-  const A = store.A || { subagents: [] }, narrow = innerWidth < 820, cr = open ? crowd(A, narrow) : [];
+  const A = store.A || { subagents: [] }, narrow = innerWidth < 820, cr = open ? crowd(A, narrow, D) : [];
   return {
     key: JSON.stringify([open, cr.map((c) => [c.id, c.state])]),
     pts: dust(narrow ? 700 : 1600),

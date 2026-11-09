@@ -3,7 +3,7 @@ import { rng } from "../shapes.js";
 
 export const ROLES = ["ceo", "po", "worker", "crew"], POSES = ["working", "idle", "talking", "error", "sleep"];
 const KATA = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎ";
-const HUES = [152, 172, 192, 118, 44, 24, 268, 318, 206, 88];
+const HUES = [152, 172, 192, 118, 44, 238, 268, 318, 206, 88];
 const TOPPER = { ears: 0, none: 1, sprout: 2, horns: 3, ant: 4 }, MOUTH = { smile: 0, cat: 1, o: 2, fang: 3 };
 
 export function hash(s) { let h = 2166136261; for (const ch of s) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
