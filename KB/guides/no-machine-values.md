@@ -22,5 +22,5 @@ echo '<new literal>' >> ~/.config/pc-harness/private-values   # deny a new value
 - moodle-harness `sync.sh` exits 1 when a copied file carries a value.
 
 ## Links
-- Code: `bin/tests/no-machine-values.test.sh`, `~/moodle-harness/tests/no-machine-values.test.sh` (identical copy)
+- Code: `bin/tests/no-machine-values.test.sh`, `~/moodle-harness/tests/no-machine-values.test.sh` (same checks; not byte-identical: the ~/agents copy uses `lib/assert.sh`, the harness copy its own `ok()`, `cmp` differs at line 13, 2026-11-09)
 - Design: `~/agent-work/research/2026-10-07/T278/ARCHITECTURE.md`

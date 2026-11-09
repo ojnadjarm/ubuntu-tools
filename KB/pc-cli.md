@@ -76,7 +76,7 @@ Regenerate: `pc help --md > ~/agents/KB/pc-cli.md`. Never hand-edit.
 
 | command | description | usage | bench (warm) |
 |---|---|---|---|
-| `pc bench` | wall, CPU and exec count for every read-only pc subcommand, warm and cold. | `pc bench [--cold] [--runs 3] [--save] [--compare] [--only <sub>…] [--json]` | — |
+| `pc bench` | wall, CPU and exec count for the read-only pc subcommands in SPECS, warm and cold. | `pc bench [--cold] [--runs 3] [--save] [--compare] [--only <sub>…] [--json]` | — |
 | `pc doctor` | PASS/FAIL for the whole pc family without opening a window, making a sound or touching the TV. | `pc doctor [--quick] [--json] [--brief]` | 1.20 s |
 | `pc explain` | ranked KB lookup: heading > bold lead > exact quoted token > partial quote/backtick > word > substring. | `pc explain <thing…> [-n 3] [--json] [--files]` | — |
 | `pc failures` | every failure of the window on one screen: units, agent runs, CI, creative CI, crashes, audit, needs, checks. | `pc failures [--since 24h] [--json] [--all]` | — |

@@ -55,4 +55,4 @@ DISPLAY=:N WGPU_BACKEND=vulkan WINEPREFIX=$PWD/wp WINEDEBUG=-all wine atelier.ex
 ## Links
 - Code: `~/agent-work/research/2026-09-24/T70/bevy/atelier/` (`src/{beats,perf,timeline,kit,materials,voice}.rs`, `Cargo.toml`, `.cargo/config.toml`)
 - Runs: `T70/bevy/runs/` (`e2e.json`, `f-*.json`, `m-*.json`, `measure.txt`, build logs, shots)
-- Design / results: `T70/bevy/architecture.md`, `T70/options.md` (scores, rejection reason, critic) · build: `~/drop/t70/bevy/atelier-bevy-win64.zip` is gone since 2026-09-25 (a copy is in `~/.local/share/Trash/files/atelier-bevy-win64.zip`, 23.6 MB, still there 2026-10-20)
+- Design / results: `T70/bevy/architecture.md`, `T70/options.md` (scores, rejection reason, critic) · build: `~/drop/t70/bevy/atelier-bevy-win64.zip` is gone since 2026-09-25 (the Trash copy seen 2026-10-20 is gone too, checked 2026-11-09; rebuild from `T70/bevy/atelier`)

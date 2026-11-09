@@ -11,8 +11,9 @@ CTX="$HARNESS_CONTEXT_DIR"
 # across machines (Claude expands it) and matches the entries already written.
 HH="$HARNESS_HOME"; case "$HH" in "$HOME"/*) HH="\$HOME/${HH#"$HOME"/}";; esac
 
+rc=0
 python3 "$HERE/merge-settings.py" uninstall \
-  "$CTX/settings.json" "$HERE/settings.fragment.json" "$HH"
+  "$CTX/settings.json" "$HERE/settings.fragment.json" "$HH" || rc=1
 
 for d in "$HARNESS_HOME"/skills/*/; do
   name="$(basename "$d")"
@@ -47,4 +48,4 @@ open(path, "w").write("".join(out))
 PY
   echo "removed the @AGENTS.md include from $inc"
 fi
-exit 0
+exit "$rc"

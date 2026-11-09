@@ -20,7 +20,7 @@ A `flock` on `~/agents/state/ailearning-ci.lock` makes a second run exit 75 at o
 per unit: `~/agents/state/ailearning-declutter/<slug>` = sha256 over `git ls-files -co` of `units/<slug>/`, `u/<slug>/`,
 `public/bundles/<slug>/` plus the shared files (`src/kit src/core src/site/sheet tools/declutter.mjs tools/declutter vite.config.ts
 package-lock.json`; any shared change = every unit), written only when that unit's declutter exits 0. Once a run is past 1500 s and one
-unit has run, the rest are deferred (logged, not a failure) so the nightly fits `TimeoutStartSec=3600`; units run oldest marker first
+unit has run, the rest are deferred (logged, not a failure) so the nightly run stays short (the unit's `TimeoutStartSec` is 10800); units run oldest marker first
 (no marker first), so a deferred unit goes first the next night (before 2026-10-17 the fixed `CHECKED` order deferred 06/07 every night). Weekly:
 `ailearning-ci-weekly.timer` (Sun 05:30, after pcbench 02:00, maintenance 04:00, moodle-keep-weekly 05:00) runs `ailearning-ci-daily
 --full`: declutter of every `CHECKED` unit, no `ci:core`, `TimeoutStartSec=14400`, log `ailearning-ci-full.log`.

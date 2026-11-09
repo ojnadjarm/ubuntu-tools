@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pc bench [--cold] [--runs 3] [--save] [--compare] [--only <sub>…] — wall, CPU and exec count for every read-only pc subcommand, warm and cold.
+# pc bench [--cold] [--runs 3] [--save] [--compare] [--only <sub>…] — wall, CPU and exec count for the read-only pc subcommands in SPECS, warm and cold.
 set -uo pipefail
 export LC_ALL=C
 BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -9,7 +9,7 @@ BASELINE="$BIN/tests/BASELINE-PCTOOLS.md"
 
 pc_usage 'usage: pc bench [--cold] [--runs 3] [--save] [--compare] [--only <sub>…] [--json]
 
-Measures every `pc-*` whose default verb is read-only: median wall over --runs warm runs
+Measures the `pc-*` in its fixed list (default verb read-only): median wall over --runs warm runs
 (/usr/bin/time -f "%e %U %S"), one cold run (`--fresh` after clearing only the pc-status cache
 dir), CPU = user+sys of the median warm run, execs = successful execve calls from
 `strace -f -c -e trace=execve` on one warm run. No hyperfine dependency — a 3-run loop is enough.
@@ -39,8 +39,8 @@ done
 ONLY+=(${PC_ARGS[@]+"${PC_ARGS[@]}"})
 
 ## --- the bench list ---------------------------------------------------------
-# name | argv — every subcommand whose default verb reads and never needs --apply.
-# `pc bt` is PT12 and still being written by another agent; `selftest`/`shot`/`find`/`click`/
+# name | argv — a fixed list of subcommands whose default verb reads and never needs --apply.
+# Not listed: bt, failures, timers, crashes, lid, snap, stale, need, search-index; `selftest`/`shot`/`find`/`click`/
 # `type`/`key`/`open`/`notify` are excluded by the ticket (they open windows or move the pointer).
 SPECS=(
   'status|status'                'top|top'                  'io|io'

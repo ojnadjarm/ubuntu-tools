@@ -62,6 +62,10 @@ cmp -s "$S" "$F/settings.json" && ok "claude/uninstall restores the owner's sett
 [ ! -e "$H/.claude/skills/fleetskill" ] && [ -f "$H/.claude/skills/mine/SKILL.md" ] \
   && ok "claude/uninstall unlinks our skill and keeps the owner's" || nok "claude/uninstall skills" "$(ls "$H/.claude/skills")"
 is "claude/uninstall drops only the @AGENTS.md include" "$(cat "$H/CLAUDE.md")" "# mine"
+echo '{' >"$S"
+"$A/claude/uninstall" >"$tmp/uninstall.out" 2>&1
+is "claude/uninstall exits 1 when merge-settings.py fails" "$?" 1
+cp "$F/settings.json" "$S"
 
 # codex/install in a fixture HOME: links skills with a SKILL.md, skips the rest, rerun is a no-op.
 mkdir -p "$H/agents/skills/noskill"
