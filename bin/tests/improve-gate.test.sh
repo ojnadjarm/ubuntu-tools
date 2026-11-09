@@ -24,6 +24,11 @@ done
 [ "$cr" = "$want" ] && ok "class + rollback on $cr/$want" || nok 'class + rollback' "$cr/$want"
 "$BIN/improve-gate" check "$WORK"/q/*.md >/dev/null && ok 'imported queue passes check' || nok 'imported queue passes check' 'rc != 0'
 
+# 2b. a second import keeps an item already in the queue (its status and Result).
+f=$(ls "$WORK"/q/*.md | head -1); sed -i 's/^status: proposed/status: measuring/' "$f"
+out=$("$BIN/improve-gate" import --from "$FIX/toolsmith/proposals" --backlog "$FIX/toolsmith/BACKLOG.md" --to "$WORK/q")
+grep -q '^status: measuring$' "$f" && [ "$(tail -1 <<<"$out")" = "imported 0" ] && ok 're-import keeps a queued item' || nok 're-import keeps a queued item' "$(tail -1 <<<"$out"), $(grep '^status' "$f")"
+
 # 3. check accepts the valid item and flags each broken one.
 "$BIN/improve-gate" check "$FIX/queue/ok-valid.md" >/dev/null && ok 'valid item passes' || nok 'valid item passes' 'rc != 0'
 for f in understated no-rollback refused; do

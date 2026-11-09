@@ -1,10 +1,10 @@
 {
   "_doc": "pcbench trajectory classifier. Edit freely; pcbench parse reads this file. Regexes are Python re, applied case-sensitively to the Bash tool's `command` input (and to Read file paths where noted).",
 
-  "screenshot_cmd": "(?:^|[|;&(]\\s*|\\bsudo\\s+|\\btimeout \\S+\\s+)pc +(?:shot|wait +[0-9]|find|click-text)\\b",
+  "screenshot_cmd": "(?:^|[|;&(\\n]\\s*|\\b(?:then|do|else)\\s+|\\bsudo\\s+|\\btimeout \\S+\\s+)pc +(?:shot|wait +[0-9]|find|click-text)\\b",
   "screenshot_read_suffixes": [".png", ".jpg", ".jpeg", ".webp"],
 
-  "pc_verb": "(?:^|[|;&(`$]\\s*|\\bsudo\\s+|\\benv\\s+\\S+=\\S+\\s+|\\btimeout \\S+\\s+)pc\\s+([a-z0-9-]+)",
+  "pc_verb": "(?:^|[|;&(`$\\n]\\s*|\\b(?:then|do|else)\\s+|\\bsudo\\s+|\\benv\\s+\\S+=\\S+\\s+|\\btimeout \\S+\\s+)pc\\s+([a-z0-9-]+)",
 
   "kb_whole_files": ["toolbox.md", "quirks.md", "RUNBOOK.md", "README-pc-control.md", "machine.md"],
   "kb_whole_cmd": "\\b(?:cat|less|more|head|tail|bat)\\b[^|;&]*\\b(?:toolbox\\.md|quirks\\.md|RUNBOOK\\.md|README-pc-control\\.md|machine\\.md)",
@@ -14,13 +14,13 @@
   "ledger_marker": "rollback: pc undo",
 
   "disturb": [
-    "(?:^|[|;&(]\\s*|\\bsudo\\s+|\\btimeout \\S+\\s+)eye +speak\\b",
-    "(?:^|[|;&(]\\s*|\\bsudo\\s+|\\btimeout \\S+\\s+)eye +tv +on\\b",
-    "(?:^|[|;&(]\\s*|\\bsudo\\s+|\\btimeout \\S+\\s+)pc +(?:open|notify|type|key|click|click-text|a11y-click|drag|scroll)\\b",
-    "(?:^|[|;&(]\\s*|\\bsudo\\s+|\\btimeout \\S+\\s+)wpctl +set-volume\\b",
-    "(?:^|[|;&(]\\s*|\\bsudo\\s+|\\btimeout \\S+\\s+)pactl +set-sink-volume\\b",
-    "(?:^|[|;&(]\\s*|\\bsudo\\s+|\\btimeout \\S+\\s+)notify-send\\b",
-    "(?:^|[|;&(]\\s*|\\bsudo\\s+|\\btimeout \\S+\\s+)notify-owner\\b"
+    "(?:^|[|;&(\\n]\\s*|\\b(?:then|do|else)\\s+|\\bsudo\\s+|\\btimeout \\S+\\s+)(?:[\\w~./-]*/)?eye +speak\\b",
+    "(?:^|[|;&(\\n]\\s*|\\b(?:then|do|else)\\s+|\\bsudo\\s+|\\btimeout \\S+\\s+)(?:[\\w~./-]*/)?eye +tv +on\\b",
+    "(?:^|[|;&(\\n]\\s*|\\b(?:then|do|else)\\s+|\\bsudo\\s+|\\btimeout \\S+\\s+)(?:[\\w~./-]*/)?pc +(?:open|notify|type|key|click|click-text|a11y-click|drag|scroll)\\b",
+    "(?:^|[|;&(\\n]\\s*|\\b(?:then|do|else)\\s+|\\bsudo\\s+|\\btimeout \\S+\\s+)(?:[\\w~./-]*/)?wpctl +set-volume\\b",
+    "(?:^|[|;&(\\n]\\s*|\\b(?:then|do|else)\\s+|\\bsudo\\s+|\\btimeout \\S+\\s+)(?:[\\w~./-]*/)?pactl +set-sink-volume\\b",
+    "(?:^|[|;&(\\n]\\s*|\\b(?:then|do|else)\\s+|\\bsudo\\s+|\\btimeout \\S+\\s+)(?:[\\w~./-]*/)?notify-send\\b",
+    "(?:^|[|;&(\\n]\\s*|\\b(?:then|do|else)\\s+|\\bsudo\\s+|\\btimeout \\S+\\s+)(?:[\\w~./-]*/)?notify-owner\\b"
   ],
 
   "_raw_recipes_doc": "SPIKE finding 6: the key metric is a raw recipe used WHERE THE ARM HAD A pc VERB. Each entry names the pc verb that replaces it; the count only rises when that verb exists in the arm being scored, so the old arm is never penalised for lacking it.",

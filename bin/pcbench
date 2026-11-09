@@ -88,6 +88,11 @@ def validate_task(tid):
         t = json.load(open(os.path.join(d, "task.json")))
     except Exception as e:
         return bad + ["task.json is not JSON: %s" % e]
+    if not isinstance(t, dict):
+        return bad + ["task.json is not an object"]
+    for k in ("answer_schema", "budget"):
+        if k in t and not isinstance(t[k], dict):
+            return bad + ["%s is not an object" % k]
     for k in ("id", "tier", "set", "title", "prompt", "answer_schema", "allowed_side_effects",
               "needs", "budget", "tags"):
         if k not in t:
@@ -96,6 +101,8 @@ def validate_task(tid):
         bad.append("id %r != directory %r" % (t.get("id"), tid))
     elif not re.match(r"^[ODCSX][0-9]{2}$", tid):
         bad.append("id %r does not match ^[ODCSX][0-9]{2}$" % tid)
+    if len(str(t.get("title", ""))) > 40:
+        bad.append("title is over 40 chars")
     if t.get("tier") not in TIERS:
         bad.append("tier %r not in %s" % (t.get("tier"), TIERS))
     if t.get("set") not in SETS:
@@ -110,6 +117,8 @@ def validate_task(tid):
     for k in ("seconds", "screenshots"):
         if k not in b:
             bad.append("budget missing " + k)
+    if "seconds" in b and (isinstance(b["seconds"], bool) or not isinstance(b["seconds"], int)):
+        bad.append("budget.seconds must be an integer")
     if "turns" in b:
         bad.append("budget.turns is dead (--max-turns no longer exists, SPIKE §2)")
     s = t.get("answer_schema") or {}
@@ -175,7 +184,7 @@ def run_checker(d, answer, stream, env):
     for line in reversed(p.stdout.strip().splitlines()):
         try:
             j = json.loads(line)
-            out.update({"pass": int(j.get("pass", 0)), "reason": j.get("reason", "")})
+            out.update({"pass": int(j.get("pass", 0)), "reason": j.get("reason", ""), "score": j.get("score")})
             break
         except Exception:
             continue
@@ -680,9 +689,10 @@ def run_trial(task, arm, i, run_dir, run_id, model, dry_run, verbose, owner_go=N
     row["ledger_lines"] = int(after.get("ledger_lines") or 0) - int(before.get("ledger_lines") or 0)
     row["undo_ok"] = verdict.get("undo_ok")
     row["pass"] = verdict["pass"]
+    row["score"] = verdict.get("score")
     row["checker_exit"] = verdict["exit"]
     row["reason"] = verdict.get("reason", "")
-    if task.get("judge"):
+    if task.get("judge") and not dry_run:
         j = run_judge(d, answer_path, env)
         row.update(j)
         if j:

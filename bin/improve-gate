@@ -153,6 +153,9 @@ def do_import(src, backlog, dest):
         if len(cells) < 7 or not re.fullmatch(r'TSP-0*[1-9]\d*', cells[2]) or cells[5] not in ('proposed', 'go'):
             continue
         tid = cells[2]
+        if os.path.exists(os.path.join(dest, tid + '.md')):
+            print(f'{tid}\tkept\talready queued')
+            continue
         text = open(os.path.join(src, tid + '.md')).read()
         cls, why = classify(text)
         if cls == 'refused':

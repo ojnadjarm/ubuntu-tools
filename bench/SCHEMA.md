@@ -50,7 +50,7 @@ and receive these env vars: `PCBENCH_RUN`, `PCBENCH_TASK`, `PCBENCH_ARM`, `PCBEN
 | `answer_schema` | object | valid JSON Schema, `"type":"object"`, with `required`. Passed verbatim to `--json-schema`. **Must include an escape channel**: `unknown` (boolean) or `did_it` (boolean) plus `reason` (string) among the properties. |
 | `allowed_side_effects` | array of fingerprint field names | fields the trial may move (see the list below). Anything else that moves ⇒ `side_effect:true` and `pass=0`. |
 | `needs` | array | `buds_absent` `buds_present` `owner_go` `tv_desktop`. Unmet ⇒ trial skipped, reason in the row. |
-| `budget` | object | `seconds` (int, `timeout`), `usd` (float, `--max-budget-usd`), `screenshots` (int, over budget is reported, not a fail). **No `turns`** — `--max-turns` no longer exists (SPIKE §2). |
+| `budget` | object | `seconds` (int, `timeout`), `usd` (float, informational: the runner passes no spend cap, the timeout is the only bound), `screenshots` (int, over budget is reported, not a fail). **No `turns`** — `--max-turns` no longer exists (SPIKE §2). |
 | `oracle_s` | number | wall seconds `solve.sh` takes; informational. |
 | `tags` | array of strings | free. |
 | `judge` | object | optional. `{"rubric": "…", "must": [str], "must_not": [str]}` — an LLM judge grades the final answer after the checker (see below). |

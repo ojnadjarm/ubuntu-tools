@@ -141,5 +141,30 @@ t "validate still accepts the shipped judge tasks"
 out=$("$PB" validate --task O02 --task D02 --task D04 --task D05 2>&1)
 case $out in *FAIL*) no "$(echo "$out" | tr '\n' ' ')";; *) ok;; esac
 
+# --- 9. --dry-run never reaches a model: the judge is not called -------------
+DR="$TMP/dry/D99"; mkdir -p "$DR" "$TMP/dryrun"
+for f in setup teardown; do printf 'exit 0\n' > "$DR/$f.sh"; done
+echo '{"prompt":"q","judge":{"rubric":"r"}}' > "$DR/task.json"
+printf 'echo "{}"\n' > "$DR/solve.sh"; printf '%s\n' 'echo "{\"pass\":1,\"reason\":\"shape\"}"' > "$DR/check.sh"
+: > "$PCBENCH_STUB_LOG"
+py=$(PCBENCH_PB="$PB" python3 - "$DR" "$TMP/dryrun" <<'PY'
+import os, sys
+from importlib.machinery import SourceFileLoader
+pb = SourceFileLoader("pcbench", os.environ["PCBENCH_PB"]).load_module()
+pb.fingerprint = lambda: {}
+pb.residue = lambda: (0, "")
+task = {"id": "D99", "tier": "diagnose", "set": "night", "_dir": sys.argv[1], "budget": {"seconds": 5},
+        "judge": {"rubric": "r"}}
+for dry in (True, False):
+    if not dry:
+        pb.build_cmd = lambda *a: "true"
+    row = pb.run_trial(task, "new", 1, sys.argv[2], "t", "m", dry, False)
+    print(row["pass"], "judge_pass" in row)
+PY
+)
+t "dry run: checker verdict, no judge";  eq d "$(echo "$py" | sed -n 1p)" '1 False'
+t "dry run: one model call, the live trial's"; eq n "$(calls)" '1'
+t "a live trial still judges";           eq l "$(echo "$py" | sed -n 2p)" '0 True'
+
 [ $fail = 0 ] && echo "pcbench-judge.test.sh: all green" || echo "pcbench-judge.test.sh: FAILURES"
 exit $fail

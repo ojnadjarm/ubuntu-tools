@@ -59,6 +59,33 @@ t "pc shot is not a disturbance"; eq nd "$(h '.disturb')" 'false'
 dz() { jq -nc --arg c "$1" '{type:"assistant",message:{content:[{type:"tool_use",id:"a",name:"Bash",input:{command:$c}}]}}' > "$d"; "$PB" parse "$d" --arm new | jq -c '.disturb'; }
 t "grep/cat of notify-owner is no disturbance"; eq rd "$(dz 'grep -n -i dup $(command -v notify-owner)')$(dz 'cat bin/notify-owner')$(dz 'grep -n "eye speak" bin/eye')" 'falsefalsefalse'
 t "notify-owner at command position is one";    eq cp "$(dz 'notify-owner "x"')$(dz 'cd /tmp; notify-owner x')$(dz 'true && eye speak hi')$(dz 'timeout 5 notify-send x')" 'truetruetruetrue'
+t "a disturb verb on a later line, in a loop, by path"; eq ml "$(dz $'cd /tmp\neye speak hi')$(dz 'for i in 1; do notify-owner x; done')$(dz 'if true; then eye speak hi; fi')$(dz 'cd /tmp; ~/agents/bin/notify-owner x')" 'truetruetruetrue'
+t "pc verb and screenshot on a later line count";  eq mv "$(jq -nc --arg c $'cd /tmp\npc shot' '{type:"assistant",message:{content:[{type:"tool_use",id:"a",name:"Bash",input:{command:$c}}]}}' > "$d"; "$PB" parse "$d" --arm new | jq -c '[.pc_calls,.screenshots]')" '[1,1]'
+t "the checker's score reaches the row"
+SC=$(mktemp -d); printf '%s\n' 'echo "{\"pass\":1,\"score\":0.5,\"reason\":\"r\"}"' > "$SC/check.sh"
+{ [ "$(PCBENCH_PB="$PB" python3 - "$SC" <<'PY'
+import os, sys
+from importlib.machinery import SourceFileLoader
+pb = SourceFileLoader("pcbench", os.environ["PCBENCH_PB"]).load_module()
+print(pb.run_checker(sys.argv[1], "/dev/null", "/dev/null", dict(os.environ)).get("score"))
+PY
+)" = 0.5 ] && grep -q 'row\["score"\] = verdict.get("score")' "$PB"; } && ok || no "run_checker drops score"
+rm -rf "$SC"
+# validate enforces SCHEMA.md: title length, integer budget.seconds, and a FAIL line (no traceback) on wrong types.
+vt() { local V; V=$(mktemp -d); mkdir -p "$V/O01"; cp "$HOME/agents/bench/tasks/O01"/*.sh "$V/O01/"
+  jq "$1" "$HOME/agents/bench/tasks/O01/task.json" > "$V/O01/task.json"
+  PCBENCH_PB="$PB" PCBENCH_FAKE_TASKS="$V" python3 - 2>&1 <<'PY'
+import os
+from importlib.machinery import SourceFileLoader
+pb = SourceFileLoader("pcbench", os.environ["PCBENCH_PB"]).load_module()
+pb.TASKS = os.environ["PCBENCH_FAKE_TASKS"]
+print("; ".join(pb.validate_task("O01")) or "valid")
+PY
+  rm -rf "$V"; }
+t "validate: the unchanged task is valid";      eq v0 "$(vt .)" 'valid'
+t "validate rejects a title over 40 chars";     case $(vt '.title=("x"*41)') in *"title"*40*) ok;; *) no "$(vt '.title=("x"*41)' | tail -1)";; esac
+t "validate rejects non-integer budget.seconds"; case $(vt '.budget.seconds="soon"') in *"budget.seconds"*) ok;; *) no "$(vt '.budget.seconds="soon"' | tail -1)";; esac
+t "validate: wrong types give a FAIL line";     case "$(vt '.answer_schema="s"')$(vt '.budget=5')$(vt '[]')" in *Traceback*|*valid*) no "traceback or valid";; *) ok;; esac
 # TSP-057: O06 — a loop the PreToolUse hook denied is a 0.5 pass and counted as hook_denied; a loop that ran is a fail.
 o6() { # o6 <tool_result of the loop call, JSON>
   ( cd "$HOME/agents/bench/tasks/O06" || exit 1
