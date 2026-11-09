@@ -7,6 +7,7 @@ from dash.services import system
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "lib"))
 import agent_ends  # noqa: E402
+import sessions  # noqa: E402
 from agent_ends import iso_s  # noqa: E402
 
 PROJ = os.path.join(HOME, ".claude/projects", HOME.replace("/", "-"))
@@ -245,21 +246,46 @@ def newest_session():
     return max(glob.glob(os.path.join(PROJ, "*.jsonl")), key=os.path.getmtime, default="")[len(PROJ) + 1:-len(".jsonl")]
 
 
-def persistent(roster, session):
-    """Roster rows with state running|idle|off, and the orchestrator's state; running = an active unit or a transcript written < 60 s ago."""
+def live_sessions():
+    """Live Claude sessions from the registry (lib/sessions.py), [] when it cannot be read."""
+    try:
+        return sessions.live()
+    except Exception:
+        return []
+
+
+def under(cwd, folder):
+    return cwd == folder or cwd.startswith(folder + "/")
+
+
+def job_rows(live, names):
+    """Subagent-shaped rows for live sessions an agent started that are not a roster agent's own run (liaison jobs)."""
+    return [{"id": "pid%d" % s["pid"], "label": s["started_by"], "type": "session",
+             "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(s["since"])), "last": s["since"], "state": s["state"],
+             "doing": "live session · pid %d" % s["pid"], "report": ""}
+            for s in live if (s.get("name") or "").startswith("agent-") and s["started_by"] not in names]
+
+
+def persistent(roster, session, live=()):
+    """Roster rows with state running|idle|off, and the orchestrator's state; the live session registry decides when it holds the agent's
+    folder (or the orchestrator seat), else running = an active unit or a transcript written < 60 s ago."""
     tmux, units, now = tmux_sessions(), unit_states([r["name"] for r in roster]), time.time()
     projects = os.path.dirname(PROJ)
     out = []
     for r in roster:
-        if units.get(r["name"]) in ("active", "activating", "reloading", "deactivating"):
+        mine = [s["state"] for s in live if "cwd" in s and under(s["cwd"], os.path.join(AGENTS_DIR, r["name"]))]
+        if "working" in mine or units.get(r["name"]) in ("active", "activating", "reloading", "deactivating"):
             st = "running"
+        elif mine:
+            st = "idle"
         elif r["name"] in tmux:
             st = "running" if now - newest_write(os.path.join(projects, (os.path.join(AGENTS_DIR, r["name"])).replace("/", "-"))) < RUNNING_S else "idle"
         else:
             st = "idle" if r.get("enabled") == "enabled" else "off"
         out.append(dict(r, state=st))
     js = os.path.join(PROJ, session + ".jsonl")
-    orch = "off" if ORCH_TMUX not in tmux else "running" if os.path.exists(js) and now - os.path.getmtime(js) < RUNNING_S else "idle"
+    seat = [s["state"] for s in live if s.get("seat") == "orchestrator"]
+    orch = "off" if ORCH_TMUX not in tmux else ("running" if "working" in seat else "idle") if seat else "running" if os.path.exists(js) and now - os.path.getmtime(js) < RUNNING_S else "idle"
     return out, orch
 
 
@@ -287,7 +313,9 @@ def collect():
     session, subs = subagents(feed(), live)
     session = newest_session() or session
     roster = [dict(a, report=report_line(a["name"])) for a in swr({"agents": system.BLOCKS["agents"]})["agents"]]
-    roster, orch = cached("agents_persist", 5, lambda: persistent(roster, session), (roster, "idle"))
+    reg = live_sessions()
+    subs = shown(job_rows(reg, {r["name"] for r in roster}) + subs)
+    roster, orch = cached("agents_persist", 5, lambda: persistent(roster, session, reg), (roster, "idle"))
     return {"orchestrator": {"name": "DarkSaddler", "session": session[:8], "state": orch}, "subagents": subs, "orbiters": orb,
             "roster": roster, "claims": claims()}
 

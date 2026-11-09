@@ -33,7 +33,8 @@ class Live(unittest.TestCase):
         os.makedirs(os.path.join(self.subs, "workflows", "wf_abc"))
         self.parent = os.path.join(self.proj, "sess5678-y.jsonl")
         self.saved = (agents.PROJ, agents.ACTIONS, agents.CLAIMS, agents.AGENTS_DIR, agents.orbiters, agents.tmux_sessions,
-                      agents.unit_states, agents.system.BLOCKS["agents"])
+                      agents.unit_states, agents.system.BLOCKS["agents"], agents.live_sessions)
+        agents.live_sessions = lambda: []
         agents.PROJ, agents.ACTIONS, agents.CLAIMS = self.proj, os.path.join(t, "none.jsonl"), os.path.join(t, "none.md")
         agents.AGENTS_DIR = "/srv/x/agents"
         agents.orbiters = lambda: []
@@ -50,7 +51,7 @@ class Live(unittest.TestCase):
 
     def tearDown(self):
         (agents.PROJ, agents.ACTIONS, agents.CLAIMS, agents.AGENTS_DIR, agents.orbiters, agents.tmux_sessions,
-         agents.unit_states, agents.system.BLOCKS["agents"]) = self.saved
+         agents.unit_states, agents.system.BLOCKS["agents"], agents.live_sessions) = self.saved
         cache.forget("agents", "agents_view", "agents_persist")
         agents._parent.clear()
         agents._feed.clear()
@@ -205,6 +206,56 @@ class Live(unittest.TestCase):
         jl(os.path.join(self.proj, "newer999-z.jsonl"), [{}])
         d = agents.collect()
         self.assertEqual(d["orchestrator"], {"name": "DarkSaddler", "session": "newer999", "state": "running"})
+
+    def live(self, pid, state, cwd=None, name=None, seat=None, since=None):
+        row = {"seat": seat, "state": state, "since": int(since or self.now - 30)}
+        if cwd:
+            row.update(pid=pid, parent="orchestrator", name=name, cwd=cwd, started_by=name[len("agent-"):] if name.startswith("agent-") else "owner")
+        return row
+
+    def stale_transcripts(self):
+        os.makedirs(os.path.join(self.proj, "sess5678-y", "subagents"), exist_ok=True)
+        jl(self.parent, [{}])
+        os.utime(self.parent, (self.now - 3600, self.now - 3600))
+
+    def test_registry_states_and_job_rows(self):
+        self.stale_transcripts()
+        agents.live_sessions = lambda: [
+            self.live(10, "working", "/srv/x", "Command center", "orchestrator"),
+            self.live(11, "working", "/srv/x/agents/digest", "agent-digest-job"),
+            self.live(12, "idle", "/srv/x/agents/notes", "agent-notes"),
+            self.live(13, "working", "/srv/x/agents/digest", "agent-digest-job"),
+            self.live(14, "working")]
+        d = agents.collect()
+        self.assertEqual(d["orchestrator"]["state"], "running")
+        self.assertEqual({r["name"]: r["state"] for r in d["roster"]}, {"keeper": "running", "digest": "running", "notes": "idle", "hello": "off"})
+        jobs = [s for s in d["subagents"] if s["type"] == "session"]
+        self.assertEqual([(s["id"], s["label"], s["state"]) for s in jobs], [("pid11", "digest-job", "working"), ("pid13", "digest-job", "working")])
+        self.assertEqual(jobs[0]["last"], int(self.now - 30))
+
+    def test_registry_idle_beats_fresh_transcript(self):
+        os.makedirs(os.path.join(self.proj, "sess5678-y", "subagents"), exist_ok=True)
+        jl(self.parent, [{}])
+        agents.live_sessions = lambda: [self.live(10, "idle", "/srv/x", "Command center", "orchestrator"),
+                                        self.live(11, "idle", "/srv/x/agents/digest", "agent-digest-job")]
+        d = agents.collect()
+        self.assertEqual(d["orchestrator"]["state"], "idle")
+        self.assertEqual({r["name"]: r["state"] for r in d["roster"]}["digest"], "idle")
+        self.assertEqual([(s["label"], s["state"]) for s in d["subagents"]], [("digest-job", "idle")])
+        agents.tmux_sessions = lambda: set()
+        cache.forget("agents_view", "agents_persist")
+        self.assertEqual(agents.collect()["orchestrator"]["state"], "off")
+
+    def test_registry_failure_falls_back(self):
+        self.stale_transcripts()
+        agents.live_sessions = self.saved[-1]
+        agents.sessions.live, real = (lambda: 1 / 0), agents.sessions.live
+        try:
+            d = agents.collect()
+        finally:
+            agents.sessions.live = real
+        self.assertEqual(d["orchestrator"]["state"], "idle")
+        self.assertEqual({r["name"]: r["state"] for r in d["roster"]}["digest"], "idle")
 
     def test_parent_scan_concurrent_keeps_offset(self):
         n = self.now
