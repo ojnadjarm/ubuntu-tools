@@ -49,7 +49,7 @@
   (`/need-resolve`); say so in your report.
 
 ## 5. Forbidden
-1. `git commit`/`git push` in a work repo (Vass, Moodle Workplace; git guard T1251). Personal repos (`~/agents`,
+1. `git commit`/`git push` in a protected project (`protected list`: Vass, Moodle Workplace; `guide protected-projects`). Personal repos (`~/agents`,
    `~/the-dark-eye`, `~/moodle-harness`, every repo under `~/projects/personal/`; the machine is the source of truth, owner 2026-10-23): the
    agent that changed them commits only its claimed files (`git commit -- <paths>`, message `T<n>: <what>`) and pushes;
    never force-push or rewrite history. Also allowed: `sudo etckeeper commit` under `/etc`, `moodle-keep`'s weekly
