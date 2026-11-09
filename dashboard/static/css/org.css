@@ -5,13 +5,20 @@
 .org .pill.off { color: var(--mute); border-color: var(--line); border-style: dashed; }
 .org .pill.his { color: var(--gold); border-color: var(--gold-w); background: var(--gold-w); }
 .org .otree > li + li { margin-top: 1.1rem; }
-.org .seat { display: grid; grid-template-columns: 3.4rem minmax(0, 1fr); gap: .2rem .9rem; align-items: center; padding: .75rem .9rem; border: 1px solid var(--line2); background: var(--bg2); }
-.org .seat .av { grid-row: span 3; }
+.org .seat { position: relative; display: grid; grid-template-columns: 3.4rem minmax(0, 1fr); gap: .2rem .9rem; align-items: center; padding: .75rem .9rem; border: 1px solid var(--line2); background: var(--bg2); }
+.org .seat .av { grid-row: span 2; }
+.org .seat.him .av { grid-row: auto; }
 .org .seat .av svg { width: 100%; height: auto; display: block; }
+.org .avb { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; cursor: help; }
+.org .tip { display: none; position: absolute; z-index: 5; left: .5rem; right: .5rem; margin-top: .4rem; padding: .55rem .75rem; border: 1px solid var(--line3); background: var(--bg); color: var(--mid); font-size: max(var(--fs-min), .85rem); text-align: left; }
+.org .tip > * { display: block; }
+.org .tip b { color: var(--txt); font-weight: 400; }
+.org .av.open .tip, .org .avb:focus-visible + .tip { display: block; }
+@media (hover: hover) { .org .av:hover .tip { display: block; } }
+.org .seat .pill.dot { padding: 0; border: 0; background: none; }
+.org .seat .pill.dot::before { width: .55rem; height: .55rem; }
+.org .seat .pill.off::before { background: none; box-shadow: inset 0 0 0 1px currentColor; }
 .org .seat h3 { font-size: 1.05rem; color: var(--hi); font-weight: 600; display: flex; flex-wrap: wrap; gap: .3rem .6rem; align-items: center; }
-.org .seat p { color: var(--mid); font-size: max(var(--fs-min), .85rem); }
-.org .seat p b { color: var(--txt); font-weight: 400; }
-.org .seat p:empty { display: none; }
 .org .seat.him { border-color: var(--gold-w); max-width: 34rem; }
 .org .seat.him h3 { color: var(--gold); }
 .org .dia i { display: block; width: 2.2rem; height: 2.2rem; margin: .6rem; border: 2px solid var(--gold); transform: rotate(45deg); background: var(--gold-w); }
@@ -24,7 +31,8 @@
 .org .pos > li::after { left: -1rem; top: -1rem; bottom: 0; border-left-width: 1px; }
 .org .pos > li:last-child::after { bottom: auto; height: calc(1rem + var(--elb)); }
 .org .seat .hang, .org .seat .msg { grid-column: -2 / -1; }
-.org .seat .msg { justify-self: start; display: inline-flex; align-items: center; min-height: 32px; padding: 0 .9rem; margin-top: .5rem; font-size: max(var(--fs-min), .72rem); text-decoration: none; }
+.org .seat .msg { justify-self: start; display: inline-flex; align-items: center; justify-content: center; width: max(36px, 2.25rem); height: max(36px, 2.25rem); padding: 0; margin-top: .5rem; text-decoration: none; }
+.org .seat .msg .ic { width: max(18px, 1.2rem); height: max(18px, 1.2rem); fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .org .hang { width: 100%; margin-top: .5rem; padding-top: .5rem; border-top: 1px solid var(--line); text-align: left; }
 .org .seat .hang .hn { color: var(--mute); font-size: max(var(--fs-min), .72rem); letter-spacing: var(--ls-label); text-transform: uppercase; }
 .org .crew li, .org .folded li { display: grid; grid-template-columns: 1.7rem minmax(0, 1fr) auto; gap: .5rem; align-items: center; padding: .25rem 0; }
@@ -72,8 +80,6 @@
   .org .pos .pos > li:last-child::before { right: 50%; }
   .org .pos .pos > li::after, .org .pos .pos > li:last-child::after { left: 50%; top: 0; bottom: auto; height: var(--g); }
   .org .pos .pos .seat { width: 100%; }
-  .org .pos .pos .crew li, .org .pos .pos .folded li { grid-template-columns: 1.7rem minmax(0, 1fr); }
-  .org .pos .pos .crew .pill, .org .pos .pos .folded .pill { grid-column: 2; justify-self: start; }
 }
 /* 768–1199: the seats two levels down stack in a column under their parent, one drop each, so a third of the row never
    squeezes three cards side by side. */

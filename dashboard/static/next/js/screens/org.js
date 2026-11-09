@@ -32,6 +32,19 @@ function pull() {
 
 const prot = (s) => !("pid" in s);
 const pill = (st) => `<span class="pill ${PILL[st] || "idle"}">${esc(st)}</span>`;
+const dot = (st) => `<span class="pill dot ${PILL[st] || "idle"}" title="${esc(st)}"><span class="sr-only">${esc(st)}</span></span>`;
+const BUBBLE = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H10l-5 4v-4H4z"/></svg>';
+
+/* An avatar button described by its tooltip: lines[0] bold, the rest plain; hover, keyboard focus or a tap shows it. */
+const av = (id, name, art, lines, cls = "") => `<span class="av${cls}"><button type="button" class="avb" aria-label="About ${esc(name)}" aria-describedby="tip-${esc(id)}">${art}</button>` +
+  `<span class="tip" role="tooltip" id="tip-${esc(id)}">${lines.filter(Boolean).map((l, i) => i ? `<span>${esc(l)}</span>` : `<b>${esc(l)}</b>`).join("")}</span></span>`;
+
+/* A tap on an avatar toggles its tooltip; a tap anywhere else closes any open one. */
+document.addEventListener("click", (e) => {
+  const a = e.target.closest(".org .av");
+  document.querySelectorAll(".org .av.open").forEach((x) => x !== a && x.classList.remove("open"));
+  if (a) a.classList.toggle("open");
+});
 
 /* A seat's state from its own sessions: working, idle, yours (a protected session), else asleep (or off for the always-on seat). */
 export function seatState(seat, S) {
@@ -45,7 +58,7 @@ export function seatState(seat, S) {
 /* The owner's direct message with seat `id`, as Chat names it. */
 export const dmOf = (id) => "dm-" + ["owner", id].sort().join("--");
 
-const worker = (s) => `<li><span class="mini" aria-hidden="true">${creature("pid" + s.pid, s.state === "working" ? "working" : "idle", "worker")}</span><b>${esc(s.name || "pid " + s.pid)}</b>${pill(s.state)}</li>`;
+const worker = (s) => `<li><span class="mini" aria-hidden="true">${creature("pid" + s.pid, s.state === "working" ? "working" : "idle", "worker")}</span><b>${esc(s.name || "pid " + s.pid)}</b>${dot(s.state)}</li>`;
 
 /* The sessions a seat started, working first: SHOWN of them, the rest folded behind a "hidden N" line. */
 function crew(H) {
@@ -56,10 +69,10 @@ function crew(H) {
 }
 
 function seatCard(seat, S) {
-  if (seat.role === "owner") return `<div class="seat him"><span class="av dia" aria-hidden="true"><i></i></span><h3>${esc(seat.name)}</h3><p><b>Read every channel, write anywhere, message anyone.</b></p><p>Only your words change what an agent may do.</p></div>`;
-  const st = seatState(seat, S), helpers = S.filter((s) => !s.seat && s.parent === seat.id);
-  return `<div class="seat" data-seat="${esc(seat.id)}"><span class="av" aria-hidden="true">${creature(seat.id, st === "working" || st === "idle" ? st : "sleep", seat.role)}</span><h3>${esc(seat.name)} ${pill(st)}</h3>` +
-    `<p><b>${esc(ROLE[seat.role] || "")}</b></p><p>${esc(WAKE[seat.wake] || "")}</p>${crew(helpers)}<a class="btn msg" href="#chat?ch=${esc(dmOf(seat.id))}">Message</a></div>`;
+  if (seat.role === "owner") return `<div class="seat him">${av(seat.id, seat.name, "<i></i>", ["Read every channel, write anywhere, message anyone.", "Only your words change what an agent may do."], " dia")}<h3>${esc(seat.name)}</h3></div>`;
+  const st = seatState(seat, S), helpers = S.filter((s) => !s.seat && s.parent === seat.id), msg = "Message " + seat.name;
+  return `<div class="seat" data-seat="${esc(seat.id)}">${av(seat.id, seat.name, creature(seat.id, st === "working" || st === "idle" ? st : "sleep", seat.role), [ROLE[seat.role], WAKE[seat.wake], "Now " + st + "."])}<h3>${esc(seat.name)} ${dot(st)}</h3>` +
+    `${crew(helpers)}<a class="btn msg" href="#chat?ch=${esc(dmOf(seat.id))}" aria-label="${esc(msg)}" title="${esc(msg)}">${BUBBLE}</a></div>`;
 }
 
 /* The seat tree: the owner and the seats reporting to the owner one above the other, every deeper level as a grid under its parent. */
