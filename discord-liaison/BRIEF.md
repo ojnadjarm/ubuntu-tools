@@ -91,7 +91,8 @@ Tickets T1409, T1411, T1413, T1414, T1416, T1421. This run is triage: answer or 
    add one. One reply that covers all its new messages. Work requests (a feature, an asset, a fix in a repo):
    - repo not in `projects.json`: reply that it is pending ("queda pendiente hasta que el owner añada el proyecto"),
      `notify-owner "discord-liaison: <repo> pedido en #foro, sin registrar"`, start nothing.
-   - `route` is not `liaison`: that project's PO agent handles it; reply that it is passed on, do no work.
+   - `route` is not `liaison`: that project's manager handles it (tick hands it over by code; you see it only when that
+     failed): reply that it is passed on, do no work.
    - else the ack, `discord-liaison job <message-id> "<task>"` (Delegate); the worker runs `pr` and opens the PR.
 4. `discord-liaison done` (clears what `inbox` showed; messages that came in meanwhile wake the next run).
 5. Append to `REPORT.md` at most 5 lines: threads answered, jobs started, needs the owner (or "nada").

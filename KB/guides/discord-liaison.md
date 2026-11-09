@@ -1,6 +1,7 @@
 # Discord liaison: the agent that answers the #foro forum and @agents in #general, and turns requests into PRs
 
-Ticket: T1409, T1411, T1413, T1414, T1415, T1416, T1421, T1482 · Last verified: 2026-11-04 (T1482 postmortem of 119 jobs, lessons in `JOB.md`, guarded by `tests/test_lessons.py`); 2026-10-31 (caps re-read from agent.env, F71); 2026-10-27 by 63 liaison fixture tests (T1421: 6 batch/supersede/stale tests) + a live nudge → wake run; before: 57 (T1416: 8 routing tests, job vs escalate); before: 49 (T1415: job media + reply); before: 47 liaison fixture tests (T1414: 7 job tests, a transient-unit probe, a live tick) and eval 57 fixtures on opus (T1413: old brief 45/57 twice, new brief + context 55/57 twice); before: 25 liaison fixture tests + 25 orchestrator-pulse checks + 31 discord-bot tests, live ticks on #foro and #general
+Ticket: T1409, T1411, T1413, T1414, T1415, T1416, T1421, T1482, T1515 P31 · Last verified: 2026-11-10 (P31: 75 fixture tests,
+`test_managers.py` 5: code routing to one manager per project); 2026-11-04 (T1482 postmortem of 119 jobs, lessons in `JOB.md`, guarded by `tests/test_lessons.py`); 2026-10-31 (caps re-read from agent.env, F71); 2026-10-27 by 63 liaison fixture tests (T1421: 6 batch/supersede/stale tests) + a live nudge → wake run; before: 57 (T1416: 8 routing tests, job vs escalate); before: 49 (T1415: job media + reply); before: 47 liaison fixture tests (T1414: 7 job tests, a transient-unit probe, a live tick) and eval 57 fixtures on opus (T1413: old brief 45/57 twice, new brief + context 55/57 twice); before: 25 liaison fixture tests + 25 orchestrator-pulse checks + 31 discord-bot tests, live ticks on #foro and #general
 
 ## When to use
 Run, check, change or debug discord-liaison: the persistent agent that owns the conversation in the forum #foro
@@ -22,6 +23,11 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
 - Registry `discord-liaison/projects.json`: one entry per project (repo, clone, match tags/title, rules, skills, `po`).
   `Registry.route()` is the one routing seam: `po` set → that project's threads go to its PO agent (T1410), else the
   liaison does the work. A repo not in the registry: reply "pendiente", `notify-owner`, nothing starts.
+- Managers (T1515 P31): `po` = the project's own manager `po-<id>`; with top-level `"router": "po-discord"` the routing is
+  code: `tick` → `Registry.dispatch` → `po-ask` before the run gate, the message leaves the liaison inbox, so a routed
+  message wakes no triage. No project / a 2nd project named → the router. The triage keeps #general, projects without
+  `po` and failed handoffs. Context map and SOLID: `$AGENT_WORK/research/2026-11-09/T1515/P31-architecture.md`;
+  guide `product-owner-agents`. Rollback: drop `router` and set `po` back (one commit).
 - #general (owner, T1411): answer general questions on any topic, in Spanish, and do small creative requests there
   (concept art via `art` + `post --image`, short texts); send people to #foro only for coordination with other agents
   or follow-up on a project; never `map`/`pr` from #general (`BRIEF.md`).
@@ -98,6 +104,7 @@ discord-liaison map <thread> <project> | pr <project>   # pr = registry + route 
 discord-liaison job <message-id> "<task>"   # triage: hand a work request to a background worker (queued over the cap)
 discord-liaison job-run <id>                # the worker's runner (started by the transient unit; not by hand)
 journalctl --user -u 'discord-liaison-job-*' -n 20; ls ~/agents/discord-liaison/state/jobs/
+discord-liaison manager <project-id> # po-<id> manager for a registered project (T1515 P31)
 discord-liaison test                # fixture tests (also bin/tests/discord-liaison.test.sh)
 journalctl --user -u discord-liaison-check -n 20; tail ~/agents/discord-liaison/logs/caps.log
 ```
@@ -158,6 +165,9 @@ runaway loop), `LIAISON_IMAGES_PER_DAY` (5), `LIAISON_JOBS_MAX` (3), `LIAISON_JO
   waited for the UTC day. The debounce batches a burst into one run.
 - A retry of a crashed worker runs inline: requeuing it would launch a transient unit with the running unit's name.
 
+- Before P31 the handoff ran when the triage called `inbox`: every PO-routed message cost a triage run (target < 60 s)
+  plus a "passed on" reply; now the manager's own reply through its outbox is the only one.
+- Handed messages keep their 👀 (no `done` runs for them); images are not passed to managers (text only).
 - Postmortem T1482 (119 jobs, 2026-10-27..11-04, doc pruned with the T1482 drop folder by T1505): 82 done, 36 superseded, 1 lost;
   median 16 min, p90 47 min; 5 escalations, none after 10-28. Superseded jobs had run 320 min (12 over 5 min, one 115 min)
   and the next job did not know them: `JOB.md` now sends it to the predecessor's folder and branch. Process lessons

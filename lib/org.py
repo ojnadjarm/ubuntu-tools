@@ -2,7 +2,7 @@
 import json
 import os
 
-ROLES = ("owner", "ceo", "po")
+ROLES = ("owner", "ceo", "po", "manager")
 WAKES = ("po-inbox", "channel", "pull")
 KEYS = ("id", "name", "role", "parent", "wake", "match")
 
@@ -29,6 +29,9 @@ def _validate(seats):
         if s["match"] is not None and not (s["match"] == "~" or s["match"].startswith("~/")):
             raise ValueError(f"seat {s['id']}: match must be ~ or ~/<path> (no machine paths)")
         ids[s["id"]] = s
+    for s in seats:
+        if s["role"] == "manager" and ids.get(s["parent"], {}).get("role") != "po":
+            raise ValueError(f"seat {s['id']}: a manager's parent must be a po")
     if [s["role"] for s in seats].count("owner") != 1:
         raise ValueError("exactly one owner seat")
     for s in seats:
@@ -63,8 +66,9 @@ def parent(seat_id, p=None):
 
 
 def may_assign(a, b, p=None):
-    """True when seat a may assign work to seat b: the owner to anyone else, the ceo to a po."""
+    """True when seat a may assign work to seat b: the owner to anyone else, the ceo to a po, a po to its managers."""
     sa, sb = _seat(a, p), _seat(b, p)
     if not sa or not sb or a == b:
         return False
-    return sa["role"] == "owner" or (sa["role"] == "ceo" and sb["role"] == "po")
+    return (sa["role"] == "owner" or (sa["role"] == "ceo" and sb["role"] == "po")
+            or (sa["role"] == "po" and sb["role"] == "manager" and sb["parent"] == a))

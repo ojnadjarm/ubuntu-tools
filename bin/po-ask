@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# usage: po-ask <p> [--from owner|orchestrator|liaison|pick|chat] [--channel <ch>] [--thread <id>] [--intent|--copy] "<text>"|-
+# usage: po-ask <p> [--from owner|orchestrator|liaison|pick|chat|router|manager] [--channel <ch>] [--thread <id>] [--intent|--copy] "<text>"|-
 # Queue one request for the product-owner agent po-<p>: writes po-<p>/inbox/<utc>-<from>-<rand>.md (front matter + the
 # verbatim text; `-` reads stdin) and prints its path. The po@<p>.path unit wakes the PO. Exit 2: unknown PO or bad usage.
+# --from router|manager (agent to agent, T1515 P31) takes one of seat <p>'s 12 wakes a day; exit 4 at the cap, nothing filed.
 help() { awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; }
 case "${1:-}" in -h|--help) help; exit 0 ;; '') help >&2; exit 2 ;; esac
 set -euo pipefail
@@ -19,11 +20,15 @@ while [ $# -gt 1 ]; do
     *) break ;;
   esac
 done
-case "$from" in owner|orchestrator|liaison|pick|chat) ;; *) echo "po-ask: --from must be owner|orchestrator|liaison|pick|chat" >&2; exit 2 ;; esac
+case "$from" in owner|orchestrator|liaison|pick|chat|router|manager) ;; *) echo "po-ask: --from must be owner|orchestrator|liaison|pick|chat|router|manager" >&2; exit 2 ;; esac
 case "$channel$thread" in *[!A-Za-z0-9_.-]*) echo "po-ask: --channel/--thread take [A-Za-z0-9_.-] only" >&2; exit 2 ;; esac
 [ $# -eq 1 ] || { echo "po-ask: expected one text argument (or -)" >&2; exit 2; }
 if [ "$1" = - ]; then text=$(cat); else text="$1"; fi
 [ -n "$text" ] || { echo "po-ask: empty request" >&2; exit 2; }
+case "$from" in router|manager)
+  python3 "$(dirname "$(readlink -f "$0")")/../lib/po_cap.py" take "$p" ||
+    { echo "po-ask: po-$p had its 12 agent wakes today; nothing filed" >&2; exit 4; } ;;
+esac
 
 # Written beside the inbox, then renamed in: the path unit never sees a half-written file.
 mkdir -p "$dir/.inbox-tmp"

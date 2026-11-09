@@ -59,15 +59,38 @@ class TestPO(Base):
 
 
 class TestRealRegistry(unittest.TestCase):
-    def test_every_po_has_a_po_inbox_seat_and_folder(self):
+    def test_every_po_has_a_seat_and_folder_and_every_project_a_manager(self):
         here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         agents = os.path.dirname(here)
         with open(os.path.join(here, 'projects.json')) as f:
-            pos = {p['po'] for p in json.load(f)['projects'] if p.get('po')}
+            reg = json.load(f)
         with open(os.path.join(agents, 'org.json')) as f:
             seats = {s['id']: s for s in json.load(f)['seats']}
-        self.assertEqual(pos, {'po-discord'})
-        for name in pos:
+        router = reg.get('router')
+        for name in {p['po'] for p in reg['projects'] if p.get('po')} | ({router} if router else set()):
             seat = seats.get(name.removeprefix('po-'), {})
-            self.assertEqual((seat.get('role'), seat.get('wake'), seat.get('parent')), ('po', 'po-inbox', 'orchestrator'))
+            want = ('po', 'po-inbox', 'orchestrator') if name in (router, 'po-discord') else ('manager', 'po-inbox', 'discord')
+            self.assertEqual((seat.get('role'), seat.get('wake'), seat.get('parent')), want, name)
             self.assertTrue(os.path.isfile(os.path.join(agents, name, 'BRIEF.md')), name)
+        for p in reg['projects']:
+            self.assertEqual(seats[p['id']]['role'], 'manager', p['id'])
+            with open(os.path.join(agents, f'po-{p["id"]}', 'BRIEF.md')) as f:
+                brief = f.read()
+            self.assertIn(p['clone'], brief)
+            for q in reg['projects']:
+                if q is not p:
+                    self.assertNotIn(q['clone'], brief, f'po-{p["id"]} names {q["id"]}')
+
+    def test_chat_wake_cap_applies_to_every_manager(self):
+        import sys
+        agents = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        sys.path.insert(0, os.path.join(agents, 'lib'))
+        import chat_route
+        import org
+        seats = org.seats(os.path.join(agents, 'org.json'))
+        for s in (s for s in seats if s['role'] == 'manager'):
+            msg = {'ch': 'org', 'from': 'orchestrator', 'to': [], 'text': f'@{s["id"]} hola', 'hop': 0}
+            [w] = chat_route.wakes(msg, seats, {s['id']: chat_route.CAP})
+            self.assertEqual((w['seat'], w['queue']), (s['id'], 'cap'))
+            [w] = chat_route.wakes(msg, seats, {s['id']: chat_route.CAP - 1})
+            self.assertIsNone(w['queue'])

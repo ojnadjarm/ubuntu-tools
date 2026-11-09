@@ -3,13 +3,26 @@
 # request the run left in current/ to done/ with an outcome line; repeat while the inbox refills (at most PO_MAX_LOOPS,
 # default 5; the path unit starts it again after that). One po-run per PO at a time: a second call exits 0 at once.
 # Each run gets PO_BUDGET=stop when `plan-usage --check 95` exits 1 (the PO then spawns no worker), else ok;
-# CHAT_SEAT=<p> lets the run post with `chat`.
+# CHAT_SEAT=<p> lets the run post with `chat`. A manager (PARENT=<seat> in agent.env, T1515 P31) gets no CHAT_SEAT, and
+# each new REPORT.md `ESCALATE:` line goes to its parent with `po-ask <seat> --from manager` (once; at the cap it waits).
 help() { awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; }
 case "${1:-}" in -h|--help) help; exit 0 ;; '') help >&2; exit 2 ;; esac
 set -uo pipefail
 . "$(dirname "$(readlink -f "$0")")/polib.sh"
 dir=$(po_dir po-run "$1") || exit 2
 name="po-$1"
+parent=$(sed -n 's/^PARENT=\([a-z0-9-]*\).*/\1/p' "$dir/agent.env" 2>/dev/null | tail -1)
+seat="$1"; [ -z "$parent" ] || seat=''
+escalate() {
+  local mark="$dir/state/escalated" n=0 i=0 line
+  mapfile -t lines < <(grep -h '^ESCALATE:' "$dir/REPORT.md" 2>/dev/null)
+  n=$(cat "$mark" 2>/dev/null || echo 0); [ "$n" -le ${#lines[@]} ] 2>/dev/null || n=0
+  for line in "${lines[@]:$n}"; do
+    po-ask "$parent" --from manager --copy "$name: $line" >/dev/null 2>&1 || break
+    i=$((i + 1))
+  done
+  echo $((n + i)) >"$mark"
+}
 mkdir -p "$dir/current" "$dir/done"
 exec 9>"$dir/.po-run.lock"
 flock -n 9 || { echo "po-run: $name is already running; that run picks up new requests"; exit 0; }
@@ -20,7 +33,8 @@ for _ in $(seq "${PO_MAX_LOOPS:-5}"); do
   [ ${#reqs[@]} -gt 0 ] || break
   mv -n "${reqs[@]}" "$dir/current/"
   PO_BUDGET=ok; plan-usage --check 95 >/dev/null 2>&1; [ $? -ne 1 ] || PO_BUDGET=stop
-  PO_BUDGET=$PO_BUDGET CHAT_SEAT="$1" agent-run "$name" 9>&-; rc=$?
+  PO_BUDGET=$PO_BUDGET CHAT_SEAT="$seat" agent-run "$name" 9>&-; rc=$?
+  [ -z "$parent" ] || escalate
   for f in "$dir"/current/*.md; do
     printf '\noutcome: left in current/ by the run (agent-run exit %s); see REPORT.md\n' "$rc" >>"$f"
     mv -n "$f" "$dir/done/"

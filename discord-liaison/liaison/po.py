@@ -1,4 +1,4 @@
-"""Product-owner handoff (T1412 P5): inbox messages of a project whose registry entry names a `po` go to that PO with
+"""Product-owner handoff (T1412 P5, T1515 P31): inbox messages go by code to their project's manager or the router with
 `po-ask`; the PO's replies in <po>/outbox/discord/ are posted to their thread. `python -m liaison.po handoff|relay`."""
 import asyncio
 import glob
@@ -21,33 +21,46 @@ def po_home(env):
 
 
 def handoff(app, env):
-    """po-ask every inbox message routed to a PO, once (state/po-asked.json); returns the number handed off."""
+    """po-ask every inbox message `Registry.dispatch` gives an agent, once (state/po-asked.json); with a router set the
+    handed message leaves the liaison inbox, so no triage run wakes for it. Returns the number handed off."""
     path = os.path.join(app.home, 'state', 'po-asked.json')
-    try:
-        with open(path) as f:
-            asked = set(json.load(f))
-    except (OSError, ValueError):
-        asked = set()
-    n = 0
-    for m in app.state.inbox:
-        pid = (app.state.thread(m['thread_id']) or {}).get('project', '')
-        route = app.registry.route(pid) if pid else None
-        if m['id'] in asked or route in (None, 'liaison') or m.get('channel') == 'general':
-            continue
-        cmd = shlex.split(env.get('LIAISON_PO_ASK', 'po-ask')) + [
-            route.removeprefix('po-'), '--from', 'liaison', '--channel', 'discord', '--thread', m['thread_id'], '--copy',
-            f'{m["author"]} (Discord, thread "{m["thread"]}", message {m["id"]}): {m["content"]}']
-        if subprocess.call(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL) == 0:
-            asked.add(m['id'])
-            n += 1
-    save_json(path, sorted(asked))
+    with app.locked():
+        app.reload()
+        try:
+            with open(path) as f:
+                asked = set(json.load(f))
+        except (OSError, ValueError):
+            asked = set()
+        handed = set()
+        for m in app.state.inbox:
+            pid = (app.state.thread(m['thread_id']) or {}).get('project', '')
+            to = app.registry.dispatch(m, pid)
+            if to is None:
+                continue
+            if m['id'] not in asked and subprocess.call(ask(env, to, m, pid), stdin=subprocess.DEVNULL,
+                                                        stdout=subprocess.DEVNULL) != 0:
+                continue
+            handed.add(m['id'])
+        n = len(handed - asked)
+        save_json(path, sorted(asked | handed))
+        if app.registry.router and handed:
+            app.state.inbox = [m for m in app.state.inbox if m['id'] not in handed]
+            save_json(os.path.join(app.home, 'state', 'inbox.json'), app.state.inbox)
     return n
 
 
+def ask(env, to, m, pid):
+    """The po-ask command that files one Discord message for agent `to` (the router also gets the thread's project)."""
+    where = f'thread "{m["thread"]}"' + (f', project {pid or "none"}' if to != f'po-{pid}' else '')
+    return shlex.split(env.get('LIAISON_PO_ASK', 'po-ask')) + [
+        to.removeprefix('po-'), '--from', 'liaison', '--channel', 'discord', '--thread', m['thread_id'], '--copy',
+        f'{m["author"]} (Discord, {where}, message {m["id"]}): {m["content"]}']
+
+
 def outbox_files(app, env):
-    for p in app.registry.projects.values():
-        if p.get('po'):
-            yield from sorted(glob.glob(os.path.join(glob.escape(po_home(env)), p['po'], 'outbox', 'discord', '*.md')))
+    agents = {p['po'] for p in app.registry.projects.values() if p.get('po')} | {app.registry.router} - {None}
+    for name in sorted(agents):
+        yield from sorted(glob.glob(os.path.join(glob.escape(po_home(env)), name, 'outbox', 'discord', '*.md')))
 
 
 async def relay(app, env):
