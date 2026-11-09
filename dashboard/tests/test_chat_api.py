@@ -1,5 +1,5 @@
 """GET /api/chat, POST /api/chat/post and /seen on a temp store: tailnet gate, owner gate, held 422, ETag 304, cursors."""
-import email.message, json, os, sys, tempfile, threading, unittest, urllib.error, urllib.request
+import email.message, json, os, sys, tempfile, threading, time, unittest, urllib.error, urllib.request
 from http.server import ThreadingHTTPServer
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import server  # noqa: F401
@@ -8,8 +8,10 @@ from dash.http import Handler
 from dash.services import chat as svc
 
 LOGIN = "owner@example.com"
-ENV = ("HARNESS_HOME", "HARNESS_CONFIG", "CHAT_OWNER_LOGIN", "CHAT_DENY_WORDS", "PROTECTED_PROJECTS", "WORK_REPO_ROOTS", "HARNESS_ENV_LOADED")
+ENV = ("HARNESS_HOME", "HARNESS_CONFIG", "ORG_FILE", "CHAT_OWNER_LOGIN", "CHAT_DENY_WORDS", "PROTECTED_PROJECTS", "WORK_REPO_ROOTS", "HARNESS_ENV_LOADED")
 LAN, TAILNET = "192.0.2.10", "100.101.102.103"
+ORG = {"seats": [{"id": "owner", "name": "You", "role": "owner", "parent": None, "wake": None, "match": None},
+                 {"id": "fx", "name": "Fixture", "role": "po", "parent": "owner", "wake": "pull", "match": "~/fx"}]}
 
 
 def dispatch(method, path, ip, headers=None):
@@ -36,7 +38,10 @@ class ChatApi(unittest.TestCase):
         open(conf, "w").close()
         for k in ("PROTECTED_PROJECTS", "WORK_REPO_ROOTS", "HARNESS_ENV_LOADED"):
             os.environ.pop(k, None)
-        os.environ.update(HARNESS_HOME=self.tmp.name, HARNESS_CONFIG=conf, CHAT_OWNER_LOGIN=LOGIN, CHAT_DENY_WORDS="acme")
+        org = os.path.join(self.tmp.name, "org.json")
+        with open(org, "w") as f:
+            json.dump(ORG, f)
+        os.environ.update(HARNESS_HOME=self.tmp.name, HARNESS_CONFIG=conf, ORG_FILE=org, CHAT_OWNER_LOGIN=LOGIN, CHAT_DENY_WORDS="acme")
         svc.chat_guard.deny_words.cache_clear()
         svc.chat_guard.protected_paths.cache_clear()
         self.srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -96,7 +101,26 @@ class ChatApi(unittest.TestCase):
 
     def test_no_channel_lists_channels_only(self):
         self.req("/api/chat/post", {"ch": "harness", "text": "x"})
-        self.assertEqual(self.req("/api/chat")[1], {"messages": [], "channels": [{"ch": "harness", "unread": 0}]})
+        self.assertEqual(self.req("/api/chat")[1], {"messages": [], "channels": [{"ch": "harness", "unread": 0}],
+                                                    "wakes": {"cap": 12, "today": {}}})
+
+    def test_post_wakes_through_dispatch(self):
+        """The panel's post goes through chat_dispatch: @fx is routed, its pull seat has no adapter, so the wake parks in the fixture store."""
+        code, body, _ = self.req("/api/chat/post", {"ch": "harness", "text": "@fx are you there"})
+        self.assertEqual((code, body["wakes"]), (200, [{"seat": "fx", "outcome": "refused"}]))
+        st = os.path.join(self.tmp.name, "state", "chat")
+        with open(os.path.join(st, "queue", "fx.jsonl")) as f:
+            self.assertEqual([json.loads(l)["id"] for l in f], [body["id"]])
+        with open(os.path.join(st, "audit.jsonl")) as f:
+            self.assertIn({"wake": "fx", "reason": "mention"}, [{k: r[k] for k in ("wake", "reason")} for r in map(json.loads, f) if "wake" in r])
+        self.assertEqual(self.req("/api/chat/post", {"ch": "harness", "text": "nobody named"})[1]["wakes"], [])
+
+    def test_wakes_today_per_seat(self):
+        day = os.path.join(self.tmp.name, "state", "chat", "counters")
+        os.makedirs(day)
+        with open(os.path.join(day, time.strftime("%Y-%m-%d") + ".json"), "w") as f:
+            json.dump({"fx": 3}, f)
+        self.assertEqual(self.req("/api/chat")[1]["wakes"], {"cap": 12, "today": {"fx": 3}})
 
     def test_held_is_422_and_not_stored(self):
         for text, rule in (("token=abcdefghijklmnop1234", "secret"), ("the ACME ticket", "deny word")):

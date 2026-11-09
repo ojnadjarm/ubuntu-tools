@@ -141,10 +141,13 @@ def _arm(seat):
 
 
 def withdraw(seat, ids):
-    """Drop messages the seat has already read from its pending batch; the armed timer then files only the rest."""
-    if os.path.exists(os.path.join(_dir(), f"{seat}.json")):
-        with _batch(seat) as state:
-            state["msgs"] = [m for m in state["msgs"] if m["id"] not in ids]
+    """Drop messages the seat has already read from its pending batch; True when that empties it (no wake will follow)."""
+    if not os.path.exists(os.path.join(_dir(), f"{seat}.json")):
+        return False
+    with _batch(seat) as state:
+        before = len(state["msgs"])
+        state["msgs"] = [m for m in state["msgs"] if m["id"] not in ids]
+        return before > 0 and not state["msgs"]
 
 
 def _row(ch, mid):

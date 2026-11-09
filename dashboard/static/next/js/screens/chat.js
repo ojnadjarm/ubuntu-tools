@@ -1,6 +1,6 @@
-/* Chat, read only: the channels of the agent chat, the chosen channel's stream (questions, answers, system lines) and who is in it, from GET /api/chat. */
+/* Chat: the channels and direct messages of the agent chat, the chosen channel's stream, a composer, who is in it and today's wakes, from GET /api/chat. */
 import { esc, p2 } from "/static/js/core/fmt.js";
-import { getJSON } from "/static/js/core/api.js";
+import { getJSON, postJSON } from "/static/js/core/api.js";
 import { cur, go } from "/static/js/core/router.js";
 import { creature } from "../avatar.js";
 import { dust } from "../shapes.js";
@@ -8,6 +8,8 @@ import { fitEye } from "../gl/cam.js";
 import { sync } from "../ui/sync.js";
 import { plural } from "../summary.js";
 import { seatState } from "./org.js";
+import { composer, bind, forget } from "./chat-compose.js";
+import { store } from "../store.js";
 
 export const own = true;
 const POLL_MS = 3000, ORG_MS = 20000, QUOTE = 44;
@@ -15,7 +17,9 @@ const DESC = { harness: "Product owners ask how the machine works. The orchestra
 const PILL = { working: "running", idle: "idle", asleep: "off", off: "off", yours: "his" };
 const LINE = { working: "working now", idle: "idle", asleep: "asleep, wakes on its name", off: "off", yours: "your session" };
 const TAG = { ask: `<span class="ctag">question</span>`, answer: `<span class="ctag ans">answer</span>` };
-let C = null, msgs = [], ch = "", err = "", busy = false, timer = 0, O = null, oat = 0, stick = true;
+const ROOMS = ["harness", "org"];
+let C = null, msgs = [], ch = "", err = "", busy = false, timer = 0, O = null, oat = 0, stick = true, W = null;
+const seen = {};
 
 if (!document.querySelector('link[href="/static/css/chat.css"]')) {
   const l = document.createElement("link");
@@ -26,7 +30,7 @@ if (!document.querySelector('link[href="/static/css/chat.css"]')) {
 /* The hash carries the open channel: #chat?ch=<id>. */
 export function read(q) {
   const want = new URLSearchParams(q).get("ch") || "";
-  if (want !== ch) { ch = want; msgs = []; stick = true; }
+  if (want !== ch) { ch = want; msgs = []; stick = true; forget(); }
 }
 export const hash = () => "#chat" + (ch ? "?ch=" + encodeURIComponent(ch) : "");
 if (location.hash.startsWith("#chat?")) read(location.hash.slice(6));
@@ -41,9 +45,10 @@ function pull() {
     .then((j) => {
       err = "";
       if (want !== ch) return;
-      C = j.channels || [];
+      C = j.channels || []; W = j.wakes || null;
       msgs = after ? msgs.concat(j.messages || []) : j.messages || [];
-      if (!ch && C.length) ch = (C.find((c) => c.ch === "harness") || C[0]).ch;
+      if (!ch) ch = "harness";
+      markRead();
     }, (e) => { err = e.message || "unreadable"; })
     .finally(() => {
       busy = false;
@@ -51,6 +56,19 @@ function pull() {
       timer = setTimeout(() => { timer = 0; if (cur === "chat" && !document.hidden) pull(); }, want === ch ? POLL_MS : 0);
       paint();
     });
+}
+
+/* After a send: repaint now, then read what is new at once. */
+function paintNow() { clearTimeout(timer); timer = 0; paint(); pull(); }
+
+/* Moves his read cursor to the newest message of the open channel once per new message; the badges follow. */
+function markRead() {
+  const c = C.find((x) => x.ch === ch), last = msgs.length ? msgs[msgs.length - 1].id : 0;
+  store.chatUnread = C.reduce((t, x) => t + (x.ch === ch ? 0 : x.unread), 0);
+  store.chrome();
+  if (!c || !c.unread || !last || seen[ch] >= last || document.hidden) return;
+  seen[ch] = last; c.unread = 0;
+  postJSON("/api/chat/seen", { ch, id: last }).catch(() => {});
 }
 
 /* Repaints in place (the stream keeps its scroll) and keeps the newest message in view while he is at the bottom. */
@@ -66,6 +84,14 @@ function paint() {
 const names = () => Object.fromEntries(((O && O.seats) || []).map((s) => [s.id, s.name]));
 const nameOf = (id, N) => (id === "owner" ? "You" : N[id] || id);
 const pair = (c) => c.slice(3).split("--");
+const dmOf = (id) => "dm-" + ["owner", id].sort().join("--");
+/* Every channel he can open: the rooms and a direct message per seat even before a first message, then the agents' own direct messages. */
+function listed() {
+  const seats = ((O && O.seats) || []).filter((s) => s.role !== "owner"), have = (id) => C.find((c) => c.ch === id) || { ch: id, unread: 0 };
+  const rooms = [...new Set([...ROOMS, ...seats.filter((s) => s.role === "po").map((s) => s.id), ...C.filter((c) => !c.ch.startsWith("dm-")).map((c) => c.ch)])].map(have);
+  const mine = seats.map((s) => have(dmOf(s.id)));
+  return { rooms, dms: [...mine, ...C.filter((c) => c.ch.startsWith("dm-") && !mine.some((m) => m.ch === c.ch))] };
+}
 function label(c, N) {
   if (!c.startsWith("dm-")) return "# " + c;
   const [a, b] = pair(c);
@@ -119,6 +145,15 @@ function members(N) {
   });
   return rows.join("") || `<p class="none">Nobody has written here yet.</p>`;
 }
+/* Agent-caused wakes per seat today against the daily cap; his own messages never count. */
+function wakes(N) {
+  if (!W) return "";
+  const rows = ((O && O.seats) || []).filter((s) => s.role !== "owner").map((s) => {
+    const n = W.today[s.id] || 0;
+    return `<div class="wk"><span>${esc(nameOf(s.id, N))}</span><b>${n} of ${W.cap}</b><progress max="${W.cap}" value="${Math.min(n, W.cap)}" aria-label="${esc(nameOf(s.id, N))}: ${n} of ${W.cap} wakes"></progress></div>`;
+  });
+  return `<section class="wakes" aria-label="Wakes today"><h2><span data-dec>wakes today</span></h2>${rows.join("") || `<p class="none">no seats</p>`}<p class="none">Agents only: your messages never count.</p></section>`;
+}
 function head(N) {
   if (!ch) return "";
   const desc = ch.startsWith("dm-") ? "Direct messages between " + pair(ch).map((s) => nameOf(s, N)).join(" and ") + "." : DESC[ch] || (N[ch] ? N[ch] + "'s channel." : "");
@@ -128,16 +163,16 @@ function head(N) {
 export function render() {
   if (!timer && !busy) pull();
   if (!C) return `<div class="nxs skel" aria-busy="true"><p class="sm pad">${err ? "chat unreadable · " + esc(err) : "reading the chat…"}</p></div>`;
-  const N = names(), rooms = C.filter((c) => !c.ch.startsWith("dm-")), dms = C.filter((c) => c.ch.startsWith("dm-"));
-  const unread = C.filter((c) => c.unread && c.ch !== ch), n = ch ? msgs.filter((m) => m.kind !== "system").length : 0;
-  const sum = !C.length ? "No messages yet" : `<b>${esc(label(ch, N))}</b>, ${plural(n, "message")}` + (unread.length ? ` · <span class="gold">${unread.map((c) => `${c.unread} new in ${esc(label(c.ch, N))}`).join(", ")}</span>` : "");
-  const nav = `<nav class="chans" aria-label="Channels"><h3>Channels</h3>${rooms.map((c) => chanLink(c, N)).join("") || `<p class="none">none yet</p>`}` +
+  bind(paintNow, (id) => nameOf(id, names()));
+  const N = names(), { rooms, dms } = listed();
+  const unread = C.filter((c) => c.unread && c.ch !== ch), n = msgs.filter((m) => m.kind !== "system").length;
+  const sum = `<b>${esc(label(ch, N))}</b>, ${plural(n, "message")}` + (unread.length ? ` · <span class="gold">${unread.map((c) => `${c.unread} new in ${esc(label(c.ch, N))}`).join(", ")}</span>` : "");
+  const nav = `<nav class="chans" aria-label="Channels"><h3>Channels</h3>${rooms.map((c) => chanLink(c, N)).join("")}` +
     (dms.length ? `<h3>Direct</h3>${dms.map((c) => chanLink(c, N)).join("")}` : "") + `</nav>`;
-  const body = C.length ? `<section class="pane stream" aria-label="Messages">${head(N)}<ol class="msgs" aria-live="polite">${stream(N)}</ol></section>`
-    : `<section class="pane stream"><ol class="msgs"><li class="csys">Nothing has been posted yet. Agents write here with <code>chat post</code>.</li></ol></section>`;
+  const body = `<section class="pane stream" aria-label="Messages">${head(N)}<ol class="msgs" aria-live="polite">${stream(N)}</ol>${composer(ch, label(ch, N))}</section>`;
   return `<div class="nxs chat"><section class="band" aria-label="Chat summary"><div class="perch" id="perch" aria-hidden="true"></div><div class="bt"><p class="kin" data-dec>Chat</p>` +
     `<p class="bsum">${sum}${err ? ` · stale: ${esc(err)}` : ""}</p></div></section><div class="cgrid">${nav}${body}` +
-    `<aside class="pane cside" aria-label="In this channel"><h2><span data-dec>in this channel</span></h2>${members(N)}</aside></div></div>`;
+    `<aside class="pane cside" aria-label="In this channel"><h2><span data-dec>in this channel</span></h2>${members(N)}${wakes(N)}</aside></div></div>`;
 }
 
 /* A tap on a channel opens it in place. */
@@ -145,7 +180,7 @@ export function click(e) {
   const a = e.target.closest(".chat [data-ch]");
   if (!a || e.metaKey || e.ctrlKey || e.shiftKey) return false;
   e.preventDefault();
-  if (a.dataset.ch !== ch) { ch = a.dataset.ch; msgs = []; stick = true; clearTimeout(timer); timer = 0; go("chat", true); pull(); }
+  if (a.dataset.ch !== ch) { ch = a.dataset.ch; msgs = []; stick = true; forget(); clearTimeout(timer); timer = 0; go("chat", true); pull(); }
   return true;
 }
 

@@ -13,7 +13,7 @@ import { verdict } from "./verdict.js";
 import { summary } from "./summary.js";
 import { bindTouch } from "./ui/touch.js";
 
-const M = {}, L = {}, S = {}, grid = document.getElementById("grid"), board = document.getElementById("board");
+const M = {}, L = {}, Q = {}, S = {}, grid = document.getElementById("grid"), board = document.getElementById("board");
 const byId = Object.fromEntries(SCREENS.map((s) => [s.id, s]));
 const still = matchMedia("(prefers-reduced-motion: reduce)");
 const WORKING = (A) => ((A || {}).subagents || []).filter((s) => s.state === "working").length;
@@ -31,7 +31,7 @@ SCREENS.forEach((s) => {
 
 /* Imports a screen module once, then re-renders it if it is still the active screen. */
 function load(id) {
-  if (!L[id]) L[id] = import(byId[id].load).then((m) => { M[id] = m; if (cur === id) { if (m.enter) m.enter(false); go(id, true); } });
+  if (!L[id]) L[id] = import(byId[id].load).then((m) => { M[id] = m; if (Q[id] != null && m.read) m.read(Q[id]); delete Q[id]; if (cur === id) { if (m.enter) m.enter(false); go(id, true); } });
   return L[id];
 }
 /* A section opens on its first screen; Voice reopens the one used last. */
@@ -60,10 +60,11 @@ function keys() {
 function readHash() {
   const h = location.hash.slice(1), i = h.indexOf("?"), id = i < 0 ? h : h.slice(0, i);
   if (i >= 0 && M[id] && M[id].read) M[id].read(h.slice(i + 1));
+  else if (i >= 0 && byId[id] && byId[id].load) Q[id] = h.slice(i + 1);
   if (id === "voice") return firstOf("voice").id;
   return S[id] ? id : "eye";
 }
-const hash = (to) => (M[to] && M[to].hash ? M[to].hash() : location.hash.indexOf("#" + to + "?") === 0 ? location.hash : "#" + to);
+const hash = (to) => (M[to] && M[to].hash ? M[to].hash() : Q[to] != null ? "#" + to + "?" + Q[to] : location.hash.indexOf("#" + to + "?") === 0 ? location.hash : "#" + to);
 function enter(to, force) {
   const m = M[to];
   if (byId[to].sec === "voice") try { localStorage.setItem("voiceSection", to); } catch (e) {}
@@ -82,7 +83,7 @@ function motion() { roll(grid); draw(grid); }
 function chrome() {
   const D = store.D, s = byId[cur] || byId.eye, k = newKeys(), A = store.A, v = verdict(D);
   const n = (id) => (k[id] || []).length, errs = ((A || {}).subagents || []).filter((x) => x.state === "error").length;
-  const badge = (id) => (id === "agents" ? errs : n(id)), live = (id) => (id === "agents" ? WORKING(A) : 0);
+  const badge = (id) => (id === "agents" ? errs : id === "chat" ? store.chatUnread : n(id)), live = (id) => (id === "agents" ? WORKING(A) : 0);
   document.querySelectorAll(".dock .sec").forEach((a) => {
     const sec = a.dataset.sec, on = sec === s.sec, b = subsOf(sec).reduce((t, x) => t + badge(x.id), 0), w = subsOf(sec).reduce((t, x) => t + live(x.id), 0), f = firstOf(sec);
     a.classList.toggle("on", on); a.setAttribute("aria-current", on ? "true" : "false");
@@ -146,6 +147,7 @@ function rescene() {
   lastKey = key; lastScreen = cur;
 }
 store.rescene = rescene;
+store.chrome = chrome;
 store.life = life;
 
 function refresh() {
@@ -180,6 +182,7 @@ function tick() {
   if (document.hidden) return;
   tTimer = setTimeout(tick, 30000 - (Date.now() % 30000) + 20);
   clock();
+  if (cur !== "chat") getJSON("/api/chat").then((j) => { store.chatUnread = (j.channels || []).reduce((t, c) => t + c.unread, 0); if (store.D) chrome(); }, () => {});
   return Promise.all([getJSON("/api/status"), agents()]).then(([d]) => { store.D = d; FAILED = false; life(); refresh(); boot3d(); fast(); })
     .catch((e) => { console.error(e); FAILED = true; if (store.D) chrome(); else grid.innerHTML = '<div class="empty">panel API not answering · retrying in 30 s</div>'; });
 }
@@ -233,7 +236,7 @@ board.addEventListener("touchend", (e) => {
   if (tx === null) return;
   const t = e.changedTouches[0], dx = t.clientX - tx, dy = t.clientY - ty;
   tx = null;
-  if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5 || e.target.closest(".tw, .facets, .lb, .scape, .vx:not([data-rs=idle])")) return;
+  if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5 || e.target.closest(".tw, .facets, .lb, .scape, .chat .cgrid, .vx:not([data-rs=idle])")) return;
   const subs = subsOf(byId[cur].sec), i = subs.indexOf(byId[cur]) + (dx < 0 ? 1 : -1);
   if (i >= 0 && i < subs.length) nav(subs[i].id);
 }, { passive: true });

@@ -1,4 +1,4 @@
-/* Agents › Chat, read only: channel list, message stream, who is in the channel (T1515-P9); eye.css tokens only. */
+/* Agents › Chat: channel list, message stream, composer, who is in the channel, wakes today (T1515-P9, P10); eye.css tokens only. */
 .chat { display: grid; gap: 1rem; }
 .chat .cgrid { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr); align-items: start; }
 .chat .pill.off { color: var(--mute); border-color: var(--line); border-style: dashed; }
@@ -31,6 +31,20 @@
 .chat .ctag.ans { color: var(--bg); background: var(--g); border-color: var(--g); }
 .chat .csys { color: var(--mute); font-size: max(11px, .78rem); padding: .15rem 0 .15rem 3.2rem; overflow-wrap: anywhere; }
 .chat .cday { text-align: center; color: var(--mute); font-size: max(11px, .74rem); letter-spacing: .2em; text-transform: uppercase; padding: .6rem 0 .2rem; }
+.chat .compose { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .5rem .6rem; padding: .7rem 1.1rem; border-top: 1px solid var(--line2); background: var(--bg1); }
+.chat .compose textarea { min-height: 2.75rem; max-height: 10rem; field-sizing: content; padding: .6rem .7rem; border: 1px solid var(--gold-w); background: var(--bg); color: var(--hi); font: inherit; resize: none; }
+.chat .compose textarea:focus { outline: none; border-color: var(--gold); }
+.chat .compose textarea::placeholder { color: var(--mute); }
+.chat .compose .btn { min-height: 2.75rem; align-self: end; padding: 0 1.1rem; }
+.chat .compose .btn:disabled { opacity: .5; cursor: progress; }
+.chat .compose .hint { grid-column: 1 / -1; color: var(--mute); font-size: max(11px, .76rem); }
+.chat .wakes { border-top: 1px solid var(--line); padding-top: .9rem; margin-top: .4rem; }
+.chat .wakes .wk { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .2rem .6rem; margin-bottom: .6rem; font-size: max(11px, .82rem); color: var(--mid); }
+.chat .wakes .wk b { color: var(--hi); font-weight: 600; }
+.chat .wakes progress { grid-column: 1 / -1; width: 100%; height: 6px; appearance: none; border: 0; background: var(--w08); }
+.chat .wakes progress::-webkit-progress-bar { background: var(--w08); }
+.chat .wakes progress::-webkit-progress-value { background: var(--g); }
+.chat .wakes progress::-moz-progress-bar { background: var(--g); }
 .chat .cside { display: none; }
 .chat .cside .mem { display: grid; grid-template-columns: 2.6rem minmax(0, 1fr); gap: .7rem; align-items: center; margin-bottom: .8rem; }
 .chat .cside .mem svg { width: 100%; height: auto; display: block; }
@@ -48,5 +62,10 @@
 @media (min-width: 1300px) {
   .chat .cgrid { grid-template-columns: 15rem minmax(0, 1fr) 19rem; }
   .chat .cside { display: block; position: sticky; top: calc(var(--rail) + 1rem); }
+}
+@media (max-width: 899px) {
+  .chat { padding-bottom: 7.5rem; }
+  #board.on .chat .stream { animation: none; }
+  .chat .compose { position: fixed; z-index: 25; left: 0; right: 0; bottom: var(--dock); padding: .6rem var(--gut); box-shadow: 0 -12px 24px -12px var(--bg); }
 }
 @media (max-width: 700px) { .chat .csys { padding-left: 0; } }

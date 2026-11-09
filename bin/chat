@@ -195,7 +195,8 @@ def ask(a, seat, seats):
     if not ans:
         print(f"chat: no answer in {a.wait} s; it arrives as a new inbox request", file=sys.stderr)
         return NO_ANSWER
-    chat_wake.withdraw(seat, {ans["id"]})
+    if chat_wake.withdraw(seat, {ans["id"]}):
+        chat_dispatch.uncount(seat)
     show([ans], with_ch=False)
     return 0
 

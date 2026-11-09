@@ -348,6 +348,7 @@ PY
   ev 'ask --wait: own answer read while blocked: rc 0' '[ "$rc" = 0 ] && grep -q "(answer re .*): waited answer$" <<<"$out"'
   is 'ask --wait: the answer armed one timer for fx' "$(grep -c 'flush fx$' "$WORK/systemd-run.log")" 1
   is 'ask --wait: the answer is withdrawn from the batch' "$(python3 -c "import json; print(json.load(open('$ST/wake/fx.json'))['msgs'])")" '[]'
+  is 'ask --wait: the withdrawn wake does not count' "$(python3 -c "import json; print(json.load(open('$ST/counters/$(date +%F).json')).get('fx', 0))")" 0
   flush=$(sed -n 's/.* --setenv=HARNESS_HOME=[^ ]* //p' "$WORK/systemd-run.log"); $flush
   is 'ask --wait: the timer files no extra wake' "$(find "$P/inbox" -type f | wc -l)" 0
   rm -rf "$P"

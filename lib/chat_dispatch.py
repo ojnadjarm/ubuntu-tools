@@ -48,6 +48,22 @@ def counters():
         os.replace(tmp, path)
 
 
+def today():
+    """Today's {seat: agent-caused wakes}, read without the lock (the file is replaced whole)."""
+    try:
+        with open(os.path.join(chat_store.root(), "counters", f"{time.strftime('%Y-%m-%d')}.json")) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def uncount(seat):
+    """Take back one of today's wakes of a seat whose batch was withdrawn before it fired."""
+    with counters() as day:
+        if day.get(seat, 0) > 0:
+            day[seat] -= 1
+
+
 def park(seat, msg, why):
     """Append a wake that was not delivered to state/chat/queue/<seat>.jsonl (id, ch, why) for a later run."""
     folder = os.path.join(chat_store.root(), "queue")

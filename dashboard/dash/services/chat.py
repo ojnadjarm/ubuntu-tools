@@ -1,10 +1,12 @@
-"""Chat routes (tailnet only): GET /api/chat reads, POST /api/chat/post and /seen act as the owner; the lib does the work."""
+"""Chat routes (tailnet only): GET /api/chat reads, POST /api/chat/post (then wakes) and /seen act as the owner; the lib does the work."""
 import ipaddress, os, sys, urllib.parse
 from dash.routes import route
 from dash.services.sites import trusted
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "lib"))
+import chat_dispatch  # noqa: E402
 import chat_guard  # noqa: E402
+import chat_route  # noqa: E402
 import chat_store  # noqa: E402
 
 OWNER = "owner"
@@ -35,7 +37,8 @@ def read_route(h, path):
         messages = chat_store.read(ch, after) if ch else []
     except ValueError as e:
         return h.json({"error": str(e)}, 400)
-    h.json({"messages": messages, "channels": chat_store.channels(OWNER)})
+    h.json({"messages": messages, "channels": chat_store.channels(OWNER),
+            "wakes": {"cap": chat_route.CAP, "today": chat_dispatch.today()}})
 
 
 @route("POST", "/api/chat/post")
@@ -49,10 +52,13 @@ def post_route(h, path):
         if isinstance(ch, str) and chat_store.NAME.match(ch):
             chat_store.audit({"seat": OWNER, "ch": ch, "held": reason})
         return h.json({"held": reason}, 422)
+    msg = {"ch": ch, "from": OWNER, "text": text}
     try:
-        return h.json({"id": chat_store.post({"ch": ch, "from": OWNER, "text": text})})
+        mid = chat_store.post(msg)
     except ValueError as e:
         return h.json({"error": str(e)}, 400)
+    woke = chat_dispatch.dispatch({**msg, "id": mid, "to": [], "kind": "msg", "re": None, "hop": 0})
+    h.json({"id": mid, "wakes": [{"seat": seat, "outcome": out} for seat, out in woke]})
 
 
 @route("POST", "/api/chat/seen")
