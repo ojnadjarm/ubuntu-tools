@@ -79,6 +79,8 @@ is 'prune apply exits 0, last line the rollback note' "$rc|$(tail -1 <<<"$out")"
 is 'one remove per disabled revision' "$(grep '^snap remove' "$W/calls" | tr '\n' ';')" 'snap remove core24 --revision=1643;snap remove firefox --revision=8763;snap remove snapd --revision=27738;'
 is 'active revisions kept' "$(awk 'NR > 1 {print $1 "_" $3}' "$W/list" | tr '\n' ' ')" 'core24_2124 firefox_9036 '
 is 'prune ledger row' "$(jq -r 'select(.target == "snap disabled revisions") | "\(.before)|\(.after)|\(.verified)"' "$PC_LEDGER")" '3 disabled revisions, 380 MB|0 disabled left|true'
+rb=$(jq -r 'select(.target == "snap disabled revisions") | .rollback' "$PC_LEDGER" | tail -1)
+is 'prune ledger rollback is a runnable no-op' "$(bash -c "$rb" 2>&1; echo $?)" 0
 is 'no disabled revisions is nothing' "$(sn prune --apply)" 'nothing: no disabled revisions'
 
 echo 'stuck    1.0      7      latest/stable  x           disabled' >>"$W/list"

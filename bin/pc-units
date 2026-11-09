@@ -265,7 +265,7 @@ case "${ARGS[0]:-}" in
   timers)
     out=$(both timers_json)
     if [ "$JSON" = 1 ]; then printf '%s\n' "$out"; else
-      jq -r '.[] | [.scope,.unit,(.next/1000000|todate),.activates] | @tsv' <<<"$out" | column -t
+      jq -r '.[] | [.scope,.unit,(if (.next // 0) > 0 then .next/1000000|todate else "-" end),.activates] | @tsv' <<<"$out" | column -t
     fi
     ;;
 

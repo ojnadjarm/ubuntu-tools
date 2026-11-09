@@ -21,7 +21,7 @@ USAGE = """usage: pc win <command> [args]
   verify                     exit 1 unless the window last focused by `pc win focus` still has focus
 <sel> is a window id, or a case-insensitive substring of the title or wm_class."""
 
-if sys.argv[1:2] in (["-h"], ["--help"], ["help"]):
+if sys.argv[1:2] == ["help"] or "-h" in sys.argv[1:] or "--help" in sys.argv[1:]:
     print(USAGE)
     sys.exit(0)
 
@@ -166,8 +166,12 @@ def cmd_wait(args):
     """Poll until a window whose title matches is focused."""
     click = "--no-click" not in args
     args = [a for a in args if a != "--no-click"]
-    sub = args[0].lower()
-    timeout = float(args[1]) if len(args) > 1 else 10.0
+    try:
+        sub = args[0].lower()
+        timeout = float(args[1]) if len(args) > 1 else 10.0
+    except (IndexError, ValueError):
+        print(USAGE, file=sys.stderr)
+        sys.exit(2)
     deadline = time.time() + timeout
     while time.time() < deadline:
         for w in windows():
@@ -217,10 +221,9 @@ def main():
             print(USAGE, file=sys.stderr)
             sys.exit(2)
         return act(simple[cmd], rest[0])
-    if cmd == "move" and len(rest) == 3:
-        return act("Move", rest[0], (int(rest[1]), int(rest[2])), "(uii)")
-    if cmd == "resize" and len(rest) == 3:
-        return act("Resize", rest[0], (int(rest[1]), int(rest[2])), "(uuu)")
+    if cmd in ("move", "resize") and len(rest) == 3 and re.fullmatch(r"-?\d+ -?\d+", " ".join(rest[1:])):
+        xy = (int(rest[1]), int(rest[2]))
+        return act("Move", rest[0], xy, "(uii)") if cmd == "move" else act("Resize", rest[0], xy, "(uuu)")
     print(USAGE, file=sys.stderr)
     sys.exit(2)
 

@@ -94,7 +94,7 @@ case $sub in
     after="$left disabled left"; [ ${#FAILED[@]} -gt 0 ] && after+=", failed: ${FAILED[*]}"
     id=$(pc_id); printf -v ts '%(%Y-%m-%dT%H:%M:%S%z)T' -1
     mkdir -p "${PC_LEDGER%/*}"
-    pc_json '{ts:$ts,id:$id,agent:$ag,cmd:"pc snap prune --apply",target:"snap disabled revisions",before:$b,after:$a,rollback:"none, revisions re-download on demand",verified:($l == "0")}' -c \
+    pc_json '{ts:$ts,id:$id,agent:$ag,cmd:"pc snap prune --apply",target:"snap disabled revisions",before:$b,after:$a,rollback:": none, revisions re-download on demand",verified:($l == "0")}' -c \
       --arg ts "$ts" --arg id "$id" --arg ag "${AGENT_NAME:-}" --arg b "$summary" --arg a "$after" --arg l "$left" >>"$PC_LEDGER"
     echo "ledger $id: $after (of $summary)"
     for f in ${FAILED[@]+"${FAILED[@]}"}; do echo "pc snap: snap remove failed: $f" >&2; done

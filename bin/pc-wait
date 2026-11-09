@@ -1,7 +1,8 @@
 #!/bin/bash
 # pc wait S [shot-args...] — sleep S seconds, then take a screenshot; prints its path.
 d="$(dirname "$(readlink -f "$0")")"
-[ "${1:-}" = -h ] || [ "${1:-}" = --help ] || [ $# -eq 0 ] && { echo "usage: pc wait SECONDS [shot args]"; exit 0; }
+[ "${1:-}" = -h ] || [ "${1:-}" = --help ] && { echo "usage: pc wait SECONDS [shot args]"; exit 0; }
+[ $# -eq 0 ] && { echo "usage: pc wait SECONDS [shot args]" >&2; exit 2; }
 s="$1"; shift
 sleep "$s"
 exec "$d/pc-shot" "$@"

@@ -71,6 +71,14 @@ XDG_RUNTIME_DIR="$WORK/run" dbus-run-session -- bash -c '
   usage=$("$W" bogus 2>&1)
   for o in -h --help help; do is "$o: text equals the usage byte for byte" "$("$W" $o)" "$usage"; done
   is "-h: json/subprocess/argparse never imported" "$(python3 -X importtime "$W" -h 2>&1 >/dev/null | grep -cE "\| +(json|subprocess|argparse)$")" 0
+  : >"$WORK/calls.log"
+  for c in close minimize maximize focus wait move resize list; do
+    is "$c -h prints the usage" "$(timeout 3 "$W" $c -h 2>&1)" "$usage"
+  done
+  is "-h after a command reaches no window" "$(grep -cE "^(Close|Minimize|Maximize|Activate|Move|Resize) " "$WORK/calls.log")" 0
+  err=$("$W" move 202 a b 2>&1); is "move with non-numbers exits 2 with the usage" "$?|$err" "2|$usage"
+  err=$("$W" wait ptyxis soon 2>&1); is "wait with a non-number timeout exits 2 with the usage" "$?|$err" "2|$usage"
+  err=$("$W" wait --no-click 2>&1); is "wait with only --no-click exits 2 with the usage" "$?|$err" "2|$usage"
 
   # usage paths never import gi (T567: pc doctor times -h)
   mkdir -p "$WORK/nogi/gi"; echo "raise ImportError(\"gi imported\")" >"$WORK/nogi/gi/__init__.py"

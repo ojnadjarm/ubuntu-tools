@@ -411,7 +411,7 @@ printf '#!/bin/sh\nsleep 0.8\ncase "$*" in *alarms*) echo "{\\"alarms\\":{}}";; 
 chmod +x "$WORK/pbin"/*
 printf 'KEEPALIVE_UNITS=""\nKEEPALIVE_HTTP="fx=http://127.0.0.1:9/"\n' >"$WORK/par.env"
 par() { cp "$WORK/pc-status"/* "$WORK/par/pc-status/"; local t=${EPOCHREALTIME/./}
-  env PATH="$WORK/pbin:$WORK/bin:$PATH" XDG_RUNTIME_DIR="$WORK/par" HARNESS_CONFIG="$WORK/par.env" \
+  env -u HARNESS_ENV_LOADED PATH="$WORK/pbin:$WORK/bin:$PATH" XDG_RUNTIME_DIR="$WORK/par" HARNESS_CONFIG="$WORK/par.env" \
     "${1:-$PCS}" --json --fresh --timing >"$WORK/par.json" 2>"$WORK/par.err"
   echo $(( (${EPOCHREALTIME/./} - t) / 1000 )); }
 ms=$(par)

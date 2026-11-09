@@ -137,6 +137,7 @@ EOF
   exec python3 "$API" "$@"
 }
 
+for a in "${@:2}"; do case $a in -h|--help) usage; exit 0;; esac; done
 case "${1:--h}" in
   status) shift; cmd_status "$@";;
   play) need_running; $P play;;

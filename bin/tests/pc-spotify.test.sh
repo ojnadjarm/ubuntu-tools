@@ -158,5 +158,10 @@ api 200 library >/dev/null
 is 'api: an expired token is refreshed and kept 0600' \
   "$(jq -r '.access_token + " " + .refresh_token' "$S/spotify-token.json") $(stat -c %a "$S/spotify-token.json")" 'NEW R 600'
 
+: >"$LOG"
+for c in play pause toggle next prev vol seek; do sp $c -h >/dev/null 2>&1; sp $c --help >/dev/null 2>&1; done
+is '-h after a player command acts on nothing' "$(grep -cE 'playerctl .* (play|pause|play-pause|next|previous|volume|position)' "$LOG")" 0
+is 'play -h prints the usage' "$(sp play -h | head -1)" 'usage: pc spotify <command> [args]'
+
 [ $bad -eq 0 ] && echo PASS || echo FAIL
 exit $bad

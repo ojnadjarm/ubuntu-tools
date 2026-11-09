@@ -135,6 +135,10 @@ out=$(loops "$WORK/fails.json" success $((tl - 60))); rc=$?
 out=$(loops "$WORK/nofails.json" success "$tl"); rc=$?
 [ $rc = 0 ] && [ -z "$out" ] && ok "never-failed unit not listed" || nok "never-failed unit" "rc=$rc $out"
 
+# --- 5c. no desktop session env (ssh, timer): facts still render ---------------
+out=$(env -u XDG_CURRENT_DESKTOP PATH="$WORK/sbin:$PATH" XDG_RUNTIME_DIR="$WORK/run" "$PCS" --facts 2>&1); rc=$?
+is "facts without XDG_CURRENT_DESKTOP keeps the body" "$rc|$(grep -c '^## Identity$' <<<"$out")|$(grep -c unbound <<<"$out")" "0|1|0"
+
 # --- 6. the real KB file was not touched -------------------------------------
 [ "$(sha256sum "$REAL" 2>/dev/null)" = "$real_sum" ] && ok "real machine.md untouched" || nok "real machine.md untouched" "checksum changed"
 exit $bad

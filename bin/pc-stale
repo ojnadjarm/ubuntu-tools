@@ -45,7 +45,7 @@ SVC=$(needrestart_svc) || { echo 'pc stale: needrestart unreadable (sudo -n need
 if [ -z "$SVC" ]; then echo 'nothing: no service on stale libraries'; exit 0; fi
 
 next=$(pc_cmd systemctl --user show agent@maintenance.timer -p NextElapseUSecRealtime --value 2>/dev/null)
-next=$(date -d "$next" +%F 2>/dev/null) || next=unknown
+{ [ -n "$next" ] && next=$(date -d "$next" +%F 2>/dev/null); } || next=unknown
 SAFE=()
 while IFS= read -r u; do
   why=$(hold_why "$u")

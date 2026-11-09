@@ -62,6 +62,11 @@ svc sticky.service >"$NR"; : >"$LOG"
 is 'a unit still stale after restart exits 1' "$rc" 1
 is 'stderr names it' "$(cat "$R/err")" 'pc stale: still stale after restart: sticky.service'
 
+printf '#!/bin/sh\n' >"$PC_FIXTURE/bin/systemctl"
+svc NetworkManager.service >"$NR"
+is 'no next maintenance run → unknown, not today' "$("$BIN/pc-stale")" 'held NetworkManager.service (network: next reboot unknown)'
+printf '#!/bin/sh\necho "Sun 2026-10-25 04:00:00 CET"\n' >"$PC_FIXTURE/bin/systemctl"
+
 M="$R/mut"; mkdir -p "$M"; ln -s "$BIN/pclib.sh" "$M/pclib.sh"; [ -e "$BIN/env.sh" ] && ln -s "$BIN/env.sh" "$M/env.sh"
 sed 's/NetworkManager\*|//' "$BIN/pc-stale" >"$M/pc-stale"; chmod +x "$M/pc-stale"
 svc NetworkManager.service >"$NR"

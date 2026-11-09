@@ -540,7 +540,7 @@ Regenerate: \`pc status --facts --apply\` rewrites only the region between the p
 - Hostname: $(hostname) · Tailscale name: $(jq -r '.Self.DNSName // "n/a"' <<<"${n_ts_json:-null}" | sed 's/\.$//')
 - OS: $(. /etc/os-release; echo "$PRETTY_NAME") · kernel $(uname -r) · $(nproc) threads · $(awk '/MemTotal/{printf "%d GB RAM", $2/1024/1024}' /proc/meminfo)
 - User: $USER (uid $(id -u)), groups: $(id -Gn "$USER" | tr ' ' ',')
-- Session: $(loginctl show-session "$sess" -p Type --value 2>/dev/null) / \$XDG_SESSION_TYPE, desktop $XDG_CURRENT_DESKTOP
+- Session: $(loginctl show-session "$sess" -p Type --value 2>/dev/null) / \$XDG_SESSION_TYPE, desktop ${XDG_CURRENT_DESKTOP:-n/a}
 
 ## Addresses
 - LAN: $n_lan · Tailscale: $n_ts_ip ($n_ts_state)

@@ -18,6 +18,11 @@ is 'list tags each row with its scope' \
   "$(PC_FIXTURE=$FIX "$U" list --json | jq -r '[.[]|.scope]|unique|sort|join(",")')" system,user
 is 'timers --json reads the user fixture' \
   "$(PC_FIXTURE=$FIX "$U" timers --json | jq -r '.[0].unit')" sentinel-check.timer
+NF=$(mktemp -d); cp -r "$FIX/bin" "$NF/bin"; echo '[]' >"$NF/list-timers-system.json"
+echo '[{"next":null,"unit":"idle.timer","activates":"idle.service"},{"next":1788729230989483,"unit":"b.timer","activates":"b.service"}]' >"$NF/list-timers-user.json"
+is 'timers prints a timer with no next run as - and keeps the rows after it' \
+  "$(PC_FIXTURE=$NF "$U" timers 2>&1 | tr -s ' ' | paste -sd'|')" 'user idle.timer - idle.service|user b.timer 2026-09-06T21:13:50Z b.service'
+rm -rf "$NF"
 
 ## --- fixture: resolve_scope (no --user/--system given) --------------------
 is 'resolve_scope picks user for a user-only unit' \
