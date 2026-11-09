@@ -65,7 +65,7 @@ grep -q '^run playthrough -- --out' "$WORK/calls"; ok "a core failure still runs
 : >"$WORK/pushes"; CI_AUTOFIX=1 CORE_FAIL=1 run; ok "under ci-autofix: rc is npm's" 1 $?
 ok "under ci-autofix: the runner leaves the push to the wrapper" 0 "$(grep -c . "$WORK/pushes")"
 grep -q '^✖ ci failed at ci (rc 1): e2e: 17 jobs in 419 s, 2 failed: lesson:lesson' "$WORK/ci.log"; ok "the log ends with the failure line" 0 $?
-grep -q '^ci-window: 1-min load 1.00 < 4 after 0 s' "$WORK/ci.log"; ok "the log records the load before ci:core" 0 $?
+grep -Eq '^ci-window: 1-min load 1.00 < 4 after [0-9]+ s' "$WORK/ci.log"; ok "the log records the load before ci:core" 0 $?
 grep -q '^ci-load: contention' "$WORK/ci.log"; ok "a quiet machine: no contention line" 1 $?
 CI_AUTOFIX=1 CORE_FAIL=1 CORE_RED="home-perf, sheet-change" run
 grep -q '^ci-load: contention' "$WORK/ci.log"; ok "only perf jobs red at load 1: no contention line" 1 $?

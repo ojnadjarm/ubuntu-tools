@@ -1,7 +1,9 @@
 // Boot without a tap freeze: at 400 px, warm load, no long task over 120 ms in the first 3 s while the WebGL stage builds; fixture API, no live services.
+// The 3 s budgets are checked only when quiet-gate (--gpu --wait 90) reads quiet; on a busy machine the boot and page errors still are.
 // Run: node tests/test_boot_longtask.js   (PWC = path to playwright-core; LT_W = viewport width, default 400; LT_DEBUG=1 prints the long tasks)
 "use strict";
 const assert = require("assert");
+const { spawnSync } = require("child_process");
 const { chromium, serveStatic } = require("./lib/browser");
 const MAX_MS = 120, WINDOW_MS = 3000, W = +(process.env.LT_W || 400);
 const now = new Date().toISOString();
@@ -16,6 +18,7 @@ const STATUS = {
 const srv = serveStatic((u) => u === "/api/status" ? STATUS : undefined, { "Cache-Control": "max-age=600" });
 
 (async () => {
+  const gate = spawnSync(process.env.HOME + "/agents/bin/quiet-gate", ["--gpu", "--wait", "90"], { encoding: "utf8" });
   await new Promise((ok) => srv.listen(0, "127.0.0.1", ok));
   const base = "http://127.0.0.1:" + srv.address().port;
   const b = await chromium.launch({ headless: true, args: ["--mute-audio"] });
@@ -34,6 +37,11 @@ const srv = serveStatic((u) => u === "/api/status" ? STATUS : undefined, { "Cach
     const r = await p.evaluate((win) => ({ lt: window.__lt.filter(([t]) => t < win), gl: document.body.classList.contains("gl"), frames: window.__stage ? window.__stage.frames() : 0 }), WINDOW_MS);
     if (process.env.LT_DEBUG) console.log(JSON.stringify(r));
     assert.deepStrictEqual(errs, [], "no page errors");
+    if (gate.status === 3) {
+      await p.waitForFunction(() => document.body.classList.contains("gl") && window.__stage.frames() > 0, null, { timeout: 30000 });
+      console.log(`ok boot at ${W} px, long-task budget not gated: ${(gate.stdout + gate.stderr).trim().split("\n").pop()}`);
+      return;
+    }
     assert.ok(r.gl, "the WebGL stage booted (body.gl)");
     assert.ok(r.frames > 0, "the stage drew frames");
     const worst = Math.max(0, ...r.lt.map(([, d]) => d));

@@ -2,6 +2,7 @@
 # moodle-envs and moodle-login-check find the code dir through the compose /var/www/html mount and skip stacks without one.
 # Runs against a temp HOME with stubbed docker/tailscale/curl on PATH, never the real ~/moodle-envs (AGENTS.md §5.6).
 set -uo pipefail
+unset MOODLE_ENVS_DIR
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENVS_BIN="$HERE/../moodle-envs"
 LOGIN_BIN="$HERE/../moodle-login-check"

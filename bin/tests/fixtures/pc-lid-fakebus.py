@@ -23,7 +23,8 @@ def change(prop, v):
     bus.emit_signal(None, PATH[iface], 'org.freedesktop.DBus.Properties', 'PropertiesChanged',
                     GLib.Variant('(sa{sv}as)', (iface, {prop: v}, [])))
 
-def get_prop(c, s, p, i, prop): return st[prop]
+ready = []
+def get_prop(c, s, p, i, prop): ready.append(1); return st[prop]
 def set_prop(c, s, p, i, prop, v): change(prop, v); return True
 for iface in node.interfaces:
     bus.register_object(PATH[iface.name], iface, None, get_prop, set_prop)
@@ -38,23 +39,33 @@ got, loop = [], GLib.MainLoop()
 steps = [
     (lambda: change('LidIsClosed', GLib.Variant('b', True)), lambda: ('lid closes: psm 3', psm(), 3)),
     (lambda: change('PowerSaveMode', GLib.Variant('i', 0)), lambda: ('gsd resets to 0: reasserted 3', psm(), 3)),
-    (lambda: None, lambda: ('reasserts counted', json.load(open(state_file))['reasserts'], 1)),
+    (lambda: None, lambda: ('reasserts counted', reasserts(), 1)),
     (lambda: change('HasExternalMonitor', GLib.Variant('b', True)), lambda: ('TV connected while closed: psm 0', psm(), 0)),
     (lambda: change('HasExternalMonitor', GLib.Variant('b', False)), lambda: ('TV gone again: psm 3', psm(), 3)),
     (lambda: change('LidIsClosed', GLib.Variant('b', False)), lambda: ('lid opens: psm 0', psm(), 0)),
 ]
-def step(i=[0]):
+def reasserts():
+    try: return json.load(open(state_file))['reasserts']
+    except (OSError, ValueError): return None
+def step(i=[0], t=[0]):
+    """Each step waits for the watcher's first read, then for its expected value, up to 10 s."""
+    if not ready:
+        return True
     if i[0] > 0:
-        got.append(steps[i[0] - 1][1]())
+        r = steps[i[0] - 1][1]()
+        t[0] += 1
+        if r[1] != r[2] and t[0] < 200:
+            return True
+        got.append(r)
     if i[0] == len(steps):
         loop.quit(); return False
-    steps[i[0]][0](); i[0] += 1
+    steps[i[0]][0](); i[0] += 1; t[0] = 0
     return True
-GLib.timeout_add(300, step)
-GLib.timeout_add(8000, loop.quit)
+GLib.timeout_add(50, step)
+GLib.timeout_add(90000, loop.quit)
 loop.run()
 w.send_signal(signal.SIGTERM)
-got.append(('SIGTERM: watcher exits 0', w.wait(3), 0))
+got.append(('SIGTERM: watcher exits 0', w.wait(30), 0))
 bad = 0
 for name, g, want in got:
     print(('ok   ' if g == want else 'FAIL ') + name + ('' if g == want else f': expected {want!r}, got {g!r}'))

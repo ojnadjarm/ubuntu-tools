@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # boot-check.sh and its reboot-gate refusal, under a fake HOME with docker/curl/tmux/systemctl stubbed.
 set -uo pipefail
-unset HARNESS_ENV_LOADED
+unset HARNESS_ENV_LOADED BOOT_CHECK_ENVS
 BIN="$HOME/agents/bin"
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 . "$HOME/agents/bin/tests/lib/assert.sh"

@@ -5,3 +5,4 @@ skills/motion-video/tests/mv-film.test.sh  # draft build wall/CPU limits checked
 skills/motion-video/tests/mv.test.sh  # build.sh x3 skipped unless quiet-gate --max-per-cpu 1
 skills/gamedev/tests/cpp-hdr.test.sh  # post_ms_p50 budget skipped unless quiet-gate --gpu
 skills/gamedev/tests/cpp-shadow.test.sh  # gpu_ms_p50_shadow budget skipped unless quiet-gate --gpu
+dashboard/tests/test_boot_longtask.js  # quiet-gate --gpu --wait 90 before its 120 ms long-task budget
