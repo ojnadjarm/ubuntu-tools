@@ -21,7 +21,7 @@
 .chat .msg .who { font-size: max(11px, .84rem); color: var(--mid); display: flex; flex-wrap: wrap; gap: .2rem .6rem; align-items: center; }
 .chat .msg .who b { color: var(--g2); font-weight: 600; }
 .chat .msg .tx { color: var(--txt); max-width: 74ch; overflow-wrap: anywhere; white-space: pre-line; }
-.chat code { color: var(--g2); background: var(--w08); padding: 0 .25rem; font-family: var(--mono); font-size: .92em; }
+.chat code { color: var(--g2); background: var(--w08); padding: 0 .25rem; font-family: var(--mono); font-size: max(11px, .92em); }
 .chat .msg .re { color: var(--mute); font-size: max(11px, .78rem); border-left: 2px solid var(--line3); padding-left: .5rem; margin: .15rem 0; overflow-wrap: anywhere; }
 .chat .msg.him { background: linear-gradient(90deg, var(--gold-w), transparent 70%); margin: 0 -1.1rem; padding: .6rem 1.1rem; border-left: 2px solid var(--gold); }
 .chat .msg.him .who b { color: var(--gold); }

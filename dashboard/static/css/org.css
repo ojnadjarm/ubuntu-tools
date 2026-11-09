@@ -9,7 +9,7 @@
 .org .seat .av { grid-row: span 3; }
 .org .seat .av svg { width: 100%; height: auto; display: block; }
 .org .seat h3 { font-size: 1.05rem; color: var(--hi); font-weight: 600; display: flex; flex-wrap: wrap; gap: .3rem .6rem; align-items: center; }
-.org .seat p { color: var(--mid); font-size: .85rem; }
+.org .seat p { color: var(--mid); font-size: max(var(--fs-min), .85rem); }
 .org .seat p b { color: var(--txt); font-weight: 400; }
 .org .seat p:empty { display: none; }
 .org .seat.him { border-color: var(--gold-w); max-width: 34rem; }
@@ -23,8 +23,8 @@
 .org .pos > li::before { left: -1rem; top: var(--elb); width: 1rem; border-top-width: 1px; }
 .org .pos > li::after { left: -1rem; top: -1rem; bottom: 0; border-left-width: 1px; }
 .org .pos > li:last-child::after { bottom: auto; height: calc(1rem + var(--elb)); }
-.org .ses { width: 100%; border-collapse: collapse; font-size: .86rem; }
-.org .ses th { text-align: left; color: var(--mute); font-weight: 400; font-size: .72rem; letter-spacing: .14em; text-transform: uppercase; padding: .3rem .6rem .5rem 0; }
+.org .ses { width: 100%; border-collapse: collapse; font-size: max(var(--fs-min), .86rem); }
+.org .ses th { text-align: left; color: var(--mute); font-weight: 400; font-size: max(var(--fs-min), .72rem); letter-spacing: .14em; text-transform: uppercase; padding: .3rem .6rem .5rem 0; }
 .org .ses td { padding: .55rem .6rem .55rem 0; border-top: 1px solid var(--line); vertical-align: middle; overflow-wrap: anywhere; }
 .org .ses td:first-child { color: var(--hi); }
 .org .ses td:last-child, .org .ses th:last-child { text-align: right; padding-right: 0; white-space: nowrap; }
@@ -67,7 +67,7 @@
   .org .ses tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .1rem .6rem; padding: .6rem 0; border-top: 1px solid var(--line); }
   .org .ses td { border: 0; padding: 0; max-width: none; width: auto; white-space: normal; overflow: visible; }
   .org .ses td:nth-child(2) { grid-column: 1; color: var(--mid); }
-  .org .ses td:nth-child(3), .org .ses td:nth-child(5) { grid-column: 1 / -1; color: var(--mid); font-size: .8rem; }
+  .org .ses td:nth-child(3), .org .ses td:nth-child(5) { grid-column: 1 / -1; color: var(--mid); font-size: max(var(--fs-min), .8rem); }
   .org .ses td:nth-child(4) { grid-column: 2; grid-row: 1; justify-self: end; }
   .org .ses td:last-child { grid-column: 1 / -1; text-align: left; margin-top: .3rem; }
   .org .seat { grid-template-columns: 2.8rem minmax(0, 1fr); }
