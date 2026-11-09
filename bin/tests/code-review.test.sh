@@ -543,6 +543,42 @@ EOF
 )"
 [ "$got" = 3 ] && ok || no "$got failing lines, want 3"
 
+t "tests after: random tmp paths are not new; touched file real; outside file re-run"
+cr backup F20 "$H/agents/bin/disk-report" >/dev/null
+got="$(PYTHONPATH="$ROOT/lib" python3 - F20 2>/dev/null <<'EOF'
+import argparse, json, os, sys
+import code_review.fixes as fx
+from code_review.common import BACKUPS, current_run
+calls, boom = [], []
+fx.subprocess.run = lambda *a, **k: boom.append(a)
+BASE = ('$ bash agents/bin/tests/run.sh\nFAIL bin/tests/push-ready.test.sh 0.7\n--- bin/tests/push-ready.test.sh (failure lines, then the last 8)\n'
+        '  | FAIL clean repo (rc 2: not a git repo: /tmp/fleet-tmp.%s/t.QJHs/tmp.%s/clean)\n'
+        '  | FAIL copy: STARTED --user-data-dir /tmp/fleet-tmp.%s/profile-default --config c.js\n')
+def case(extra, rerun_rc=0):
+    logs = [(1, BASE % ('WC8oct', 'iQX5U0U1xi', 'WC8oct') + 'rc=1\n'), (1, BASE % ('zDKNMM', '2fYhlIeTEN', 'zDKNMM') + extra + 'rc=1\n')]
+    del calls[:]
+    def stub(cmds, timeout=1200):
+        calls.append(cmds)
+        return logs.pop(0) if logs else (rerun_rc, 'rerun\n')
+    fx.run_tests = stub
+    fx.cmd_tests(argparse.Namespace(id=sys.argv[1], phase='before'))
+    try:
+        fx.cmd_tests(argparse.Namespace(id=sys.argv[1], phase='after')); rc = 0
+    except SystemExit as e:
+        rc = e.code
+    j = json.load(open(os.path.join(BACKUPS, current_run(), sys.argv[1], 'tests.after.json')))
+    return [rc, len(j.get('new_real', '?')), len(j.get('flaky', '?')), j.get('masked'), [c[0].split()[-1] for c in calls[2:]]]
+sys.stdout = sys.stderr
+r = [case(''),
+     case('--- bin/tests/disk-report.test.sh (failure lines, then the last 8)\n  | FAIL new break\n'),
+     case('--- bin/tests/other.test.sh (failure lines, then the last 8)\n  | FAIL flaky thing\n'),
+     case('--- bin/tests/other.test.sh (failure lines, then the last 8)\n  | FAIL flaky thing\n', 1)]
+print(json.dumps(r + [len(boom)]), file=sys.__stdout__)
+EOF
+)"
+want='[[0, 0, 0, 2, []], [5, 1, 0, 2, []], [0, 0, 1, 2, ["bin/tests/other.test.sh"]], [5, 1, 0, 2, ["bin/tests/other.test.sh"]], 0]'
+[ "$got" = "$want" ] && ok || no "$got"
+
 join netproxy_checks
 
 unset CR_HOME CR_DATE

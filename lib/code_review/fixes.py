@@ -5,8 +5,10 @@ import glob
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
+import time
 
 from .backups import manifest, restore, retired_now
 from .claims import drop_rows
@@ -34,23 +36,43 @@ def area_tests(keys):
 
 
 def fail_lines(out):
-    """Failing-test lines, with numbers masked so timings do not count as new failures."""
-    return sorted({re.sub(r'\d+(\.\d+)?', '#', l.strip())[:160] for l in out.splitlines()
-                   if re.search(r'\bFAIL|\bERROR\b|Error:|Traceback', l)
-                   and not re.match(r'(ok|OK|PASS|pass)\b', l.strip())})
+    """Failing-test lines keyed `file: text`, with numbers, temp paths and hex runs masked so only the failure counts."""
+    fails, cur = set(), None
+    for l in out.splitlines():
+        if l.startswith('$ '):
+            cur = None
+        m = re.match(r'--- (\S+) \(failure', l)
+        if m:
+            cur = m.group(1)
+            continue
+        if not re.search(r'\bFAIL|\bERROR\b|Error:|Traceback', l) or re.match(r'(ok|OK|PASS|pass)\b', l.strip()):
+            continue
+        m = re.match(r'FAIL (\S+\.(?:sh|py|js)) ', l) or re.match(r'FAILED (tests/\S+?\.py)', l)
+        f = ('dashboard/' if m and l.startswith('FAILED') else '') + m.group(1) if m else cur
+        t = l.strip()
+        for pat, to in ((r'--user-data-dir \S+', '--user-data-dir #'), (r'/tmp/\S+', '/tmp/#'), (r'tmp\.[A-Za-z0-9]+', 'tmp.#'),
+                        (r'\b[0-9a-f]{6,}\b', '#'), (r'\d+(\.\d+)?', '#')):
+            t = re.sub(pat, to, t)
+        fails.add((f + ': ' if f else '') + t[:160])
+    return sorted(fails)
 
 
-def run_tests(cmds):
+def file_of(fail):
+    m = re.match(r'(\S+\.(?:sh|py|js)): ', fail)
+    return m.group(1) if m else None
+
+
+def run_tests(cmds, timeout=1200):
     me = f'{sys.executable} {os.path.abspath(sys.argv[0])} '
     out, rc = [], 0
     for c in cmds:
         c = me + c[len('code-review '):] if c.startswith('code-review ') else c
         try:
-            r = subprocess.run(['bash', '-c', c], cwd=HOME, capture_output=True, text=True, timeout=1200)
+            r = subprocess.run(['bash', '-c', c], cwd=HOME, capture_output=True, text=True, timeout=timeout)
             out.append(f'$ {c}\n{r.stdout}{r.stderr}rc={r.returncode}\n')
             rc = rc or r.returncode
         except subprocess.TimeoutExpired:
-            out.append(f'$ {c}\nFAIL timeout after 1200 s\n')
+            out.append(f'$ {c}\nFAIL timeout after {timeout} s\n')
             rc = rc or 124
     return rc, ''.join(out)
 
@@ -76,16 +98,40 @@ def cmd_tests(a):
     new = [f for f in fails if f not in before['fails']]
     if rc and not before['rc'] and not new:
         new = [f'rc {rc} (baseline rc 0)']
+    touched = {r for _, r in rows}
+    stems = {os.path.basename(r).split('.')[0] for r in touched}
+
+    def own(f):
+        b = os.path.basename(f)
+        return 'agents/' + f in touched or any((b[5:] if b.startswith('test_') else b).startswith(s) for s in stems)
+    outside = sorted({file_of(f) for f in new if file_of(f) and not own(file_of(f))})
+    green, end = [], time.time() + 300
+    for f in outside[:5]:
+        left = int(end - time.time())
+        if left <= 0:
+            break
+        cmd = f'bash agents/bin/tests/run.sh --only {shlex.quote(f)}'
+        r, o = locked(os.path.join(STATE, 'tests'), lambda: run_tests([cmd], left))
+        open(os.path.join(base, 'tests.after.log'), 'a').write(o)
+        if not r:
+            green.append(f)
+    flaky = [f for f in new if file_of(f) in green]
+    new_real = [f for f in new if f not in flaky]
+    masked = sum(1 for f in fails if '/tmp/#' in f or 'tmp.#' in f or '--user-data-dir #' in f)
+    json.dump({'rc': rc, 'fails': fails, 'cmds': cmds, 'new_real': new_real, 'flaky': flaky, 'masked': masked},
+              open(os.path.join(base, 'tests.after.json'), 'w'))
+    note = ''.join(f'\nflaky (green on one re-run): {f}' for f in flaky[:10])
     gone = [r for k, r in rows if k in ('file', 'dir') and not os.path.lexists(os.path.join(HOME, r)) and not retired_now(r)]
-    why = [f'new failure: {f}' for f in new] + [f'deleted {r}: removal goes through code-review retire' for r in gone]
+    why = [f'new failure: {f}' for f in new_real] + [f'deleted {r}: removal goes through code-review retire' for r in gone]
     mark = os.path.join(base, 'VERIFIED')
     if why:
         if os.path.exists(mark):
             os.unlink(mark)
-        print('NOT verified\n' + '\n'.join(why[:10]))
+        print('NOT verified\n' + '\n'.join(why[:10]) + note)
         sys.exit(5)
     open(mark, 'w').write(f'{dt.datetime.now().isoformat(timespec="seconds")}\n')
-    print(f'verified: no new failures ({len(fails)} failing line(s) at baseline and after), nothing deleted outside code-review retire')
+    print(f'verified: no new failures ({len(fails)} failing line(s) after, {len(flaky)} flaky), '
+          f'nothing deleted outside code-review retire' + note)
 
 
 def cmd_lint(a):
