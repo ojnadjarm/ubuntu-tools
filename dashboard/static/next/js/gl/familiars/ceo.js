@@ -22,7 +22,7 @@ export function build(g = {}) {
   let nv = 0;
   const add = (parent, geo, m, o) => { nv += geo.P.length / 3; return R.part(parent, geo, m, o); };
   const mNavy = toon(NAVY, NAVY_D), mCoral = toon(CORAL, CORAL_D), mCream = toon(CREAM, CREAM_D), mGold = toon(GOLD, GOLD_D), mWhite = toon(WHITE, [0.8, 0.74, 0.76]);
-  const mInk = toon(INKC, INKC, { rim: 0.3, flag: 0 }), mBoot = toon([0.09, 0.1, 0.2], [0.04, 0.045, 0.1]), mGlow = toon(CORAL, CORAL, { rim: 0, em: 0.3 }), mHalo = toon(CORAL, CORAL, { rim: 0, em: 0.3, flag: 0 });
+  const mInk = toon(INKC, INKC, { rim: 0.3, flag: 0 }), mBoot = toon([0.09, 0.1, 0.2], [0.04, 0.045, 0.1]), mGlow = toon(CORAL, CORAL, { rim: 0, em: 0.3 }), mHalo = toon(CORAL, CORAL, { rim: 0, em: 0.45, flag: 0 }), mLid = toon(CREAM_D, CREAM_D.map((v) => v * 0.86)), mMask = toon(WHITE, CREAM);
 
   add(root, torus(0.76, 0.022, 4, 40), lit([1, 1, 1], 3), { r: [Math.PI / 2, 0, 0], p: [0, 0.01, 0] });
   add(root, G.lo, lit([0.015, 0.03, 0.045]), { p: [0, 0.012, 0], s: [0.66, 0.01, 0.52] });
@@ -78,9 +78,9 @@ export function build(g = {}) {
   add(head, G.sph, mCream, { p: [0, HC, 0], s: [A, HT, C], outline: 1 });
   add(head, G.dome, mNavy, { p: [0, HC + HT * 0.52, -0.03], s: [A * 0.9, HT * 0.53, C * 0.9], outline: 1 });
   add(head, G.cone4, mNavy, { p: [0, HC + HT * 0.5, surf(0, HT * 0.5) - 0.03], s: [0.12, 0.2, 0.05], r: [Math.PI + 0.5, 0, 0] });
-  add(head, G.lo, mWhite, { p: [0, HC - 0.19, surf(0, -0.19) - 0.06], s: [0.15, 0.1, 0.09] });
+  add(head, G.lo, mMask, { p: [0, HC - 0.19, surf(0, -0.19) - 0.022], s: [0.13, 0.078, 0.03] });
   add(head, G.lo, mCoral, { p: [0, HC - 0.105, surf(0, -0.1) + 0.012], s: [0.036, 0.026, 0.02] });
-  [-1, 1].forEach((d) => add(head, G.lo, mCoral, { p: [d * 0.34, HC - 0.18, surf(0.34, -0.18) - 0.012], s: [0.065, 0.028, 0.03], r: [0, d * 0.8, d * 0.4] }));
+  [-1, 1].forEach((d) => add(head, G.lo, mCoral, { p: [d * 0.34, HC - 0.18, surf(0.34, -0.18) - 0.004], s: [0.06, 0.02, 0.012], r: [0, d * 0.8, d * 0.4] }));
   const mz = surf(0, -0.19) + 0.028, smile = group(head, [0, HC - 0.165, mz]), mouth = add(head, G.lo, mInk, { p: [0, HC - 0.2, mz - 0.012], s: [0.05, 0.04, 0.025], bone: 1 });
   [-1, 1].forEach((d) => add(smile, torus(0.038, 0.011, 4, 8, Math.PI), mInk, { p: [d * 0.038, 0, 0], r: [0, 0, Math.PI] }));
   const eyes = [-1, 1].map((d) => {
@@ -90,7 +90,7 @@ export function build(g = {}) {
     add(iris, G.lo, mInk, { p: [0, 0, 0.5], s: [0.6, 0.6, 0.7] });
     add(iris, G.lo, lit([1, 1, 1]), { p: [0.34, 0.2, 1.1], s: 0.25 });
     const lid = group(e, [0, er * LID, 0]);
-    add(lid, G.dome, mCream, { s: [er * 1.1, er * 0.9, er * 0.66] });
+    add(lid, G.dome, mLid, { s: [er * 1.1, er * 0.9, er * 0.66] });
     add(lid, torus(1, 0.13, 4, 10, Math.PI), mInk, { r: [Math.PI / 2, 0, 0], s: [er * 1.11, er * 0.68, er] });
     return { e, iris, lid, d };
   });
@@ -117,11 +117,11 @@ export function build(g = {}) {
 
     hip.p[1] = 0.5 - 0.11 * w.sleep + w.talking * Math.sin(t * 5 + ph) * 0.012 + w.error * Math.abs(Math.sin(t * 9)) * 0.025;
     hip.s[0] = hip.s[2] = 1 + breathe + 0.07 * w.sleep; hip.s[1] = 1 - breathe * 1.3 - 0.12 * w.sleep;
-    hip.r[0] = 0.15 * w.talking + 0.1 * w.sleep + 0.04 * w.working; hip.r[1] = w.talking * Math.sin(t * 1.4 + ph) * 0.14 + w.working * beat * 0.07;
+    hip.r[0] = 0.15 * w.talking + 0.04 * w.sleep + 0.04 * w.working; hip.r[1] = w.talking * Math.sin(t * 1.4 + ph) * 0.14 + w.working * beat * 0.07;
     hip.r[2] = w.idle * Math.sin(t * 0.7 + ph) * 0.045 + w.error * Math.sin(t * 33) * 0.03 + w.working * beat * 0.025;
-    head.r[0] = -0.12 * act + 0.26 * w.sleep + 0.3 * peek + w.talking * Math.sin(t * 6.5 + ph) * 0.05 - 0.14 * w.error - 0.1 * w.working;
+    head.r[0] = -0.12 * act - 0.04 * w.sleep + 0.3 * peek + w.talking * Math.sin(t * 6.5 + ph) * 0.05 - 0.14 * w.error - 0.1 * w.working;
     head.r[1] = w.idle * Math.sin(t * 0.5 + ph) * 0.25 * (1 - peek) + 0.3 * peek + w.talking * Math.sin(t * 2 + ph) * 0.16 - 0.22 * w.error;
-    head.r[2] = 0.2 * w.sleep + w.idle * Math.sin(t * 0.8 + ph) * 0.05 - 0.1 * w.error + w.working * beat * 0.05;
+    head.r[2] = 0.14 * w.sleep + w.idle * Math.sin(t * 0.8 + ph) * 0.05 - 0.1 * w.error + w.working * beat * 0.05;
 
     armR.r[2] = -(0.2 + 2.0 * w.working + 0.95 * w.talking + 2.2 * w.error - 0.08 * w.sleep) - w.working * beat * 0.3 + w.error * Math.sin(t * 20) * 0.05;
     armR.r[0] = 0.55 * w.idle - 0.95 * w.talking - 0.25 * w.working * Math.cos(t * 1.7 + ph) - 0.2 * w.error;
@@ -148,12 +148,11 @@ export function build(g = {}) {
     const talk = w.talking * env;
     mouth.s[0] = 0.04 + talk * 0.025 + w.error * 0.015; mouth.s[1] = 0.006 + talk * 0.06 + w.error * 0.035; mouth.vis = w.talking + w.error > 0.05; smile.vis = !mouth.vis;
     tufts.forEach((e) => { e.r[2] = e.d * (0.28 * w.talking + 0.12 * w.working - 0.3 * w.sleep - 0.25 * w.error + Math.sin(t * 2.1 + ph + e.d) * 0.04 * act); e.r[0] = -0.45 * w.sleep + 0.12 * w.talking; });
-    halo.p[1] = HY - 0.27 * w.sleep + Math.sin(t * 1.1 + ph) * 0.02 * act;
-    halo.r[0] = 0.26 + 0.5 * w.error - 0.2 * w.sleep; halo.r[1] = t * (0.5 + 0.9 * w.working) * act; halo.r[2] = 0.3 * w.error + w.error * Math.sin(t * 19) * 0.04;
-    halo.s[0] = halo.s[1] = halo.s[2] = 1 - 0.18 * w.sleep;
-    size(spokes, (1 - w.sleep) * (1 + talk * 0.3 + w.working * 0.06 * Math.sin(t * 3.4)));
+    halo.p[1] = HY - 0.2 * w.sleep + Math.sin(t * 1.1 + ph) * 0.02 * act;
+    halo.r[0] = 0.26 + 0.5 * w.error + 0.2 * w.sleep; halo.r[1] = t * (0.5 + 0.9 * w.working) * act; halo.r[2] = 0.3 * w.error + w.error * Math.sin(t * 19) * 0.04;
+        size(spokes, (1 - w.sleep) * (1 + talk * 0.3 + w.working * 0.06 * Math.sin(t * 3.4)));
     size(ember, 0.55 + 0.6 * Math.max(w.sleep, m.out ? 0 : 1) * (0.9 + 0.1 * Math.sin(t * 2.2)), 0.082);
-    return { dim: 1 - 0.14 * w.sleep, tint: 0.22 * w.error * (0.6 + 0.4 * Math.sin(t * 10)), screen: 1, recolor };
+    return { dim: 1 - 0.14 * w.sleep, tint: 0, screen: 1, recolor };
   }
   return { mesh, bones: R.bones.length, pose: R.pose, update };
 }

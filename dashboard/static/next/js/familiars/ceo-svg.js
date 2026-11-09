@@ -1,7 +1,7 @@
 /* The Conductor in 2D for lists and chips: ear tufts, spark-halo, coat triangle with coral lining and the tail lamp; motes only when the caller has room for them. */
 import { css, pose } from "./genome.js";
 
-const INK = "#04140c", NAVY = "#2a3466", DEEP = "#1d2340", CORAL = "#D97757", CREAM = "#f3e9dc", GOLD = "#e2b04a", MINT = "#4dffa0", RED = "#ff4a42";
+const INK = "#04140c", NAVY = "#2a3466", DEEP = "#1d2340", CORAL = "#D97757", CREAM = "#f3e9dc", GOLD = "#e2b04a", MINT = "#4dffa0", RED = "#ff4a42", LID = "#dccbb6";
 const LAMP = { ok: CORAL, talking: "#ffa07a", needs: RED };
 /* Where the motes sit on the two tilted rings round the coat, clear of the hand, the face and the lamp. */
 const SPOTS = [[7, 62], [95, 76], [22, 88], [76, 94], [4, 80], [30, 70], [72, 82], [14, 74], [86, 91], [38, 84], [60, 89], [26, 60]];
@@ -31,10 +31,10 @@ export function ceoSvg(state, o = {}) {
   s += `<ellipse cx="50" cy="37" rx="22" ry="19" fill="${CREAM}" stroke="${INK}" stroke-width="3"/><path d="M29.5 31A22 19 0 0 1 70.5 31Q58 22 50 31Q42 22 29.5 31Z" fill="${NAVY}" stroke="${INK}" stroke-width="2" stroke-linejoin="round"/>`;
   s += `<path d="M50 54l3 4.5l4.5 1.5l-4.5 1.5l-3 4.5l-3 -4.5l-4.5 -1.5l4.5 -1.5Z" fill="${GOLD}" stroke="${INK}" stroke-width="1.6" stroke-linejoin="round"/>`;
   s += `<ellipse cx="50" cy="48.6" rx="7.4" ry="4.8" fill="#fffaf2"/><ellipse cx="50" cy="45.4" rx="1.9" ry="1.3" fill="${CORAL}"/>`;
-  const lid = err ? 36 : p === "talking" ? 37.2 : 38.2;
+  const lid = err ? 36.6 : p === "talking" ? 38.2 : 39.4;
   [41, 59].forEach((x, i) => {
     s += shut ? `<path d="M${x - 5.5} 40q5.5 4.4 11 0" stroke="${INK}" stroke-width="2.8" fill="none" stroke-linecap="round"/>`
-      : `<g class="lid"><circle cx="${x}" cy="40" r="6.2" fill="#fffaf2" stroke="${INK}" stroke-width="1.8"/><circle cx="${x}" cy="40.8" r="${err ? 3.6 : 4.5}" fill="${GOLD}"/><circle cx="${x}" cy="40.8" r="${err ? 2 : 2.7}" fill="${INK}"/><circle cx="${x + 1.7}" cy="39.6" r="1.1" fill="#fff"/><path d="M${x - 7.6} ${lid}h15.2v${32.6 - lid}h-15.2Z" fill="${CREAM}"/><path d="M${x - 7} ${lid}h14" stroke="${INK}" stroke-width="2.6" stroke-linecap="round"${err ? ` transform="rotate(${i ? -12 : 12} ${x} ${lid})"` : ""}/></g>`;
+      : `<g class="lid"><circle cx="${x}" cy="40" r="6" fill="#fffaf2"/><circle cx="${x}" cy="40.8" r="${err ? 3.8 : 4.8}" fill="${GOLD}"/><circle cx="${x}" cy="40.8" r="${err ? 2 : 2.7}" fill="${INK}"/><circle cx="${x + 1.7}" cy="39.6" r="1.1" fill="#fff"/><path d="M${x - 6.8} ${lid}V37Q${x} 29.5 ${x + 6.8} 37V${lid}Z" fill="${LID}"/><path d="M${x - 6.4} ${lid}h12.8" stroke="${INK}" stroke-width="2.2" stroke-linecap="round"${err ? ` transform="rotate(${i ? -12 : 12} ${x} ${lid})"` : ""}/></g>`;
   });
   s += `<path d="M30 46.5l4.6 1.6M70 46.5l-4.6 1.6" stroke="${CORAL}" stroke-width="3" stroke-linecap="round"/>`;
   s += p === "talking" || err ? `<ellipse cx="50" cy="50" rx="3.2" ry="${err ? 2.2 : 3.2}" fill="${INK}"/>` : `<path d="M45.6 48.2q2.2 3.2 4.4 0q2.2 3.2 4.4 0" stroke="${INK}" stroke-width="2" fill="none" stroke-linecap="round"/>`;

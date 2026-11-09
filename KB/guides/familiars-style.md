@@ -55,8 +55,9 @@ every label on screen shows the orchestrator's display name (owner, 2026-11-10).
   the stage scissor (x ±1.2 size, y −1.2…+1.6 size) bounds the mote rings (radius 1.3 units round y 2.2).
 - Model sheet, 5 poses video, perf: `~/drop/T1515-V4/` (`index.html`, `poses.mp4`, `perf.json`, `before/`, `after/`).
 - V5 polish (2026-11-10, measured): the Court box stretched to the tall side pane's grid row, so at 1366x768 the eye sat
-  below the fold; `court.js` `fold(b)` clamps the fit box to the visible height (min 240 px). Lids are cream domes with an
-  ink half-torus on a bone at 0.22 eye radii: a flat lid quad read as glasses. Parts that must not dim in sleep (halo ring,
+  below the fold; `court.js` `fold(b)` clamps the fit box to the visible height (min 240 px). Lids are domes a shade darker than the fur with an
+  ink half-torus on a bone at 0.22 eye radii; in the SVG a stroked sclera read as glasses, so the eye has no ring, only the lid line.
+  The muzzle is a flush patch (z scale 0.03): a 0.09 deep sphere read as dough. Error keeps the normal colours (`tint: 0`). Parts that must not dim in sleep (halo ring,
   lamp) use `flag: 0`; sleep dims the rest by 0.14, not 0.42. Motes ride 2 tilted rings (r 1.18 / 1.0, tilt 0.5 / -0.42)
   round y 1.12; a thread is hidden when its hand-to-mote segment passes within 0.5 units of the face (25 of 100 in the SVG).
   SVG lamp r 10 at (86,32): fine = coral, talking = lighter + ring, needs you = red with "!" and 3 rays, readable at 48 px.
