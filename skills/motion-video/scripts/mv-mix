@@ -101,7 +101,7 @@ if [[ -n $music ]]; then
     in+=(-i "$tmp/bed.wav"); bedfx="volume=${music_db}dB"
   else
     in+=(-stream_loop -1 -i "$music")
-    bedfx="atrim=0:$dur,volume=${music_db}dB,afade=t=in:d=1,afade=t=out:st=$(echo "$dur - 2" | bc):d=2"
+    bedfx="atrim=0:$dur,volume=${music_db}dB,afade=t=in:d=1,afade=t=out:st=$(awk -v d="$dur" 'BEGIN{print (d > 2 ? d - 2 : 0)}'):d=2"
   fi
   i=$n; n=$((n + 1))
   fc+="[$i:a]aresample=48000,aformat=channel_layouts=stereo,$bedfx[bed0];"

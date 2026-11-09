@@ -91,9 +91,17 @@ def main():
     if rest or not a.src or a.every < 1 or a.meter < 1 or not os.path.isfile(a.src):
         print(f"mv-beats: bad arguments {' '.join(rest)}".rstrip(), file=sys.stderr); print(USAGE, file=sys.stderr); return 2
     if a.src.endswith(".json"):
-        doc = json.load(open(a.src))
+        try:
+            doc = json.load(open(a.src))
+            doc["beats"]
+        except (ValueError, KeyError, TypeError):
+            print(f"mv-beats: {a.src} is not a beats.json", file=sys.stderr); return 2
     else:
-        doc = build(a.src, analyse(a.src, a.meter, a.downbeats), a.every)
+        try:
+            r = analyse(a.src, a.meter, a.downbeats)
+        except RuntimeError as e:
+            print(f"mv-beats: cannot read {a.src}: {str(e).splitlines()[-1]}", file=sys.stderr); return 1
+        doc = build(a.src, r, a.every)
     if a.out:
         with open(a.out, "w") as f:
             json.dump(doc, f, indent=1)

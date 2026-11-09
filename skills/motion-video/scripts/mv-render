@@ -37,6 +37,8 @@ deps() { [[ -d $1/node_modules ]] || (cd "$1" && npm install --no-audit --no-fun
 now() { date +%s.%N; }
 
 cmd=${1:-}; shift || true
+case $cmd in new|bundle|blender) need=2 ;; variants) need=3 ;; remotion|bench|mc|clean) need=1 ;; *) need=0 ;; esac
+[[ $# -ge $need ]] || { usage >&2; exit 2; }
 case $cmd in
   new)
     kind=$1 dir=$2

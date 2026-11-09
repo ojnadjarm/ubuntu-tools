@@ -17,6 +17,7 @@ ap = argparse.ArgumentParser(prog="mv-otio", description="Timeline of a film bui
 ap.add_argument("outdir", help="the build's out/ (holds build.json with .edit, written by the film template's MV_EDIT=1 ./build.sh)")
 a = ap.parse_args()
 out = os.path.abspath(a.outdir)
+os.path.isfile(os.path.join(out, "build.json")) or ap.error(f"no build.json in {out}")
 b = json.load(open(os.path.join(out, "build.json")))
 e = b.get("edit") or sys.exit("mv-otio: build.json has no .edit (rebuild with MV_EDIT=1 ./build.sh, film template)")
 fps, total = b["fps"], round(b["seconds"] * b["fps"])

@@ -20,6 +20,7 @@ def chunks(words, max_words):
 
 
 def ts(t, sep):
+    t = round(t, 3 if sep == ',' else 2)
     h, m, s = int(t // 3600), int(t % 3600 // 60), t % 60
     return f'{h:02d}:{m:02d}:{s:06.3f}'.replace('.', sep) if sep == ',' else f'{h}:{m:02d}:{s:05.2f}'
 
@@ -34,7 +35,10 @@ def main():
     ap.add_argument('--words', type=int, default=5, help='max words per line')
     ap.add_argument('--accent', default='33C2FF', help='active word colour, ASS BGR hex')
     a = ap.parse_args()
-    words = json.load(open(a.cues))['clips'][a.clip]['words']
+    try:
+        words = json.load(open(a.cues))['clips'][a.clip]['words']
+    except (OSError, ValueError, KeyError) as e:
+        ap.error(f'no words for clip {a.clip} in {a.cues} ({e!r})')
     for w in words:
         w['s'] += a.offset
         w['e'] += a.offset
