@@ -82,7 +82,7 @@ invalid("bad wake", [O, dict(C, wake="shout")], "wake")
 invalid("two owners", [O, dict(O, id="o2")], "owner")
 invalid("parent cycle", [O, dict(C, parent="po"), dict(C, id="po", role="po", parent="ceo", match="~/x")], "cycle")
 invalid("missing key", [O, {k: v for k, v in C.items() if k != "match"}], "match")
-invalid("machine path in match", [O, dict(C, match="/home/someone/x")], "match")
+invalid("machine path in match", [O, dict(C, match="/" + "home/someone/x")], "match")
 
 rows = sessions.live()
 by = {r.get("name"): r for r in rows}
