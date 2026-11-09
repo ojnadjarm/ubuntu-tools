@@ -71,6 +71,7 @@ function label(c, N) {
   const [a, b] = pair(c);
   return a === "owner" ? nameOf(b, N) : b === "owner" ? nameOf(a, N) : nameOf(a, N) + " · " + nameOf(b, N);
 }
+const roleOf = (id) => (((O && O.seats) || []).find((s) => s.id === id) || {}).role || "worker";
 function stateOf(id) {
   const seat = ((O && O.seats) || []).find((s) => s.id === id);
   return seat ? seatState(seat, O.sessions || []) : "";
@@ -90,7 +91,7 @@ const clip = (t) => (t.length > QUOTE ? t.slice(0, QUOTE).trimEnd() + "…" : t)
 function msg(m, byId, N) {
   if (m.kind === "system") return `<li class="csys">${text(m.text)}</li>`;
   const him = m.from === "owner", r = m.re != null ? byId[m.re] : null;
-  const av = him ? `<i class="dia"></i>` : creature(m.from, stateOf(m.from) === "working" ? "working" : "sleep");
+  const av = him ? `<i class="dia"></i>` : creature(m.from, stateOf(m.from) === "working" ? "working" : "sleep", roleOf(m.from));
   const re = m.re == null ? "" : `<p class="re">${r ? esc(nameOf(r.from, N) + " " + time(r) + ": " + clip(r.text)) : "a reply to an earlier message"}</p>`;
   return `<li class="msg${him ? " him" : ""}"><span class="av" aria-hidden="true">${av}</span><div><p class="who"><b>${esc(nameOf(m.from, N))}</b>${TAG[m.kind] || ""}<time datetime="${esc(m.ts)}">${time(m)}</time></p>${re}<p class="tx">${text(m.text)}</p></div></li>`;
 }
@@ -114,7 +115,7 @@ function members(N) {
   const ids = ch.startsWith("dm-") ? pair(ch) : [...new Set(msgs.filter((m) => m.kind !== "system").map((m) => m.from))];
   const rows = ids.filter((id) => id !== "owner").map((id) => {
     const st = stateOf(id);
-    return `<div class="mem"><span class="av" aria-hidden="true">${creature(id, st === "working" ? "working" : "sleep")}</span><div><b>${esc(nameOf(id, N))}</b><span>${esc(LINE[st] || "not a seat of the org")}</span></div></div>`;
+    return `<div class="mem"><span class="av" aria-hidden="true">${creature(id, st === "working" ? "working" : "sleep", roleOf(id))}</span><div><b>${esc(nameOf(id, N))}</b><span>${esc(LINE[st] || "not a seat of the org")}</span></div></div>`;
   });
   return rows.join("") || `<p class="none">Nobody has written here yet.</p>`;
 }

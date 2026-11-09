@@ -29,7 +29,7 @@ export function render(grid, D) {
 
 const last = (l) => (l && l.end ? esc(when(l.end)) + " · " + ago(l.end) + " ago" : "never");
 const exit = (l, b) => { const ex = l && l.exit; return `<dd class="${b ? "gold" : ""}">${ex == null || ex === "" ? "—" : esc(ex)}${l && l.seconds ? " · " + esc(l.seconds) + " s" : ""}</dd>`; };
-const head = (r, b, pill, cls, meta) => `<article class="pane ragent${b ? " bad" : r.health === "warn" ? " warn" : ""}${on(r) ? "" : " off"}"><div class="av" aria-hidden="true">${creature(r.name, b ? "error" : "sleep")}</div><div class="bd"><h3><b data-dec>${esc(r.name)}</b></h3>` +
+const head = (r, b, pill, cls, meta) => `<article class="pane ragent${b ? " bad" : r.health === "warn" ? " warn" : ""}${on(r) ? "" : " off"}"><div class="av" aria-hidden="true">${creature(r.name, b ? "error" : "sleep", "crew")}</div><div class="bd"><h3><b data-dec>${esc(r.name)}</b></h3>` +
   `<p class="meta"><span class="pill ${cls}">${pill}</span> ${meta}</p></div>`;
 const foot = (r, pre = "") => `<p class="doing">${r.report ? pre + esc(r.report) : "no report yet"}</p></article>`;
 
@@ -73,6 +73,6 @@ export function scene(D) {
     box: document.getElementById("gl"), span: narrow ? 14 : 24, tilt: 0.3,
     eyeEl: document.getElementById("shelf"), eyeFit: (b) => fitEye(b, { outer: outer + 0.22, n: FACE, pad: 0.02 }),
     rings: G.map((g) => ({ r: g.rad, v: g.p / 100, kind: bad(g.r) ? 1 : 3 })), ringN: FACE, halo: 0, sleep: 0.6,
-    creatures: G.map((g) => ({ id: g.r.name, state: bad(g.r) ? "error" : "sleep", ring: { r: g.rad, a: g.p / 100 }, size: 0.44, min: narrow ? 30 : 36 })),
+    creatures: G.map((g) => ({ id: g.r.name, role: "crew", state: bad(g.r) ? "error" : "sleep", ring: { r: g.rad, a: g.p / 100 }, size: 0.44, min: narrow ? 30 : 36 })),
   };
 }

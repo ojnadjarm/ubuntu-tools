@@ -45,7 +45,7 @@ function seatCard(seat, S) {
   if (seat.role === "owner") return `<div class="seat him"><span class="av dia" aria-hidden="true"><i></i></span><h3>${esc(seat.name)}</h3><p><b>Read every channel, write anywhere, message anyone.</b></p><p>Only your words change what an agent may do.</p></div>`;
   const st = seatState(seat, S), helpers = S.filter((s) => !s.seat && s.parent === seat.id), hw = helpers.filter((s) => s.state === "working").length;
   const line = (WAKE[seat.wake] || "") + (helpers.length ? ` ${plural(helpers.length, "helper session")}, ${hw} working.` : "");
-  return `<div class="seat"><span class="av" aria-hidden="true">${creature(seat.id, st === "working" ? "working" : "sleep")}</span><h3>${esc(seat.name)} ${pill(st)}</h3>` +
+  return `<div class="seat"><span class="av" aria-hidden="true">${creature(seat.id, st === "working" || st === "idle" ? st : "sleep", seat.role)}</span><h3>${esc(seat.name)} ${pill(st)}</h3>` +
     `<p><b>${esc(ROLE[seat.role] || "")}</b></p><p>${esc(line)}</p></div>`;
 }
 
