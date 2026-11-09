@@ -34,6 +34,7 @@ class Live(unittest.TestCase):
         self.parent = os.path.join(self.proj, "sess5678-y.jsonl")
         self.saved = (agents.PROJ, agents.ACTIONS, agents.CLAIMS, agents.AGENTS_DIR, agents.orbiters, agents.tmux_sessions,
                       agents.unit_states, agents.system.BLOCKS["agents"], agents.live_sessions)
+        self.name = agents.ORCH_NAME
         agents.live_sessions = lambda: []
         agents.PROJ, agents.ACTIONS, agents.CLAIMS = self.proj, os.path.join(t, "none.jsonl"), os.path.join(t, "none.md")
         agents.AGENTS_DIR = "/srv/x/agents"
@@ -52,6 +53,7 @@ class Live(unittest.TestCase):
     def tearDown(self):
         (agents.PROJ, agents.ACTIONS, agents.CLAIMS, agents.AGENTS_DIR, agents.orbiters, agents.tmux_sessions,
          agents.unit_states, agents.system.BLOCKS["agents"], agents.live_sessions) = self.saved
+        agents.ORCH_NAME = self.name
         cache.forget("agents", "agents_view", "agents_persist")
         agents._parent.clear()
         agents._feed.clear()
@@ -204,8 +206,24 @@ class Live(unittest.TestCase):
         jl(self.parent, [{}])
         os.utime(self.parent, (self.now - 3600, self.now - 3600))
         jl(os.path.join(self.proj, "newer999-z.jsonl"), [{}])
+        agents.ORCH_NAME = "Nova"
         d = agents.collect()
-        self.assertEqual(d["orchestrator"], {"name": "DarkSaddler", "session": "newer999", "state": "running"})
+        self.assertEqual(d["orchestrator"], {"name": "Nova", "role": "ceo", "session": "newer999", "state": "running"})
+
+    def test_roster_roles_from_org(self):
+        org = os.path.join(self.tmp.name, "org.json")
+        with open(org, "w") as f:
+            json.dump({"seats": [
+                {"id": "owner", "name": "You", "role": "owner", "parent": None, "wake": None, "match": None},
+                {"id": "orchestrator", "name": "O", "role": "ceo", "parent": "owner", "wake": "channel", "match": "~"},
+                {"id": "k", "name": "K", "role": "po", "parent": "orchestrator", "wake": "po-inbox", "match": "~/agents/keeper"},
+                {"id": "n", "name": "N", "role": "manager", "parent": "k", "wake": "po-inbox", "match": "~/agents/notes"}]}, f)
+        os.environ["ORG_FILE"] = org
+        try:
+            roles = {r["name"]: r["role"] for r in agents.collect()["roster"]}
+        finally:
+            del os.environ["ORG_FILE"]
+        self.assertEqual(roles, {"keeper": "po", "notes": "po", "digest": "crew", "hello": "crew"})
 
     def live(self, pid, state, cwd=None, name=None, seat=None, since=None):
         row = {"seat": seat, "state": state, "since": int(since or self.now - 30)}

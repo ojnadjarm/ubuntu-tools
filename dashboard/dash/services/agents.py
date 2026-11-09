@@ -1,12 +1,13 @@
 """/api/agents: the orchestrator's live and recent sub-agents, the persistent agents, the orbiter feed and the claims board, read-only."""
 import glob, json, os, re, sys, threading, time
 from dash.cache import cached, swr
-from dash.env import HOME, run
+from dash.env import HOME, ORCH_NAME, run
 from dash.routes import route
 from dash.services import system
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "lib"))
 import agent_ends  # noqa: E402
+import org  # noqa: E402
 import sessions  # noqa: E402
 from agent_ends import iso_s  # noqa: E402
 
@@ -301,6 +302,15 @@ def report_line(name):
     return ""
 
 
+def roles():
+    """{agent folder name: po} for org seats of role po or manager matched to ~/agents/<name>, {} when org.json cannot be read."""
+    try:
+        seats = org.seats()
+    except Exception:
+        return {}
+    return {s["match"][len("~/agents/"):]: "po" for s in seats if s["role"] in ("po", "manager") and (s["match"] or "").startswith("~/agents/")}
+
+
 def claims():
     if not os.path.exists(CLAIMS):
         return []
@@ -312,11 +322,12 @@ def collect():
     live = {o.get("id", "").lower() for o in orb}
     session, subs = subagents(feed(), live)
     session = newest_session() or session
-    roster = [dict(a, report=report_line(a["name"])) for a in swr({"agents": system.BLOCKS["agents"]})["agents"]]
+    role = roles()
+    roster = [dict(a, report=report_line(a["name"]), role=role.get(a["name"], "crew")) for a in swr({"agents": system.BLOCKS["agents"]})["agents"]]
     reg = live_sessions()
     subs = shown(job_rows(reg, {r["name"] for r in roster}) + subs)
     roster, orch = cached("agents_persist", 5, lambda: persistent(roster, session, reg), (roster, "idle"))
-    return {"orchestrator": {"name": "DarkSaddler", "session": session[:8], "state": orch}, "subagents": subs, "orbiters": orb,
+    return {"orchestrator": {"name": ORCH_NAME, "role": "ceo", "session": session[:8], "state": orch}, "subagents": subs, "orbiters": orb,
             "roster": roster, "claims": claims()}
 
 
