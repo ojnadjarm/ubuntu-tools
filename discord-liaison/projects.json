@@ -14,6 +14,20 @@
    },
    "skills": ["kokoro-narration", "motion-video", "concept-img", "frontend-design"],
    "po": null
+  },
+  {
+   "id": "mosaico",
+   "name": "Mosaico (ImgCrypt)",
+   "repo": "RunarStudio/ImgCrypt",
+   "clone": "~/projects/collab/ImgCrypt",
+   "match": {"tags": ["mosaico", "imgcrypt"], "title": ["mosaico", "imgcrypt"]},
+   "rules": {
+    "language": "es: every forum post in Spanish; technical terms in English (RyuuKatze 2026-11-07)",
+    "pr_flow": "feature branch, push over SSH, gh pr create, link in the thread; never push main, never merge",
+    "repo_rules": "read the repo's AGENTS.md first: no stack approved yet, privacy (no personal images to any AI, synthetic fixtures only), do not rewrite the maintainers' docs (README, AGENTS, CLAUDE, docs/plan.md, .gitignore)"
+   },
+   "skills": ["frontend-design", "concept-img"],
+   "po": null
   }
  ]
 }
