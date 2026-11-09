@@ -76,6 +76,18 @@ const ROOT = path.join(__dirname, "..", "static"), NEXT = path.join(ROOT, "next"
   assert.strictEqual(tagSpot(200, 200, 60, 80, 16, walls, [0, 400]), null, "no free side: the tag hides instead of covering a creature");
   assert.ok(tagSpot(380, 200, 60, 80, 16, [box(380, 200, 60)], [100, 400])[0] <= 400 - 80 && tagSpot(110, 200, 60, 80, 16, [box(110, 200, 60)], [100, 400])[0] >= 100, "a tag never leaves its span sideways");
 
+  require("module").registerHooks({ resolve: (spec, ctx, next) => next(spec.startsWith("/static/") ? pathToFileURL(path.join(ROOT, "..", spec)).href : spec, ctx) });
+  const { store } = await import(pathToFileURL(path.join(NEXT, "js", "store.js")));
+  const court = await import(pathToFileURL(path.join(NEXT, "js", "screens", "court.js")));
+  store.A = { orchestrator: { name: "Nova", role: "ceo", state: "idle" }, subagents: [], claims: [], roster: [
+    { name: "keeper", kind: "timer-agent", enabled: "enabled", state: "idle", role: "crew" },
+    { name: "po-x", kind: "on-demand", enabled: "no", state: "off", role: "po" },
+    { name: "hello", kind: "timer-agent", enabled: "disabled", state: "off", role: "crew" }] };
+  const page = court.render(null, null);
+  assert.ok(page.includes("<b>Nova</b>"), "Court names the orchestrator from /api/agents");
+  assert.ok(page.includes("<b>po-x</b>") && page.includes("on demand") && !page.includes("<b>hello</b>"), "Court lists on-demand agents, not disabled ones");
+  assert.ok(page.includes(creature("po-x", "sleep", "po")) && page.includes(creature("keeper", "sleep", "crew")), "Court draws each agent in its org role");
+
   const tokens = (css) => new Set([...(/:root\s*{([^}]*)}/.exec(css) || [, ""])[1].matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
   const eye = tokens(fs.readFileSync(path.join(ROOT, "eye.css"), "utf8"));
   for (const f of ["next.css", "voice.css", "../css/org.css", "../css/chat.css"]) {

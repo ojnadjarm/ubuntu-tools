@@ -20,7 +20,7 @@ const mins = (t) => { const ms = typeof t === "number" ? t * 1000 : /^\d+$/.test
 export const ago = (t) => { const m = mins(t); return isNaN(m) ? "—" : m < 60 ? Math.round(m) + " min" : m < 2880 ? (m / 60).toFixed(1) + " h" : Math.round(m / 1440) + " d"; };
 export const until = (t) => { const h = (Date.parse(t) - Date.now()) / 3600000; return isNaN(h) ? "—" : h < 1 ? Math.max(0, Math.round(h * 60)) + " min" : h < 48 ? h.toFixed(0) + " h" : (h / 24).toFixed(0) + " d"; };
 const split = (A) => { const s = A.subagents || []; return { live: s.filter((x) => x.state === "working"), done: s.filter((x) => x.state !== "working") }; };
-const crew = (A) => (A.roster || []).filter((r) => r.state && r.state !== "off");
+const crew = (A) => (A.roster || []).filter((r) => r.state && (r.state !== "off" || r.kind === "on-demand"));
 /* ago() as rolling digits under key k. */
 const agoOdo = (k, t) => { const a = ago(t), m = /^([\d.]+)(.*)$/.exec(a); return m ? odo(k, m[1]) + esc(m[2]) : esc(a); };
 
@@ -38,8 +38,8 @@ export function render(grid, D) {
   return `<div class="nxs hero agents">` +
     `<section class="pane side"><h2><span data-dec>running now</span><s>${live.length}</s></h2>${live.map(card).join("") || `<p class="sm">nobody is working · the court sleeps</p>`}` +
     `<details class="recent"${recent ? " open" : ""}><summary><h2><span data-dec>recent · 24 h</span><s>${done.length} ended</s></h2></summary><ul class="mini">${done.map((s) => `<li><span aria-hidden="true">${creature(s.id, s.state)}</span><b>${esc(tk(s.label))}</b><span>${s.state === "done" ? "" : `<i class="pill ${PILL[s.state]}">${s.state === "stale" ? "stopped" : s.state}</i> `}${esc(s.report || rest(s.label))}</span><em>${ago(s.last)}</em></li>`).join("") || `<li><span></span><b></b><span>nothing ended in the last 24 h</span></li>`}</ul></details></section>` +
-    `<div class="court" id="court"><div class="ring" id="ring" aria-hidden="true"></div><button class="orch" id="orch" type="button" aria-expanded="${open}" aria-controls="court"><b>${esc(O.name || "DarkSaddler")}</b><span>orchestrator · ${esc(O.state || "idle")} · ${odo("ct.w", String(live.length))} working</span></button></div>` +
-    `<section class="pane side"><h2><span data-dec>persistent</span><s>${up} running · ${P.length}</s></h2><ul class="mini">${P.map((r) => `<li><span aria-hidden="true">${creature(r.name, r.state === "running" ? "working" : "sleep", "crew")}</span><b>${esc(r.name)}</b><span><i class="pill ${r.state}">${r.state}</i> ${r.next ? "next " + until(r.next) : r.enabled === "enabled" ? "—" : "always on"}</span><em>${r.last && r.last.end ? ago(r.last.end) : ""}</em></li>`).join("")}</ul>` +
+    `<div class="court" id="court"><div class="ring" id="ring" aria-hidden="true"></div><button class="orch" id="orch" type="button" aria-expanded="${open}" aria-controls="court"><b>${esc(O.name || "")}</b><span>orchestrator · ${esc(O.state || "idle")} · ${odo("ct.w", String(live.length))} working</span></button></div>` +
+    `<section class="pane side"><h2><span data-dec>persistent</span><s>${up} running · ${P.length}</s></h2><ul class="mini">${P.map((r) => `<li><span aria-hidden="true">${creature(r.name, r.state === "running" ? "working" : "sleep", r.role || "crew")}</span><b>${esc(r.name)}</b><span><i class="pill ${r.state}">${r.state}</i> ${r.next ? "next " + until(r.next) : r.kind === "on-demand" ? "on demand" : r.enabled === "enabled" ? "—" : "always on"}</span><em>${r.last && r.last.end ? ago(r.last.end) : ""}</em></li>`).join("")}</ul>` +
     `<h2 class="sub2"><span data-dec>claims board</span><s>${(A.claims || []).length}</s></h2><ul class="claims">${(A.claims || []).map(claimRow).map((c) => `<li><b>${esc(c.who)}</b><em>${esc(c.note)}</em>${c.paths.map((p) => `<span title="${esc(p.full)}">${esc(p.short)}</span>`).join("")}</li>`).join("") || `<li><span>empty · nobody holds a file</span></li>`}</ul></section></div>`;
 }
 
@@ -48,9 +48,9 @@ function crowd(A, narrow, D) {
   const { live } = split(A), P = crew(A), O = A.orchestrator || {}, bad = (A.subagents || []).find((s) => s.state === "error" && mins(s.last) < 10);
   return [
     { id: "orchestrator", role: "ceo", state: bad ? "error" : POSE[O.state] || "sleep", live: { motes: live.map((s) => ({ id: s.id, hue: genome(s.id).hue })), lamp: verdict(D).bad ? "needs" : "ok", failing: bad && bad.id },
-      ring: { r: R0, a: 0.5 }, dir: 0, up: 1.5, size: 0.72, min: narrow ? 44 : 56, big: true, tag: `<b>${esc(O.name || "DarkSaddler")}</b>` },
+      ring: { r: R0, a: 0.5 }, dir: 0, up: 1.5, size: 0.72, min: narrow ? 44 : 56, big: true, tag: `<b>${esc(O.name || "")}</b>` },
     ...live.map((s, i) => ({ id: s.id, state: s.state, ring: { r: R1, a: 0.36 + i / Math.max(1, live.length) }, dir: 1, size: 0.72, min: narrow ? 44 : 56, big: true, tag: `<b>${esc(tk(s.label))}</b> · ${ago(s.started)}` })),
-    ...P.map((r, i) => ({ id: r.name, state: r.state === "running" ? "working" : "sleep", ring: { r: R2, a: 0.1 + i / P.length }, dir: -1, size: 0.5, min: narrow ? 26 : 36, tag: `<b>${esc(r.name)}</b>` })),
+    ...P.map((r, i) => ({ id: r.name, role: r.role || "crew", state: r.state === "running" ? "working" : "sleep", ring: { r: R2, a: 0.1 + i / P.length }, dir: -1, size: 0.5, min: narrow ? 26 : 36, tag: `<b>${esc(r.name)}</b>` })),
   ];
 }
 
