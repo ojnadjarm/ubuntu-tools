@@ -54,13 +54,16 @@ function crowd(A, narrow, D) {
   ];
 }
 
+/* The part of box b above the fold of the unscrolled page, so the eye stays in view when a side pane makes the court taller than the window. */
+const fold = (b) => ({ left: b.left, top: b.top, width: b.width, height: Math.min(b.height, Math.max(240, innerHeight - (b.top + scrollY) - 16)) });
+
 export function scene(D) {
   const A = store.A || { subagents: [] }, narrow = innerWidth < 820, cr = open ? crowd(A, narrow, D) : [];
   return {
     key: JSON.stringify([open, cr.map((c) => [c.id, c.state])]),
     pts: dust(narrow ? 700 : 1600),
     box: document.getElementById("gl"), span: narrow ? 14 : 24, tilt: 0.2,
-    eyeEl: document.getElementById("ring"), eyeFit: (b) => fitEye(b, open ? { outer: R2, n: ORBIT, lift: 0.55, pad: narrow ? 0.1 : 0.03 } : { halo: true, pad: 0.1, cap: b.height * 0.3 }),
+    eyeEl: document.getElementById("ring"), eyeFit: (b) => fitEye(fold(b), open ? { outer: R2, n: ORBIT, lift: 0.55, pad: narrow ? 0.1 : 0.03 } : { halo: true, pad: 0.1, cap: b.height * 0.3 }),
     rings: open ? [{ r: R1, v: 1, kind: 2 }, { r: R2, v: 1, kind: 2 }] : [], ringN: ORBIT, halo: open ? 0 : 1,
     orbit: open && cr.some((c) => c.state === "working"), creatures: cr, pulse: "done",
   };

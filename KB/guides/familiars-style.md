@@ -1,6 +1,6 @@
 # Familiars: the agent creature look (3D on the stage, SVG in lists)
 
-Ticket: T1515-V2, T1515-V4, T1515-P21 · Last verified: 2026-11-10 by `node tests/test_next.js`, `tools/shots.mjs` at 5 widths, draw-call and fps count on the iGPU
+Ticket: T1515-V2, T1515-V4, T1515-V5, T1515-P21 · Last verified: 2026-11-10 by `node tests/test_next.js`, `tools/shots.mjs` at 5 widths, draw-call and fps count on the iGPU
 
 ## When to use
 An agent needs a face: a new panel screen, another project, a new role or state. Load skill `/familiars-style` (rules + kit).
@@ -54,6 +54,14 @@ every label on screen shows the orchestrator's display name (owner, 2026-11-10).
   24 live canvases on one page fall to 24 fps at 2560, so lists use the SVG twin and pass motes only from 48 px up;
   the stage scissor (x ±1.2 size, y −1.2…+1.6 size) bounds the mote rings (radius 1.3 units round y 2.2).
 - Model sheet, 5 poses video, perf: `~/drop/T1515-V4/` (`index.html`, `poses.mp4`, `perf.json`, `before/`, `after/`).
+- V5 polish (2026-11-10, measured): the Court box stretched to the tall side pane's grid row, so at 1366x768 the eye sat
+  below the fold; `court.js` `fold(b)` clamps the fit box to the visible height (min 240 px). Lids are cream domes with an
+  ink half-torus on a bone at 0.22 eye radii: a flat lid quad read as glasses. Parts that must not dim in sleep (halo ring,
+  lamp) use `flag: 0`; sleep dims the rest by 0.14, not 0.42. Motes ride 2 tilted rings (r 1.18 / 1.0, tilt 0.5 / -0.42)
+  round y 1.12; a thread is hidden when its hand-to-mote segment passes within 0.5 units of the face (25 of 100 in the SVG).
+  SVG lamp r 10 at (86,32): fine = coral, talking = lighter + ring, needs you = red with "!" and 3 rays, readable at 48 px.
+  A model sheet paints its grid as stills (one view per frame, then stops): 60.3 fps at 400-2560 where 24 live canvases gave 24.
+  Court draws are 2 a creature + 15: 51 with 18 creatures, 43 with 14. Evidence: `~/drop/T1515-V5/` (`sheet.png`, `perf.json`).
 
 ## Manager gear (T1515-P21, 2026-11-10)
 Role `manager` (the Discord project managers in `org.json`): one small accessory, a violet bow tie at the chest

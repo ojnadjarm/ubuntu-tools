@@ -4,7 +4,7 @@ import { hsl } from "../../familiars/genome.js";
 
 export const SLOTS = 12, MOTE_BONES = SLOTS * 2 + 2;
 const TAU = Math.PI * 2, MINT = [0.3, 1, 0.63], ORDER = [0, 3, 1, 4, 2, 5];
-const RINGS = [{ r: 1.3, tilt: 0.24, dir: 1 }, { r: 1.02, tilt: -0.32, dir: -1 }];
+const RINGS = [{ r: 1.18, tilt: 0.5, dir: 1 }, { r: 1.0, tilt: -0.42, dir: -1 }], FACE = [0, 1.64], CLEAR = 0.5;
 const glow = (col, em = 0) => ({ col, shade: col, rim: 0, em, flag: 0 });
 const mix = (a, b, k) => a + (b - a) * k;
 
@@ -61,15 +61,16 @@ export function attach({ add, group, root, verts }, at) {
       s.was = s.k;
       s.b.vis = s.th.vis = false;
       if (s.k < 0.02) { s.k = s.id != null ? 0.02 : 0; continue; }
-      const th = spin * s.ring.dir + s.a, x = Math.cos(th) * s.ring.r, z = Math.sin(th) * s.ring.r * 0.55, ct = Math.cos(s.ring.tilt), sn = Math.sin(s.ring.tilt);
-      const orb = [at.centre[0] + x * ct, at.centre[1] + x * sn + z * 0.3 + Math.sin(t * 1.7 + i * 2.1) * 0.05, at.centre[2] + z];
+      const th = spin * s.ring.dir + s.a, x = Math.cos(th) * s.ring.r, z = Math.sin(th) * s.ring.r * 0.8, ct = Math.cos(s.ring.tilt), sn = Math.sin(s.ring.tilt);
+      const orb = [at.centre[0] + x * ct, at.centre[1] + x * sn + Math.sin(t * 1.7 + i * 2.1) * 0.04, at.centre[2] + z];
       const nest = [at.home[0] + Math.cos(i * 2.4) * 0.07, at.home[1] + 0.02 + (i % 3) * 0.035, at.home[2] + Math.sin(i * 2.4) * 0.07];
       const k = Math.min(1, s.k), e = s === bad ? w.error : 0;
       for (let a = 0; a < 3; a++) s.pos[a] = mix(at.collar[a], mix(mix(orb[a], nest[a], home), alarm[a], e), k);
       const size = k * (1 - 0.55 * home) * (1 + 0.12 * Math.sin(t * 3.1 + i));
       s.b.p[0] = s.pos[0]; s.b.p[1] = s.pos[1]; s.b.p[2] = s.pos[2]; s.b.s[0] = s.b.s[1] = s.b.s[2] = size; s.b.vis = size > 0.03;
       if (s.id != null) { out++; if (!lead) lead = s.pos; }
-      const tk = threads * k * (1 - e);
+      const dx = s.pos[0] - hand[0], dy = s.pos[1] - hand[1], u = Math.max(0, Math.min(1, ((FACE[0] - hand[0]) * dx + (FACE[1] - hand[1]) * dy) / (dx * dx + dy * dy || 1)));
+      const gap = Math.hypot(hand[0] + dx * u - FACE[0], hand[1] + dy * u - FACE[1]), tk = threads * k * (1 - e) * Math.max(0, Math.min(1, (gap - CLEAR) / 0.12));
       if (tk > 0.04) {
         const d = [s.pos[0] - hand[0], s.pos[1] - hand[1], s.pos[2] - hand[2]], r = aim(d);
         s.th.vis = true; s.th.p[0] = hand[0]; s.th.p[1] = hand[1]; s.th.p[2] = hand[2];
