@@ -26,4 +26,10 @@ date -u -d '+3 hour' +%Y-%m-%dT%H:%M:%S+00:00 >"$WORK/reset"
 "$P5"; "$P5"
 [ "$(pulses)" -eq 0 ] && ok 'a future reset does not pulse' || nok 'a future reset does not pulse' "$(pulses) pulses"
 [ "$(cat "$WORK/state")" = "$(cat "$WORK/reset")" ] && ok 'the future reset is saved' || nok 'the future reset is saved' "$(cat "$WORK/state")"
+rm -f "$WORK/pulses" "$WORK/state"
+printf '#!/bin/sh\necho "{\\"5h\\": {\\"pct\\": null, \\"resets_at\\": null}}"\n' >"$WORK/stubs/plan-usage"
+out=$("$P5"); rc=$?
+[ "$rc" -eq 0 ] && [ "$(pulses)" -eq 0 ] && [ ! -e "$WORK/state" ] && ok 'a null 5h window neither pulses nor saves state' \
+  || nok 'a null 5h window neither pulses nor saves state' "rc $rc, $(pulses) pulses"
+printf '%s' "$out" | grep -q 'no future 5h resets_at' && ok 'a null 5h window logs one line' || nok 'a null 5h window logs one line' "out: $out"
 exit $bad

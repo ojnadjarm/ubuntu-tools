@@ -552,16 +552,21 @@ def guard_start(args):
     busy = [u for u in out.split() if u.endswith(".service")]
     if busy:
         return "a fleet agent is running: " + " ".join(busy)
-    rc, out = sh("systemctl --user list-timers --all --no-legend 2>/dev/null")
-    for line in out.splitlines():
-        f = line.split()
-        if len(f) < 4 or "pcbench" in line:
+    rc, out = sh("systemctl --user list-timers --all --output=json 2>/dev/null")
+    try:
+        timers = json.loads(out or "[]")
+    except ValueError:
+        timers = []
+    now_us = time.time() * 1e6
+    for tm in timers:
+        unit, nxt, last = tm.get("unit") or "?", tm.get("next") or 0, tm.get("last") or 0
+        line = "%s %s" % (unit, tm.get("activates") or "")
+        if "pcbench" in line or nxt <= 0:
             continue
-        m = re.search(r"(?:(\d+)h)?\s*(?:(\d+)min)?\s*(?:(\d+)s)?\s+left", line)
-        if not m:
+        # Sub-10-min ticks (moodle crons, login-watch, liaison-check) always fall inside any clearance: skip them.
+        if last > 0 and nxt - last <= 600e6:
             continue
-        secs = int(m.group(1) or 0) * 3600 + int(m.group(2) or 0) * 60 + int(m.group(3) or 0)
-        unit = next((x for x in f if x.endswith(".timer")), "?")
+        secs = int(max(0, nxt - now_us) / 1e6)
         # sentinel-check ticks every 15 min and is cheap: 60 s of clearance is enough.
         # Everything else in the fleet is a long job: keep 10 min.
         limit = 60 if "sentinel-check" in unit else 600

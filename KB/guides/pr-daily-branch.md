@@ -1,6 +1,6 @@
 # Daily integration branch: every open PR of a repo merged into one branch for a single review
 
-Ticket: T1435 · Last verified: 2026-10-31 by `bin/tests/pr-daily-branch.test.sh` (14 checks) and a live run on Tiny Epic Narrator (PRs #11 + #12 → `liaison/diaria-2026-10-31`, PR #13)
+Ticket: T1435 · Last verified: 2026-11-09 by `bin/tests/pr-daily-branch.test.sh` (19 checks) and a live run on Tiny Epic Narrator (PRs #11 + #12 → `liaison/diaria-2026-10-31`, PR #13)
 
 ## When to use
 A maintainer leaves PRs unmerged for days and asks for "una rama diaria con todo lo acumulado": one branch per day with
@@ -14,19 +14,25 @@ for bringing one PR up to date (merge `origin/main` into its own branch).
 - `bin/pr-daily-branch <clone>`: `gh pr list` (open PRs into `--base` with heads under `--prefix`, the daily branches
   `<prefix>diaria-*` left out, oldest first) → detached worktree `<clone>-wt-<branch>` from `origin/<branch>` if it
   exists, else `origin/<base>` → `git merge --no-ff -m "Rama diaria: une #N (<head>)"` per PR, heads already in skipped
-  → `--test` in the worktree → plain `git push origin HEAD:<branch>` (never forced) → worktree removed.
-- Conflict: exit 3, the worktree stays with the merge open; resolve, `git commit --no-edit`, re-run the same command.
+  → `--test` in the worktree → plain `git push origin HEAD:<branch>` (never forced) → worktree removed, unless the caller's cwd is inside it (`worktree kept (you are in it)`).
+- Conflict: exit 3, the worktree stays with the merge open; resolve, `git commit --no-edit`, re-run with the
+  `--name <branch>` the exit message prints: without it a re-run after 00:00 UTC starts `diaria-<next day>` from
+  `origin/<base>` and leaves the conflicted worktree behind.
+- Push refused (exit 5, e.g. `origin/<branch>` moved): the worktree stays; re-run, it merges the moved
+  `origin/<branch>` into the kept worktree first, then pushes fast-forward.
+- A merge that fails without a conflict (e.g. the PR head is not on origin): exit 6 with git's error.
 - The clone's own checkout is never touched (other jobs keep their worktrees and branches).
 
 ## Exact commands
 ```bash
 pr-daily-branch ~/projects/collab/<repo>                       # would: liaison/diaria-<date> = origin/main + #11 …, #12 …
 pr-daily-branch ~/projects/collab/<repo> --test 'npm test' --apply
-# exit 3 → cd ~/projects/collab/<repo>-wt-liaison-diaria-<date>; fix the files; git add …; git commit --no-edit; re-run
+# exit 3 → cd ~/projects/collab/<repo>-wt-liaison-diaria-<date>; fix the files; git add …; git commit --no-edit; then
+pr-daily-branch ~/projects/collab/<repo> --name liaison/diaria-<date> --test 'npm test' --apply
 gh pr create -R <owner>/<repo> --base main --head liaison/diaria-<date> --title "Rama diaria <date>: #11 + #12" --body "…"
 ```
 Options: `--repo OWNER/NAME` (else parsed from origin), `--base main`, `--prefix liaison/`, `--name <branch>`.
-Exit 0 done or nothing to do, 2 usage, 3 conflict, 4 `--test` failed (worktree kept, nothing pushed), 5 push refused.
+Exit 0 done or nothing to do, 2 usage, 3 conflict, 4 `--test` failed (worktree kept, nothing pushed), 5 push refused, 6 merge failed without a conflict.
 Registry: `discord-liaison/projects.json` rule `daily` tells liaison workers when to run it for a project.
 
 ## Pitfalls (measured)
@@ -36,7 +42,7 @@ Registry: `discord-liaison/projects.json` rule `daily` tells liaison workers whe
   ~/agents, the personal repos and ~/projects/collab: the first fixture run had 9 FAILs from refused commits in /tmp. The test
   drops the guards dir from the fixture's PATH (the fixture is the sandbox, FLEET.md §5.6) and proves with a selftest that origin is a
   local bare repo and `gh` is a fake.
-- Adding a PR to the day's branch later: re-run the same command (live 2026-10-31: #14 added, `in:` ×3, `merged:` ×1,
+- Adding a PR to the day's branch later: re-run the same command, with `--name` after 00:00 UTC (live 2026-10-31: #14 added, `in:` ×3, `merged:` ×1,
   fast-forward push). Then retitle the daily PR with `gh api -X PATCH repos/<owner>/<repo>/pulls/<n> -f title=… -f body=…`:
   `gh pr edit` failed on this repo with the "Projects (classic) is being deprecated" GraphQL error.
 - Merging the daily PR makes GitHub mark the PRs it contains as merged; merging those PRs one by one leaves the daily PR

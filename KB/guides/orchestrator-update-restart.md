@@ -1,6 +1,6 @@
 # Keep the orchestrator session on the newest Claude Code (restart onto a new version without a reboot)
 
-Ticket: T1430 (id reused: the 10-29 T1430 is vass-ticket-video, `briefs/T1430-report.md`; this one is `briefs/T1430-orchestrator-auto-update-restart.md`) · Last verified: 2026-10-30 by `bin/tests/orchestrator-update-restart.test.sh` (34 checks, 37 s) and one real unit run (noop, 2.1.314 = 2.1.314)
+Ticket: T1430 (id reused: the 10-29 T1430 is vass-ticket-video, `briefs/T1430-report.md`; this one is `briefs/T1430-orchestrator-auto-update-restart.md`) · Last verified: 2026-11-07 by `bin/tests/orchestrator-update-restart.test.sh` (41 checks) and the stuck check on a copy of the real log (fires once)
 
 ## When to use
 The auto-updater installed a new Claude Code but the orchestrator pane still runs the old binary. Not for other
@@ -15,6 +15,9 @@ sessions (Vass, liaison jobs) and not for the auto-updater itself.
   no `esc to interrupt`/`Waiting for … background`, no `◯` agent row under the input box, no subagent/workflow file of
   the session touched in 10 min, empty input line, no `discord-liaison/state/escalations/*.md`, outside 08-01 unless the
   new version is 24 h old.
+- A non-empty input line logs `input line not empty: len=<chars> sgr=<SGR codes on the prompt line>` (never the text).
+- Stuck: the 3rd identical `wait` in a row (dry runs aside, text after `:` ignored) is one `notify-owner` line; the log
+  line ends `owner told` and the same streak never notifies again.
 - Restart: `/exit` typed, wait for the pid to end, `systemctl --user start claude-orchestrator.service`, read back
   version + same `sessionId` (`--continue` keeps the id, measured). Failure → one `notify-owner` line, exit 1.
 - Pane probes live in `bin/orchlib.sh`, shared with `orchestrator-pulse`; `decide` is a pure function the test sources.
@@ -27,6 +30,9 @@ bash ~/agents/bin/tests/orchestrator-update-restart.test.sh
 ```
 
 ## Pitfalls (measured)
+- 2026-11-01..06: 5 nights of `wait input line not empty` on 2.1.314 while 2.1.316-2.1.318 were installed, nobody told.
+  `unghost` drops only dim (`\e[2m`) ghost text; grey truecolor text (`38;2;…`) counts as typed (test fixture). Read the
+  logged `sgr=` before widening `unghost`.
 - An open escalation file blocks the restart with no time limit: on 2026-10-30 two from 10-27/10-28 were still open.
 - `--continue` resumes the newest conversation in `~`; if another session there is newer the read-back sees a new id and notifies.
 - Fake claude in tests: `bash` copied to `versions/<v>` and run as `exec -a claude` in a subshell, so `/proc/<pid>/exe`

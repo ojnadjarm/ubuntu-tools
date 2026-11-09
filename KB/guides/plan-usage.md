@@ -17,7 +17,8 @@ the owner. Not for token counts per session (those are in `~/.claude/projects` t
   Its hourly `orchestrator-pulse.timer` is disabled since 2026-10-18 (owner: "not doing anything"); the live trigger is
   `pulse-5h-reset.timer` (every 10 min at :02) → `pulse-5h-reset`: reads `resets_at` from `plan-usage --json`, keeps it
   in `~/agents/state/pulse-5h-reset`, and once that time passes runs one pulse with `PULSE_FLOOR_H=0` (no
-  empty-queue skip). Measured: 7 fires 10-23 01:02 to 10-24 02:02, one per 5 h. Roster rows in `KB/orchestrator.md`.
+  empty-queue skip). Measured: 7 fires 10-23 01:02 to 10-24 02:02, one per 5 h. When `plan-usage` has no future 5h `resets_at` (null since 2026-10-31: no pulse after 10-31 17:42) and no state is
+  saved, it fires nothing and logs one journal line (`journalctl --user -u pulse-5h-reset`), "no future 5h resets_at". Roster rows in `KB/orchestrator.md`.
 
 ## Exact commands
 ```bash

@@ -154,13 +154,11 @@ def groups(by_size, exclude=()):
             buckets = {}
             for paths, st in inodes.values():
                 buckets.setdefault(digest(paths[0], 2**20 if key == "head" else None), []).append((paths, st))
-            inodes = {(st.st_dev, st.st_ino): (paths, st) for b in buckets.values() if len(b) > 1 for paths, st in b}
+            kept = [b for b in buckets.values() if len(b) > 1]
+            inodes = {(st.st_dev, st.st_ino): (paths, st) for b in kept for paths, st in b}
             if not inodes:
                 break
-        full = {}
-        for paths, st in inodes.values():
-            full.setdefault(digest(paths[0]), []).append((sorted(paths), st))
-        out += [sorted(g, key=lambda e: (e[1].st_mtime, e[0][0])) for g in full.values() if len(g) > 1]
+        out += [sorted([(sorted(paths), st) for paths, st in g], key=lambda e: (e[1].st_mtime, e[0][0])) for g in kept]
     return sorted(out, key=lambda g: -g[0][1].st_size * (len(g) - 1))
 
 

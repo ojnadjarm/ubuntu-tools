@@ -12,14 +12,14 @@ pc_usage 'usage: pc audio [graph] [--json]
        pc audio sinks|sources|streams|links|devices [--json]
        pc audio xruns [--seconds 1] [--json]
        pc audio default [sink|source] [<name>] [--apply]
-       pc audio move <stream-id|app-name> <sink-name|earbuds|tv> [--apply]
+       pc audio move <stream-id|app-name> <sink-name|earbuds|speakers|tv> [--apply]
        pc audio vol <node> <0-150%|+N|-N> [--apply]
        pc audio mute <node> on|off|toggle [--apply]
        pc audio loglevel [0-5] [--apply]
        pc audio residue [--json]
 
 Nodes are matched by name (node.name or application.name), never index — the bluez node index
-changes on every A2DP<->HFP switch (toolbox §4). `earbuds`/`tv` resolve to the known sink names.
+changes on every A2DP<->HFP switch (toolbox §4). `earbuds`/`speakers`/`tv` resolve to the known sink names.
 Mutations print `would: <before> → <after>` without --apply; with it they are ledgered and
 undoable with `pc undo`. `loglevel` above 2 should not be left raised (quirks: pipewire log
 storm) — undo it promptly.' "$@"
@@ -43,6 +43,7 @@ LOGLEVEL=$(meta_val settings log.level); : "${LOGLEVEL:=2}"
 resolve_sink_alias() {
   case "$1" in
     earbuds) local m="${BUDS_MAC:-$HARNESS_BUDS_MAC}"; printf 'bluez_output.%s.1' "${m//:/_}";;
+    speakers) printf '%s' 'alsa_output.pci-0000_00_1f.3.analog-stereo';;
     tv)      printf '%s' 'alsa_output.pci-0000_00_1f.3.hdmi-stereo';;
     *)       printf '%s' "$1";;
   esac
@@ -183,6 +184,7 @@ do_move() {
     .[] | select((.properties["node.name"]==$t) or (.properties["application.name"]==$t)
                   or (.properties["object.id"]==$t) or ((.index|tostring)==$t)) | .index' | head -1)
   [ -n "$idx" ] || { printf 'pc audio: no stream matching %s\n' "$target" >&2; exit 1; }
+  [ -n "$(node_id_by_name "$sink_name")" ] || { printf 'pc audio: no sink named %s\n' "$sink_name" >&2; exit 1; }
   before=$("$SELF" _sink-of "$idx")
   [ "$before" = "$sink_name" ] && { printf 'already: stream.%s %s\n' "$target" "$sink_name"; return 0; }
   PC_READ_CMD="$SELF _sink-of $idx" pc_apply "stream.$target" "$before" "$sink_name" \

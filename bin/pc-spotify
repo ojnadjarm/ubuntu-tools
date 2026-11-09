@@ -12,7 +12,7 @@ usage: pc spotify <command> [args]
   vol <0-100>            Spotify stream volume
   seek <s|+s|-s>         absolute or relative position
   open <uri|url>         spotify:… or open.spotify.com/… ; launches the app if needed
-  output [earbuds|speakers|tv|<sink>]   move the Spotify stream (no arg: print current)
+  output [earbuds|speakers|tv|<sink>]   move the Spotify stream via pc audio move (ledgered; no arg: print current)
   search <query>         Web API (needs ~/agents/secrets/spotify.env)
   library                your playlists (Web API)
   auth                   one-time browser login for the Web API (run as the owner)
@@ -26,18 +26,6 @@ need_running() { running || { echo "spotify: not running (try: pc spotify open <
 
 # fmt_time SECONDS — m:ss
 fmt_time() { awk -v s="${1:-0}" 'BEGIN{s=int(s);printf "%d:%02d", s/60, s%60}'; }
-
-# sink_of_alias NAME — resolve earbuds/speakers/tv or a sink name/substring to a sink name.
-sink_of_alias() {
-  local pat
-  case "$1" in
-    earbuds|bt|bluetooth) pat='^bluez_output';;
-    speakers|laptop) pat='analog';;
-    tv|hdmi) pat='hdmi';;
-    *) pat="$1";;
-  esac
-  pactl list sinks short | awk -v p="$pat" '$2 ~ p {print $2; exit}'
-}
 
 # alias_of_sink NAME — friendly label for a sink name.
 alias_of_sink() {
@@ -125,13 +113,11 @@ cmd_open() {
 }
 
 cmd_output() {
-  local stream id cur target
+  local stream cur
   stream="$(sp_stream)" || { echo "spotify: no audio stream (play something first)" >&2; exit 1; }
-  id="${stream% *}"; cur="${stream#* }"
+  cur="${stream#* }"
   [ $# -eq 0 ] && { echo "output: $(alias_of_sink "$cur") ($cur)"; return 0; }
-  target="$(sink_of_alias "$1")"
-  [ -n "$target" ] || { echo "spotify: no sink matches '$1'" >&2; pactl list sinks short | awk '{print "  " $2}' >&2; exit 2; }
-  pactl move-sink-input "$id" "$target" || exit 1
+  "$(dirname "$(readlink -f "$0")")/pc-audio" move Spotify "$1" --apply || exit 1
   stream="$(sp_stream)"
   echo "output: $(alias_of_sink "${stream#* }") (${stream#* })"
 }

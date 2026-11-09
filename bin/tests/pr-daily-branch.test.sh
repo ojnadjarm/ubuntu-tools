@@ -8,18 +8,18 @@ ok() { echo "ok $1"; }
 bad() { echo "FAIL $1"; fails=$((fails + 1)); }
 check() { if eval "$2"; then ok "$1"; else bad "$1"; fi; }
 
+# The fixture is the sandbox (FLEET.md §5.6): the agents' git guard stays off its PATH, the fake gh goes first.
+export PATH="$t/bin:$(tr ':' '\n' <<<"$PATH" | grep -vx "$HOME/agents/bin/guards" | paste -sd:)"
 export GIT_CONFIG_GLOBAL="$t/gitconfig" GIT_CONFIG_NOSYSTEM=1 GH_PRS="$t/prs.json"
-git config --file "$t/gitconfig" user.name fixture
-git config --file "$t/gitconfig" user.email fixture@example.invalid
-git config --file "$t/gitconfig" init.defaultBranch main
 mkdir -p "$t/bin"
 cat > "$t/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 cat "$GH_PRS"
 EOF
 chmod +x "$t/bin/gh"
-# The fixture is the sandbox (FLEET.md §5.6): the agents' git guard stays off its PATH, the fake gh goes first.
-export PATH="$t/bin:$(tr ':' '\n' <<<"$PATH" | grep -vx "$HOME/agents/bin/guards" | paste -sd:)"
+git config --file "$t/gitconfig" user.name fixture
+git config --file "$t/gitconfig" user.email fixture@example.invalid
+git config --file "$t/gitconfig" init.defaultBranch main
 
 git init -q --bare "$t/origin.git"
 git clone -q "$t/origin.git" "$t/work" 2>/dev/null
@@ -68,10 +68,33 @@ wt="$t/work-wt-liaison-diaria-c"
 check "conflict: exit 3, worktree kept, nothing pushed" '[ $rc -eq 3 ] && grep -q "^conflict: Rama diaria: une #5 (liaison/c): shared.txt;" <<<"$out" && [ -d "$wt" ] && [ -z "$(git ls-remote --heads origin liaison/diaria-c)" ]'
 out=$("$tool" "$t/work" --repo fixture/repo --name liaison/diaria-c --apply 2>&1); rc=$?
 check "re-run during an open merge refuses" '[ $rc -eq 3 ] && grep -q "merge in progress" <<<"$out"'
+check "conflict messages name the branch for the re-run" 'grep -qF -- "re-run with --name liaison/diaria-c --apply" <<<"$out"'
+mv "$wt" "$t/wt-held"
+out=$("$tool" "$t/work" --repo fixture/repo --apply 2>&1); rc=$?
+dwt=$(ls -d "$t"/work-wt-liaison-diaria-2* 2>/dev/null)
+check "a dated conflict names its branch, so a re-run after midnight UTC resumes it" '[ $rc -eq 3 ] && grep -qE -- "re-run with --name liaison/diaria-[0-9]{4}-[0-9]{2}-[0-9]{2} --apply$" <<<"$out"'
+[ -n "$dwt" ] && git -C "$dwt" merge --abort && git worktree remove --force "$dwt"
+mv "$t/wt-held" "$wt"; git worktree repair "$wt" >/dev/null 2>&1
 echo resolved > "$wt/shared.txt"; git -C "$wt" add shared.txt; git -C "$wt" commit -q --no-edit
 out=$("$tool" "$t/work" --repo fixture/repo --name liaison/diaria-c --apply 2>&1); rc=$?
 git fetch -q origin
 check "after the fix the re-run pushes both" '[ $rc -eq 0 ] && git merge-base --is-ancestor origin/liaison/c origin/liaison/diaria-c && git merge-base --is-ancestor origin/liaison/a origin/liaison/diaria-c'
+out=$("$tool" "$t/work" --repo fixture/repo --name liaison/diaria-in --apply 2>&1); rc=$?
+wt="$t/work-wt-liaison-diaria-in"
+echo resolved > "$wt/shared.txt"; git -C "$wt" add shared.txt; git -C "$wt" commit -q --no-edit
+out=$(cd "$wt" && "$tool" "$t/work" --repo fixture/repo --name liaison/diaria-in --apply 2>&1 && /bin/pwd); rc=$?
+check "a resume from inside the worktree pushes and keeps the caller's cwd" '[ $rc -eq 0 ] && grep -q "^pushed liaison/diaria-in " <<<"$out" && grep -q "^worktree kept (you are in it): $wt$" <<<"$out" && [ -d "$wt" ]'
+echo '[{"number":1,"headRefName":"liaison/a","title":"A"}]' > "$GH_PRS"
+out=$("$tool" "$t/work" --repo fixture/repo --name liaison/diaria-m --test false --apply 2>&1)
+git switch -q -c liaison/diaria-m main; echo m > m.txt; git add m.txt; git commit -qm m; git push -q origin liaison/diaria-m; git switch -q main
+out=$("$tool" "$t/work" --repo fixture/repo --name liaison/diaria-m --apply 2>&1); rc=$?
+git fetch -q origin
+check "kept worktree merges the moved origin branch and pushes" '[ $rc -eq 0 ] && grep -q "^merged: origin/liaison/diaria-m$" <<<"$out" && git merge-base --is-ancestor origin/liaison/a origin/liaison/diaria-m && git cat-file -e origin/liaison/diaria-m:m.txt'
+cat > "$GH_PRS" <<'EOF'
+[{"number":6,"headRefName":"liaison/gone","title":"Gone"}]
+EOF
+out=$("$tool" "$t/work" --repo fixture/repo --name liaison/diaria-gone --apply 2>&1); rc=$?
+check "missing PR head: exit 6 with git's error, not a conflict" '[ $rc -eq 6 ] && grep -q "^merge failed: Rama diaria: une #6 (liaison/gone): .*origin/liaison/gone" <<<"$out" && ! grep -q "^conflict" <<<"$out"'
 check "never a forced push" '! grep -nE -- "--force|\+refs|\"\+" "$tool"'
 
 [ $fails -eq 0 ] && echo "PASS pr-daily-branch" || echo "FAIL pr-daily-branch ($fails)"

@@ -8,9 +8,11 @@ oldest PR first, with `git merge --no-ff`, into BRANCH (default `<prefix>diaria-
 origin/BRANCH when it already exists, else from origin/<base>. The work happens in a detached worktree next to the
 clone (`<clone>-wt-<branch with / as ->`); the clone's own checkout is never touched.
 Without --apply: prints `would: …` and changes nothing. With --apply: fetch, merge, --test (shell, in the worktree),
-then a plain `git push origin HEAD:<branch>` (never forced) and the worktree is removed.
-Resumable: heads already in the branch are skipped; after a conflict, resolve and commit in the worktree, re-run.
-Exit 0 done or nothing to do; 2 usage; 3 merge conflict (worktree kept); 4 --test failed; 5 push refused.
+then a plain `git push origin HEAD:<branch>` (never forced) and the worktree is removed (kept when the cwd is in it).
+Resumable: origin/BRANCH is merged first and heads already in the branch are skipped; after a conflict, resolve and
+commit in the worktree, re-run with the `--name BRANCH` the message prints; after a refused push, re-run.
+Exit 0 done or nothing to do; 2 usage; 3 merge conflict (worktree kept); 4 --test failed; 5 push refused;
+6 merge failed without a conflict (e.g. the PR head is not on origin).
 """
 import argparse, datetime, json, os, re, subprocess, sys
 
@@ -37,7 +39,7 @@ def worktree(clone, name, base):
     wt = f"{os.path.abspath(clone).rstrip('/')}-wt-{name.replace('/', '-')}"
     if os.path.isdir(wt):
         if git(wt, 'rev-parse', '-q', '--verify', 'MERGE_HEAD', check=False).returncode == 0:
-            print(f'conflict: merge in progress in {wt}: resolve, commit, then re-run')
+            print(f'conflict: merge in progress in {wt}: resolve, commit, then re-run with --name {name} --apply')
             sys.exit(3)
         return wt
     remote = git(clone, 'rev-parse', '-q', '--verify', f'origin/{name}', check=False).returncode == 0
@@ -46,12 +48,13 @@ def worktree(clone, name, base):
 
 
 def merge(wt, ref, message):
-    """Merges ref unless it is already in HEAD; returns 'in', 'merged' or the conflicted paths."""
+    """Merges ref unless it is already in HEAD; returns 'in', 'merged', the conflicted paths or git's error."""
     if git(wt, 'merge-base', '--is-ancestor', ref, 'HEAD', check=False).returncode == 0:
         return 'in'
-    if git(wt, 'merge', '--no-ff', '-m', message, ref, check=False).returncode == 0:
+    run = git(wt, 'merge', '--no-ff', '-m', message, ref, check=False)
+    if run.returncode == 0:
         return 'merged'
-    return git(wt, 'diff', '--name-only', '--diff-filter=U').stdout.split()
+    return git(wt, 'diff', '--name-only', '--diff-filter=U').stdout.split() or (run.stderr or run.stdout).strip()
 
 
 def main():
@@ -80,12 +83,18 @@ def main():
         return 0
     wt = worktree(a.clone, name, a.base)
     steps = [(f'origin/{a.base}', f'Rama diaria: al día con {a.base}')]
+    if git(wt, 'rev-parse', '-q', '--verify', f'origin/{name}', check=False).returncode == 0:
+        steps.insert(0, (f'origin/{name}', f'Rama diaria: al día con origin/{name}'))
     steps += [(f"origin/{p['headRefName']}", f"Rama diaria: une #{p['number']} ({p['headRefName']})") for p in prs]
     for ref, message in steps:
         result = merge(wt, ref, message)
         if isinstance(result, list):
-            print(f"conflict: {message}: {' '.join(result)}; resolve and commit in {wt}, then re-run with --apply")
+            print(f"conflict: {message}: {' '.join(result)}; resolve and commit in {wt}, "
+                  f"then re-run with --name {name} --apply")
             return 3
+        if result not in ('in', 'merged'):
+            print(f'merge failed: {message}: {result}')
+            return 6
         print(f'{result}: {ref}')
     if a.test and subprocess.run(a.test, shell=True, cwd=wt).returncode != 0:
         print(f'tests failed: {a.test} (worktree kept: {wt})')
@@ -95,7 +104,13 @@ def main():
         print(f'push refused (never forced): {push.stderr.strip()}')
         return 5
     sha = git(wt, 'rev-parse', '--short', 'HEAD').stdout.strip()
-    if git(a.clone, 'worktree', 'remove', wt, check=False).returncode != 0:
+    try:
+        inside = os.path.commonpath([os.path.realpath(os.getcwd()), os.path.realpath(wt)]) == os.path.realpath(wt)
+    except OSError:
+        inside = True
+    if inside:
+        print(f'worktree kept (you are in it): {wt}')
+    elif git(a.clone, 'worktree', 'remove', wt, check=False).returncode != 0:
         print(f'worktree kept (not clean): {wt}')
     print(f"pushed {name} {sha}: {' '.join('#' + str(p['number']) for p in prs)}")
     return 0

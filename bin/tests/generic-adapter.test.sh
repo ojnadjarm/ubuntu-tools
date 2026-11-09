@@ -27,4 +27,10 @@ out="$(run 'echo late' 5)"
 ap=$!; sleep 1; kill -TERM "$ap"; wait "$ap" 2>/dev/null; sleep 0.3
 left="$(pgrep -f '[s]leep 47472')"
 [ -z "$left" ] && truthy "SIGTERM stops the agent command" 1 || { truthy "SIGTERM stops the agent command ($left left)" 0; kill $left; }
+# F27: SIGTERM also stops the grandchildren of a compound command.
+(HARNESS_AGENT_CMD='sleep 47473; echo done' PROMPT_FILE="$tmp/prompt.md" AGENT_TIMEOUT= \
+  RAW_OUT="$tmp/raw.txt" META_OUT="$tmp/meta.json" exec "$A") >/dev/null 2>&1 &
+ap=$!; sleep 1; kill -TERM "$ap"; wait "$ap" 2>/dev/null; sleep 0.3
+left="$(pgrep -f '[s]leep 47473')"
+[ -z "$left" ] && truthy "SIGTERM stops a compound agent command" 1 || { truthy "SIGTERM stops a compound agent command ($left left)" 0; kill $left; }
 exit $bad

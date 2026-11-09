@@ -12,7 +12,8 @@ STUB="$WORK/stub" FH="$WORK/home" LOG="$WORK/calls.log"
 mkdir -p "$STUB" "$FH/agents/secrets"; : >"$LOG"
 . "$HOME/agents/bin/tests/lib/assert.sh"
 has() { grep -qF -- "$2" <<<"$3" && ok "$1" || nok "$1" "no '$2' in: $3"; }
-sp()  { PATH="$STUB:$PATH" HOME="$FH" HARNESS_CONFIG=/dev/null SP_LOG="$LOG" "$PC" "$@"; }
+sp()  { PATH="$STUB:$PATH" HOME="$FH" HARNESS_CONFIG=/dev/null SP_LOG="$LOG" SP_SINK="$WORK/sink" \
+        BUDS_MAC=00:00:5E:00:53:01 PC_LEDGER="$WORK/ledger.jsonl" "$PC" "$@"; }
 
 cat >"$STUB/playerctl" <<'EOF'
 #!/bin/bash
@@ -34,18 +35,28 @@ EOF
 cat >"$STUB/pactl" <<'EOF'
 #!/bin/bash
 echo "pactl $*" >>"$SP_LOG"
+cur=$(cat "$SP_SINK" 2>/dev/null || echo 5)
 case "$*" in
-  'list sink-inputs') printf 'Sink Input #42\n\tSink: 5\n\tProperties:\n\t\tapplication.name = "Spotify"\n';;
-  'list sinks short') printf '5\talsa_output.pci-0000.analog-stereo\tPipeWire\n7\tbluez_output.00_00_5E_00_53_01.1\tPipeWire\n';;
-  get-default-sink) echo alsa_output.pci-0000.analog-stereo;;
+  'list sink-inputs') printf 'Sink Input #42\n\tSink: %s\n\tProperties:\n\t\tapplication.name = "Spotify"\n' "$cur";;
+  '-f json list sink-inputs') printf '[{"index":42,"sink":%s,"properties":{"application.name":"Spotify"}}]\n' "$cur";;
+  'list sinks short') printf '5\talsa_output.pci-0000_00_1f.3.analog-stereo\tPipeWire\n7\tbluez_output.00_00_5E_00_53_01.1\tPipeWire\n';;
+  get-default-sink) echo alsa_output.pci-0000_00_1f.3.analog-stereo;;
+  'move-sink-input 42 alsa_output.pci-0000_00_1f.3.analog-stereo') echo 5 >"$SP_SINK";;
+  'move-sink-input 42 bluez_output.00_00_5E_00_53_01.1') echo 7 >"$SP_SINK";;
+  move-sink-input*) exit 1;;
 esac
 exit 0
+EOF
+cat >"$STUB/pw-dump" <<'EOF'
+#!/bin/bash
+n() { printf '{"id":%s,"type":"PipeWire:Interface:Node","info":{"props":{"object.serial":%s,"node.name":"%s","media.class":"Audio/Sink"}}}' "$1" "$1" "$2"; }
+echo "[$(n 5 alsa_output.pci-0000_00_1f.3.analog-stereo),$(n 7 bluez_output.00_00_5E_00_53_01.1)]"
 EOF
 printf '#!/bin/sh\nexit 0\n' >"$STUB/sleep"
 chmod +x "$STUB"/*
 
 # 0. selftest: the stubs win on PATH, the fake HOME has no Web API secrets, the sandbox has no route out.
-for c in playerctl pactl sleep; do
+for c in playerctl pactl pw-dump sleep; do
   is "selftest: $c resolves to the stub" "$(PATH="$STUB:$PATH" command -v $c)" "$STUB/$c"
 done
 [ -e "$FH/agents/secrets/spotify.env" ] && nok 'selftest: fake HOME has no spotify.env' present || ok 'selftest: fake HOME has no spotify.env'
@@ -61,7 +72,8 @@ sp vol 101 >/dev/null 2>&1; is 'vol 101 exits 2' "$?" 2
 sp vol abc >/dev/null 2>&1; is 'vol abc exits 2' "$?" 2
 sp seek xyz >/dev/null 2>&1; is 'seek xyz exits 2' "$?" 2
 sp open https://example.com/x >/dev/null 2>&1; is 'open of a non-Spotify URL exits 2' "$?" 2
-sp output nosuchsink >/dev/null 2>&1; is 'output to an unknown sink exits 2' "$?" 2
+: >"$LOG"; sp output nosuchsink >/dev/null 2>&1; is 'output to an unknown sink exits 1' "$?" 1
+grep -q move-sink-input "$LOG" && nok 'output to an unknown sink moves nothing' moved || ok 'output to an unknown sink moves nothing'
 sp search >/dev/null 2>&1; is 'search with no query exits 2' "$?" 2
 
 # 2. the app is not on the bus: every player verb refuses with 1.
@@ -73,7 +85,7 @@ out=$(sp status)
 has 'status prints the state' 'state: Playing' "$out"
 has 'status prints position / length as m:ss' 'position: 1:15 / 3:30' "$out"
 has 'status prints volume as a percentage' 'volume: 42' "$out"
-has 'status names the stream sink by alias' 'output: speakers (alsa_output.pci-0000.analog-stereo)' "$out"
+has 'status names the stream sink by alias' 'output: speakers (alsa_output.pci-0000_00_1f.3.analog-stereo)' "$out"
 j=$(sp status --json)
 is 'status --json types and values' "$(jq -r '[.state,.artist,.position==75.3,.length==210,.volume,.output]|map(tostring)|join(",")' <<<"$j")" \
   'Playing,Fake Artist,true,true,42,speakers'
@@ -82,9 +94,16 @@ has 'vol 55 sets 0.55 on the player' 'playerctl -p spotify volume 0.55' "$(cat "
 : >"$LOG"; sp toggle; has 'toggle sends play-pause' 'playerctl -p spotify play-pause' "$(cat "$LOG")"
 : >"$LOG"; sp seek +10 >/dev/null; has 'seek +10 is relative' 'playerctl -p spotify position 10+' "$(cat "$LOG")"
 : >"$LOG"; sp next; has 'next sends next' 'playerctl -p spotify next' "$(cat "$LOG")"
-is 'output with no argument prints the current sink' "$(sp output)" 'output: speakers (alsa_output.pci-0000.analog-stereo)'
-: >"$LOG"; sp output earbuds >/dev/null
+is 'output with no argument prints the current sink' "$(sp output)" 'output: speakers (alsa_output.pci-0000_00_1f.3.analog-stereo)'
+: >"$LOG"; out=$(sp output earbuds)
 has 'output earbuds moves stream 42 to the bluez sink' 'pactl move-sink-input 42 bluez_output.00_00_5E_00_53_01.1' "$(cat "$LOG")"
+has 'output earbuds prints the undo' 'rollback: pc undo ' "$out"
+has 'output earbuds prints the new sink' 'output: earbuds (bluez_output.00_00_5E_00_53_01.1)' "$out"
+is 'output earbuds is ledgered and verified' \
+  "$(jq -sr '[.[0].target, .[0].after, .[1].verified] | map(tostring) | join(" ")' "$WORK/ledger.jsonl" 2>/dev/null)" \
+  'stream.Spotify bluez_output.00_00_5E_00_53_01.1 true'
+: >"$LOG"; sp output speakers >/dev/null
+has 'output speakers moves stream 42 to the analog sink' 'pactl move-sink-input 42 alsa_output.pci-0000_00_1f.3.analog-stereo' "$(cat "$LOG")"
 
 # 4. the Web API without credentials prints the setup steps and exits 2.
 out=$(sp search 'x' 2>&1); is 'search with no credentials exits 2' "$?" 2

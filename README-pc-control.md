@@ -143,8 +143,9 @@
 - `pc spotify status [--json] | play | pause | toggle | next | prev | vol <0-100> | seek <s|+s|-s> |
   open <uri|url> | output [earbuds|speakers|tv|<sink>] | search <q> | library | auth`.
 - Control and status are MPRIS (`playerctl -p spotify`, `dbus-send --dest=org.mpris.MediaPlayer2.spotify`);
-  `vol` maps onto the stream volume, `output` is `pactl move-sink-input <spotify-input> <sink>` (aliases:
-  `earbuds` → `bluez_output*`, `speakers` → `*analog*`, `tv` → `*hdmi*`; the HDMI sink only exists while the TV
+  `vol` maps onto the stream volume, `output` is `pc audio move Spotify <sink> --apply` (ledgered, prints
+  `rollback: pc undo <id>`; aliases are pc audio's: `earbuds` → the `BUDS_MAC` bluez sink, `speakers` →
+  `…analog-stereo`, `tv` → `…hdmi-stereo`, else an exact sink name; the HDMI sink only exists while the TV
   is connected).
 - **`OpenUri` and `LoadContextUri` are no-ops in this client** (verified on 1.2.95: both return without changing
   the track), and so is `spotify --uri=…` / `xdg-open spotify:…` beyond navigating the UI. Starting a *specific*

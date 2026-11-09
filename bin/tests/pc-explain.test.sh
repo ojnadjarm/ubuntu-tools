@@ -16,6 +16,12 @@ T1=$EPOCHREALTIME
 ms=$(awk -v a="$T0" -v b="$T1" 'BEGIN{printf "%d", (b-a)*1000}')
 b=$(budget 0.3); bms=$(awk -v b="$b" 'BEGIN{printf "%d", b*1000}')
 [ "$ms" -le "$bms" ] && ok "render.sock answers in <= $b s budget ($ms ms)" || nok "render.sock answers in <= $b s budget" "${ms}ms"
+T0=$EPOCHREALTIME
+"$BIN/pc-explain" pc >/dev/null
+T1=$EPOCHREALTIME
+ms=$(awk -v a="$T0" -v b="$T1" 'BEGIN{printf "%d", (b-a)*1000}')
+b=$(budget 0.5); bms=$(awk -v b="$b" 'BEGIN{printf "%d", b*1000}')
+[ "$ms" -le "$bms" ] && ok "broad query pc (600+ lines) answers in <= $b s budget ($ms ms)" || nok "broad query pc answers in <= $b s budget" "${ms}ms"
 
 # 2. the agents' actual questions each resolve to a relevant file in the top 3.
 in_top3 render.sock toolbox.md          && ok 'render.sock -> toolbox.md in top 3' || nok 'render.sock -> toolbox.md in top 3' "$( "$BIN/pc-explain" render.sock --files)"

@@ -4,6 +4,7 @@
 # escalation, and outside owner hours (OWNER_HOURS, default 08-01) unless the new version is OWNER_WAIT_H (24) h old.
 # Not safe: logged, retried next run. Restart: /exit typed into the pane, `systemctl --user start` the unit, read back
 # the new version and the same session id (--continue); a failure is one notify-owner line. One log line per run.
+# The 3rd identical wait in a row (dry runs aside) is one notify-owner line per streak; a non-empty input line logs its length and SGR codes.
 # Usage: orchestrator-update-restart [--dry-run]   (--dry-run prints and logs the decision, changes nothing)
 case "${1:-}" in -h|--help) awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; exit 0 ;; esac
 set -uo pipefail
@@ -21,6 +22,7 @@ OWNER_WAIT_H=${OWNER_WAIT_H:-24}
 ACTIVE_MIN=${OUR_ACTIVE_MIN:-10}
 EXIT_WAIT=${OUR_EXIT_WAIT:-60}
 START_WAIT=${OUR_START_WAIT:-240}
+STUCK_RUNS=3
 PANE=
 tm() { tmux "$@"; }
 
@@ -63,7 +65,21 @@ busy_reason() {
   fi
   line=$(prompt_line)
   [ -n "$line" ] || { echo "no prompt box (dialog or startup)"; return; }
-  [ -z "$(printf '%s' "$line" | sed -e 's/^❯//' -e 's/^>//' | tr -d ' \302\240')" ] || echo "input line not empty"
+  local rest raw sgr
+  rest=$(printf '%s' "$line" | sed -e 's/^❯//' -e 's/^>//' | tr -d ' \302\240')
+  [ -n "$rest" ] || return 0
+  raw=$(tm capture-pane -peJt "$PANE" 2>/dev/null | perl -ne '(my $s = $_) =~ s/\e\[[0-9;:?]*[A-Za-z]//g; print if $s =~ /^(❯|>)/' | tail -n1)
+  sgr=$(printf '%s' "$raw" | grep -oE $'\e\\[[0-9;:]*m' | sed -e 's/^.\[//' -e 's/m$//' | sort -u | paste -sd' ')
+  echo "input line not empty: len=${#rest} sgr=${sgr:-none}"
+}
+# Prints wait key $1 when it ends STUCK_RUNS+ identical waits in the log not yet told (dry runs, details after ":" ignored).
+stuck() {
+  { grep -v '^[^ ]* dry-run ' "$LOG" 2>/dev/null | sed -E -e 's/^[^ ]+ //' -e 's/ \(running=.*( owner told)$/:\1/' -e 's/ \(running=.*//'; echo "$1"; } \
+    | awk -v n="$STUCK_RUNS" '{ t[NR] = /owner told$/; sub(/:.*/, ""); k[NR] = $0 } END {
+        if (k[NR] !~ /^wait /) exit 1
+        for (i = NR; i > 0 && k[i] == k[NR]; i--) if (t[i]) exit 1
+        if (NR - i < n) exit 1
+        print k[NR] }'
 }
 log() { mkdir -p "$(dirname "$LOG")"; printf '%s %s\n' "$(date -Is)" "$*" >>"$LOG"; echo "orchestrator-update-restart: $*"; }
 fail() { log "fail $1"; notify-owner "orchestrator-update-restart: $1" >/dev/null 2>&1; exit 1; }
@@ -91,7 +107,12 @@ installed=$(installed_version)
 [ -z "$running" ] || [ "$running" = "$installed" ] || busy=$(busy_reason "$pid")
 read -r verdict reason < <(decide "$running" "$installed" "$(installed_age)" "$(date +%H)" "$busy" "$(open_escalations)")
 if [ "$DRY" = 1 ] || [ "$verdict" != restart ]; then
-  log "$([ "$DRY" = 1 ] && echo "dry-run ")$verdict $reason (running=${running:-none} installed=${installed:-none})"
+  told=
+  if [ "$DRY" = 0 ] && key=$(stuck "$verdict $reason"); then
+    notify-owner "orchestrator-update-restart: $STUCK_RUNS runs in a row: $key (running=${running:-none} installed=${installed:-none})" >/dev/null 2>&1
+    told=" owner told"
+  fi
+  log "$([ "$DRY" = 1 ] && echo "dry-run ")$verdict $reason (running=${running:-none} installed=${installed:-none})$told"
   exit 0
 fi
 

@@ -91,7 +91,9 @@ condition held (exit 3)`, `stalled: … (exit 3)`, `killed by SIGTERM after N s,
   denies an `until/while … sleep` or `X && break` loop before it runs, in subagents too (measured: a haiku subagent got the deny
   and the line); the reason is the `wait-for` line to run. Loops in quoted data or heredoc bodies pass; `bash -c '…'`/`eval` loops
   are blocked. A deliberate loop fixture (reaper tests) goes in a script file run with `bash f.sh`. Replay of 7 days of audit
-  summaries: 139 denies of 15 269, 0 on data. Live: registered as a PreToolUse Bash hook in `~/.claude/settings.json` (checked 2026-10-20).
+  summaries: 139 denies of 15 269, 0 on data (2026-10-19; denied calls never reach the PostToolUse audit log, so the replay
+  now only guards false positives). Deny coverage: `bin/tests/fixtures/sleep-loop/loops.jsonl`, the 613 distinct loops logged
+  2026-09-05..10-19 (paths and machine values masked), all denied by the fast path (2026-11-09). Live: registered as a PreToolUse Bash hook in `~/.claude/settings.json` (checked 2026-10-20).
   Dash front (T896): `hooks/sleep-loop-block.py` is a `#!/bin/dash` script that reads stdin (`gnucat` when present) and exits 0
   unless the call holds `pkill`/`pgrep`, or `sleep` with `until`/`while`/`for`; only then it execs `python3 -IS
   sleep-loop-block-impl.py` (the parser). Measured 2026-10-20 (T947, 15 runs): miss 1.7 ms median, hit 28 ms (T896: miss 3.0 ms with the front, 39 ms without).

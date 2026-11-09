@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""sleep-loop-block PreToolUse hook on fixture commands, then a replay of 7 days of real Bash commands.
+"""sleep-loop-block PreToolUse hook on fixture commands, a replay of 7 days of real Bash commands, and a frozen loop corpus.
 Run: python3 sleep-loop-block.test.py"""
 import glob, gzip, importlib.util, json, os, subprocess, sys, tempfile, time
 
@@ -376,6 +376,8 @@ check(f'hook latency on a plain command {ms:.0f} ms (budget {budget(0.1) * 1000:
 cut = time.strftime('%Y-%m-%dT%H:%M', time.localtime(time.time() - 7 * 86400))
 cmds = []
 for p in glob.glob(os.path.expanduser('~/agents/log/actions.jsonl*')):
+    if os.path.getmtime(p) < time.time() - 7 * 86400:
+        continue
     with (gzip.open(p, 'rt') if p.endswith('.gz') else open(p)) as f:
         for line in f:
             try:
@@ -411,8 +413,14 @@ sdata = [c for c in shint + cdrm if c.lstrip().startswith(('echo ', 'printf ', '
          and not any(o in c for o in (';', '&', '|', '$(', '\n'))]
 print(f'     replay: {len(sh)} grep/find/cd+rm commands, {len(shint)} ugrep/bfs hints, {len(cdrm)} cd-then-rm denies')
 check('replay: 0 shadow hints or cd-then-rm denies where the tool is data', not sdata or print('     data', sdata[:3]))
-lost = [c for c, (d, _) in zip(hits, denied_many(hits)) if not d]
-check(f'replay: the fast path keeps all {len(hits)} denies ({len(lost)} lost)', not lost or print('     lost', lost[:3]))
+
+# Corpus: the 613 distinct loops the audit log saw before the hook went live (2026-09-05..10-19); denied calls never reach it now.
+CORPUS = os.path.join(HERE, '..', 'bin', 'tests', 'fixtures', 'sleep-loop', 'loops.jsonl')
+corpus = [json.loads(l) for l in open(CORPUS)] if os.path.exists(CORPUS) else []
+missed = [c for c in corpus if not w.loop_wait(c)]
+check(f'corpus: the parser flags all {len(corpus)} historical loops ({len(missed)} missed)', len(corpus) >= 600 and not missed or print('     missed', missed[:3]))
+lost = [c for c, (d, _) in zip(corpus, denied_many(corpus)) if not d]
+check(f'corpus: the fast path keeps all {len(corpus)} denies ({len(lost)} lost)', corpus and not lost or print('     lost', lost[:3]))
 
 subprocess.run(['rm', '-rf', WORK])
 print('PASS' if not bad else 'FAIL')

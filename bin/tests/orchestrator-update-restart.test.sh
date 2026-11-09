@@ -89,6 +89,23 @@ ev "busy: old session still running" 'kill -0 $(cat "$WORK/old") 2>/dev/null'
 
 out=$(TYPED='hello' case_ 2.1.1 2.1.2)
 case "$out" in *"wait input line not empty"*) ok "typed text: wait";; *) nok "typed text: wait" "$out";; esac
+case "$out" in *"not empty: len=5 sgr=none "*) ok "typed text: length and SGR logged";; *) nok "typed text: length and SGR logged" "$out";; esac
+out=$(TYPED='\033[38;2;153;153;153mtry this\033[39m' case_ 2.1.1 2.1.2)
+case "$out" in *"not empty: len=7 sgr=38;2;153;153;153 "*) ok "grey ghost text: SGR logged";; *) nok "grey ghost text: SGR logged" "$out";; esac
+
+# Stuck: the 3rd identical wait in a row tells the owner once; the 4th does not.
+printf '%s\n' "x wait session busy, not idle (running=2.1.1 installed=2.1.2)" "x wait input line not empty (running=2.1.1 installed=2.1.2)" \
+  "x dry-run wait input line not empty (running=2.1.1 installed=2.1.2)" >"$WORK/our.log"
+TYPED=hi case_ 2.1.1 2.1.2 >/dev/null
+ev "2nd identical wait: owner not told" '! argv | grep -q notify-owner'
+out=$(TYPED=hi case_ 2.1.1 2.1.2)
+ev "3rd identical wait: owner told once" '[ "$(argv | grep -c "notify-owner orchestrator-update-restart: 3 runs in a row: wait input line not empty")" = 1 ]'
+case "$out" in *"(running=2.1.1 installed=2.1.2) owner told"*) ok "3rd identical wait: logged as told";; *) nok "3rd identical wait: logged as told" "$out";; esac
+TYPED=hi case_ 2.1.1 2.1.2 >/dev/null
+ev "4th identical wait: owner not told again" '! argv | grep -q notify-owner'
+printf '%s\n' "x wait input line not empty: len=2 sgr=none (running=2.1.1 installed=2.1.2)" "x wait input line not empty (running=2.1.1 installed=2.1.3)" >"$WORK/our.log"
+TYPED=hi case_ 2.1.1 2.1.2 >/dev/null
+ev "streak already 3 long, never told: owner told" 'argv | grep -q "notify-owner orchestrator-update-restart: 3 runs in a row"'
 
 echo fx >"$WORK/esc/1.md"; out=$(case_ 2.1.1 2.1.2); rm -f "$WORK/esc/1.md"
 case "$out" in *"wait 1 Discord escalation(s) open"*) ok "open escalation: wait";; *) nok "open escalation: wait" "$out";; esac

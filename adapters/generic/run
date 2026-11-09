@@ -13,9 +13,10 @@ cmd=(bash -c "$HARNESS_AGENT_CMD")
 [ -n "${AGENT_TIMEOUT:-}" ] && cmd=(timeout "$AGENT_TIMEOUT" "${cmd[@]}")
 
 # Background + wait so a SIGTERM from agents-stop reaches the command instead of waiting for it.
-( "${cmd[@]}" </dev/null | tee "$RAW_OUT"; exit "${PIPESTATUS[0]}" ) &
+# setsid gives the command its own process group, so the trap also reaches its grandchildren.
+setsid bash -c '"$@" </dev/null | tee "$RAW_OUT"; exit "${PIPESTATUS[0]}"' _ "${cmd[@]}" &
 child=$!
-trap 'pkill -TERM -P "$child"' TERM INT
+trap 'pkill -TERM -P "$child"; kill -TERM -- -"$child" 2>/dev/null' TERM INT
 until wait "$child"; rc=$?; ! kill -0 "$child" 2>/dev/null; do :; done
 jq -n '{}' >"$META_OUT"
 exit "$rc"

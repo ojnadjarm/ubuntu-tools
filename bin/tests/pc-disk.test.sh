@@ -86,6 +86,30 @@ run_cases() {
 }
 run_cases "$BIN/pc-disk"
 
+# groups() reads each candidate once in the head pass and once in full, and splits same-size content groups.
+G="$R/groups"; mkdir -p "$G"; S=$((2 * 1048576 + 1))
+for f in a1 a2 a3 c1; do head -c $S /dev/zero >"$G/$f"; done; printf x | dd of="$G/c1" bs=1 seek=$((S - 1)) conv=notrunc status=none
+for f in b1 b2; do head -c $S /dev/zero | tr '\0' b >"$G/$f"; done; head -c $S /dev/zero | tr '\0' u >"$G/u1"
+out=$(python3 -I - "$BIN/pc-disk" "$G" <<'PY'
+import builtins, importlib.machinery, importlib.util, os, sys
+spec = importlib.util.spec_from_loader("pcdisk", importlib.machinery.SourceFileLoader("pcdisk", sys.argv[1]))
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+n = [0]
+class F:
+    def __init__(s, *a): s.f = builtins.open(*a)
+    def __enter__(s): return s
+    def __exit__(s, *a): s.f.close()
+    def read(s, k): b = s.f.read(k); n[0] += len(b); return b
+m.open = F
+by = {}
+for e in sorted(os.listdir(sys.argv[2])):
+    p = os.path.join(sys.argv[2], e); st = os.stat(p); by.setdefault(st.st_size, []).append((p, st))
+gs = m.groups(by)
+print(" ".join(sorted(",".join(os.path.basename(ps[0]) for ps, _ in g) for g in gs)), n[0])
+PY
+)
+is 'groups: same-size groups split, each candidate read once in full' "$out" "a1,a2,a3 b1,b2 $((7 * 1048576 + 6 * S))"
+
 # mutant <name> <sed-expr> — a copy of pc-disk with the edit must fail at least one case.
 mutant() {
   local m="$R/m-$1"; mkdir -p "$m"; sed "$2" "$BIN/pc-disk" >"$m/pc-disk"; chmod +x "$m/pc-disk"
