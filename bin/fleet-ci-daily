@@ -3,6 +3,7 @@
 # Red files re-run once serially after a quiet wait: green ones print `load-noise: <files>`; `✖ fleet ci red: <files>` (ci-autofix's cause line)
 # names only files red twice, after `ci-load: contention …` when the 1-min load was > 6.
 # Mon–Sat it passes --skip-unchanged (heavy green skill tests nothing touched are skipped, T717); Sunday or FLEET_CI_FULL=1 runs all.
+# The quiet wait ending with pcbench-weekly still active defers the night (rc 75, `deferred: pcbench-weekly active`); the next run is full.
 # CI_AUTOFIX_RERUN=<first log> (ci-autofix after a fix attempt, T733): only that log's red files plus tests the fixer touched re-run.
 # --recheck (T853): today's (else the newest) log's red files re-run alone; all green clears the failed unit and the fleet nightly need (rc 3 when the reset or that resolve fails).
 set -uo pipefail
@@ -54,6 +55,15 @@ recheck() {
   "$B/pc" need resolve "fleet nightly" --fixed "recheck green: $red" --apply \
     || { echo "fleet-ci-daily: need resolve failed rc $?" | tee -a "$log"; return 3; }
 }
+# OWNER lines of the log (run.sh, `# owner-data` tests): one high push per message not in last night's set (state/fleet-ci/owner-data.txt).
+owner_data() {
+  local st="$HOME/agents/state/fleet-ci/owner-data.txt" now l
+  now="$(grep '^OWNER ' "$LOG" | sort -u)"; mkdir -p "${st%/*}"
+  while IFS= read -r l; do
+    [ -n "$l" ] && ! grep -qxF -- "$l" "$st" 2>/dev/null && "$B/notify-owner" -p high -t "fleet owner-data" "${l:0:180}"
+  done <<<"$now"
+  printf '%s\n' "$now" >"$st"
+}
 mkdir -p "${LOG%/*}" "$HOME/agents/state"
 exec 9>"$HOME/agents/state/fleet-ci.lock"
 flock -n 9 || { echo "fleet-ci-daily: a run is already going" >&2; exit 75; }
@@ -66,7 +76,9 @@ t0=$(date +%s); cap="${FLEET_CI_AFTER_CAP:-6000}"
 timeout "$cap" "$B/wait-for" --label fleet-ci-after-ailearning --every "${CI_QUIET_EVERY:-15}" --until 'case "$(systemctl --user is-active ailearning-ci-daily.service)" in active|activating|reloading|deactivating) exit 1;; esac' >/dev/null; arc=$?
 w=$(( $(date +%s) - t0 ))
 echo "waited $(( w / 60 )) min for ailearning-ci-daily ($w s$([ "$arc" -eq 0 ] || echo ", cap $cap s reached; running anyway"))"
-"$B/ci-window" --quiet
+q="$("$B/ci-window" --quiet)"; echo "$q"
+FULL="$HOME/agents/state/fleet-ci-full"
+case "$q" in *"pcbench-weekly.service still active"*) touch "$FULL"; echo "deferred: pcbench-weekly active"; exit 75;; esac
 F="${CI_AUTOFIX_RERUN:-}"
 if [ -f "$F" ] && grep -q '^✖ fleet ci red: ' "$F"; then
   red="$(sed -nE 's/^✖ fleet ci red: //p' "$F" | tail -1)"
@@ -89,8 +101,10 @@ if [ -f "$F" ] && grep -q '^✖ fleet ci red: ' "$F"; then
 fi
 l0=$(qg_load1 "$LOADAVG")
 skipu=--skip-unchanged
-{ [ "${FLEET_CI_DOW:-$(date +%u)}" = 7 ] || [ "${FLEET_CI_FULL:-}" = 1 ]; } && skipu=
+{ [ "${FLEET_CI_DOW:-$(date +%u)}" = 7 ] || [ "${FLEET_CI_FULL:-}" = 1 ] || [ -e "$FULL" ]; } && skipu=
+rm -f "$FULL"
 bash "$B/tests/run.sh" -j 8 --skills $skipu; rc=$?
+owner_data
 [ -x "$B/agent-verify" ] && { "$B/agent-verify" --recheck || echo "fleet-ci-daily: agent-verify --recheck failed rc $?"; }
 [ "$rc" -eq 0 ] && exit 0
 l1=$(qg_load1 "$LOADAVG")

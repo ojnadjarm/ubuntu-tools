@@ -1,1 +1,1 @@
-\bgit\b(?:\s+-C\s+\S+)*\s+(?:commit|push)\b
+\bgit\b(?:\s+-C\s+\S+)*\s+(?:push\b[^;&|\n]*(?:\s--force|\s-\w*f\w*\b|\s\+\S)|commit\b[^;&|\n]*\s--amend\b)

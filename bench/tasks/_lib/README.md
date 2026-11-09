@@ -5,7 +5,8 @@ Shared helpers for the C/S packs (PB05).
   `verdict`/`verdict_score`, `af` (a typed answer field, booleans included), `traj`/`tj`.
 - `traj.py` — reads a `stream-json` transcript and reports `tool_calls`, `bash_calls`,
   `guard_hits`, and whether a Python regex matched a Bash command that **succeeded**
-  (`matched_ok`, from the paired `tool_result.is_error`). Empty or missing stream ⇒
+  (`matched_ok`, from the paired `tool_result.is_error`). `hook_denied` counts calls a PreToolUse hook refused
+  (`is_error` and a body starting `PreToolUse:… hook error`), `matched_denied` those the regex matched. Empty or missing stream ⇒
   `"stream": false`, which the S checkers treat as "no transcript to score exploration".
 
 - `fixture.sh` — the PB11 throwaway `~/the-dark-eye` (`ensure`/`reset`/`path`/`remote`/

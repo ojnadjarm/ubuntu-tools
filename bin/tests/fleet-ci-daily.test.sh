@@ -186,6 +186,23 @@ ok "recheck red: the line counts it" yes "$(has '0/1 green (bin/tests/b.test.sh)
 ok "recheck red: nothing cleared" 0 "$(calls pc)"
 printf 'PASS 2/2 files\n' >"$LOG"
 out="$(recheck)"; rc=$?; ok "recheck green log: nothing red, rc 0" "yes 0" "$(has 'recheck: nothing red' "$out") $rc"
+# TSP-050: the quiet wait ends with pcbench-weekly still active → rc 75, no suite, no fix, no push; the next run is full.
+mkdir -p "$WORK/bench"; printf '#!/bin/sh\n# STUB\necho "$*" >>"%s/bench.calls"\n[ "$3" = pcbench-weekly.service ] && echo active || echo inactive\n' "$WORK" >"$WORK/bench/systemctl"; chmod +x "$WORK/bench/systemctl"
+PATH="$WORK/bench:$PATH" CI_UNITS=pcbench-weekly.service CI_BENCH_CAP=2 FAILS=0 run; ok "bench active: deferred rc 75" 75 $?
+ok "bench active: says so, no suite" "yes no" "$(has 'deferred: pcbench-weekly active' "$(cat "$LOG")") $(has 'files in' "$(cat "$LOG")")"
+ok "bench active: no fix attempt, no push, flag left" "0 0 yes" "$(calls agent-run) $(calls notify-owner) $([ -e "$H/agents/state/fleet-ci-full" ] && echo yes)"
+ok "selftest: no unit started or stopped" 0 "$(grep -cE '(^| )(start|stop|restart)( |$)' "$WORK/bench.calls")"
+ok "night after a deferral: full suite on a Wednesday, flag gone" "ran no" "$(day env FLEET_CI_DOW=3) $([ -e "$H/agents/state/fleet-ci-full" ] && echo yes || echo no)"
+
+# TSP-058: OWNER lines (run.sh, `# owner-data` tests) keep the night green; one high push per new message, none for a repeat.
+printf '#!/bin/sh\n# owner-data: fixture\necho "FAIL index over the cap: chars ${OD:-6473} > 6000"; exit 1\n' >"$B/tests/od.test.sh"
+rm -rf "$H/agents/state/fleet-ci"; FAILS=0 run; ok "owner-data: the night is green" 0 $?
+ok "owner-data: OWNER line in the log, no fix attempt" "1 0" "$(grep -c '^OWNER bin/tests/od.test.sh: ' "$LOG") $(calls agent-run)"
+ok "owner-data: one high push naming the file" "1 yes" "$(calls notify-owner) $(has '-p high -t fleet owner-data OWNER bin/tests/od.test.sh: FAIL index over the cap' "$(cat "$WORK/notify-owner.calls")")"
+FAILS=0 run; ok "owner-data: the same message the next night is no push" "0 0" "$? $(calls notify-owner)"
+OD=6500 FAILS=0 run; ok "owner-data: a changed message is one push" "0 1" "$? $(calls notify-owner)"
+rm -f "$B/tests/od.test.sh"
+
 rm -f "$L"/*.txt; out="$(recheck)"; ok "recheck no log: rc 0" 0 $?
 ok "recheck no log: nothing red, nothing cleared" "yes 0" "$(has 'recheck: nothing red' "$out") $(calls pc)"
 

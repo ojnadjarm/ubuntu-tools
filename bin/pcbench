@@ -333,7 +333,7 @@ def parse_stream(path, verbs=None, table=None):
     verbs = verbs if verbs is not None else arm_verbs("new")
     tools, bash_cmds = Counter(), []
     pc_verbs, raw_detail, disturb_hits = Counter(), Counter(), []
-    shots = kb_whole = applies = guard_hits = rollback_lines = is_errors = 0
+    shots = kb_whole = applies = guard_hits = rollback_lines = is_errors = hook_denied = 0
     result = {}
     for line in open(path, errors="replace"):
         line = line.strip()
@@ -385,6 +385,8 @@ def parse_stream(path, verbs=None, table=None):
                     is_errors += 1
                 body = b.get("content")
                 body = body if isinstance(body, str) else json.dumps(body)
+                if b.get("is_error") and re.match(r"PreToolUse:.*hook error", body):
+                    hook_denied += 1
                 if c["guard_marker"] in body or re.search(r"exit code 3\b", body):
                     guard_hits += 1
                 rollback_lines += body.count(c["ledger_marker"])
@@ -416,6 +418,7 @@ def parse_stream(path, verbs=None, table=None):
         "rollback_lines": rollback_lines,
         "is_errors": is_errors,
         "permission_denials": len(result.get("permission_denials") or []),
+        "hook_denied": hook_denied,
         "disturb": bool(disturb_hits),
         "disturb_detail": disturb_hits,
         "budget_hit": bool(re.search(r"budget|max_budget", stop, re.I)),
@@ -474,6 +477,7 @@ def needs_met(need, owner_go=None):
 
 
 AWAY_IDLE_S = float(os.environ.get("PCBENCH_AWAY_IDLE_S", 1800))
+CI_UNITS = ["fleet-ci-daily.service", "ailearning-ci-daily.service", "ailearning-ci-weekly.service"]
 
 
 def owner_presence():
@@ -508,6 +512,10 @@ def owner_presence():
     seats = v("desktop", "seat_logins")
     if seats.isdigit() and int(seats) > 0:
         reasons.append("%s interactive login(s) on the seat" % seats)
+    units = os.environ["CI_UNITS"].split() if "CI_UNITS" in os.environ else CI_UNITS
+    for u in units:
+        if u != "pcbench-weekly.service" and sh("systemctl --user is-active %s 2>/dev/null" % u)[1] in ("active", "activating"):
+            reasons.append("ci unit active: " + u)
     return bool(reasons), reasons
 
 
@@ -668,7 +676,7 @@ def run_trial(task, arm, i, run_dir, run_id, model, dry_run, verbose, owner_go=N
                 ("wall_s", "api_s", "turns", "tool_calls", "bash_calls", "pc_calls", "pc_verbs",
                  "screenshots", "raw_recipes", "raw_recipes_detail", "kb_whole", "guard_hits",
                  "applies", "rollback_lines", "is_errors", "tokens", "cost_usd", "answer",
-                 "tool_histogram", "permission_denials")})
+                 "tool_histogram", "permission_denials", "hook_denied")})
     row["ledger_lines"] = int(after.get("ledger_lines") or 0) - int(before.get("ledger_lines") or 0)
     row["undo_ok"] = verdict.get("undo_ok")
     row["pass"] = verdict["pass"]
@@ -759,6 +767,7 @@ def arm_stats(rows):
         "kb_whole": round(sum(r.get("kb_whole", 0) for r in live) / ntasks, 2),
         "guard": sum(r.get("guard_hits", 0) for r in live),
         "is_errors": sum(r.get("is_errors", 0) for r in live),
+        "hook_denied": sum(r.get("hook_denied", 0) for r in live),
         "residue": sum(r.get("residue", 0) for r in live),
         "cost": round(sum(r.get("cost_usd", 0) for r in live) / ntasks, 2),
         "per_task": {t: round(sum(x["pass"] for x in per_task[t]) / len(per_task[t]), 2)
@@ -862,7 +871,7 @@ def write_baseline(text, rows, stats, runs):
     a = stats.get("new") or list(stats.values())[0]
     digest = {"ts": now(), "runs": [os.path.basename(r.rstrip("/")) for r in runs],
               "trials": sum(s["trials"] for s in stats.values()),
-              "arms": {k: {m: v[m] for m in ("tasks", "pass", "cup", "passN", "residue", "cost")}
+              "arms": {k: {m: v[m] for m in ("tasks", "pass", "cup", "passN", "residue", "cost", "hook_denied")}
                        for k, v in stats.items()},
               "regressions": sorted(t for t, v in a["passN_task"].items() if not v)}
     open(os.path.join(BENCH, "LAST.json"), "w").write(json.dumps(digest, indent=1) + "\n")

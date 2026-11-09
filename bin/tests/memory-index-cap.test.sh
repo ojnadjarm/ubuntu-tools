@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # host-only: checks this box's real ~/.claude memory index
+# owner-data: the index is the owner's to trim
 # MEMORY.md index cap (T375): ≤ 60 lines, ≤ 6000 chars, every memory file linked, every link resolves.
 set -uo pipefail
 MAX_LINES=60 MAX_CHARS=6000

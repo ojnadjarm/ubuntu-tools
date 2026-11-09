@@ -14,13 +14,13 @@
   "ledger_marker": "rollback: pc undo",
 
   "disturb": [
-    "\\beye +speak\\b",
-    "\\beye +tv +on\\b",
+    "(?:^|[|;&(]\\s*|\\bsudo\\s+|\\btimeout \\S+\\s+)eye +speak\\b",
+    "(?:^|[|;&(]\\s*|\\bsudo\\s+|\\btimeout \\S+\\s+)eye +tv +on\\b",
     "(?:^|[|;&(]\\s*|\\bsudo\\s+|\\btimeout \\S+\\s+)pc +(?:open|notify|type|key|click|click-text|a11y-click|drag|scroll)\\b",
-    "\\bwpctl +set-volume\\b",
-    "\\bpactl +set-sink-volume\\b",
-    "\\bnotify-send\\b",
-    "\\bnotify-owner\\b"
+    "(?:^|[|;&(]\\s*|\\bsudo\\s+|\\btimeout \\S+\\s+)wpctl +set-volume\\b",
+    "(?:^|[|;&(]\\s*|\\bsudo\\s+|\\btimeout \\S+\\s+)pactl +set-sink-volume\\b",
+    "(?:^|[|;&(]\\s*|\\bsudo\\s+|\\btimeout \\S+\\s+)notify-send\\b",
+    "(?:^|[|;&(]\\s*|\\bsudo\\s+|\\btimeout \\S+\\s+)notify-owner\\b"
   ],
 
   "_raw_recipes_doc": "SPIKE finding 6: the key metric is a raw recipe used WHERE THE ARM HAD A pc VERB. Each entry names the pc verb that replaces it; the count only rises when that verb exists in the arm being scored, so the old arm is never penalised for lacking it.",

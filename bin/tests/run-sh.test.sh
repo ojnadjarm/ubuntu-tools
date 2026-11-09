@@ -389,5 +389,15 @@ RUN_TESTS_ROOT="$R" bash "$RUN" >/dev/null 2>&1
 is  'fails: 21 reds -> 20 records kept, the oldest seed dropped' "$(grep -c '^## ' "$F") $(grep -c 'FAIL seed 01$' "$F")" '20 0'
 is  'fails: a file untouched for > 30 days is deleted' "$(ls "$R/state/test-fails")" bin__tests__red.test.sh.txt
 
+# TSP-058: a red `# owner-data` file prints OWNER lines, counts as ok and leaves rc alone.
+O=$(mktemp -d "$W/od.XXXX"); mkdir -p "$O/bin/tests"; printf 'echo fine\n' >"$O/bin/tests/pass.test.sh"
+printf '#!/bin/sh\n# owner-data: fixture\necho "FAIL index over the cap: chars 6473 > 6000"; exit 1\n' >"$O/bin/tests/od.test.sh"
+out=$(RUN_TESTS_ROOT="$O" bash "$RUN" 2>&1); rc=$?
+is  'owner-data: rc 0' "$rc" 0
+has 'owner-data: OWNER line names file and message' "$out" '^OWNER bin/tests/od\.test\.sh: FAIL index over the cap: chars 6473 > 6000$'
+has 'owner-data: summary counts it apart' "$(tail -1 <<<"$out")" '^PASS 2/2 files in [0-9]+ s, owner-data 1$'
+printf 'exit 1\n' >"$O/bin/tests/red.test.sh"; out=$(RUN_TESTS_ROOT="$O" bash "$RUN" 2>&1); rc=$?
+is  'owner-data: a real red beside it still fails the run' "$rc $(tail -1 <<<"$out" | grep -cE '^FAIL 2/3 files in [0-9]+ s, owner-data 1$')" '1 1'
+
 [ $fail = 0 ] && echo "run-sh.test.sh: all green" || echo "run-sh.test.sh: FAILURES"
 exit $fail

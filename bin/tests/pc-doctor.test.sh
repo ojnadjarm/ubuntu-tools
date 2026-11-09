@@ -560,6 +560,12 @@ case "$(dt "$(row ci-run fleet-ci)")" in '2026-10-10.txt: PASS 9/9; cpu 1400.0 s
 cinights "$WORK/ci" 1400 1; cidrun ci-two
 is 'a jump with 2 nights of data is no WARN' "$(row ci-two fleet-ci | cut -f1)" OK
 
+# TSP-058: OWNER lines in the newest log make the fleet-ci row a WARN that names the owner-data files.
+cinights "$WORK/ci" 1010 6; printf 'OWNER bin/tests/memory-index-cap.test.sh: FAIL chars 6473 > 6000\nPASS 9/9 files in 9 s, owner-data 1\n' >>"$WORK/ci/2026-10-09.txt"; cidrun ci-owner
+r=$(row ci-owner fleet-ci)
+is 'owner-data lines are a WARN fleet-ci row' "$(st "$r")" WARN
+case "$(dt "$r")" in *'; owner-data: memory-index-cap') ok 'the WARN names the owner-data file';; *) nok 'the WARN names the owner-data file' "$r";; esac
+
 # --- 13. a green recheck heals the night: the verdict is the last summary or recheck line (T897) ----
 recheck() { cinights "$WORK/ci" 1010 6; printf 'FAIL 8/9 files in 9 s\n✖ fleet ci red: a.test.sh\n' >>"$WORK/ci/2026-10-09.txt"; printf "$1" >>"$WORK/ci/2026-10-09.txt"; cidrun "$2"; }
 recheck 'recheck 11:27:28: 1/1 green (a.test.sh)\n' rc-green

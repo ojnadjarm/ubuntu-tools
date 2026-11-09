@@ -3,14 +3,14 @@
 set -uo pipefail
 WINDOW="${CI_WINDOW:-00:50-01:50}"
 LOADAVG="${CI_LOADAVG:-/proc/loadavg}"
-BELOW="${CI_QUIET_BELOW:-4}"; CAP="${CI_QUIET_CAP:-1800}"; EVERY="${CI_QUIET_EVERY:-15}"
+BELOW="${CI_QUIET_BELOW:-4}"; CAP="${CI_QUIET_CAP:-1800}"; EVERY="${CI_QUIET_EVERY:-15}"; BENCH_CAP="${CI_BENCH_CAP:-5400}"
 NEED="${CI_RUN_NEED:-2700}"   # with CI_DEADLINE (epoch, from ci-autofix): every wait leaves NEED s for the run after it
-export CI_UNITS="${CI_UNITS-fleet-ci-daily.service ailearning-ci-daily.service}" CI_CGROUP="${CI_CGROUP:-/proc/self/cgroup}"
+export CI_UNITS="${CI_UNITS-fleet-ci-daily.service ailearning-ci-daily.service pcbench-weekly.service}" CI_CGROUP="${CI_CGROUP:-/proc/self/cgroup}"
 
 usage() {
   cat <<EOF
 usage: ci-window            exit 0 outside the CI window ($WINDOW), 1 inside it: heavy browser/test runs wait (\`ci-window && npm test\`)
-       ci-window --quiet    wait (wait-for, cap ${CAP} s) until the 1-min load is below $BELOW; prints the load; exit 0 quiet, 1 cap reached
+       ci-window --quiet    wait (wait-for, cap ${CAP} s; ${BENCH_CAP} s while pcbench-weekly runs) until the 1-min load is below $BELOW and no CI unit or bench is active; prints the load; exit 0 quiet, 1 cap reached
                             with CI_DEADLINE set, the cap shrinks to the shared budget: CI_DEADLINE - now - $NEED s (CI_RUN_NEED)
 EOF
 }
@@ -30,14 +30,14 @@ export -f busy_unit
 case "${1:-}" in
   -h|--help) usage; exit 0;;
   --quiet)
+    u0=$(busy_unit); [ "$u0" = pcbench-weekly.service ] && CAP=$BENCH_CAP
     t0=$(date +%s); why="cap $CAP s"
     if [ -n "${CI_DEADLINE:-}" ]; then
       room=$(( CI_DEADLINE - t0 - NEED ))
       [ "$room" -gt 0 ] || { echo "ci-window: no wait budget left ($(( CI_DEADLINE - t0 )) s to the deadline, a run needs $NEED s); going on"; exit 1; }
       [ "$room" -lt "$CAP" ] && { CAP=$room; why="cap $CAP s, shared budget: $(( CI_DEADLINE - t0 )) s to the deadline"; }
     fi
-    u0=$(busy_unit)
-    timeout "$CAP" "$(dirname "$0")/wait-for" --label "ci-window: 1-min load < $BELOW, no CI unit active" --every "$EVERY" \
+    timeout "$CAP" "$(dirname "$0")/wait-for" --label "ci-window: 1-min load < $BELOW, no CI unit active${u0:+ ($u0 active)}" --every "$EVERY" \
       --until "awk -v b=$BELOW '{exit !(\$1 < b)}' '$LOADAVG' && ! busy_unit" >/dev/null; rc=$?
     w=$(( $(date +%s) - t0 ))
     if [ "$rc" -eq 0 ]; then echo "ci-window: 1-min load $(load1) < $BELOW after $w s${u0:+, $u0 done}"; exit 0; fi

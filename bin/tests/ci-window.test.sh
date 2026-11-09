@@ -56,4 +56,12 @@ out="$(CI_QUIET_CAP=20 "$B/ci-window" --quiet)"; ok "unit goes inactive: --quiet
 ok "unit goes inactive: says what it waited for" yes "$(case "$out" in *"load 1.20 < 4 after "[0-9]*" s, ailearning-ci-daily.service done") echo yes;; *) echo "no: $out";; esac)"
 CI_WINDOW_NOW=02:15 "$B/ci-window" >/dev/null; ok "unit inactive: rc 0" 0 $?
 
+# TSP-050: the Sunday bench (pcbench-weekly.service) is busy like a CI unit, with its own longer cap (CI_BENCH_CAP).
+echo pcbench-weekly.service >"$WORK/active"
+out="$(CI_WINDOW_NOW=02:15 "$B/ci-window")"; ok "bench active: rc 1, named" "1 ci-window: pcbench-weekly.service active; start heavy runs after it" "$? $out"
+out="$(CI_QUIET_CAP=20 CI_BENCH_CAP=2 "$B/ci-window" --quiet)"; ok "bench past its cap: rc 1" 1 $?
+ok "bench past its cap: names the unit and the bench cap" yes "$(case "$out" in *"pcbench-weekly.service still active after "*"cap 2 s"*) echo yes;; *) echo "no: $out";; esac)"
+: >"$WORK/active"
+out="$(CI_WINDOW_NOW=02:15 "$B/ci-window")"; ok "bench inactive: rc 0" 0 $?
+
 exit $(( bad > 0 ))

@@ -422,9 +422,9 @@ fleet_cpu() {
       if (bf != "") { x = cur[bf]; sub(/.*\//, "", bf); sub(/\.test\.[a-z]+$/, "", bf); printf ", top %s %.1f vs %.1f", bf, x, bm } }' "$hist" 2>/dev/null
   echo; return 2
 }
-# The last nightly fleet suite (T459): its verdict (last PASS/FAIL or `recheck T: N/M green` line, green at N = M) and CPU s; red, cut short, older than 48 h or a CPU jump is a WARN.
+# The last nightly fleet suite (T459): its verdict (last PASS/FAIL or `recheck T: N/M green` line, green at N = M) and CPU s; red, cut short, older than 48 h, a CPU jump or an `OWNER` line (owner-data test) is a WARN.
 fleet_ci() {
-  local d=${PC_FLEET_CI_DIR:-$HOME/agents/log/fleet-ci} f last now cpu crc
+  local d=${PC_FLEET_CI_DIR:-$HOME/agents/log/fleet-ci} f last now cpu crc own
   f=$(ls "$d"/*.txt 2>/dev/null | tail -1)
   [ -n "$f" ] || { echo "no fleet ci run yet in ${d/#$HOME/\~}"; return 2; }
   last=$(awk '/^(PASS|FAIL) [0-9]+\/[0-9]+ files/ { s = v = $0 }
@@ -433,7 +433,9 @@ fleet_ci() {
   printf -v now '%(%s)T' -1
   cpu=$(fleet_cpu "$d"); crc=$?
   [ "$crc" = 2 ] && [ "${last%% *}" != healed ] && last=$(cut -d' ' -f1-2 <<<"$last")
-  echo "${f##*/}: ${last:-no summary line (running or cut short)}${cpu:+; $cpu}"
+  own=$(sed -nE 's/^OWNER [^ ]*\/([^ /]+)\.test\.[a-z]+: .*/\1/p' "$f" | sort -u | paste -sd ' ')
+  echo "${f##*/}: ${last:-no summary line (running or cut short)}${cpu:+; $cpu}${own:+; owner-data: $own}"
+  [ -z "$own" ] || return 2
   case ${last%% *} in PASS|healed) ;; *) return 2;; esac
   [ $(( now - $(stat -c %Y "$f") )) -le 172800 ] && [ "$crc" != 2 ] || return 2
 }

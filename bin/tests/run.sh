@@ -4,6 +4,7 @@
 #        --portable (or FLEET_FRESH=1) prints `SKIP host-only <file>` for files listed in host-only.txt or with a `# host-only` line in their first 5 lines; they count as ok.
 #        Every file gets lib/sudo-shim as `sudo` (logged, refused) unless a `# live-sudo` line sits in its first 5 lines.
 #        --skills (implied by --only 'skills/...') adds <skill>/tests/*.test.* as skills/<skill>/..., docker shimmed.
+#        A red file with a `# owner-data` line in its first 5 lines prints `OWNER <file>: <failure line>` (up to 3), counts as ok and adds `, owner-data N` to the summary.
 #        Files listed in quiet-gated.txt run after the pool drains, one at a time (`serial tail: N quiet-gated`).
 #        --skip-unchanged prints `SKIP unchanged <file> (green <date>, <cpu> CPU s)`, counted ok, for a skill test whose last history row is green with >= 20 CPU s and none of its inputs is newer:
 #        the test file, the skill entries it names (scripts, templates/<x>, top-level files and dirs; named scripts are followed), fixtures
@@ -232,6 +233,9 @@ run_one() {
     "$logs/${rel//\//__}.times" 2>/dev/null)
   cpu=$(awk -v c="${cpu:-0}" 'BEGIN{printf "%.1f", c}')
   if [[ -e $logs/${rel//\//__}.oom ]]; then echo "FAIL $rel $s oom"
+  elif ((rc != 0 && rc != 124 && rc != 137)) && head -n 5 "$path" | grep -qE '^(#|//) owner-data'; then
+    { grep -E '\bFAIL|Error|Traceback' "$logs/${rel//\//__}.log" | head -n 3 | grep . || echo "rc $rc"; } | sed "s|^|OWNER $rel: |"
+    touch "$logs/${rel//\//__}.ok"; echo "$rel" >>"$logs/ownerdata"
   elif ((rc == 0)); then echo "ok $rel $s"; touch "$logs/${rel//\//__}.ok"
   elif ((rc == 124 || rc == 137)); then echo "FAIL $rel $s timeout"
   else echo "FAIL $rel $s"; fi
@@ -371,6 +375,7 @@ save_fail() {
 }
 total=${#all[@]}
 ok=$(find "$logs" -name '*.ok' | wc -l)
+owner=$(cat "$logs/ownerdata" 2>/dev/null | wc -l)
 for f in "${all[@]}"; do
   [[ -e "$logs/${f//\//__}.ok" ]] && continue
   echo "--- $f (failure lines, then the last 8)"
@@ -402,5 +407,6 @@ n=$(( $(residue) - tmp_before )); echo "tmp residue: $(( n > 0 ? n : 0 )) dirs"
 [[ -n ${cpu_line:-} ]] && echo "$cpu_line"
 secs=$(( $(date +%s) - t0 ))
 skip_note=; ((skipped)) && skip_note=", skipped $skipped, saved ~$saved CPU s"
+((owner)) && skip_note+=", owner-data $owner"
 if ((ok == total && total > 0 && led_n <= 0 && led_c == 0)); then echo "PASS $ok/$total files in $secs s$skip_note"; exit 0; fi
 echo "FAIL $ok/$total files in $secs s$skip_note"; exit 1

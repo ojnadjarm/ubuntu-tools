@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Count tool calls in a stream-json transcript and whether a regex matched a command that succeeded."""
+"""Count tool calls in a stream-json transcript and whether a regex matched a command that succeeded or a hook denied."""
 import json, re, sys
 
 path = sys.argv[1]
 pat = re.compile(sys.argv[2], re.I) if len(sys.argv) > 2 and sys.argv[2] else None
 out = {"stream": False, "tool_calls": 0, "bash_calls": 0, "matched": 0, "matched_ok": 0,
-       "guard_hits": 0, "errors": 0}
+       "matched_denied": 0, "hook_denied": 0, "guard_hits": 0, "errors": 0}
 try:
     recs = [json.loads(l) for l in open(path) if l.strip()]
 except Exception:
@@ -36,6 +36,8 @@ for r in recs:
             out["errors"] += 1
         if "pc: refused" in body:
             out["guard_hits"] += 1
+        denied = err and bool(re.match(r"PreToolUse:.*hook error", body))
+        out["hook_denied"] += denied
         if b.get("name") != "Bash":
             continue
         cmd = b.get("input", {}).get("command", "")
@@ -44,4 +46,5 @@ for r in recs:
             out["matched"] += 1
             if not err:
                 out["matched_ok"] += 1
+            out["matched_denied"] += denied
 print(json.dumps(out))
