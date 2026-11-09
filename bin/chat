@@ -1,17 +1,30 @@
 #!/usr/bin/env python3
-"""chat — the fleet chat for agents: post to a channel or a seat, read channels; the seat is $CHAT_SEAT."""
+"""chat — the fleet chat for agents: post, read, ask and answer harness questions; the seat is $CHAT_SEAT."""
 import argparse
 import os
+import re
+import shlex
+import subprocess
 import sys
+import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
+BIN = os.path.dirname(os.path.realpath(__file__))
+LIB = os.path.join(os.path.dirname(BIN), "lib")
+sys.path.insert(0, LIB)
 import chat_dispatch  # noqa: E402
 import chat_guard  # noqa: E402
+import chat_route  # noqa: E402
 import chat_store  # noqa: E402
 import org  # noqa: E402
 from chat_wake import HEADER  # noqa: E402
 
 HELD = 3
+LOOK_FIRST = 4
+NO_ANSWER = 5
+GUIDE_HITS = 3
+REPEAT_DAYS = 7
+SEEN = re.compile(r"\n\(guides seen: [^)\n]*\)$")
+ALL = 10 ** 6
 
 
 def seat_of(seats):
@@ -92,6 +105,108 @@ def read(a, seat, seats):
     return 0
 
 
+def send(msg, seats):
+    """Guard, store, print the id and wake the addressed seats; None when the guard holds it."""
+    ok, rule = chat_guard.check(msg["text"], msg["from"])
+    if not ok:
+        chat_store.audit({"held": True, "seat": msg["from"], "ch": msg["ch"], "rule": rule})
+        print(f"chat: held ({rule}): nothing was posted", file=sys.stderr)
+        return None
+    mid = chat_store.post(msg)
+    print(mid)
+    chat_dispatch.dispatch({"to": [], "re": None, "hop": 0, **msg, "id": mid}, seats)
+    return mid
+
+
+def words(text):
+    """A question as lowercase words, its guides-seen line dropped, for the repeat lookup."""
+    return " ".join(re.findall(r"[a-z0-9]+", SEEN.sub("", text).lower()))
+
+
+def guide_hits(question):
+    """[(slug, head line, summary line)] of the top `guide` hits for the question."""
+    out = subprocess.run([os.path.join(BIN, "guide"), *question.split()], capture_output=True, text=True,
+                         timeout=60).stdout.splitlines()
+    hits = []
+    for head, body in zip(out[0::2], out[1::2]):
+        path = head.split()[2]
+        hits.append((os.path.basename(path)[:-3] if path.endswith(".md") else os.path.basename(path), head, body))
+    return hits[:GUIDE_HITS]
+
+
+def asked_before(question):
+    """(ask, answer or None) of the newest same question in #harness within REPEAT_DAYS, answered ones first."""
+    since = int(time.time() * 1000) - REPEAT_DAYS * 86400 * 1000
+    rows = chat_store.read("harness", after=since, limit=ALL)
+    want = words(question)
+    asks = [r for r in rows if r["kind"] == "ask" and words(r["text"]) == want]
+    answers = {r["re"]: r for r in rows if r["kind"] == "answer"}
+    for q in reversed(asks):
+        if q["id"] in answers:
+            return q, answers[q["id"]]
+    return (asks[-1], None) if asks else (None, None)
+
+
+def answer_of(mid):
+    """The newest answer to question `mid`, or None."""
+    got = [r for r in chat_store.read("harness", after=mid, limit=ALL) if r["kind"] == "answer" and r["re"] == mid]
+    return got[-1] if got else None
+
+
+def wait_answer(mid, seconds):
+    """Block on `wait-for` until question `mid` has an answer, at most `seconds`; the answer or None."""
+    cond = (f"{shlex.quote(sys.executable)} -c " + shlex.quote(
+        f"import sys; sys.path.insert(0, {LIB!r}); import chat_store; "
+        f"sys.exit(not any(r['kind'] == 'answer' and r['re'] == {mid} "
+        f"for r in chat_store.read('harness', after={mid}, limit={ALL})))"))
+    subprocess.run(["timeout", str(seconds), os.path.join(BIN, "wait-for"), "--label", f"chat-ask-{mid}",
+                    "--every", "2", "--until", cond], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return answer_of(mid)
+
+
+def ask(a, seat, seats):
+    question = sys.stdin.read().rstrip("\n") if a.question == "-" else a.question
+    q, ans = asked_before(question)
+    if ans:
+        print(f"chat: asked before as {q['id']}; the answer:")
+        show([ans], with_ch=False)
+        return 0
+    if q:
+        mid = q["id"]
+        print(f"chat: asked already as {mid} by {q['from']}, not answered yet; nothing was posted")
+    else:
+        hits = guide_hits(question)
+        if hits and not a.post:
+            for _, head, body in hits:
+                print(f"{head}\n{body}")
+            print("chat: read these first; nothing was posted. None answers it: chat ask --post ...", file=sys.stderr)
+            return LOOK_FIRST
+        seen = f"\n(guides seen: {', '.join(h[0] for h in hits)})" if hits else ""
+        mid = send({"ch": "harness", "from": seat, "to": [], "kind": "ask", "text": question + seen, "hop": 0}, seats)
+        if mid is None:
+            return HELD
+    if not a.wait:
+        return 0
+    ans = wait_answer(mid, a.wait)
+    if not ans:
+        print(f"chat: no answer in {a.wait} s; it arrives as a new inbox request", file=sys.stderr)
+        return NO_ANSWER
+    show([ans], with_ch=False)
+    return 0
+
+
+def answer(a, seat, seats):
+    got = chat_store.read("harness", after=a.id - 1, limit=1)
+    if not got or got[0]["id"] != a.id or got[0]["kind"] != "ask":
+        raise ValueError(f"no question {a.id} in #harness")
+    q = got[0]
+    text = sys.stdin.read().rstrip("\n") if a.text == "-" else a.text
+    to = [] if q["from"] == seat else [q["from"]]
+    mid = send({"ch": "harness", "from": seat, "to": to, "kind": "answer", "text": text, "re": q["id"],
+                "hop": chat_route.next_hop(seat, q)}, seats)
+    return HELD if mid is None else 0
+
+
 def main():
     p = argparse.ArgumentParser(prog="chat", description=__doc__.split("—", 1)[1].strip())
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -101,10 +216,18 @@ def main():
     s = sub.add_parser("read", help="no channel: your channels with unread counts; else the messages, marked read")
     s.add_argument("ch", nargs="?", help="a channel or @<seat>")
     s.add_argument("--unread", action="store_true", help="only messages since you last read, not your own")
+    s = sub.add_parser("ask", help="ask the harness: a 7-day repeat prints its answer; guide hits print first "
+                                   "(exit 4, nothing posted); else posts to #harness and prints the id")
+    s.add_argument("question", help="the question, or - to read it from stdin")
+    s.add_argument("--post", action="store_true", help="post even though guide hits exist (none answered it)")
+    s.add_argument("--wait", type=int, metavar="S", help="block up to S seconds on the answer (exit 5: none came)")
+    s = sub.add_parser("answer", help="answer question <id> in #harness; wakes the seat that asked")
+    s.add_argument("id", type=int, help="the question's id")
+    s.add_argument("text", help="the answer (max 2000 characters), or - to read it from stdin")
     a = p.parse_args()
     try:
         seats = org.seats()
-        return {"post": post, "read": read}[a.cmd](a, seat_of(seats), seats)
+        return {"post": post, "read": read, "ask": ask, "answer": answer}[a.cmd](a, seat_of(seats), seats)
     except ValueError as e:
         print(f"chat: {e}", file=sys.stderr)
         return 2
