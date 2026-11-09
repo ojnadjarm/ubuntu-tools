@@ -77,14 +77,31 @@ def outbox_files(app, env):
         yield from sorted(glob.glob(os.path.join(glob.escape(po_home(env)), name, 'outbox', 'discord', '*.md')))
 
 
+def media_roots(app, env, name):
+    """Where agent `name`'s reply images may live: its own folder and the clones of the projects it manages."""
+    clones = [p['clone'] for p in app.registry.projects.values() if p.get('po') == name and p.get('clone')]
+    return [os.path.join(po_home(env), name)] + [home_path(env, c) for c in clones]
+
+
+def home_path(env, path):
+    return os.path.join(env.get('HOME', os.path.expanduser('~')), path[2:]) if path.startswith('~/') else path
+
+
 async def relay(app, env):
-    """Post each PO reply (`thread: <id>` line, then the text) with the liaison's own post; move it to sent/ or refused/."""
+    """Post each PO reply (`thread: <id>` line, `image: <path>` lines, then the text) with the liaison's own post; move it
+    to sent/ or refused/. Images must sit in the agent's own folder or its project clone."""
     n = 0
     for f in outbox_files(app, env):
         with open(f) as fh:
             head, _, text = fh.read().partition('\n')
+        images = []
+        while text.startswith('image:'):
+            line, _, text = text.partition('\n')
+            images += ['--image', home_path(env, line.removeprefix('image:').strip())]
+        app.media_roots = media_roots(app, env, os.path.basename(os.path.dirname(os.path.dirname(os.path.dirname(f)))))
         tid = head.removeprefix('thread:').strip()
-        ok = head.startswith('thread:') and tid.isdigit() and text.strip() and await app.post([tid, text.strip()]) == 0
+        ok = (head.startswith('thread:') and tid.isdigit() and text.strip()
+              and await app.post([tid, *images, text.strip()]) == 0)
         dest = os.path.join(os.path.dirname(f), 'sent' if ok else 'refused')
         os.makedirs(dest, exist_ok=True)
         shutil.move(f, os.path.join(dest, os.path.basename(f)))

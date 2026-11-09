@@ -21,7 +21,9 @@ your answer with `chat post @owner "<text>"` (short, no paths, hosts or secrets;
   most MAX_WORKERS (agent.env). Wait for every worker's notification before you finish.
 - A decision of the owner (owner="true" on Discord, or relayed by your router): one dated line in your ledger, his words.
 - `channel: discord` requests: write the reply (the project's language, short, no paths, hosts or machine details) to
-  `outbox/discord/<utc>-<thread>.md`, first line `thread: <thread>`, then the text; the liaison posts it.
+  `outbox/discord/<utc>-<thread>.md`, first line `thread: <thread>`, then one `image: <path>` line per image or video you made (PNG/JPEG/GIF/WebP/MP4,
+  <= 25 MB each, at most 10, only from your own folder or your project clone, else the whole reply is refused), then the
+  text; the liaison posts it with the files attached.
 - When done with a request: append `outcome: <one line>` to its file and move it to `done/`.
 
 ## End of every run

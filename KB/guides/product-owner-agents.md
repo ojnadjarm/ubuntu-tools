@@ -1,7 +1,7 @@
 # Product-owner agents: one PO per busy project (po-ask, po-run, po-status, po-push, deploy-lock)
 
-Ticket: T1412 (plan T1410), T1515 P31 (managers), P32 (images) · Last verified: 2026-11-10 by `po.test.sh` (69 ok) and
-`discord-liaison/tests` (76, `test_managers.py`); before: 2026-10-27 by `bin/tests/po.test.sh` (52 ok), pulse test (30 ok), liaison suite
+Ticket: T1412 (plan T1410), T1515 P31 (managers), P32 (images), P36 (reply images) · Last verified: 2026-11-10 by `po.test.sh` (71 ok) and
+`discord-liaison/tests` (77, `test_managers.py`); before: 2026-10-27 by `bin/tests/po.test.sh` (52 ok), pulse test (30 ok), liaison suite
 (40 tests) and two live po-mooblox runs (dry run 54 s, budget stop 18 s)
 
 ## When to use
@@ -26,7 +26,9 @@ orchestrator relays with `po-ask`. Not for fleet tooling, work repos (Vass) or r
   `~/agent-work/decisions/<id>.md`. The entry's `po` names its manager; top-level `"router": "po-discord"` turns on code
   routing: `tick` runs `Registry.dispatch` before any LLM run and `po-ask`s each message to its manager; a thread with no
   project or a message naming a 2nd project goes to the router; #general, a project without `po` and a failed `po-ask`
-  stay with the liaison triage (fallback, jobs). `tick` first posts every `outbox/discord/*.md` of managers and router.
+  stay with the liaison triage (fallback, jobs). `tick` first posts every `outbox/discord/*.md` of managers and router:
+  `thread: <id>`, then `image: <path>` lines (P36: <= 10, PNG/JPEG/GIF/WebP/MP4 <= 25 MB, only from the agent's own
+  folder or its project clone, else the file goes to `refused/` unposted), then the text.
 - Managers report up, not out: po-run gives them no `CHAT_SEAT` (Q5) and files each new `ESCALATE:` line of their
   REPORT.md to the parent (`po-ask discord --from manager`, counted in `state/escalated`). po-discord holds no project
   context: it maps/forwards (`po-ask <id> --from router`) and writes its own `ESCALATE:` for the orchestrator.

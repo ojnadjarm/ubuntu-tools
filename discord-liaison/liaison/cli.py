@@ -43,6 +43,7 @@ IMAGE_MAGIC = (b'\x89PNG\r\n\x1a\n', b'\xff\xd8\xff')
 SEEN_MAGIC = IMAGE_MAGIC + (b'GIF87a', b'GIF89a')
 MAX_IMAGE = 10 * 1024 * 1024
 MAX_MEDIA = 25 * 1024 * 1024
+MAX_FILES = 10
 SHEET_FRAMES, SHEET_PX = 12, 2048
 
 
@@ -108,6 +109,7 @@ class App:
         self.work = os.path.join(self.home, 'state', 'work')
         self.cdn = tuple(env.get('LIAISON_CDN_PREFIXES', ' '.join(CDN)).split())
         self.jobs = JobQueue(os.path.join(self.home, 'state', 'jobs'))
+        self.media_roots = ()
         self.job_cap = int(env.get('LIAISON_JOBS_MAX', '3'))
         self.nudge_file = env.get('LIAISON_NUDGE', os.path.join(os.path.dirname(ME), 'discord-bot', 'state', 'liaison.nudge'))
 
@@ -330,7 +332,8 @@ class App:
         return bool(self.forum) and ch.get('parent_id') == self.forum
 
     def image_ok(self, path):
-        """A PNG/JPEG made by `art` (<= 10 MB), or a PNG/JPEG/GIF/WebP/MP4 inside a job's folder (<= 25 MB)."""
+        """A PNG/JPEG made by `art` (<= 10 MB), or a PNG/JPEG/GIF/WebP/MP4 inside a job's folder or a `media_roots`
+        folder (<= 25 MB)."""
         real = os.path.realpath(path)
         if not os.path.isfile(real):
             return False
@@ -341,13 +344,19 @@ class App:
             return head.startswith(IMAGE_MAGIC) and size <= MAX_IMAGE
         rel = os.path.relpath(real, os.path.realpath(self.jobs.dir))
         media = head.startswith(SEEN_MAGIC) or (head[:4] == b'RIFF' and head[8:12] == b'WEBP') or head[4:8] == b'ftyp'
+        if any(real.startswith(os.path.realpath(r) + os.sep) for r in self.media_roots):
+            return media and size <= MAX_MEDIA
         return not rel.startswith('..') and os.sep in rel and media and size <= MAX_MEDIA
 
     async def post(self, args):
-        opts = {'--image': '', '--reply': ''}
-        while args[1:2] and args[1] in opts and len(args) > 2:
-            opts[args[1]], args = args[2], args[:1] + args[3:]
-        image, reply = opts['--image'], opts['--reply']
+        images, reply = [], ''
+        while args[1:2] and args[1] in ('--image', '--reply') and len(args) > 2:
+            if args[1] == '--image':
+                images.append(args[2])
+            else:
+                reply = args[2]
+            args = args[:1] + args[3:]
+        image = images[0] if images else ''
         if len(args) < 2:
             print(USAGE)
             return 2
@@ -363,13 +372,14 @@ class App:
         if await self.stale(tid):
             print(STALE)
             return 4
-        if image and not self.image_ok(image):
-            print('refused: --image takes a PNG/JPEG made by `discord-liaison art` (max 10 MB) '
+        if len(images) > MAX_FILES or not all(map(self.image_ok, images)):
+            print(f'refused: --image (at most {MAX_FILES}) takes a PNG/JPEG made by `discord-liaison art` (max 10 MB) '
                   'or a PNG/JPEG/GIF/WebP/MP4 in your job folder (max 25 MB)')
             return 3
         parts = chunks(clean(text, [self.env.get(k, '') for k in SECRET_KEYS]))
         if self.env.get('LIAISON_DRY_RUN'):
-            print(f'would post {len(parts)} message(s) to {tid}{" with " + image if image else ""}:\n' + '\n'.join(parts))
+            print(f'would post {len(parts)} message(s) to {tid}{" with " + " ".join(images) if images else ""}:\n'
+                  + '\n'.join(parts))
             return 0
         for i, part in enumerate(parts):
             ref = reply if i == 0 else ''
@@ -377,7 +387,9 @@ class App:
                 await self.rest.send_file(tid, part, image, reply=ref)
             else:
                 await self.rest.send(tid, part, reply=ref)
-        print(f'posted {len(parts)} message(s){" with the image" if image else ""}')
+        for extra in images[1:]:
+            await self.rest.send_file(tid, '', extra)
+        print(f'posted {len(parts)} message(s){f" with {len(images)} image(s)" if images else ""}')
         return 0
 
     def job_projects(self):

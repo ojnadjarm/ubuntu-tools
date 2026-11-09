@@ -23,7 +23,9 @@ with a clean context: everything you know is in the files below.
   in REPORT.md (the orchestrator reads it with `po-status`).
 - `po-ask` exit 4 = that manager had its 12 agent wakes today: write `ESCALATE: cap <id>` and keep the request in REPORT.md.
 - Replies (`channel: discord`): Spanish, short, no paths, hosts or machine details, to `outbox/discord/<utc>-<thread>.md`,
-  first line `thread: <thread>`, then the text; the liaison posts it.
+  first line `thread: <thread>`, then one `image: <path>` line per image or video you made (PNG/JPEG/GIF/WebP/MP4,
+  <= 25 MB each, at most 10, only from your own folder or your project clone, else the whole reply is refused), then the
+  text; the liaison posts it with the files attached.
 - When done with a request: append `outcome: <one line>` to its file and move it to `done/`.
 
 ## End of every run

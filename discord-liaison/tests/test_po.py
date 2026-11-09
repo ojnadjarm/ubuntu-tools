@@ -57,6 +57,40 @@ class TestPO(Base):
         self.assertEqual(sorted(os.listdir(os.path.join(self.outbox, 'refused'))), ['b.md', 'c.md'])
         self.assertEqual([f for f in os.listdir(self.outbox) if f.endswith('.md')], [])
 
+    def media(self, path, data=b'\x89PNG\r\n\x1a\n' + b'0' * 64):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'wb') as f:
+            f.write(data)
+        return path
+
+    async def test_relay_posts_images_from_own_folder_or_clone_and_refuses_others(self):
+        self.env['HOME'] = self.tmp.name
+        mine = self.media(os.path.join(self.tmp.name, 'agents', 'po-other', 'state', 'shot.png'))
+        clone = self.media(os.path.join(self.tmp.name, 'y', 'out', 'render.gif'), b'GIF89a' + b'0' * 64)
+        foreign = self.media(os.path.join(self.tmp.name, 'agents', 'po-ten', 'secret.png'))
+        loose = self.media(os.path.join(self.tmp.name, 'token.png'))
+        link = os.path.join(self.tmp.name, 'agents', 'po-other', 'state', 'link.png')
+        os.symlink(loose, link)
+        text = self.media(os.path.join(self.tmp.name, 'agents', 'po-other', 'state', 'notes.png'), b'TOKEN=abc')
+        big = self.media(os.path.join(self.tmp.name, 'y', 'big.png'),
+                         b'\x89PNG\r\n\x1a\n' + b'0' * (25 * 1024 * 1024))
+        bodies = {'a.md': f'thread: 400\nimage: {mine}\nimage: ~/y/out/render.gif\nMira las capturas',
+                  'b.md': f'thread: 400\nimage: {foreign}\nno', 'c.md': f'thread: 400\nimage: {loose}\nno',
+                  'd.md': f'thread: 400\nimage: {link}\nno', 'e.md': f'thread: 400\nimage: {text}\nno',
+                  'f.md': f'thread: 400\nimage: {mine}/../../../token.png\nno', 'g.md': f'thread: 400\nimage: {big}\nno',
+                  'h.md': 'thread: 400\n' + f'image: {mine}\n' * 11 + 'no'}
+        for name, body in bodies.items():
+            with open(os.path.join(self.outbox, name), 'w') as f:
+                f.write(body)
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(await po.amain(['relay'], self.env, self.rest), 0)
+        sent = [m for m in self.fake.messages['400'] if m['author']['id'] == '900']
+        self.assertEqual([(m['content'], m['attachments']) for m in sent], [
+            ('Mira las capturas', [{'filename': 'shot.png', 'size': os.path.getsize(mine)}]),
+            ('', [{'filename': 'render.gif', 'size': os.path.getsize(clone)}])])
+        self.assertEqual(os.listdir(os.path.join(self.outbox, 'sent')), ['a.md'])
+        self.assertEqual(sorted(os.listdir(os.path.join(self.outbox, 'refused'))), sorted(bodies.keys() - {'a.md'}))
+
 
 class TestRealRegistry(unittest.TestCase):
     def test_every_po_has_a_seat_and_folder_and_every_project_a_manager(self):

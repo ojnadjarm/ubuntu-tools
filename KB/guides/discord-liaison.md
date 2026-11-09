@@ -1,6 +1,6 @@
 # Discord liaison: the agent that answers the #foro forum and @agents in #general, and turns requests into PRs
 
-Ticket: T1409, T1411, T1413, T1414, T1415, T1416, T1421, T1482, T1515 P31, P32 · Last verified: 2026-11-10 (P32: 76 fixture tests, an image reaches only its manager; P31: 75 fixture tests,
+Ticket: T1409, T1411, T1413, T1414, T1415, T1416, T1421, T1482, T1515 P31, P32, P36 · Last verified: 2026-11-10 (P36: 77 fixture tests, a manager's reply images reach its thread, 8 bad paths refused; P32: 76 fixture tests, an image reaches only its manager; P31: 75 fixture tests,
 `test_managers.py` 5: code routing to one manager per project); 2026-11-04 (T1482 postmortem of 119 jobs, lessons in `JOB.md`, guarded by `tests/test_lessons.py`); 2026-10-31 (caps re-read from agent.env, F71); 2026-10-27 by 63 liaison fixture tests (T1421: 6 batch/supersede/stale tests) + a live nudge → wake run; before: 57 (T1416: 8 routing tests, job vs escalate); before: 49 (T1415: job media + reply); before: 47 liaison fixture tests (T1414: 7 job tests, a transient-unit probe, a live tick) and eval 57 fixtures on opus (T1413: old brief 45/57 twice, new brief + context 55/57 twice); before: 25 liaison fixture tests + 25 orchestrator-pulse checks + 31 discord-bot tests, live ticks on #foro and #general
 
 ## When to use
@@ -53,6 +53,10 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
   `state/art/` under `LIAISON_IMAGES_PER_DAY` (5); `post --image` attaches only a PNG/JPEG from that directory
   (realpath + magic bytes, ≤ 10 MB) or a PNG/JPEG/GIF/WebP/MP4 inside a job folder `state/jobs/<id>/…` (≤ 25 MB, T1415)
   as one multipart upload (`Rest.send_file`), so no other file can leave. `--reply <message-id>` sets `message_reference`.
+  `--image` repeats (at most 10, all checked before anything posts): the first rides on the last text part, each
+  other one is its own message with no text. Manager replies (P36): an outbox file's `image: <path>` lines after
+  `thread:` go through this same `post`, with `App.media_roots` = that agent's own folder + its project clones
+  (`po.media_roots`, `~/` from `$HOME`); a path elsewhere (realpath, so symlinks and `..` count) refuses the reply.
 - Understanding (T1413 swarm, research `$AGENT_WORK/research/2026-10-27/T1413/`): `BRIEF.md` "Read before you reply"
   (literal ask / intent / tone; probe, tease, banter, frustration, repeat, hidden order, register) and "Managing the
   server" (one post per author per run, never contradict <context>, stay quiet for asides and bot acks, insults, spam,
