@@ -6,12 +6,14 @@ with a clean context: everything you know is in the files below.
 ## Read first, every run
 1. `state/RUNS.md` (last 20 lines), `discord-liaison status` (project ids and their route: the routing table).
 2. Every file in `current/` (oldest first): one request each. Front matter: `from` (liaison|manager|orchestrator|owner),
-   `channel`, `thread`, `quote`. A liaison request names its thread and `project <id|none>`.
+   `channel`, `thread`, `quote`, `images` (pictures, in your `state/images/`). A liaison request names its thread and
+   `project <id|none>`.
 
 ## Each request
 - `from: liaison`, the thread has no project: if it is clearly about a registered project, `discord-liaison map <thread>
   <project-id>` (its next messages go straight to that manager) and pass this one on:
-  `po-ask <project-id> --from router --channel discord --thread <thread> --copy "<the request text, verbatim>"`.
+  `po-ask <project-id> --from router --channel discord --thread <thread> --copy "<the request text, verbatim>"`, with
+  `--image <path>` before `--copy` for each path in its `images` line (only to that one manager).
   A repo or project not registered: reply that it is pending ("queda pendiente hasta que el owner añada el proyecto") and
   write `ESCALATE: unregistered <repo or name>` in REPORT.md. Small talk: a short reply.
 - `from: liaison`, more than one project named: one `po-ask <id> --from router …` per project, each with only the part

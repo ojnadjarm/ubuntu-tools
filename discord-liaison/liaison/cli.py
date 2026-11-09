@@ -195,7 +195,7 @@ class App:
         msgs, _ = await self.check()
         if self.registry.router:
             from . import po
-            n = po.handoff(self, self.env)
+            n = await po.handoff(self, self.env)
             if n:
                 print(f'handed {n} message(s) to their manager or the router')
         print(f'{len(msgs)} new, inbox {len(self.state.inbox)}')
@@ -212,11 +212,11 @@ class App:
         finally:
             shutil.rmtree(self.work, ignore_errors=True)
 
-    async def fetch_images(self):
-        """Download the inbox's images into state/work for this run: CDN only, no token, <= 8 MB, magic checked."""
+    async def fetch_images(self, msgs=None):
+        """Download the messages' (default: the inbox's) images into state/work: CDN only, no token, <= 8 MB, magic checked."""
         os.makedirs(self.work, exist_ok=True)
         async with aiohttp.ClientSession() as http:
-            for m in self.state.inbox:
+            for m in self.state.inbox if msgs is None else msgs:
                 for i, a in enumerate(m.get('attachments', [])):
                     if not a['url'].startswith(self.cdn):
                         continue

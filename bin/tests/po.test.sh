@@ -92,6 +92,15 @@ po-ask fx --from boss "x" >/dev/null 2>&1; is 'po-ask: bad --from exits 2' "$?" 
 c=$(po-ask fx --from chat --channel chat --thread 1700000000000 "a chat batch")
 ev 'po-ask: --from chat (T1515-P12)' 'grep -qx "from: chat" "$c" && grep -qx "thread: 1700000000000" "$c"'
 ev 'po-ask: no temp file left in the inbox' '[ -z "$(ls -A "$P/.inbox-tmp")" ]'
+printf '\x89PNG\r\n\x1a\nxx' >"$WORK/shot.png"; printf 'secret' >"$WORK/key.png"
+i=$(po-ask fx --from router --image "$WORK/shot.png" --copy "with a picture")
+img=$(sed -n 's/^images: //p' "$i")
+ev 'po-ask --image (T1515-P32): copied into the PO folder, path in the front matter' '[ "${img#"$P"/state/images/}" != "$img" ] && cmp -s "$img" "$WORK/shot.png"'
+n=$(ls "$P/inbox" | wc -l)
+po-ask fx --image "$WORK/key.png" "not an image" >/dev/null 2>&1; is 'po-ask --image: not a PNG/JPEG/GIF/WebP exits 2' "$?" 2
+po-ask fx --image "$WORK/none.png" "missing" >/dev/null 2>&1; is 'po-ask --image: missing file exits 2' "$?" 2
+is 'po-ask --image: a refused image files nothing' "$(ls "$P/inbox" | wc -l)" "$n"
+rm -f "$i"
 
 # po-run (review focus 2): a request during a run is queued for one more run, never a parallel one
 touch "$WORK/drop" "$WORK/hold"

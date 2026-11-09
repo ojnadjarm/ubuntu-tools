@@ -6,7 +6,7 @@ import shutil
 from liaison import managers
 from liaison.registry import Registry
 
-from .test_liaison import Base
+from .test_liaison import PNG, Base
 
 AGENTS = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 BIN = os.path.join(AGENTS, 'bin')
@@ -108,6 +108,29 @@ class TestManagers(Base):
         await self.run_cli('tick')
         self.assertEqual([m['content'] for m in self.state().inbox], ['pedido-A'])
         self.assertTrue(os.path.exists(self.ran))
+
+    async def test_an_image_reaches_its_manager_only(self):
+        cdn = str(self.server.make_url('/cdn'))
+        self.env['LIAISON_CDN_PREFIXES'] = cdn + '/'
+        self.fake.files = {'a.png': PNG, 'b.png': PNG}
+        att = lambda n: {'filename': n, 'size': len(PNG), 'url': f'{cdn}/{n}'}  # noqa: E731
+        await self.run_cli('tick')
+        self.fake.say('400', '2', 'pedido-A con captura', attachments=[att('a.png')])
+        self.fake.say('460', '4', 'pedido-sin-proyecto con foto', attachments=[att('b.png')])
+        rc, out = await self.run_cli('tick')
+        self.assertEqual(rc, 0, out)
+        for name, n in (('po-ten', 1), ('po-r', 1), ('po-other', 0)):
+            d = os.path.join(self.home, name)
+            imgs = [os.path.join(r, f) for r, _, fs in os.walk(d) for f in fs if f.endswith('.png')]
+            self.assertEqual(len(imgs), n, name)
+            for img in imgs:
+                self.assertEqual(open(img, 'rb').read(), PNG)
+                self.assertTrue(img.startswith(d + '/'))
+                req = [open(os.path.join(d, 'inbox', f)).read() for f in os.listdir(os.path.join(d, 'inbox'))]
+                self.assertEqual(sum(f'images: {img}' in r for r in req), 1, name)
+        work = os.path.join(self.tmp.name, 'state', 'work')
+        self.assertEqual(os.listdir(work) if os.path.isdir(work) else [], [], 'the liaison keeps no copy')
+        self.assertFalse(os.path.exists(self.ran))
 
     async def test_manager_folder_contract(self):
         d = os.path.join(self.home, 'po-ten')

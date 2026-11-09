@@ -6,7 +6,8 @@ to your router po-discord, never to the owner or the chat. Each run starts with 
 1. `~/agents/KB/DECISIONS.md` (fleet decisions), then `state/PROJECT.md`, `state/BACKLOG.md`, the last 20 lines of
    `state/RUNS.md`, the head of your ledger `~/agent-work/decisions/mosaico.md`, and the project block below.
 2. Every file in `current/` (oldest first): one request each. Front matter: `from` (liaison|router|chat), `channel`,
-   `thread`, `quote` (copy = the author's exact words).
+   `thread`, `quote` (copy = the author's exact words), `images` when the message had pictures (files in your
+   `state/images/`; look at each with Read).
 
 ## Each request
 - Questions and status: answer from the files; no worker.

@@ -20,9 +20,10 @@ def po_home(env):
     return env.get('LIAISON_PO_HOME') or env.get('HARNESS_HOME') or os.path.expanduser('~/agents')
 
 
-def handoff(app, env):
-    """po-ask every inbox message `Registry.dispatch` gives an agent, once (state/po-asked.json); with a router set the
-    handed message leaves the liaison inbox, so no triage run wakes for it. Returns the number handed off."""
+async def handoff(app, env):
+    """po-ask every inbox message `Registry.dispatch` gives an agent, once (state/po-asked.json), its images copied into
+    that agent's folder; with a router set the handed message leaves the liaison inbox, so no triage run wakes for it.
+    Returns the number handed off."""
     path = os.path.join(app.home, 'state', 'po-asked.json')
     with app.locked():
         app.reload()
@@ -37,8 +38,7 @@ def handoff(app, env):
             to = app.registry.dispatch(m, pid)
             if to is None:
                 continue
-            if m['id'] not in asked and subprocess.call(ask(env, to, m, pid), stdin=subprocess.DEVNULL,
-                                                        stdout=subprocess.DEVNULL) != 0:
+            if m['id'] not in asked and not await deliver(app, env, to, m, pid):
                 continue
             handed.add(m['id'])
         n = len(handed - asked)
@@ -49,12 +49,26 @@ def handoff(app, env):
     return n
 
 
-def ask(env, to, m, pid):
+async def deliver(app, env, to, m, pid):
+    """File one message with po-ask, its downloaded images attached; the liaison keeps no copy. True when filed."""
+    await app.fetch_images([m])
+    imgs = app.images(m['id'])
+    notes = ''.join(f'\n[image {i + 1}: {app.note(p)}]' for i, p in enumerate(imgs) if app.note(p))
+    try:
+        return subprocess.call(ask(env, to, m, pid, imgs, notes), stdin=subprocess.DEVNULL,
+                               stdout=subprocess.DEVNULL) == 0
+    finally:
+        for f in glob.glob(os.path.join(glob.escape(app.work), f'{m["id"]}-*')):
+            os.unlink(f)
+
+
+def ask(env, to, m, pid, images=(), notes=''):
     """The po-ask command that files one Discord message for agent `to` (the router also gets the thread's project)."""
     where = f'thread "{m["thread"]}"' + (f', project {pid or "none"}' if to != f'po-{pid}' else '')
     return shlex.split(env.get('LIAISON_PO_ASK', 'po-ask')) + [
-        to.removeprefix('po-'), '--from', 'liaison', '--channel', 'discord', '--thread', m['thread_id'], '--copy',
-        f'{m["author"]} (Discord, {where}, message {m["id"]}): {m["content"]}']
+        to.removeprefix('po-'), '--from', 'liaison', '--channel', 'discord', '--thread', m['thread_id'],
+        *[a for p in images for a in ('--image', p)], '--copy',
+        f'{m["author"]} (Discord, {where}, message {m["id"]}): {m["content"]}{notes}']
 
 
 def outbox_files(app, env):
@@ -82,7 +96,7 @@ async def amain(argv, env=None, rest=None):
     env = dict(os.environ) if env is None else env
     cmd = argv[0] if argv else ''
     if cmd == 'handoff':
-        n = handoff(App(env, rest), env)
+        n = await handoff(App(env, rest), env)
         if n:
             print(f'handed {n} message(s) to their PO agent')
         return 0

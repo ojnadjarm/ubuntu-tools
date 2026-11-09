@@ -1,6 +1,6 @@
 # Discord liaison: the agent that answers the #foro forum and @agents in #general, and turns requests into PRs
 
-Ticket: T1409, T1411, T1413, T1414, T1415, T1416, T1421, T1482, T1515 P31 · Last verified: 2026-11-10 (P31: 75 fixture tests,
+Ticket: T1409, T1411, T1413, T1414, T1415, T1416, T1421, T1482, T1515 P31, P32 · Last verified: 2026-11-10 (P32: 76 fixture tests, an image reaches only its manager; P31: 75 fixture tests,
 `test_managers.py` 5: code routing to one manager per project); 2026-11-04 (T1482 postmortem of 119 jobs, lessons in `JOB.md`, guarded by `tests/test_lessons.py`); 2026-10-31 (caps re-read from agent.env, F71); 2026-10-27 by 63 liaison fixture tests (T1421: 6 batch/supersede/stale tests) + a live nudge → wake run; before: 57 (T1416: 8 routing tests, job vs escalate); before: 49 (T1415: job media + reply); before: 47 liaison fixture tests (T1414: 7 job tests, a transient-unit probe, a live tick) and eval 57 fixtures on opus (T1413: old brief 45/57 twice, new brief + context 55/57 twice); before: 25 liaison fixture tests + 25 orchestrator-pulse checks + 31 discord-bot tests, live ticks on #foro and #general
 
 ## When to use
@@ -167,7 +167,9 @@ runaway loop), `LIAISON_IMAGES_PER_DAY` (5), `LIAISON_JOBS_MAX` (3), `LIAISON_JO
 
 - Before P31 the handoff ran when the triage called `inbox`: every PO-routed message cost a triage run (target < 60 s)
   plus a "passed on" reply; now the manager's own reply through its outbox is the only one.
-- Handed messages keep their 👀 (no `done` runs for them); images are not passed to managers (text only).
+- Handed messages keep their 👀 (no `done` runs for them). Images (P32): `po.deliver` downloads the message's images into
+  `state/work`, passes them as `po-ask --image` (copied into `po-<id>/state/images/`, `images:` in the front matter) and
+  deletes its own copies; the router forwards them with `--image` to one manager only. Before P32 handoff passed text only.
 - Postmortem T1482 (119 jobs, 2026-10-27..11-04, doc pruned with the T1482 drop folder by T1505): 82 done, 36 superseded, 1 lost;
   median 16 min, p90 47 min; 5 escalations, none after 10-28. Superseded jobs had run 320 min (12 over 5 min, one 115 min)
   and the next job did not know them: `JOB.md` now sends it to the predecessor's folder and branch. Process lessons

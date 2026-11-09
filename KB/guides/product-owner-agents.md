@@ -1,7 +1,7 @@
 # Product-owner agents: one PO per busy project (po-ask, po-run, po-status, po-push, deploy-lock)
 
-Ticket: T1412 (plan T1410), T1515 P31 (managers) · Last verified: 2026-11-10 by `po.test.sh` (65 ok) and
-`discord-liaison/tests` (75, `test_managers.py`); before: 2026-10-27 by `bin/tests/po.test.sh` (52 ok), pulse test (30 ok), liaison suite
+Ticket: T1412 (plan T1410), T1515 P31 (managers), P32 (images) · Last verified: 2026-11-10 by `po.test.sh` (69 ok) and
+`discord-liaison/tests` (76, `test_managers.py`); before: 2026-10-27 by `bin/tests/po.test.sh` (52 ok), pulse test (30 ok), liaison suite
 (40 tests) and two live po-mooblox runs (dry run 54 s, budget stop 18 s)
 
 ## When to use
@@ -43,6 +43,7 @@ po-new <p> "<Name>"                     # from ~/agents/po-template; then fill t
 discord-liaison manager <project-id>    # a Discord project's manager (po-new --parent discord + its block + ledger)
 pc units enable po@<p>.path --user --now --apply
 po-ask <p> --from owner --copy "<his words>"      # or --intent; prints the inbox file
+po-ask <p> --image <png|jpg|gif|webp> … "<text>"  # copies each into po-<p>/state/images/, `images:` line (P32)
 po-status                               # last run, inbox, running, open items, pushes today, ESCALATE lines
 po-push <p> --pick 'A=Dimensioned;B=Plain' "pick a look <link>"
 deploy-lock 5.2 --version '<read live version>' -- <deploy cmd>

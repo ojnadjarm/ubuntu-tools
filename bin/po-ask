@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
-# usage: po-ask <p> [--from owner|orchestrator|liaison|pick|chat|router|manager] [--channel <ch>] [--thread <id>] [--intent|--copy] "<text>"|-
+# usage: po-ask <p> [--from owner|orchestrator|liaison|pick|chat|router|manager] [--channel <ch>] [--thread <id>] [--image <file>]… [--intent|--copy] "<text>"|-
 # Queue one request for the product-owner agent po-<p>: writes po-<p>/inbox/<utc>-<from>-<rand>.md (front matter + the
 # verbatim text; `-` reads stdin) and prints its path. The po@<p>.path unit wakes the PO. Exit 2: unknown PO or bad usage.
 # --from router|manager (agent to agent, T1515 P31) takes one of seat <p>'s 12 wakes a day; exit 4 at the cap, nothing filed.
+# --image (repeatable, T1515 P32): a PNG/JPEG/GIF/WebP copied into po-<p>/state/images/, listed as `images:` in the front matter.
 help() { awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; }
 case "${1:-}" in -h|--help) help; exit 0 ;; '') help >&2; exit 2 ;; esac
 set -euo pipefail
 . "$(dirname "$(readlink -f "$0")")/polib.sh"
 p="$1"; shift
 dir=$(po_dir po-ask "$p") || exit 2
-from=orchestrator channel=none thread='' quote=copy
+from=orchestrator channel=none thread='' quote=copy images=()
 while [ $# -gt 1 ]; do
   case "$1" in
     --from) from="$2"; shift 2 ;;
     --channel) channel="$2"; shift 2 ;;
     --thread) thread="$2"; shift 2 ;;
+    --image) images+=("$2"); shift 2 ;;
     --intent) quote=intent; shift ;;
     --copy) quote=copy; shift ;;
     *) break ;;
@@ -25,6 +27,11 @@ case "$channel$thread" in *[!A-Za-z0-9_.-]*) echo "po-ask: --channel/--thread ta
 [ $# -eq 1 ] || { echo "po-ask: expected one text argument (or -)" >&2; exit 2; }
 if [ "$1" = - ]; then text=$(cat); else text="$1"; fi
 [ -n "$text" ] || { echo "po-ask: empty request" >&2; exit 2; }
+for i in "${images[@]}"; do
+  magic=$(head -c 12 "$i" 2>/dev/null | od -An -tx1 | tr -d ' \n') || magic=''
+  case "$magic" in 89504e470d0a1a0a*|ffd8ff*|474946383?61*|52494646????????57454250) ;;
+    *) echo "po-ask: --image takes a PNG/JPEG/GIF/WebP file: $i" >&2; exit 2 ;; esac
+done
 case "$from" in router|manager)
   python3 "$(dirname "$(readlink -f "$0")")/../lib/po_cap.py" take "$p" ||
     { echo "po-ask: po-$p had its 12 agent wakes today; nothing filed" >&2; exit 4; } ;;
@@ -34,8 +41,16 @@ esac
 mkdir -p "$dir/.inbox-tmp"
 name="$(date -u +%Y%m%dT%H%M%SZ)-$from-$(od -An -N3 -tx1 /dev/urandom | tr -d ' \n').md"
 tmp="$dir/.inbox-tmp/$name"
-printf -- '---\nfrom: %s\nchannel: %s\nthread: %s\nquote: %s\nreceived: %s\n---\n%s\n' \
-  "$from" "$channel" "$thread" "$quote" "$(date -Is)" "$text" >"$tmp"
+copies=''
+for n in "${!images[@]}"; do
+  ext=${images[$n]##*.}; case "${ext,,}" in png|jpg|jpeg|gif|webp) ext=${ext,,} ;; *) ext=img ;; esac
+  mkdir -p "$dir/state/images"; c="$dir/state/images/${name%.md}-$n.$ext"
+  cp "${images[$n]}" "$c" || { echo "po-ask: could not copy ${images[$n]}" >&2; exit 1; }
+  copies+=" $c"
+done
+[ -z "$copies" ] || copies="images:$copies"$'\n'
+printf -- '---\nfrom: %s\nchannel: %s\nthread: %s\nquote: %s\n%sreceived: %s\n---\n%s\n' \
+  "$from" "$channel" "$thread" "$quote" "$copies" "$(date -Is)" "$text" >"$tmp"
 mv -n "$tmp" "$dir/inbox/$name"
 [ -e "$dir/inbox/$name" ] && [ ! -e "$tmp" ] || { echo "po-ask: could not file $name" >&2; exit 1; }
 echo "$dir/inbox/$name"

@@ -30,8 +30,8 @@ class TestPO(Base):
 
     async def test_po_routed_message_handed_off_once(self):
         mid = await self.message('other')
-        self.assertEqual(po.handoff(App(self.env, self.rest), self.env), 1)
-        self.assertEqual(po.handoff(App(self.env, self.rest), self.env), 0)
+        self.assertEqual(await po.handoff(App(self.env, self.rest), self.env), 1)
+        self.assertEqual(await po.handoff(App(self.env, self.rest), self.env), 0)
         with open(self.asklog) as f:
             lines = f.read().splitlines()
         self.assertEqual(len(lines), 1)
@@ -40,7 +40,7 @@ class TestPO(Base):
 
     async def test_liaison_project_not_handed_off(self):
         await self.message('ten')
-        self.assertEqual(po.handoff(App(self.env, self.rest), self.env), 0)
+        self.assertEqual(await po.handoff(App(self.env, self.rest), self.env), 0)
         self.assertFalse(os.path.exists(self.asklog))
 
     async def test_relay_posts_replies_and_refuses_bad_files(self):
