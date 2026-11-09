@@ -34,7 +34,7 @@ Not for invoices (`/invoice`), budgets, forecasts or bank sync (not built; ask f
 ## Exact commands
 ```bash
 finance-month <export.xlsx>            # import + dedup + balance check + rebuild + headline
-finance-month label "<Merchant>" <cat> # rule appended to ~/finance/rules.yaml, history relabelled
+finance-month label "<Merchant>" <cat> # rule in ~/finance/rules.yaml (replaces that merchant's older one), history relabelled
 finance-month cash <date> <amount> <category> "<note>" [--approx] | cash list | cash rm <id>
 finance-month oneoff <date> <amount> "<category>"   # out of regular totals, comparison and recurring
 finance-month link                     # private link; never paste the token into a command

@@ -1,6 +1,6 @@
 # Daily ailearning full suite on a timer
 
-Ticket: T140, T340 · Last verified: 2026-10-20 by `--help`, unit files, `systemctl --user list-timers`, `ailearning-ci.jsonl` (T846); earlier: 2026-09-29 by a hand run (`systemctl --user start ailearning-ci-daily.service`): rc 0, 423 s; dumps 2026-10-11 (T314); changed-only declutter 2026-10-12 by `bin/tests/ailearning-ci-daily.test.sh` (T340); oldest-marker-first order 2026-10-17 (F46); auto-fix first 2026-10-18 by `bin/tests/ci-autofix.test.sh` (T402); load guard 2026-10-19 by `ci-autofix.test.sh`, `ailearning-ci-daily.test.sh`, `ci-window.test.sh` (T407); shared wait budget 2026-10-19 by the same three suites (T408)
+Ticket: T140, T340 · Last verified: 2026-10-20 by `--help`, unit files, `systemctl --user list-timers`, `ailearning-ci.jsonl` (T846); earlier: 2026-09-29 by a hand run (`systemctl --user start ailearning-ci-daily.service`): rc 0, 423 s; dumps 2026-10-11 (T314); changed-only declutter 2026-10-12 by `bin/tests/ailearning-ci-daily.test.sh` (T340); oldest-marker-first order 2026-10-17 (F46); auto-fix first 2026-10-18 by `bin/tests/ci-autofix.test.sh` (T402); load guard 2026-10-19 by `ci-autofix.test.sh`, `ailearning-ci-daily.test.sh`, `ci-window.test.sh` (T407); shared wait budget 2026-10-19 by the same three suites (T408); weekly full timing 2026-11-07 by `ailearning-ci.jsonl` (F49)
 
 ## When to use
 Reading, changing or re-running the once-a-day `npm run ci` of ailearning. Agents run `npm run test:changed`, never the full suite.
@@ -16,7 +16,7 @@ row to `ailearning-ci.jsonl` (`mode` nightly or full), pushes once on a failure 
 A `flock` on `~/agents/state/ailearning-ci.lock` makes a second run exit 75 at once; an unknown option exits 2. A run outside the
 `ailearning-ci-{daily,weekly}.service` cgroup (by hand, from an agent) logs to `ailearning-ci-manual.log` and never pushes when killed (rc 143).
 
-**Changed-only declutter (T340):** a full declutter (U01–U07 at 1366) takes ~8150 s, so the nightly checks only changed units. Marker
+**Changed-only declutter (T340):** a full declutter (U01–U07 at 1366) took 1784–1960 s in the green weekly runs 10-25 and 11-01 (7917 s in the red 10-18 run), so the nightly checks only changed units. Marker
 per unit: `~/agents/state/ailearning-declutter/<slug>` = sha256 over `git ls-files -co` of `units/<slug>/`, `u/<slug>/`,
 `public/bundles/<slug>/` plus the shared files (`src/kit src/core src/site/sheet tools/declutter.mjs tools/declutter vite.config.ts
 package-lock.json`; any shared change = every unit), written only when that unit's declutter exits 0. Once a run is past 1500 s and one
@@ -54,7 +54,7 @@ clock starts after the guard, so a long wait does not defer every unit. The rend
 ## Exact commands
 ```bash
 systemctl --user start ailearning-ci-daily.service     # run it now (~16 min idle: 941–948 s green 10-22..24 incl. playthrough, + declutter of changed units; run budget 3600 s, unit TimeoutStartSec=10800, source ~/agents/units)
-systemctl --user start ailearning-ci-weekly.service    # full declutter U01–U07 at 1366 (~2.3 h; log ~/agents/log/ailearning-ci-full.log)
+systemctl --user start ailearning-ci-weekly.service    # full declutter U01–U07 at 1366 (~30 min: 1784–1960 s green 10-25, 11-01; log ~/agents/log/ailearning-ci-full.log)
 ailearning-ci-daily --mark 02-layers                    # after `npm run declutter -- 02 --size 1366x768` passed by hand: the nightly skips it
 ls ~/agents/state/ailearning-declutter/                 # one marker per unit green at its current files
 tail -1 ~/agents/log/ailearning-ci.jsonl                # last result

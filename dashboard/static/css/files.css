@@ -26,3 +26,4 @@
   .toast { bottom: 76px; }
 }
 @media (pointer: coarse) { .fsel tbody tr { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; } }
+.fsel td.n .about { display: block; margin-top: 2px; color: var(--mid); font-size: max(.85em, 11px); line-height: 1.35; }

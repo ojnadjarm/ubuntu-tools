@@ -35,7 +35,7 @@ def running(now):
         with open(claims) as f:
             for c in json.load(f).values():
                 out.append({"label": _label(c.get("tx", "")), "min": int((now - c.get("at", now)) // 60)})
-    except (OSError, ValueError, AttributeError):
+    except (OSError, ValueError, AttributeError, TypeError):
         pass
     try:
         units = subprocess.run(["systemctl", "--user", "list-units", "agent@*.service", "--state=active", "--no-legend",
@@ -63,8 +63,8 @@ def _stamp(home):
     try:
         with open(stamp_path(home)) as f:
             s = json.load(f)
-        return s.get("at", ""), int(s.get("lines", 0))
-    except (OSError, ValueError):
+        return str(s.get("at") or ""), int(s.get("lines", 0))
+    except (OSError, ValueError, TypeError, AttributeError):
         return "", None
 
 

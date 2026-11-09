@@ -107,6 +107,16 @@ class Needs(unittest.TestCase):
             self.assertTrue(server.asks_owner(text), text)
         self.assertFalse(server.asks_owner("Tuning plate as picked (A, no big tubes): https://x/t88/. Building it now."))
 
+    def test_spanish_and_question_asks_count(self):
+        for text in ("discord-liaison: Darksaddler pide que liaison vea todos los fotogramas de GIFs (hoy solo un PNG fijo). ¿Lo añado?",
+                     "discord-liaison: RunarStudio/Spidey_PR_Dashboard pedido en #foro (revisión + propuesta, rama oscar-review), sin registrar. Acepta la invitación de GitHub y añádelo a projects.json.",
+                     "Elige A o B.",
+                     "Ship the plate now?"):
+            self.assertTrue(server.asks_owner(text), text)
+        self.assertFalse(server.asks_owner("All green. Nothing to decide."))
+        v = server.verdict({"sections": {}}, [], [push("discord-liaison: Acepta la invitación de GitHub y añádelo a projects.json.")])
+        self.assertEqual(len(v["needs"]), 1)
+
     def test_the_0922_digest_leaves_nothing_to_count(self):
         v = server.verdict({"sections": {}}, [{"name": "digest", "last": {"exit": "0"}}], [push(DIGEST)])
         self.assertEqual((v["ok"], v["needs"], v["problems"], v["asks"]), (True, [], [], []))

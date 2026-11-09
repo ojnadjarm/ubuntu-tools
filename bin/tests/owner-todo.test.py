@@ -70,6 +70,13 @@ for name, data in {"int id": GOOD + b'{"op": "add", "id": 2, "text": "Int id"}\n
     rc, out, _ = run("add", "After " + name)
     rc, out, _ = run("list", "--json")
     check(name + ": add after it lands", rc == 0 and json.loads(out)[-1]["text"] == "After " + name, out)
+with open(LEDGER, "wb") as f:
+    f.write(GOOD + '{"op": "add", "id": "\u00b2", "text": "Odd id"}\n'.encode())
+try:
+    check("non-decimal digit id: read does not raise", len(owner_todo.read()[0]) == 2, owner_todo.read())
+    check("non-decimal digit id: add numbers past the good rows", owner_todo.add("After odd id") == "2")
+except Exception as e:
+    check("non-decimal digit id: no raise", False, repr(e))
 os.remove(LEDGER)
 rc, out, _ = run("decide")
 check("decide: none when empty", rc == 0 and "no decisions" in out, out)

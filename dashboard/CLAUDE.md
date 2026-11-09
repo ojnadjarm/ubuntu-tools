@@ -14,12 +14,13 @@ dash/cache.py        cached() TTL memo; swr() stale-while-revalidate, blocks ref
 dash/services/       system, sites, files, thumbs, voice, state, agents, projects, runners, todo, reports — each registers its own routes
 index.html           classic shell, served at /classic; loads static/js/app.js (module)
 static/eye.css       the one design system: tokens, chrome, @component blocks, responsive
-static/css/          machine.css
+static/css/          machine.css, files.css
 static/js/core/      fmt, api, router, poll
 static/js/app.js     boot + lazy import() of the active screen
-static/js/screens/   sites, services, files, docs, machine, style — each exports render(grid, data)
-static/js/ui/        lightbox, head, copy, spark
-static/next/         the front end served at / (/next redirects): index.html, next.css, voice.css, js/{app,screens,store,stage,shapes,avatar,verdict}.js, js/screens/ (record.js, pron.js = Voice section), js/voice/{common,recorder}.js, js/gl/ (eye.js picks eyes/swarm.js), vendor/three.sub.js
+static/js/screens/   sites, services, files, docs, machine, style, todo — each exports render(grid, data)
+static/js/ui/        lightbox, head, copy, spark, confirm, toast
+static/next/         the front end served at / (/next redirects): index.html, next.css, voice.css, js/{app,screens,store,stage,shapes,avatar,verdict,summary}.js, js/screens/ (record.js, pron.js = Voice section), js/voice/{common,recorder}.js, js/gl/ (eye.js picks eyes/swarm.js), vendor/three.sub.js
+src/                 node CLIs floor.js (Kokoro error floor), tts-gen.js (drill wavs); lattice.js (WebGL backdrop source)
 tools/perf.py        endpoint timings (5× keep-alive + 5× fresh, raw/gzip bytes); --cold times each /api/status block computed without the cache
 tests/               pytest + node test_pronunciation_page.js (registerHooks maps /static/ to the tree), test_next.js
 ```

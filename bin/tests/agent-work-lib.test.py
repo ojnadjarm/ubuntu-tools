@@ -32,6 +32,8 @@ os.environ["AGENT_WORK"] = ""
 open(cfg, "w").write('# keys\nOTHER=1\nAGENT_WORK="~/from-config"\n')
 os.environ["HARNESS_CONFIG"] = cfg
 check("empty env: config.env line, quotes stripped, ~ expanded", agent_work() == home + "/from-config", agent_work())
+open(cfg, "w").write("AGENT_WORK=$HOME/papers         # agent working papers\n")
+check("config line with a trailing comment: comment dropped", agent_work() == home + "/papers", agent_work())
 open(cfg, "w").write("OTHER=1\n")
 check("config without the key: HOME/agent-work", agent_work() == home + "/agent-work", agent_work())
 check("real ~/agent-work never resolved", agent_work() != REAL_WORK, agent_work())

@@ -76,6 +76,19 @@ open(claims, "w").write("{not json")
 check("unreadable claims file: no raise", len(os_.running(NOW)) == 1)
 open(stamp, "w").write("{broken")
 check("broken stamp: falls back to today's date", os_.done(["- 2026-01-01 T1 x"], None, os_._stamp(None))[1] == [])
+for body in ("[]", '"s"', '{"lines": null}', '{"at": null, "lines": 0}', '{"at": 5, "lines": 0}'):
+    open(stamp, "w").write(body)
+    try:
+        os_.done(["- 2026-01-01 T1 x"], None, os_._stamp(None))
+        check("stamp %s: no raise" % body, True)
+    except Exception as e:
+        check("stamp %s: no raise" % body, False, repr(e))
+for body in ('{"a": {"tx": null}}', '{"a": {"tx": "x.jsonl", "at": "soon"}}'):
+    open(claims, "w").write(body)
+    try:
+        check("claims %s: no raise, headless unit kept" % body, "T14-headless (headless)" in [r["label"] for r in os_.running(NOW)])
+    except Exception as e:
+        check("claims %s: no raise" % body, False, repr(e))
 
 home = sandbox(tree=False)
 with open(home + "/bin/systemctl", "w") as f:

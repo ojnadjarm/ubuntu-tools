@@ -16,7 +16,7 @@ done
 printf '#!/bin/sh\ncat "%s/status.json"\n' "$WORK" >"$BIN/status-stub"; chmod +x "$BIN/status-stub"
 down='{"sections":{"keepalive":{"vass-frontend.service":{"state":"FAIL","value":"failed"},"http-moodle45":{"state":"FAIL","value":"502"}}}}'
 up='{"sections":{"keepalive":{"vass-frontend.service":{"state":"OK","value":"active"}}}}'
-tick() { HOME="$WORK" HARNESS_ENV_LOADED=1 SENTINEL_STATUS_CMD="$BIN/status-stub" SENTINEL_TRIES=3 "$SCRIPT"; }
+tick() { HOME="$WORK" HARNESS_ENV_LOADED=1 SENTINEL_BRIEF_CMD=false SENTINEL_STATUS_CMD="$BIN/status-stub" SENTINEL_TRIES=3 "$SCRIPT"; }
 
 # selftest: the shims win over the real commands on the script's PATH.
 [ "$(PATH="$BIN:$PATH" command -v systemctl)" = "$BIN/systemctl" ] && ok "selftest: systemctl is a shim" \

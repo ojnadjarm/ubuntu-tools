@@ -41,6 +41,11 @@ ok "$(has "$o" '^bbox min \[10, 0, 0\] max \[11, 1, 0\]')" "1-triangle glb: stri
 c=$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import glb; g, b = glb.load(sys.argv[2]); print([round(v, 3) for v in glb.accessor(g, b, 1)[0]])' "$A/lib" "$TMP/tri.glb")
 ok "$([[ $c == '[1.0, 0.0, 0.502, 1.0]' ]] && echo 1 || echo 0)" "lib accessor: byteStride + normalized ubyte ($c)"
 
+mkdir "$TMP/sp"; printf '\0\0\0\0' >"$TMP/sp/my buf.bin"; printf '\x89PNG\r\n\x1a\n0000IHDR\0\0\0\2\0\0\0\3' >"$TMP/sp/my tex.png"
+printf '{"asset":{"version":"2.0"},"buffers":[{"uri":"my%%20buf.bin","byteLength":4}],"images":[{"uri":"my%%20tex.png"}]}' >"$TMP/sp/s.gltf"
+c=$(python3 -I -c 'import os, sys; sys.path.insert(0, sys.argv[1]); import glb; g, b = glb.load(sys.argv[2]); print(len(b), glb.images(g, b, os.path.dirname(sys.argv[2]))[0]["codec"])' "$A/lib" "$TMP/sp/s.gltf" 2>&1 | tail -1)
+ok "$([[ $c == '4 png' ]] && echo 1 || echo 0)" "lib load + images: percent-encoded uris ($c)"
+
 printf 'not a model\n' >"$TMP/x.glb"
 o=$("$BIN" "$TMP/x.glb" 2>&1); rc=$?
 ok "$( [[ $rc == 2 && $(wc -l <<<"$o") == 1 && $o == "glb-info: $TMP/x.glb: "* ]] && echo 1 || echo 0)" "non-glb: rc 2, one line (rc $rc: $o)"

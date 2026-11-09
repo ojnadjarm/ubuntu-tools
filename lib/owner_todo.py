@@ -50,7 +50,7 @@ def _fold(events):
             i.update(done=True, done_at=e.get("ts", ""), note=e.get("note", ""))
         elif e["op"] == "reopen" and i:
             i.update(done=False, done_at="", note="")
-    return sorted(items.values(), key=lambda i: int(i["id"]) if i["id"].isdigit() else 0)
+    return sorted(items.values(), key=lambda i: int(i["id"]) if i["id"].isdecimal() else 0)
 
 
 def read(home=None, all=False):
@@ -87,7 +87,7 @@ def add(text, how="", src="", by="", home=None):
     """Append a new open item; returns its id (one more than the highest so far)."""
     if not text.strip():
         raise ValueError("text is empty")
-    nxt = lambda cur: str(max([int(i["id"]) for i in cur if i["id"].isdigit()] + [0]) + 1)
+    nxt = lambda cur: str(max([int(i["id"]) for i in cur if i["id"].isdecimal()] + [0]) + 1)
     return _append(home, lambda cur: {"op": "add", "id": nxt(cur), "text": text.strip(), "how": how.strip(), "src": src, "by": by})["id"]
 
 

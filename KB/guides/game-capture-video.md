@@ -52,5 +52,5 @@ Reference project: `~/agent-work/motion/T1408` (tools/timeline.py, edit/src/Main
 
 ## Links
 - Code: `~/projects/personal/mooblox/client/tools/trailer/` (capture.mjs, session.mjs, shots.mjs, gameplay.mjs)
-- Project: `~/agent-work/motion/T1408`; result `~/drop/T1408/index.html`
+- Project: `~/agent-work/motion/T1408`; result `~/drop/T1408/index.html` (pruned; `~/agent-work/evidence/T1408/check.json` remains)
 - Guides: `guide motion-video`, `guide kokoro-narration-word-timings`

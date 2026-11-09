@@ -125,6 +125,8 @@ is "slow tests: n=5 quiet row ranks above an n=1 load-34 row" "$(sed -n 1,2p <<<
   " 20.0 s p50 of 5 quiet.test.sh| 84.4 s p50 of 1 busy.test.sh noisy (n=1, load 34)|"
 is "slow tests: top CPU ranks the noisy row by cpu_s" "$(sed -n '/^top CPU$/,$p' <<<"$st" | sed 's/  */ /g' | tr '\n' '|')" \
   "top CPU| 9.0 cpu s p50 of 1 busy.test.sh| 3.0 cpu s p50 of 5 quiet.test.sh|"
+hist zero.test.sh 0.0 0.0 0.0 0.0 45 >"$A/state/test-timings-history.tsv"
+is "slow tests: outlier over a 0.0 s p50 does not divide by zero" "$(survey | grep -c '^outlier .* zero.test.sh$')" 1
 
 # flaky: red<->green flips in the window; an input mtime between the two runs makes the flip dev, a later one unsure.
 mkdir -p "$A/skills/fsk/tests" "$A/skills/fsk/scripts" "$A/skills/gsk/tests" "$A/skills/gsk/scripts/__pycache__"

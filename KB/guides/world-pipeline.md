@@ -1,6 +1,6 @@
 # AI Avatars world pipeline: build, validate and render a Godot game world from a spec
 
-Ticket: T714 · Last verified: 2026-10-20 by `world-pipeline/tests/selftest.sh` (7/7) and the round-2 integration numbers in T714/NEXT.md (suite 21/21, tour 98.6 s)
+Ticket: T714 · Last verified: 2026-11-07 by `world-pipeline/tests/selftest.sh` (9/9) and the round-2 integration numbers in T714/NEXT.md (suite 21/21, tour 98.6 s)
 
 ## When to use
 Rebuild, check or extend a world of the AI Avatars game (`godot/agent-world`: Magic Forest, Darkwood, later interiors). Not for one plant (`/pixel-foliage`), one character (`/pixel-avatar`) or a standalone scene outside the game (`/pixel-scene`).
@@ -33,7 +33,7 @@ heavy run --ticket T<n> -- nice -n 19 bash tools/render/mf_check.sh /tmp/mf     
 
 ## Pitfalls (measured)
 - Owner works on this machine: every build, render, tour and suite goes through `heavy run` + `nice -n 19` (T775); one full suite per ticket.
-- Tests: use `res://tests/run_tests.tscn`; `-s tests/run_tests.gd` hangs (it extends Node). Child boots use `-- --offline` so McpServer does not fight for port 8975.
+- Tests: use `res://tests/run_tests.tscn`; `-s tests/run_tests.gd` hangs (it extends Node). Child boots and `world.sh validate`/`tests` use `-- --offline` so McpServer does not fight for port 8975 (F32: validate bound it before).
 - Build cost: `build.py` on a 1920x1080 spec = 80 s wall, 0.5 GB RSS (PLAN). Foliage atlases reached 778 MB (Magic Forest) and 353 MB (Darkwood) at 108 frames per big tree, risky on the Iris Xe. r3: big trees tracked at 4 fps (36 cells), cells trimmed to the opaque union, 4 conifer variants, normals loaded as RG8 (Godot's canvas shader reads only .xy) -> 253.5 MB MF / 107.9 MB DW (`python3 tools/render/atlas_bytes.py assets/worlds/*`, budget 256 MB, also fails on a static reed). Next lever: shrub variants 6 -> 4 (about -14 MB). Reeds are the pixel-foliage `reed` preset.
 - Agent paths: Theta* line-of-sight cut 3 px (FOOT_RADIUS*0.5) into walls; the nav grid had no bridge cells, so the Mirror Lake goal moved from (2090,893) to (1975,893) (NEXT item 3).
 - Map size vs window: PixelZoom grew the widest view with the stretch factor (a 2560x1440 window saw 2.25x a map); it is now capped at 1920x1080 art px (r3 zoom-1).
@@ -43,5 +43,5 @@ heavy run --ticket T<n> -- nice -n 19 bash tools/render/mf_check.sh /tmp/mf     
 
 ## Links
 - Code: `~/projects/personal/ai-avatars/godot/agent-world/tools/worldgen/`, `scripts/world_art/`; repo notes `~/projects/personal/ai-avatars/CLAUDE.md`
-- Tests: `~/.claude/skills/world-pipeline/tests/selftest.sh`; `godot --headless --audio-driver Dummy --path . res://tests/run_tests.tscn`
+- Tests: `~/.claude/skills/world-pipeline/tests/selftest.sh`, `relpath.test.sh` (relative OUT/OUTDIR land in the caller cwd, F33); `godot --headless --audio-driver Dummy --path . res://tests/run_tests.tscn -- --offline`
 - Design / results: `~/agent-work/research/2026-10-19/T714/{PLAN.md,NEXT.md,INTERIORS-PLAN.md}`; owner picks `T697/PICK.md`

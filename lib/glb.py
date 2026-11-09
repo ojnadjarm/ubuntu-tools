@@ -3,6 +3,7 @@ import base64
 import json
 import os
 import struct
+from urllib.parse import unquote
 
 COMPONENTS = {5120: ("b", 127), 5121: ("B", 255), 5122: ("h", 32767), 5123: ("H", 65535), 5125: ("I", 0), 5126: ("f", 0)}
 WIDTHS = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT2": 4, "MAT3": 9, "MAT4": 16}
@@ -31,7 +32,7 @@ def load(path):
         return gltf, b""
     if uri.startswith("data:"):
         return gltf, base64.b64decode(uri.split(",", 1)[1])
-    return gltf, open(os.path.join(os.path.dirname(path), uri), "rb").read()
+    return gltf, open(os.path.join(os.path.dirname(path), unquote(uri)), "rb").read()
 
 
 def accessor(gltf, bin_, i):
@@ -65,7 +66,7 @@ def image_bytes(gltf, bin_, i, base=""):
         return bin_[o:o + v["byteLength"]]
     if m["uri"].startswith("data:"):
         return base64.b64decode(m["uri"].split(",", 1)[1])
-    return open(os.path.join(base, m["uri"]), "rb").read()
+    return open(os.path.join(base, unquote(m["uri"])), "rb").read()
 
 
 def image_info(data):

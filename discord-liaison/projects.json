@@ -16,6 +16,19 @@
    "po": null
   },
   {
+   "id": "spidey-pr-dashboard",
+   "name": "Spidey PR Dashboard (Watchtower PR)",
+   "repo": "RunarStudio/Spidey_PR_Dashboard",
+   "clone": "~/projects/collab/Spidey_PR_Dashboard",
+   "match": {"tags": ["spidey", "watchtower"], "title": ["watchtower", "spidey"]},
+   "rules": {
+    "language": "es: every forum post in Spanish",
+    "pr_flow": "work only on branch oscar-review (the maintainers' review branch for the owner): fetch, commit there, push over SSH, link it in the thread; a PR only into oscar-review; never push main, never merge"
+   },
+   "skills": ["frontend-design", "code-hero-render", "motion-video"],
+   "po": null
+  },
+  {
    "id": "mosaico",
    "name": "Mosaico (ImgCrypt)",
    "repo": "RunarStudio/ImgCrypt",

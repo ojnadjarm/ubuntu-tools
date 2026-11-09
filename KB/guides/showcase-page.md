@@ -44,4 +44,4 @@ Override roots with `--drop --motion --games --perf --followups`; `--now <epoch>
 ## Links
 - Code: `~/agents/bin/showcase-page`
 - Tests: `bash ~/agents/bin/tests/showcase-page.test.sh`
-- Design: `~/agent-work/research/2026-10-20/T731/BACKLOG.md` §14; page `~/drop/T745/` + `resp.jpg`
+- Design: `~/agent-work/research/2026-10-20/T731/BACKLOG.md` §14; page `~/drop/T745/` + `resp.jpg` (pruned; `~/agent-work/evidence/T745/check.json` remains, rebuild with `showcase-page --out ~/drop/T745`)

@@ -61,7 +61,7 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
   `dispatch` starts queued jobs oldest first up to `LIAISON_JOBS_MAX` (3) as transient units
   `systemd-run --user --unit discord-liaison-job-<id>` → `discord-liaison job-run <id>`: holds `jobs/<id>/lock`, runs
   `agent-exec` (prompt = `JOB.md` + BRIEF.md's "## Rules" + the job, fleet preamble, `LIAISON_JOB_TIMEOUT` 10800,
-  `EFFORT=$LIAISON_JOB_EFFORT` (max), logs `logs/jobs/<id>.*`), then starts the next queued job. The worker posts the
+  `EFFORT=$LIAISON_JOB_EFFORT` (xhigh), logs `logs/jobs/<id>.*`), then starts the next queued job. The worker posts the
   result and ✅ itself; a non-zero exit, a failed launch or a lost runner (no lock, > 120 s after start; reaped by every
   `tick`) gets a Spanish note in the
   thread + an escalation. `tick` dispatches before the run lock, which guards the triage run only.
@@ -103,7 +103,7 @@ journalctl --user -u discord-liaison-check -n 20; tail ~/agents/discord-liaison/
 ```
 Caps: `LIAISON_RUNS_PER_DAY` (100000, owner: no caps), `LIAISON_PRS_PER_DAY` (100000, owner 2026-10-28; only guards a
 runaway loop), `LIAISON_IMAGES_PER_DAY` (5), `LIAISON_JOBS_MAX` (3), `LIAISON_JOB_TIMEOUT` (10800),
-`LIAISON_JOB_EFFORT` (max, owner fleet rule 2026-10-30) in `discord-liaison/agent.env`.
+`LIAISON_JOB_EFFORT` (xhigh, owner fleet rule 2026-10-30; 11-01: max wastes tokens) in `discord-liaison/agent.env`.
 
 ## Pitfalls (measured)
 - The first tick with an empty cursor only seeds it: old history never wakes the LLM (#foro had 2 threads of old

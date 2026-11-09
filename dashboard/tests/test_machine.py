@@ -81,6 +81,13 @@ class Failures(unittest.TestCase):
         with mock.patch.object(system, "run", return_value=""):
             self.assertRaises(RuntimeError, system.failures)
 
+    def test_failed_rerun_raises_instead_of_serving_old_rows(self):
+        with mock.patch.object(system, "run", return_value=self.raw):
+            self.assertEqual(len(system.failures()), 12)
+        cache._cache["pc-failures"]["tried"] = 0
+        with mock.patch.object(system, "run", side_effect=TimeoutError("pc-failures timed out")):
+            self.assertRaisesRegex(RuntimeError, "timed out", system.failures)
+
     def test_status_block_and_vitals_table(self):
         self.assertIn("failures", system.BLOCKS)
         js = open(os.path.join(HERE, "static", "next", "js", "screens", "vitals.js"), encoding="utf-8").read()

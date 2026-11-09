@@ -3,6 +3,7 @@ import html, json, os, re, subprocess, sys, threading, urllib.parse, zipfile
 from dash.cache import forget
 from dash.env import HERE, HOME, PUBLIC_HOST
 from dash.routes import route
+from dash.services.sites import SITES
 
 PLANS = os.path.join(HERE, "plans")
 DROP = os.path.join(HOME, "drop")
@@ -37,8 +38,30 @@ def fs_path(raw):
     return full, rel
 
 
+def folder_info(path, rel):
+    """A drop folder's served https page (when it holds index.html) and its one-line description."""
+    index = os.path.join(path, "index.html")
+    site = "https://%s:%d/%s/" % (PUBLIC_HOST, SITES[8070][3], urllib.parse.quote(rel)) if os.path.isfile(index) else None
+    about = ""
+    for name in (".about", "README.md", "index.html"):
+        try:
+            with open(os.path.join(path, name), encoding="utf-8", errors="replace") as f:
+                text = f.read(65536)
+        except OSError:
+            continue
+        if name == "index.html":
+            m = re.search(r"<title[^>]*>(.*?)</title>", text, re.S | re.I)
+            text = html.unescape(m.group(1)) if m else ""
+        else:
+            text = next((l.strip() for l in text.splitlines() if l.strip()), "").lstrip("# ")
+        about = " ".join(text.split())
+        if about:
+            break
+    return {"site": site, "about": about if len(about) <= 160 else about[:159] + "…"}
+
+
 def ls_dir(raw):
-    """One folder of ~/drop: (status, payload) — entries with name, dir, bytes, mtime, kind, mime."""
+    """One folder of ~/drop: (status, payload) — entries with name, dir, bytes, mtime, kind, mime; folders add site, about."""
     hit = fs_path(raw)
     if not hit or not os.path.isdir(hit[0]):
         return 404, {"error": "not found"}
@@ -63,7 +86,8 @@ def ls_dir(raw):
         total += 0 if isdir else st.st_size
         items.append({"name": n, "dir": isdir, "bytes": None if isdir else st.st_size, "mtime": st.st_mtime,
                       "kind": "folder" if isdir else KINDS.get(ext, "file"),
-                      "mime": "" if isdir else MIME.get(ext, "application/octet-stream")})
+                      "mime": "" if isdir else MIME.get(ext, "application/octet-stream"),
+                      **(folder_info(p, rel + "/" + n if rel else n) if isdir else {})})
     return 200, {"path": rel, "items": items, "count": len(items), "bytes": total}
 
 

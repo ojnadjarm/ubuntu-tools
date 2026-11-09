@@ -3,7 +3,7 @@ import { esc } from "../../js/core/fmt.js";
 /* The verdict from /api/status: the server's one `needs` list is the headline count, the list under it and the badge keys. */
 export function verdict(D) {
   const needs = ((D && D.verdict) || {}).needs || [], errs = Object.keys((D && D.errors) || {}), n = needs.length;
-  const keys = needs.map((x) => (x.kind === "ask" ? "ask:" + x.t : x.kind === "todo" ? "todo:" + x.todo : "need:" + x.text));
+  const keys = needs.map((x) => (x.kind === "ask" ? "ask:" + x.t : x.kind === "todo" ? "todo:" + x.todo : "need:" + x.text + "@" + (x.t || x.since || "")));
   return {
     text: errs.length ? "unknown" : n ? n + (n === 1 ? " needs you" : " need you") : "all clear",
     bad: errs.length > 0 || n > 0,

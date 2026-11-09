@@ -1,7 +1,7 @@
 """Machine blocks for /api/status: pc status, envs, agents, units, timers, events, sparks, failures, the verdict."""
 import hashlib, json, os, re, urllib.request
 from datetime import datetime, timedelta, timezone
-from dash.cache import cache_meta, cached, swr
+from dash.cache import _cache, cache_meta, cached, swr
 from dash.env import BIN, BRAND, HOME, HOST, PUBLIC_HOST, run
 from dash.routes import route
 from dash.services import files, projects, runners, sites, todo
@@ -247,8 +247,12 @@ def human_cal(cal):
 
 
 def pc_failures():
-    """`pc failures --since 24h --json`, run at most once a minute however many tabs poll."""
-    return cached("pc-failures", 60, lambda: json.loads(run([os.path.join(BIN, "pc-failures"), "--since", "24h", "--json"], 30)))
+    """`pc failures --since 24h --json`, run at most once a minute however many tabs poll; raises while the last run failed."""
+    d = cached("pc-failures", 60, lambda: json.loads(run([os.path.join(BIN, "pc-failures"), "--since", "24h", "--json"], 30)))
+    err = (_cache.get("pc-failures") or {}).get("error")
+    if err:
+        raise RuntimeError(err)
+    return d
 
 
 def epoch(s):
@@ -340,7 +344,7 @@ def sparks():
     return out
 
 
-ASK = re.compile(r'\b(?:decide|pick|choose)\b|say\s+"?go|needs? you', re.I)
+ASK = re.compile(r'\b(?:decide|pick|choose|acepta|elige)\b|say\s+"?go|needs? you|¿|\?\s*$', re.I)
 NEG = re.compile(r"\b(nothing|no|not|none|never|nobody)\b", re.I)
 CLAUSE = re.compile(r"(?<=[.;:!?,])\s+|\s+(?:[—–-]|but)\s+|\s+(?=\d+[.)]\s)")
 
@@ -390,14 +394,14 @@ def verdict(st, ag, ev, todos=()):
     for sec, items in st.get("sections", {}).items():
         for k, v in items.items():
             if v.get("state") == "FAIL":
-                needs.append({"kind": "fail", "text": "%s.%s" % (sec, k)})
+                needs.append({"kind": "fail", "text": "%s.%s" % (sec, k), "since": datetime.now().strftime("%Y-%m-%d")})
     for a in ag:
         if a["last"].get("exit") not in (None, "", "0"):
             if any(n["kind"] == "push" and n["text"] == "agent %s failed (exit %s)" % (a["name"], a["last"]["exit"])
                    and a["last"].get("end") and datetime.fromisoformat(n["t"]) >= datetime.fromisoformat(a["last"]["end"])
                    for n in needs):
                 continue
-            needs.append({"kind": "agent", "text": "agent %s exit %s" % (a["name"], a["last"]["exit"])})
+            needs.append({"kind": "agent", "text": "agent %s exit %s" % (a["name"], a["last"]["exit"]), "since": a["last"].get("end", "")})
     bad = [(n["kind"] + ": " + n["text"][:80]) if n["kind"] in ("ask", "todo") else n["text"] for n in needs]
     return {"ok": not needs, "problems": bad, "asks": asks, "needs": needs}
 
@@ -423,6 +427,7 @@ def payload():
     out["verdict"] = verdict(out["status"], out["agents"], out["events"], out["todo"])
     out["events"] = out["events"][:20]
     out["host"] = HOST
+    out["nproc"] = os.cpu_count()
     out["brand"] = BRAND
     out["netdata"] = f"http://{PUBLIC_HOST}:19999"
     out["voice_url"] = "https://%s:%d/voice" % (PUBLIC_HOST, sites.SITES[19998][3])

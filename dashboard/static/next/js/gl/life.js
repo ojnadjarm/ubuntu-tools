@@ -1,12 +1,12 @@
 /* The eye's life: fixation with micro-saccades, pursuit of the pointer, glances at events, blinks, sleep, a pupil driven by load, flashes and squints. */
-const mulberry = (a) => () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+import { rng } from "../shapes.js";
 const RAD = Math.PI / 180, YAW = 30 * RAD, PITCH = 22 * RAD;
 const ease = (x) => x * x * (3 - 2 * x);
 
 export const COLORS = { done: [1.0, 0.637, 0.133], needs: [1.0, 0.637, 0.133], stray: [0.434, 0.074, 1.0], info: [0.074, 1.0, 0.35], poke: [0.6, 1.0, 0.86] };
 
 export function createLife({ seed = 7, still = () => false } = {}) {
-  const rnd = mulberry(seed), R = (a, b) => a + (b - a) * rnd();
+  const rnd = rng(seed), R = (a, b) => a + (b - a) * rnd();
   const L = {
     yaw: 0, pitch: 0, fix: [0, 0], micro: [0, 0], sac: null,
     blink: 0, blinkT0: -1, nextBlink: R(1.6, 3.2), double: false,

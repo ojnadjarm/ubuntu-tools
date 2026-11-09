@@ -2,7 +2,7 @@
 const TAU = Math.PI * 2;
 export const C = { mint: 0, gold: 1, vio: 2, ice: 3 };
 
-function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+export function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 let R = rng(52);
 /* Every shape draws from one seeded stream, so the same data always gives the same field. */
 export const reseed = (s = 52) => { R = rng(s); };

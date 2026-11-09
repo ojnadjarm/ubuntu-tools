@@ -3,7 +3,7 @@
 Ticket: T1073 · Last verified: 2026-10-21 by `bin/tests/hook-bench.test.sh` (11 ok) and `hook-bench -n 50` on the live settings
 
 ## When to use
-Before and after editing any PreToolUse/PostToolUse hook, or when calls feel slow: every hook runs on each of the ~21,000 tool calls a day, and agents-log records no hook timing. Not for SessionStart/Stop/Subagent*/PostCompact hooks (listed as skipped: rare, and orbit-hook pushes to the Eye).
+Before and after editing any PreToolUse/PostToolUse hook, or when calls feel slow: every hook runs on each tool call (measured in log/actions.jsonl on 2026-11-07: about 3,000 a day on average over 64 days, peak 21,431 on 2026-10-20), and agents-log records no hook timing. Not for SessionStart/Stop/Subagent*/PostCompact hooks (listed as skipped: rare, and orbit-hook pushes to the Eye).
 
 ## The path we took
 - Survey: hyperfine cannot feed a different stdin per run; `pc bench` covers only `pc-*` verbs; nothing timed hooks. Chosen: a small Python CLI with `time.perf_counter_ns` around each run.

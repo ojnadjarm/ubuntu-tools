@@ -1,6 +1,6 @@
 """Small JSON state under state/: the seen badges and the pronunciation path's progress."""
 import json, os
-from datetime import datetime
+from datetime import datetime, timedelta
 from dash.cache import lock
 from dash.env import HERE
 from dash.routes import route
@@ -17,10 +17,12 @@ def seen_get():
 
 
 def seen_add(keys):
-    """Merge keys into state/seen.json; returns the full set."""
+    """Merge keys into state/seen.json, dated today, and drop need keys seen more than 30 days ago; returns the full set."""
+    today, cut = datetime.now().strftime("%Y-%m-%d"), (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
     with lock:
         seen = seen_get()
-        seen.update({k: 1 for k in keys if isinstance(k, str)})
+        seen.update({k: today for k in keys if isinstance(k, str)})
+        seen = {k: v for k, v in seen.items() if not (k.startswith("need:") and isinstance(v, str) and v < cut)}
         os.makedirs(os.path.dirname(SEEN_FILE), exist_ok=True)
         tmp = SEEN_FILE + ".tmp"
         json.dump(seen, open(tmp, "w"))

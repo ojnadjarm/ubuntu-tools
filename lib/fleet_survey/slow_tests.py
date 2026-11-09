@@ -38,7 +38,7 @@ def rows(ctx):
     out = [f'{p50[k]:7.1f} s  p50 of {len(last[k])}  {k}' + ('' if measured(k) else
            f'  noisy (n={len(last[k])}, load {max(float(l) for _, _, l in last[k]):.0f})') for k in order]
     for k, v in sorted(last.items()):
-        out += [f'outlier {s:7.1f} s  {s / p50[k]:.1f}x p50 {p50[k]:.1f} s  {when} load {load}  {k}'
+        out += [f'outlier {s:7.1f} s  {s / (p50[k] or 0.1):.1f}x p50 {p50[k]:.1f} s  {when} load {load}  {k}'
                 for s, when, load in v if s > 5 * p50[k] and s > 30]
     cpu = {k: statistics.median(v[-5:]) for k, v in cpus.items()}
     if cpu:

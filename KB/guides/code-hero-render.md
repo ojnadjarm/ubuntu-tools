@@ -5,7 +5,7 @@ Ticket: T1415, T1417, T1450, T1451, T1469 · Last verified: 2026-11-03 by T1470 
 
 ## When to use
 The owner asks for art "made with code" or "without AI image models": a mascot or character loop, a logo hero loop, a Discord
-piece. The quality bar is the T1415 droid (`~/drop/T1415/`): "AAA, shocking and breathtaking". Not for multi-shot edits, VO or
+piece. The quality bar is the T1415 droid (`~/agent-work/motion/T1415/out/agents-g.mp4`; the `~/drop` copy is pruned): "AAA, shocking and breathtaking". Not for multi-shot edits, VO or
 titles (`/motion-video`), rigged humans (`/char3d`) or pixel sprites (`/pixel-avatar`).
 
 ## The path we took
@@ -94,5 +94,5 @@ title, word-lit captions, end card) and `encode.sh` (open gate to 16:9 + 4:5, tw
 ## Links
 - Skill: `~/.claude/skills/code-hero-render/` (SKILL.md, reference/recipe.md, scripts/, templates/shot.py, tests/)
 - Tests: `python3 tests/loop.test.py`, `bash tests/audio.test.sh`, `bash tests/smoke.test.sh` (96 px Blender, about 15 s), `bash tests/encode.test.sh`
-- Results: `~/drop/T1415/` (reference), `~/drop/T1417/` (Mooblox proof), postmortem `~/agent-work/research/2026-10-27/T1417/POSTMORTEM.md`
+- Results: `~/agent-work/motion/T1415/` (reference, film `out/agents-g.mp4`), `~/agent-work/motion/T1417/mooblox/` (Mooblox proof; both `~/drop` copies pruned), postmortem `~/agent-work/research/2026-10-27/T1417/POSTMORTEM.md`
 - Example shot: `~/agent-work/motion/T1417/mooblox/shot.py`

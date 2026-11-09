@@ -19,7 +19,7 @@ export function gauges(D) {
     { k: "power", v: num(val(pw, "battery")) || 0, u: "%", p: num(val(pw, "battery")) },
     { k: "disk", v: isNaN(disk) ? "—" : disk, u: "%", p: disk, bad: disk >= 90 },
     { k: "memory", v: ram ? ramPct.toFixed(0) : "—", u: "%", p: ramPct, bad: ramPct >= 90 },
-    { k: "load", v: isNaN(load) ? "—" : load.toFixed(2), u: "", p: Math.min(100, load * 12), bad: load * 12 >= 100 },
+    { k: "load", v: isNaN(load) ? "—" : load.toFixed(2), u: "", p: Math.min(100, 100 * load / D.nproc), bad: load >= D.nproc },
     { k: "docker", v: up, u: "/" + dk.length, p: dk.length ? 100 * up / dk.length : 0, bad: up < dk.length },
     { k: "battery", v: isNaN(bh) ? "—" : bh, u: "% health", p: bh, bad: bh < 60 },
   ];

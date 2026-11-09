@@ -13,7 +13,7 @@ export function head(d,failed,last){D=d;FAILED=failed;LAST=last;
   var G=[["power",num(val(pw,"battery"))||0,"% "+(val(pw,"source")||"").toLowerCase(),num(val(pw,"battery"))],
     ["disk",isNaN(diskPct)?"—":diskPct,"% · "+gb((/,\s*(\S+) free/.exec(val(res,"disk_root"))||[])[1]||"")+" free",diskPct,diskPct>=90],
     ["memory",ram?ramPct.toFixed(0):"—","% · "+(ram?(ram[1]/1024).toFixed(0)+" GB free":""),ramPct,ramPct>=90],
-    ["load",load||"—","",Math.min(100,num(load)*12),num(load)*12>=100],
+    ["load",load||"—","",Math.min(100,100*num(load)/D.nproc),num(load)>=D.nproc],
     ["docker",up,"/ "+tot,tot?100*up/tot:0],
     ["battery",isNaN(bh)?"—":bh,"% health",bh,bh<60]];
   var gs=document.querySelectorAll("#gauges .gauge"),C=2*Math.PI*16;

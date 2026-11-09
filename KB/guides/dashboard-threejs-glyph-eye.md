@@ -49,7 +49,7 @@ systemctl --user restart agents-dashboard && curl -sI http://127.0.0.1:19998/ | 
 - Reduced motion froze the eye staring at the pointer (T53a); the still frame must reset gaze and ignore input.
 - "1 needs you" vs digest "Nothing needs you": the digest line itself was counted as an ask (T54). One server list
   (`system.verdict`, negation-aware) now feeds the headline, list and badges; test `tests/test_needs.py`.
-- "pick A/B/C" pushes did not count as asks (F18, 2026-09-26): `ASK` matches decide, pick, choose, say go, needs you.
+- "pick A/B/C" pushes did not count as asks (F18, 2026-09-26): `ASK` matches decide, pick, choose, say go, needs you; Spanish liaison asks (acepta, elige, `¿`) and a clause ending in `?` count too (F15, 2026-11-07).
 - Brand truncated at 400 px: a stacked lockup by container query below 23rem, never ellipsis (T54).
 
 ## Links
