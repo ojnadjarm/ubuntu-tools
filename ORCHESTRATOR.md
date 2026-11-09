@@ -28,9 +28,9 @@ Every web page, screen or component, for every agent and ticket (exception: aile
 
 ## Delegation
 
-- **Audiovisual = xhigh reasoning (owner fleet rule 2026-10-30; max → xhigh 2026-11-01, max wasted tokens):** every art/content task (3D assets, motion videos, pixel
-  art, scenes, characters, illustration, music/sound design) runs at xhigh effort: `worker-max` (xhigh), or `EFFORT=xhigh` for
-  `agent-exec` runs (Discord jobs: `LIAISON_JOB_EFFORT`). Plain how-it-works screen videos with a basic narration stay `worker`.
+- **Audiovisual = Fable 5.2, medium reasoning (owner 2026-11-09; was Opus xhigh):** every art/content task (3D assets, motion videos, pixel
+  art, scenes, characters, illustration, music/sound design) runs on `worker-max` (claude-fable-5-2, medium), or
+  `MODEL=claude-fable-5-2 EFFORT=medium` for `agent-exec` runs (Discord jobs: `LIAISON_JOB_MODEL`/`LIAISON_JOB_EFFORT`). Plain how-it-works screen videos with a basic narration stay `worker`.
 
 - **Visual/UI fixes need pre and post evidence (owner, 2026-10-08):** screenshots or a short video, whichever shows
   the issue (video for motion: scroll jumps, animations). Same screen, viewport and steps; bug visible before the

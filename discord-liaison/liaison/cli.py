@@ -626,7 +626,7 @@ class App:
             os.makedirs(logs, exist_ok=True)
             while True:
                 q = {k: shlex.quote(v) for k, v in {
-                    'prompt': self.job_prompt(job), 'id': job['id'], 'home': self.home, 'model': self.env.get('MODEL', 'opus'),
+                    'prompt': self.job_prompt(job), 'id': job['id'], 'home': self.home, 'model': self.env.get('LIAISON_JOB_MODEL', self.env.get('MODEL', 'opus')),
                     'timeout': self.env.get('LIAISON_JOB_TIMEOUT', '1800'), 'logs': logs,
                     'preamble': os.path.join(os.path.dirname(ME), 'AGENT-PREAMBLE.md')}.items()}
                 cmd = self.env.get('LIAISON_WORKER_CMD', (
