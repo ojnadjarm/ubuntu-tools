@@ -39,6 +39,24 @@ def _place(cwd, seats):
     return None, holders[-1][1]["id"] if holders else None
 
 
+def locate(cwd, protected):
+    """(protected project or None, folder) of a session folder; a protected one is matched as written and never resolved
+    (no stat), else the real path is matched again. protected None (matcher down) fails closed as project ''."""
+    cwd = os.path.normpath(cwd)
+    if protected is None:
+        return "", cwd
+    project = protectedlib.project(protected, cwd)
+    if project:
+        return project, cwd
+    real = os.path.realpath(cwd)
+    return protectedlib.project(protected, real), real
+
+
+def _pull_seat(project, seats):
+    """The pull seat named after a protected project: on/off of that project's session, nothing else."""
+    return next((s["id"] for s in seats if s["wake"] == "pull" and s["id"] == project), None)
+
+
 def _started_by(reg):
     """The agent of an `agent-<name>` session (agent-run), else owner for a terminal session, else the entrypoint."""
     name = reg.get("name") or ""
@@ -48,7 +66,8 @@ def _started_by(reg):
 
 
 def live(directory=None, seats=None):
-    """Live sessions sorted by pid; a session in a protected folder (or any, if the matcher fails) is {seat, state, since}."""
+    """Live sessions sorted by pid; a session in a protected folder (or any, if the matcher fails) is {seat, state, since},
+    its seat the pull seat named after the project; on/off comes from the registry and /proc only."""
     seats = org.seats() if seats is None else seats
     try:
         protected = protectedlib.eres("path")
@@ -59,17 +78,19 @@ def live(directory=None, seats=None):
         try:
             with open(f) as fh:
                 reg = json.load(fh)
-            pid, cwd = int(reg["pid"]), os.path.realpath(reg["cwd"])
+            pid, cwd = int(reg["pid"]), reg["cwd"]
+            if not _alive(pid, reg.get("procStart")):
+                continue
+            project, cwd = locate(cwd, protected)
         except (OSError, ValueError, KeyError, TypeError):
             continue
-        if not _alive(pid, reg.get("procStart")):
-            continue
-        seat, parent = _place(cwd, seats)
-        row = {"seat": seat, "state": STATES.get(reg.get("status"), "idle"),
+        row = {"seat": None, "state": STATES.get(reg.get("status"), "idle"),
                "since": int(reg.get("statusUpdatedAt") or reg.get("startedAt") or 0) // 1000}
-        if protected is None or protectedlib.project(protected, cwd):
+        if project is not None:
+            row["seat"] = _pull_seat(project, seats) or _place(cwd, seats)[0]
             rows.append((pid, row))
             continue
+        row["seat"], parent = _place(cwd, seats)
         row.update(pid=pid, parent=parent, name=reg.get("name"), cwd=cwd, started_by=_started_by(reg))
         rows.append((pid, row))
     return [r for _, r in sorted(rows, key=lambda x: x[0])]

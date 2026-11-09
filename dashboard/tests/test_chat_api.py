@@ -105,14 +105,20 @@ class ChatApi(unittest.TestCase):
                                                     "wakes": {"cap": 12, "today": {}}})
 
     def test_post_wakes_through_dispatch(self):
-        """The panel's post goes through chat_dispatch: @fx is routed, its pull seat has no adapter, so the wake parks in the fixture store."""
+        """The panel's post goes through chat_dispatch: @fx is routed to its pull seat, which waits in the store (queued, not parked)."""
         code, body, _ = self.req("/api/chat/post", {"ch": "harness", "text": "@fx are you there"})
-        self.assertEqual((code, body["wakes"]), (200, [{"seat": "fx", "outcome": "refused"}]))
+        self.assertEqual((code, body["wakes"]), (200, [{"seat": "fx", "outcome": "queued"}]))
         st = os.path.join(self.tmp.name, "state", "chat")
-        with open(os.path.join(st, "queue", "fx.jsonl")) as f:
-            self.assertEqual([json.loads(l)["id"] for l in f], [body["id"]])
+        self.assertFalse(os.path.exists(os.path.join(st, "queue", "fx.jsonl")))
         with open(os.path.join(st, "audit.jsonl")) as f:
-            self.assertIn({"wake": "fx", "reason": "mention"}, [{k: r[k] for k in ("wake", "reason")} for r in map(json.loads, f) if "wake" in r])
+            self.assertIn({"wake": "fx", "reason": "mention", "outcome": "queued"},
+                          [{k: r[k] for k in ("wake", "reason", "outcome")} for r in map(json.loads, f) if "wake" in r])
+
+    def test_post_to_pull_seat_strict(self):
+        """The owner's direct message to a pull seat meets the strict guard: a ticket key is held (422), nothing stored."""
+        code, body, _ = self.req("/api/chat/post", {"ch": "dm-fx--owner", "text": "about AB-7"})
+        self.assertEqual((code, body), (422, {"held": "ticket key"}))
+        self.assertEqual(self.req("/api/chat/post", {"ch": "harness", "text": "about AB-7"})[0], 200)
         self.assertEqual(self.req("/api/chat/post", {"ch": "harness", "text": "nobody named"})[1]["wakes"], [])
 
     def test_wakes_today_per_seat(self):

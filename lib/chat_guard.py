@@ -1,12 +1,19 @@
-"""Chat guard: check(text, seat) allows a message or holds it with the rule's name; any error holds it."""
+"""Chat guard: check(text, seat, ch, to) allows a message or holds it with the rule's name; any error holds it."""
 import functools
 import os
 import re
 import subprocess
+import sys
 
+import chat_route
+import org
 import redact
 
 BIN = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), 'bin')
+sys.path.insert(0, BIN)
+import protectedlib  # noqa: E402
+
+TICKET = re.compile(r'(?<![A-Za-z0-9])[A-Z]{2,}-\d+(?![0-9])')
 
 
 def config_path():
@@ -28,6 +35,12 @@ def protected_paths(_mtime):
     out = subprocess.run([os.path.join(BIN, 'protected'), 'entries', 'path'], capture_output=True, text=True,
                          check=True, timeout=10).stdout
     return tuple(p.rstrip('/') for p in out.splitlines() if p.strip())
+
+
+@functools.lru_cache(maxsize=2)
+def protected_words(_mtime):
+    """[(project, ERE)] of every protected project's text words (`protected eres text`, lowercase)."""
+    return tuple(protectedlib.eres('text'))
 
 
 @functools.lru_cache(maxsize=2)
@@ -64,15 +77,36 @@ def has_deny_word(text, seat):
     return any(re.search(r'(?<![a-z0-9])' + re.escape(w) + r'(?![a-z0-9])', low) for w in deny_words(config_mtime()))
 
 
+def has_ticket_key(text, seat):
+    """A tracker key such as AB-123."""
+    return bool(TICKET.search(text))
+
+
+def has_protected_word(text, seat):
+    """A protected project's word (`protected` text matcher), any case."""
+    return protectedlib.project(protected_words(config_mtime()), text.lower()) is not None
+
+
 RULES = (('secret', has_secret), ('protected path', has_protected_path), ('deny word', has_deny_word))
+STRICT = (('ticket key', has_ticket_key), ('protected word', has_protected_word))
 
 
-def check(text, seat):
-    """(True, '') to allow text from seat, else (False, the rule that holds it); never names the matched text."""
+def strict(text, seat, ch, to):
+    """True when a pull seat (outside the fleet, e.g. a protected project's own session) sends, receives or is named."""
+    parties = {seat, *(to or ())} | set(chat_route.MENTION.findall(text.lower()))
+    if ch and ch.startswith('dm-'):
+        parties |= set(ch[3:].split('--'))
+    return any(s['wake'] == 'pull' and s['id'] in parties for s in org.seats())
+
+
+def check(text, seat, ch=None, to=()):
+    """(True, '') to allow text from seat in ch to `to`, else (False, the rule that holds it); never names the matched
+    text. A message to, from or naming a pull seat also meets the STRICT rules."""
     try:
         if not isinstance(text, str):
             return False, 'not text'
-        for name, rule in RULES:
+        rules = RULES + STRICT if strict(text, seat, ch, to) else RULES
+        for name, rule in rules:
             if rule(text, seat):
                 return False, name
         return True, ''

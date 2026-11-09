@@ -41,7 +41,8 @@ cat >"$WORK/org.json" <<'EOF'
   {"id": "owner", "name": "You", "role": "owner", "parent": null, "wake": null, "match": null},
   {"id": "ceo", "name": "Orchestrator", "role": "ceo", "parent": "owner", "wake": "channel", "match": "~"},
   {"id": "fx", "name": "Fx owner", "role": "po", "parent": "ceo", "wake": "po-inbox", "match": "~/agents/po-fx"},
-  {"id": "gx", "name": "Gx owner", "role": "po", "parent": "ceo", "wake": "po-inbox", "match": "~/agents/po-gx"}
+  {"id": "gx", "name": "Gx owner", "role": "po", "parent": "ceo", "wake": "po-inbox", "match": "~/agents/po-gx"},
+  {"id": "acme", "name": "Acme seat", "role": "po", "parent": "ceo", "wake": "pull", "match": null}
 ]}
 EOF
 
@@ -59,7 +60,7 @@ def check(name, cond, got=""):
 check("selftest: org file is the fixture", org.path() == f"{work}/org.json", org.path())
 check("selftest: registry is the fixture", sessions.registry_dir() == f"{work}/reg", sessions.registry_dir())
 ids = [s["id"] for s in org.seats()]
-check("org: 4 seats in file order", ids == ["owner", "ceo", "fx", "gx"], ids)
+check("org: 5 seats in file order", ids == ["owner", "ceo", "fx", "gx", "acme"], ids)
 check("org: parent of a po is the ceo", org.parent("fx") == "ceo")
 check("org: owner has no parent", org.parent("owner") is None)
 check("org: unknown seat has no parent", org.parent("nobody") is None)
@@ -100,7 +101,11 @@ check("live: seatless job: no seat, parent = deepest seat folder", j.get("seat")
 prot = [r for r in rows if "name" not in r]
 check("live: 2 protected rows (one via symlink)", len(prot) == 2, rows)
 check("live: protected row has exactly 3 keys", all(set(r) == {"seat", "state", "since"} for r in prot), prot)
-check("live: no protected text anywhere", "secret client" not in json.dumps(rows) and "acme" not in json.dumps(rows), rows)
+check("live: protected rows carry the pull seat named after the project (on/off only)", [r["seat"] for r in prot] == ["acme", "acme"], prot)
+bare = json.dumps([{k: v for k, v in r.items() if k != "seat"} for r in rows])
+check("live: no protected text anywhere", "secret client" not in bare and "acme" not in bare and "symlink" not in bare, rows)
+off = sessions.live(seats=[s for s in org.seats() if s["id"] != "acme"])
+check("live: no pull seat: protected rows have no seat", [r["seat"] for r in off if "name" not in r] == [None, None], off)
 
 import protectedlib
 def boom(kind): raise RuntimeError("matcher down")
@@ -108,12 +113,36 @@ protectedlib.eres = boom
 rows = sessions.live()
 check("live: matcher error strips every row (fail closed)", len(rows) == 5 and all(set(r) == {"seat", "state", "since"} for r in rows), rows)
 check("live: missing registry dir gives []", sessions.live(f"{work}/nope") == [])
+check("locate: matcher down fails closed, no resolve", sessions.locate("/x/../y", None) == ("", "/y"))
 sys.exit(bad)
 PY
 rc=$?; [ $rc = 0 ] || bad=1
 
+# T1515-P20: on/off of a pull seat opens, lists and stats nothing in its protected folder (registry + /proc only);
+# the only syscalls naming the folder are the shared matcher's `readlink -m` of its own config entry.
+mkdir -p "$WORK/reg2"; tail -f /dev/null & PIDS+=($!)
+python3 - "$AG" "$H" "$WORK" "${PIDS[-1]}" "${PIDS[0]}" <<'PY'
+import json, sys
+ag, home, work, *pids = sys.argv[1:]
+tpl = json.load(open(f"{ag}/bin/tests/fixtures/sessions/registry-2.1.321.json"))
+for pid, cwd in zip(map(int, pids), (f"{home}/acme/sub", home)):
+    st = open(f"/proc/{pid}/stat").read().rsplit(")", 1)[1].split()[19]
+    json.dump(dict(tpl, pid=pid, cwd=cwd, procStart=st, status="busy", name="n"), open(f"{work}/reg2/{pid}.json", "w"))
+PY
+out=$(HOME="$H" ORG_FILE="$WORK/org.json" CLAUDE_SESSIONS_DIR="$WORK/reg2" strace -f -y -qq -o "$WORK/trace" \
+  -e trace=%file,getdents64,fchdir python3 -c "import sys; sys.path.insert(0, '$AG/lib'); import sessions; print([r['seat'] for r in sessions.live()])")
+is "pull seat: on from the registry (acme on, ceo on)" "$out" "['ceo', 'acme']"
+is "pull seat: no open, list or stat of the protected folder, no container runtime" \
+  "$(python3 "$AG/bin/tests/lib/no_touch.py" "$WORK/trace" "$H/acme")" ""
+ev "selftest: the trace saw the registry" 'grep -q "$WORK/reg2" "$WORK/trace"'
+strace -f -y -qq -o "$WORK/trace-bad" -e trace=%file,getdents64,fchdir python3 -c "import os; os.listdir('$H/acme')"
+ev "selftest: no_touch flags a listing of the protected folder" \
+  '[ -n "$(python3 "$AG/bin/tests/lib/no_touch.py" "$WORK/trace-bad" "$H/acme")" ]'
+
 # The tracked org.json validates and carries no machine values.
 python3 -c "import sys; sys.path.insert(0, '$AG/lib'); import org; s = org.seats('$AG/org.json'); assert {x['role'] for x in s} >= {'owner', 'ceo', 'po'}" \
   && ok "tracked org.json validates (owner, ceo, po)" || nok "tracked org.json" "invalid"
+python3 -c "import sys; sys.path.insert(0, '$AG/lib'); import org; v = [s for s in org.seats('$AG/org.json') if s['id'] == 'vass']; assert v and v[0]['wake'] == 'pull' and v[0]['match'] is None and v[0]['parent'] == 'orchestrator'" 2>/dev/null \
+  && ok "tracked org.json: vass seat is pull, no folder" || nok "tracked org.json" "no vass pull seat"
 grep -q "$HOME" "$AG/org.json" && nok "tracked org.json" "contains \$HOME" || ok "tracked org.json has no home path"
 exit $bad

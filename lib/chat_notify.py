@@ -27,8 +27,10 @@ def to_owner(msg):
 
 
 def _protected(seat):
-    """True when the seat's folder is in a protected project; fails closed."""
+    """True for a pull seat or a seat whose folder is in a protected project; fails closed."""
     try:
+        if seat.get("wake") == "pull":
+            return True
         folder = os.path.expanduser(seat["match"]) if seat.get("match") else ""
         return bool(folder) and protectedlib.project(protectedlib.eres("path"), folder) is not None
     except Exception:

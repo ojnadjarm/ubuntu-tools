@@ -41,6 +41,18 @@ def seat_of(seats):
     return seat
 
 
+def pull(seat, seats):
+    """True for a pull seat: #harness and its direct messages only, no project channel."""
+    return any(s["id"] == seat and s["wake"] == "pull" for s in seats)
+
+
+def room(ch, seat, seats):
+    """ch, unless a pull seat names a channel other than #harness or a direct message (ValueError)."""
+    if pull(seat, seats) and ch != "harness" and not ch.startswith("dm-"):
+        raise ValueError(f"{seat} has #harness and direct messages only")
+    return ch
+
+
 def target(where, seat, seats):
     """(channel, to) for a channel name or @seat; agents post to harness, org, a product owner's channel or a seat."""
     ids = {s["id"] for s in seats}
@@ -49,7 +61,8 @@ def target(where, seat, seats):
         if other not in ids or other == seat:
             raise ValueError(f"no other seat {other!r}")
         return chat_store.dm(seat, other), [other]
-    named = {"harness", "org"} | {s["id"] for s in seats if s["role"] == "po"}
+    room(where, seat, seats)
+    named = {"harness", "org"} | {s["id"] for s in seats if s["role"] == "po" and s["wake"] != "pull"}
     if where not in named:
         raise ValueError(f"unknown channel {where!r}: {', '.join(sorted(named))} or @<seat>")
     return where, []
@@ -71,7 +84,7 @@ def show(rows, with_ch):
 def post(a, seat, seats):
     ch, to = target(a.where, seat, seats)
     text = sys.stdin.read().rstrip("\n") if a.text == "-" else a.text
-    ok, rule = chat_guard.check(text, seat)
+    ok, rule = chat_guard.check(text, seat, ch, to)
     if not ok:
         chat_store.audit({"held": True, "seat": seat, "ch": ch, "rule": rule})
         print(f"chat: held ({rule}): nothing was posted", file=sys.stderr)
@@ -85,7 +98,8 @@ def post(a, seat, seats):
 
 
 def read(a, seat, seats):
-    visible = chat_store.channels(seat)
+    visible = [c for c in chat_store.channels(seat)
+               if not pull(seat, seats) or c["ch"] == "harness" or c["ch"].startswith("dm-")]
     if a.ch is None and not a.unread:
         for c in visible:
             print(f"{c['ch']} {c['unread']} unread")
@@ -97,7 +111,7 @@ def read(a, seat, seats):
     elif a.ch.startswith("dm-") and seat not in a.ch[3:].split("--"):
         raise ValueError(f"{a.ch} is not your direct message")
     else:
-        chs = [a.ch]
+        chs = [room(a.ch, seat, seats)]
     rows = []
     for ch in chs:
         got = chat_store.read(ch, after=chat_store.cursor(seat, ch)) if a.unread else chat_store.read(ch)
@@ -110,7 +124,7 @@ def read(a, seat, seats):
 
 def send(msg, seats):
     """Guard, store, print the id and wake the addressed seats; None when the guard holds it."""
-    ok, rule = chat_guard.check(msg["text"], msg["from"])
+    ok, rule = chat_guard.check(msg["text"], msg["from"], msg["ch"], msg.get("to"))
     if not ok:
         chat_store.audit({"held": True, "seat": msg["from"], "ch": msg["ch"], "rule": rule})
         print(f"chat: held ({rule}): nothing was posted", file=sys.stderr)

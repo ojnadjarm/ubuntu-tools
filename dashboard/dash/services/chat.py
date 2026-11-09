@@ -47,7 +47,7 @@ def post_route(h, path):
         return h.json({"error": "owner only"}, 403)
     body = h.body_json(BODY_LIMIT, {})
     ch, text = body.get("ch"), body.get("text")
-    ok, reason = chat_guard.check(text, OWNER)
+    ok, reason = chat_guard.check(text, OWNER, ch if isinstance(ch, str) else None)
     if not ok:
         if isinstance(ch, str) and chat_store.NAME.match(ch):
             chat_store.audit({"seat": OWNER, "ch": ch, "held": reason})
