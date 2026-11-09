@@ -183,6 +183,11 @@ def channels(seat):
     return out
 
 
+def cursor(seat, ch):
+    """The id the seat last read in a channel (0: never)."""
+    return _read_json(_cursors(seat), {}).get(_channel(ch), 0)
+
+
 def mark(seat, ch, mid):
     """Move the seat's read cursor of a channel to id `mid`; it never moves back."""
     path, mid = _cursors(seat), int(mid)
