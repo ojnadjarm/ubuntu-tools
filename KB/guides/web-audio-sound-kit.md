@@ -82,3 +82,9 @@ cd ~/agent-work/research/2026-09-23/T57/build            # a stub Eye on :18657 
 - Film with sound and a muted browser: stub the sound modules with Playwright `ctx.route` to log every call with its virtual time, then replay the log offline through the real modules on one `OfflineAudioContext` (`suspend(t)` per event, `globalThis.AudioContext` returning it), write float WAV, normalize, mux. Tools: `~/agents/discord-liaison/state/jobs/20261103T184609-1567248388091543614/tools/` (`film.mjs`, `replay.mjs`, `cuelevels.sh`).
 - A hash-only `page.goto` does not reload: the old store saved over the seeded state. Use `page.reload()` after seeding `localStorage`.
 
+
+## T1414 restore a legacy sample into a synth engine (Watchtower V4 «telaraña», 2026-11-09, PR #13)
+- A request for "the sound the old version played" means the bytes it played: trace the call path (V3 `beep()` → `requestSound('notify')` → an MP3 data URI), not the synth named after the sound (the `thwip` synth was only its fallback). Copy the data URI into a module and pin it with a test that compares it to the old file.
+- A −1.7 dBFS sample into a bus compressor at −16 dB threshold: trim 0.45 put it at −15.7 LUFS momentary next to the −16.0 sound it replaced (offline render, ebur128 max M); trim 0.5 was −15.1.
+- Proving the sample (not the fallback) plays in the real page with a muted browser: hook `AudioBufferSourceNode.prototype.start` and log `buffer.duration`/`numberOfChannels` (0.624 s mono here) next to a wrapped `sfx.play` log.
+- `decodeAudioData` started in the unlock gesture is async: a test checking "the gesture decodes" needs `await new Promise(r => setImmediate(r))` first.
