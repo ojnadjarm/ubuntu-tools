@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# T1515 bin/chat: one section per ticket. Run: bash chat.test.sh [post] [read] [wake-ceo] [wake-po] [ask] [answer]   (no args: every section)
+# T1515 bin/chat: one section per ticket. Run: bash chat.test.sh [post] [read] [wake-ceo] [wake-po] [ask] [answer] [notify] [pause]   (no args: every section)
 # Fixture-only (FLEET §5.6): bwrap --unshare-net, HARNESS_HOME and HARNESS_CONFIG in a temp dir, a fixture org;
 # the selftest proves no route out and that the real chat store is untouched.
 set -uo pipefail
@@ -45,6 +45,10 @@ python3 -c 'import socket; socket.create_connection(("1.1.1.1", 53), 1)' 2>/dev/
   && { nok 'selftest: no network' 'a route out exists'; exit 1; } || ok 'selftest: no network'
 is 'selftest: systemd-run is the fake' "$(command -v systemd-run)" "$WORK/stubs/systemd-run"
 is 'selftest: plan-usage is the fake' "$(command -v plan-usage)" "$WORK/stubs/plan-usage"
+# P18: fake notify-owner (one line of its args per call; exits with $WORK/notify.rc), so no section reaches the phone.
+printf '#!/bin/sh\nprintf "%%s|" "$@" >>"$WORK/notify.log"; echo >>"$WORK/notify.log"\nexit $(cat "$WORK/notify.rc" 2>/dev/null || echo 0)\n' >"$WORK/stubs/notify-owner"
+chmod +x "$WORK/stubs/notify-owner"
+is 'selftest: notify-owner is the fake' "$(command -v notify-owner)" "$WORK/stubs/notify-owner"
 
 t_post() {
   local out rc id
@@ -364,10 +368,109 @@ print(r['to'], repr(r['text']))")" "[] 'own\\nanswer'"
   is 'answer: 4 rows in harness' "$(cat "$ST"/harness.*.jsonl | wc -l)" 4
 }
 
-[ $# -gt 0 ] || set -- post read wake-ceo wake-po ask answer
+t_notify() {
+  # P18: an agent's message to the owner pings notify-owner (the fake), 3 a day per seat; a protected seat's text never.
+  local out rc
+  rm -rf "$ST"; rm -f "$WORK/notify.log" "$WORK/notify.rc"
+  calls() { cat "$WORK/notify.log" 2>/dev/null | wc -l; }
+  last() { python3 -c "import json; r = [json.loads(l) for l in open('$ST/audit.jsonl') if '\"alert\"' in l]
+print(r[-1]['alert'], r[-1]['outcome'])"; }
+  CHAT_SEAT=fx chat post @owner 'build is done' >/dev/null
+  is 'notify: dm to the owner pings once, title is the seat' "$(cat "$WORK/notify.log")" '-t|chat: Fixture PO|[fx] to you: build is done|'
+  is 'notify: audit says sent' "$(last)" 'fx sent'
+  CHAT_SEAT=fx chat post harness 'no ping here, @gx' >/dev/null
+  CHAT_SEAT=orchestrator chat post @fx 'not for you' >/dev/null
+  CHAT_SEAT=fx chat post harness 'mail owner@example.org' >/dev/null
+  is 'notify: messages not to the owner do not ping' "$(calls)" 1
+  CHAT_SEAT=fx chat post harness $'look @owner\nsecond line' >/dev/null
+  is 'notify: @owner in a channel pings, text on one line' "$(tail -1 "$WORK/notify.log")" \
+     '-t|chat: Fixture PO|[fx] #harness: look @owner second line|'
+  CHAT_SEAT=fx chat post @owner "$(printf 'y%.0s' $(seq 400))" >/dev/null
+  is 'notify: text cut to 200 characters' "$(tail -1 "$WORK/notify.log" | cut -d'|' -f3 | tr -d '\n' | wc -m)" 200
+  out=$(CHAT_SEAT=fx chat post @owner 'fourth'); rc=$?
+  is 'notify: 4th of the day from fx is stored (rc 0), not pinged' "$rc $(calls)" '0 3'
+  is 'notify: audit says cap' "$(last)" 'fx cap'
+  CHAT_SEAT=gx chat post @owner 'from gx' >/dev/null
+  is 'notify: the cap is per seat' "$(calls) $(last)" '4 gx sent'
+  echo 1 >"$WORK/notify.rc"
+  CHAT_SEAT=gx chat post @owner 'phone down' >/dev/null; rc=$?
+  is 'notify: a failed push keeps the post (rc 0), audit fail' "$rc $(last)" '0 gx fail'
+  rm "$WORK/notify.rc"
+  CHAT_SEAT=gx chat post @owner 'two' >/dev/null; CHAT_SEAT=gx chat post @owner 'three' >/dev/null
+  CHAT_SEAT=gx chat post @owner 'four' >/dev/null
+  is 'notify: a failed push is not counted' "$(calls) $(last)" '7 gx cap'
+  touch "$ST/PAUSED"
+  CHAT_SEAT=orchestrator chat post @owner 'quiet please' >/dev/null
+  is 'notify: paused, no ping' "$(calls) $(last)" '7 orchestrator paused'
+  rm "$ST/PAUSED"
+  is 'notify: an owner message never pings' "$(python3 -c "import sys; sys.path.insert(0, '$BIN/../lib'); import chat_notify
+print(chat_notify.alert({'id': 1, 'ch': 'dm-fx--owner', 'from': 'owner', 'to': ['fx'], 'text': '@owner'}))")" None
+  sed 's/^]}/,{"id": "hx", "name": "Held PO", "role": "po", "parent": "orchestrator", "wake": "pull", "match": "~\/acme"}\n]}/' \
+    "$HARNESS_HOME/org.json" >"$WORK/org-hx.json"
+  ORG_FILE="$WORK/org-hx.json" CHAT_SEAT=hx chat post @owner 'the plan' >/dev/null
+  is 'notify: a protected seat pings without its text' "$(tail -1 "$WORK/notify.log")" \
+     '-t|chat: Held PO|[hx] wrote to you; read it on the Chat screen|'
+}
+
+t_pause() {
+  # P18: chat pause|resume [--apply] sets or clears PAUSED (dry run without --apply, any shell); agents-stop sets it.
+  local out rc id SB="$HARNESS_HOME/bin" P="$HARNESS_HOME/po-fx" day
+  rm -rf "$ST" "$WORK/systemd-run.log"; mkdir -p "$P/inbox"; : >"$P/BRIEF.md"
+  wakes() { python3 -c "import json
+print([(r['wake'], r['outcome']) for r in map(json.loads, open('$ST/audit.jsonl')) if r.get('id') == $1 and 'wake' in r])"; }
+  queued() { cat "$ST/queue/fx.jsonl" 2>/dev/null | wc -l; }
+  is 'pause: dry run prints would, rc 0' "$(chat pause; echo "rc $?")" "$(printf 'would: running → paused\nrc 0')"
+  ev 'pause: dry run changes nothing' '[ ! -e "$ST/PAUSED" ]'
+  is 'pause --apply: reads back paused' "$(chat pause --apply)" 'chat: paused (undo: chat resume --apply)'
+  ev 'pause --apply: PAUSED exists' '[ -e "$ST/PAUSED" ]'
+  is 'pause --apply twice: still paused' "$(chat pause --apply)" 'chat: paused (undo: chat resume --apply)'
+  id=$(CHAT_SEAT=gx chat post @fx 'while paused'); rc=$?
+  is 'paused: post stored (rc 0)' "$rc $(grep -c "\"id\": $id" "$ST"/dm-fx--gx.*.jsonl)" '0 1'
+  is 'paused: nobody woken, the wake is parked' "$(wakes "$id") $(queued)" "[('fx', 'paused')] 1"
+  is 'resume: dry run prints would' "$(chat resume)" 'would: paused → running'
+  is 'resume --apply: reads back running, re-sends the parked wake' "$(chat resume --apply)" \
+     "$(printf 'chat: running (undo: chat pause --apply)\nchat: 1 held wake re-sent: fx delivered')"
+  ev 'resume --apply: PAUSED gone' '[ ! -e "$ST/PAUSED" ]'
+  is 'resume: the parked wake went through the adapter, queue empty' "$(wakes "$id") $(queued)" \
+     "[('fx', 'paused'), ('fx', 'delivered')] 0"
+  is 'pause: audit has one line per applied switch' "$(grep -c '"pause"' "$ST/audit.jsonl")" 3
+
+  day="$ST/counters/$(date +%F).json"
+  python3 -c "import json; json.dump({'fx': 12}, open('$day', 'w'))"
+  id=$(CHAT_SEAT=gx chat post @fx 'over the cap')
+  is 'cap: parked' "$(wakes "$id") $(queued)" "[('fx', 'cap')] 1"
+  chat pause --apply >/dev/null
+  is 'resume while still capped: parked again, nothing lost' "$(chat resume --apply | tail -1) $(queued)" \
+     'chat: 1 held wake re-sent: fx cap 1'
+  rm "$day"
+  CHAT_SEAT=fx chat post harness 'first post of a new day' >/dev/null
+  is "new day: the first post re-sends the parked wake (counter reset)" "$(wakes "$id" | grep -o "'fx', '[a-z]*')]$") $(queued)" \
+     "'fx', 'queued')] 0"
+  CHAT_SEAT=fx chat post harness 'second post' >/dev/null
+  is 'new day: only the first post drains' "$(grep -c "\"id\": $id" "$ST/audit.jsonl")" 4
+
+  # agents-stop on fakes: systemctl, claude, notify-owner in the fixture's bin; no user bus to reach.
+  mkdir -p "$HOME/agents/bin" "$SB" "$WORK/run"
+  ln -sf "$BIN/fleetlib.sh" "$HOME/agents/bin/fleetlib.sh"
+  ln -sf "$BIN/chat" "$SB/chat"
+  printf '#!/bin/sh\necho "$*" >>"$WORK/systemctl.log"\ncase "$*" in *is-active*) echo inactive ;; esac\n' >"$SB/systemctl"
+  printf '#!/bin/sh\necho "[]"\n' >"$SB/claude"
+  cp "$WORK/stubs/notify-owner" "$SB/notify-owner"
+  chmod +x "$SB/systemctl" "$SB/claude" "$SB/notify-owner"
+  rm -f "$WORK/notify.log"
+  out=$(HARNESS_ENV_LOADED=1 DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent XDG_RUNTIME_DIR="$WORK/run" \
+        bash "$BIN/agents-stop" 2>&1)
+  ev 'agents-stop: selftest: the fake systemctl answered' '[ -s "$WORK/systemctl.log" ]'
+  ev 'agents-stop: sets PAUSED' '[ -e "$ST/PAUSED" ]'
+  is 'agents-stop: says chat is paused' "$out" 'agents-stop: nothing; chat paused'
+  is 'agents-stop: the push says so too' "$(cat "$WORK/notify.log")" '-p|high|-t|agents-stop|kill switch: stopped nothing; chat paused|'
+  chat resume --apply >/dev/null
+}
+
+[ $# -gt 0 ] || set -- post read wake-ceo wake-po ask answer notify pause
 for s in "$@"; do
   case "$s" in
-    post|read|wake-ceo|wake-po|ask|answer) "t_$s" ;;
+    post|read|wake-ceo|wake-po|ask|answer|notify|pause) "t_$s" ;;
     *) nok "section $s" 'unknown section'; exit 2 ;;
   esac
 done

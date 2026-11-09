@@ -13,6 +13,7 @@ LIB = os.path.join(os.path.dirname(BIN), "lib")
 sys.path.insert(0, LIB)
 import chat_dispatch  # noqa: E402
 import chat_guard  # noqa: E402
+import chat_notify  # noqa: E402
 import chat_route  # noqa: E402
 import chat_store  # noqa: E402
 import org  # noqa: E402
@@ -78,6 +79,7 @@ def post(a, seat, seats):
     mid = chat_store.post(msg)
     print(mid)
     chat_dispatch.dispatch({**msg, "id": mid, "kind": "msg", "hop": 0}, seats)
+    chat_notify.alert({**msg, "id": mid}, seats)
     return 0
 
 
@@ -115,6 +117,7 @@ def send(msg, seats):
     mid = chat_store.post(msg)
     print(mid)
     chat_dispatch.dispatch({"to": [], "re": None, "hop": 0, **msg, "id": mid}, seats)
+    chat_notify.alert({**msg, "id": mid}, seats)
     return mid
 
 
@@ -207,6 +210,28 @@ def answer(a, seat, seats):
     return HELD if mid is None else 0
 
 
+def switch(a):
+    """pause|resume: set or clear the PAUSED file (stored, nobody woken); a dry run without --apply."""
+    path = os.path.join(chat_store.root(), "PAUSED")
+    want = "paused" if a.cmd == "pause" else "running"
+    if not a.apply:
+        print(f"would: {'paused' if chat_dispatch.paused() else 'running'} → {want}")
+        return 0
+    if want == "paused":
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')} {os.environ.get('CHAT_SEAT') or 'shell'}\n")
+    elif os.path.exists(path):
+        os.remove(path)
+    chat_store.audit({"pause": want == "paused", "by": os.environ.get("CHAT_SEAT") or "shell"})
+    now = "paused" if chat_dispatch.paused() else "running"
+    print(f"chat: {now} (undo: chat {'resume' if want == 'paused' else 'pause'} --apply)")
+    got = chat_dispatch.drain() if now == "running" else []
+    if got:
+        print(f"chat: {len(got)} held wake{'s' * (len(got) > 1)} re-sent: " + ", ".join(f"{s} {o}" for s, o in got))
+    return 0
+
+
 def main():
     p = argparse.ArgumentParser(prog="chat", description=__doc__.split("—", 1)[1].strip())
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -224,8 +249,13 @@ def main():
     s = sub.add_parser("answer", help="answer question <id> in #harness; wakes the seat that asked")
     s.add_argument("id", type=int, help="the question's id")
     s.add_argument("text", help="the answer (max 2000 characters), or - to read it from stdin")
+    for cmd, what in (("pause", "stop every wake: messages are still stored"), ("resume", "wake seats again")):
+        s = sub.add_parser(cmd, help=f"{what}; no seat needed, a dry run without --apply")
+        s.add_argument("--apply", action="store_true", help="make the change and read it back")
     a = p.parse_args()
     try:
+        if a.cmd in ("pause", "resume"):
+            return switch(a)
         seats = org.seats()
         return {"post": post, "read": read, "ask": ask, "answer": answer}[a.cmd](a, seat_of(seats), seats)
     except ValueError as e:

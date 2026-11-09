@@ -1,6 +1,7 @@
 """Chat dispatch (T1515): after a post, route the message and hand each due wake to its seat's adapter."""
 import contextlib
 import fcntl
+import glob
 import json
 import os
 import subprocess
@@ -56,15 +57,55 @@ def park(seat, msg, why):
         f.write(json.dumps({"id": msg["id"], "ch": msg["ch"], "why": why}) + "\n")
 
 
-def dispatch(msg, seats=None):
-    """[(seat, outcome)] of a stored message: the adapter's delivered|queued|refused, else the router's queue."""
+def new_day():
+    """True for the one call that creates today's counters file: the daily cap has just reset."""
+    folder = os.path.join(chat_store.root(), "counters")
+    os.makedirs(folder, exist_ok=True)
+    try:
+        path = os.path.join(folder, f"{time.strftime('%Y-%m-%d')}.json")
+        os.close(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    except FileExistsError:
+        return False
+    return True
+
+
+def drain(seats=None):
+    """[(seat, outcome)] of re-sending each parked wake once; none while paused, still-held ones park again."""
+    if paused():
+        return []
     seats = org.seats() if seats is None else seats
+    out = []
+    for path in sorted(glob.glob(os.path.join(chat_store.root(), "queue", "*.jsonl"))):
+        seat = os.path.basename(path)[:-len(".jsonl")]
+        with open(path, "r+") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            rows = [json.loads(line) for line in f if line.strip()]
+            f.seek(0)
+            f.truncate()
+        done = set()
+        for r in rows:
+            if r["id"] in done:
+                continue
+            done.add(r["id"])
+            got = chat_store.read(r["ch"], after=r["id"] - 1, limit=1)
+            if got and got[0]["id"] == r["id"]:
+                out += dispatch(got[0], seats, only=seat)
+    return out
+
+
+def dispatch(msg, seats=None, only=None):
+    """[(seat, outcome)] of a stored message (only: one seat's wakes); a day's first dispatch drains the queue first."""
+    seats = org.seats() if seats is None else seats
+    if only is None and new_day():
+        drain(seats)
     by_id = {s["id"]: s for s in seats}
     plan = 0 if msg["from"] == "owner" else plan_pct()
     with counters() as today:
         due = chat_route.wakes(msg, seats, dict(today), paused=paused(), plan=plan)
     out = []
     for w in due:
+        if only and w["seat"] != only:
+            continue
         cls = chat_wake.ADAPTERS.get(by_id[w["seat"]]["wake"])
         if w["queue"]:
             outcome = w["queue"]
