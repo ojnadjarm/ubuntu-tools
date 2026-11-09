@@ -253,7 +253,9 @@ body.nx { font-size: 1rem; min-height: 100svh; overflow-x: hidden; padding-botto
 .recent[open] > summary h2 span:before { transform: rotate(90deg); }
 .recent > summary:hover h2, .recent > summary:focus-visible h2 { color: var(--hi); }
 .mini .pill { font-style: normal; font-size: .6rem; margin-right: .3rem; }
-.claims li { font-size: .78rem; color: var(--hi); padding: .3rem 0; border-top: 1px solid var(--line); } .claims span { display: block; color: var(--mid); overflow-wrap: anywhere; }
+.claims li { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: .6rem; font-size: .78rem; padding: .3rem 0; border-top: 1px solid var(--line); }
+.claims b { color: var(--hi); font-weight: 600; } .claims em { font-style: normal; color: var(--mute); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.claims span { grid-column: 1 / -1; color: var(--mid); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 1180px) {
   .hero.agents { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .court { grid-column: 1 / -1; order: -1; min-height: clamp(24rem, 96vw, 52rem); }

@@ -249,6 +249,18 @@ function hsl(h, s, l) {
   return [lin(f(0)), lin(f(8)), lin(f(4))];
 }
 const easeBack = (x) => { const c = 1.5; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
+/* Screen box [l, t, r, b] a creature of drawn size s at (x, y) covers, topper included. */
+const footprint = (x, y, s) => [x - 0.5 * s, y - 0.72 * s, x + 0.5 * s, y + 0.6 * s];
+const hits = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+/* Top-left of a w×h tag for the creature at (x, y, s): below, above, right or left, the first side clear of every box and inside span [lo, hi]; null when none is. */
+export function tagSpot(x, y, s, w, h, boxes, [lo, hi]) {
+  const g = 0.06 * s, b = footprint(x, y, s);
+  for (const [l, t] of [[x - w / 2, b[3] + g], [x - w / 2, b[1] - g - h], [b[2] + g, y - h / 2], [b[0] - g - w, y - h / 2]]) {
+    const L = Math.max(lo, Math.min(hi - w, l)), R = [L, t, L + w, t + h];
+    if (!boxes.some((o) => hits(R, o))) return [L, t];
+  }
+  return null;
+}
 
 /* The creature layer: set(list) with {id, state, ring: {r, a}, size, min, tag}; a hook for the stage (step, back, front). */
 export function createCreatures({ T, r }, tex, st) {
@@ -300,7 +312,7 @@ export function createCreatures({ T, r }, tex, st) {
         if (c.state !== "error" && s.state === "error" && !st.still()) c.pulse = t;
       }
       c.state = s.state; c.spec = s;
-      if (c.tag) c.tag.innerHTML = s.tag || "";
+      if (c.tag) { c.tag.innerHTML = s.tag || ""; c.tagW = null; }
     });
     st.wake(0);
   };
@@ -374,13 +386,20 @@ export function createCreatures({ T, r }, tex, st) {
     NAMES.forEach((nm) => { L.A[nm].needsUpdate = true; });
     L.g.instanceCount = L.n;
   }
+  /* Tags sit on the first side clear of every creature and earlier tag (run tags first), hidden when no side is clear. */
   function tags(arr) {
-    for (const o of arr) {
+    if (!fx) return;
+    const W = innerWidth, span = st.E.span || [0, W], boxes = arr.filter((o) => o.e > 0.3).map((o) => footprint(o.q.x, o.q.y, o.size));
+    for (const o of [...arr].sort((a, b) => !!b.c.spec.big - !!a.c.spec.big)) {
       const c = o.c, s = c.spec;
-      if (!s.tag || !fx) continue;
+      if (!s.tag) continue;
       if (!c.tag) { c.tag = document.createElement("div"); c.tag.innerHTML = s.tag; fx.appendChild(c.tag); }
-      const cls = "otag " + c.state + (s.big ? " lg" : ""), tf = `translate3d(${o.q.x.toFixed(1)}px,${(o.q.y + o.size * 0.66).toFixed(1)}px,0) translateX(-50%)`, op = Math.min(1, o.e * 1.3).toFixed(2);
-      if (c.tag.className !== cls) c.tag.className = cls;
+      const cls = "otag " + c.state + (s.big ? " lg" : "");
+      if (c.tag.className !== cls) { c.tag.className = cls; c.tagW = null; }
+      if (c.tagW == null || c.tagVW !== W) { c.tagW = c.tag.offsetWidth; c.tagH = c.tag.offsetHeight; c.tagVW = W; }
+      const at = c.tagW ? tagSpot(o.q.x, o.q.y, o.size, c.tagW, c.tagH, boxes, span) : null;
+      if (at) boxes.push([at[0], at[1], at[0] + c.tagW, at[1] + c.tagH]);
+      const tf = at ? `translate3d(${at[0].toFixed(1)}px,${at[1].toFixed(1)}px,0)` : c.tagT, op = at ? Math.min(1, o.e * 1.3).toFixed(2) : "0";
       if (c.tagT !== tf) { c.tag.style.transform = c.tagT = tf; }
       if (c.tagO !== op) { c.tag.style.opacity = c.tagO = op; }
     }

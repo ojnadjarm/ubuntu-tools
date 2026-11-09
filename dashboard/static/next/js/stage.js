@@ -117,6 +117,7 @@ export async function createStage(canvas) {
     const el = sc.eyeEl;
     if (!el || !el.isConnected) return false;
     const b = el.getBoundingClientRect(), g = sc.eyeFit(b);
+    E.span = [b.left, b.right];
     if (!E.set || still.matches) { Object.assign(E, g, { vx: 0, vy: 0, vr: 0, set: true, calm: true }); return false; }
     if (E.calm && Math.abs(g.r - E.r) < 0.5) { E.x = g.x; E.y = g.y; return false; }
     E.calm = false;

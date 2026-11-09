@@ -5,10 +5,11 @@ import { dust } from "../shapes.js";
 import { fitEye, ORBIT } from "../gl/cam.js";
 import { odo } from "../ui/num.js";
 import { store } from "../store.js";
+import { claimRow } from "../claims.js";
 
 export const own = true;
 const R1 = 1.9, R2 = 2.75;
-const PILL = { working: "running", done: "idle", error: "warn", stale: "stray" };
+const PILL = { working: "running", idle: "idle", done: "idle", error: "warn", stale: "stray" };
 let open = true, recent = false;
 
 export const tk = (l) => (/^[A-Za-z]{1,3}\d+\w*(\s+[A-Za-z]{1,3}\d+\b)?/.exec(l) || [l.split(" ")[0]])[0];
@@ -37,7 +38,7 @@ export function render(grid, D) {
     `<details class="recent"${recent ? " open" : ""}><summary><h2><span data-dec>recent · 24 h</span><s>${done.length} ended</s></h2></summary><ul class="mini">${done.map((s) => `<li><span aria-hidden="true">${creature(s.id, s.state)}</span><b>${esc(tk(s.label))}</b><span>${s.state === "done" ? "" : `<i class="pill ${PILL[s.state]}">${s.state === "stale" ? "stopped" : s.state}</i> `}${esc(s.report || rest(s.label))}</span><em>${ago(s.last)}</em></li>`).join("") || `<li><span></span><b></b><span>nothing ended in the last 24 h</span></li>`}</ul></details></section>` +
     `<div class="court" id="court"><div class="ring" id="ring" aria-hidden="true"></div><button class="orch" id="orch" type="button" aria-expanded="${open}" aria-controls="court"><b>${esc(O.name || "DarkSaddler")}</b><span>orchestrator · ${esc(O.state || "idle")} · ${odo("ct.w", String(live.length))} working</span></button></div>` +
     `<section class="pane side"><h2><span data-dec>persistent</span><s>${up} running · ${P.length}</s></h2><ul class="mini">${P.map((r) => `<li><span aria-hidden="true">${creature(r.name, r.state === "running" ? "working" : "sleep")}</span><b>${esc(r.name)}</b><span><i class="pill ${r.state}">${r.state}</i> ${r.next ? "next " + until(r.next) : r.enabled === "enabled" ? "—" : "always on"}</span><em>${r.last && r.last.end ? ago(r.last.end) : ""}</em></li>`).join("")}</ul>` +
-    `<h2 class="sub2"><span data-dec>claims board</span><s>${(A.claims || []).length}</s></h2><ul class="claims">${(A.claims || []).map((c) => { const p = c.split(" · "); return `<li>${esc(p[0])} <span>${esc(p.slice(1).join(" · "))}</span></li>`; }).join("") || `<li><span>empty · nobody holds a file</span></li>`}</ul></section></div>`;
+    `<h2 class="sub2"><span data-dec>claims board</span><s>${(A.claims || []).length}</s></h2><ul class="claims">${(A.claims || []).map(claimRow).map((c) => `<li><b>${esc(c.who)}</b><em>${esc(c.note)}</em>${c.paths.map((p) => `<span title="${esc(p.full)}">${esc(p.short)}</span>`).join("")}</li>`).join("") || `<li><span>empty · nobody holds a file</span></li>`}</ul></section></div>`;
 }
 
 /* Live agents ride the inner ring from the front-right, the persistent crew spreads round the outer ring, asleep while idle; the rings turn only while someone works. */

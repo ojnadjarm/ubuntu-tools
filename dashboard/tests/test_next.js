@@ -55,6 +55,23 @@ const ROOT = path.join(__dirname, "..", "static"), NEXT = path.join(ROOT, "next"
     assert.ok(f.r > 4 && f.x - f.r >= b.left && f.x + f.r <= b.left + b.width && f.y - f.r >= b.top && f.y + f.r <= b.top + b.height, "fitEye keeps the eye inside its box");
   }
 
+  const { claimRow } = await import(pathToFileURL(path.join(NEXT, "js", "claims.js")));
+  const c1 = claimRow("T1137 · /home/u/agents/bin/pc-conf /home/u/agents/bin/tests/pc-conf.test.sh /etc/avahi/avahi-daemon.conf, /home/u/projects/collab/Tiny_Epic_Narrator-wt-cap1/src/very/deep/file.js · 2026-10-21 17:57");
+  assert.deepStrictEqual([c1.who, c1.note, c1.paths.map((p) => p.short)], ["T1137", "2026-10-21 17:57", ["bin/pc-conf", "bin/tests/pc-conf.test.sh", "/etc/avahi/avahi-daemon.conf", "…/Tiny_Epic_Narrator-wt-cap1/src/very/deep/file.js"]], "a claim is one short line per path: home as ~, ~/agents dropped, long paths keep their tail");
+  assert.ok(c1.paths.every((p) => p.short.length <= 52) && c1.paths[3].full.startsWith("/home/u/projects/"), "short lines stay ≤ 52 characters and the full path rides along");
+  assert.deepStrictEqual(claimRow("T322 · ~/drop/T322-valley/ · do not move · 2026-10-11"), { who: "T322", note: "do not move · 2026-10-11", paths: [{ short: "~/drop/T322-valley/", full: "~/drop/T322-valley/" }] }, "notes after the paths stay in the note");
+
+  const { tagSpot } = await import(pathToFileURL(path.join(NEXT, "js", "gl", "creatures.js")));
+  const hit = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+  const box = (x, y, s) => [x - 0.5 * s, y - 0.72 * s, x + 0.5 * s, y + 0.6 * s];
+  const free = tagSpot(200, 200, 60, 80, 16, [box(200, 200, 60)], [0, 400]);
+  assert.ok(free && free[1] >= 200 + 0.6 * 60 && Math.abs(free[0] + 40 - 200) < 1, "a free tag sits centred under its creature");
+  const crowd = [box(200, 200, 60), box(200, 270, 60)], t2 = tagSpot(200, 200, 60, 80, 16, crowd, [0, 400]);
+  assert.ok(t2 && !crowd.some((b) => hit([t2[0], t2[1], t2[0] + 80, t2[1] + 16], b)), "a tag that would cover a neighbour moves to a free side");
+  const walls = [box(200, 200, 60), [0, 0, 400, 150], [0, 236, 400, 400], [0, 0, 160, 400], [240, 0, 400, 400]];
+  assert.strictEqual(tagSpot(200, 200, 60, 80, 16, walls, [0, 400]), null, "no free side: the tag hides instead of covering a creature");
+  assert.ok(tagSpot(380, 200, 60, 80, 16, [box(380, 200, 60)], [100, 400])[0] <= 400 - 80 && tagSpot(110, 200, 60, 80, 16, [box(110, 200, 60)], [100, 400])[0] >= 100, "a tag never leaves its span sideways");
+
   const tokens = (css) => new Set([...(/:root\s*{([^}]*)}/.exec(css) || [, ""])[1].matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
   const eye = tokens(fs.readFileSync(path.join(ROOT, "eye.css"), "utf8"));
   for (const f of ["next.css", "voice.css", "../css/org.css"]) {
