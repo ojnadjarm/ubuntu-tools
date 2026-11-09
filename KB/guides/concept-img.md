@@ -34,4 +34,4 @@ concept-img --model google/gemini-3-pro-image --prompt-file callouts.txt --ref t
 ## Links
 - Code: ~/agents/bin/concept-img
 - Tests: `bash ~/agents/bin/tests/concept-img.test.sh` (localhost mock, no network)
-- Design / results: ~/agent-work/research/2026-10-21/T1035/ (prompts, drafts, spend.tsv), ~/drop/T1035/
+- Design / results: ~/agent-work/research/2026-10-21/T1035/ (prompts, drafts, spend.tsv), ~/drop/T1035/ (pruned)

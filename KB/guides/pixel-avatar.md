@@ -49,9 +49,9 @@ Survey: no pixel-level hand tutorial for 60-80 px sprites turned up (Lospec has 
 - Before: sphere hands 1.7-2.2 units across (about 3 px), the same width as the forearm cone, and the sleeve's round tip ate half of each. Mira's linen sleeve and skin were the same value. DarkSaddler's staff and Grok's sword hilt ran through the ball.
 - Pitfalls (measured): HAND 0.95 still read as a stump, so use 1.1-1.35. The grip hole must sit inside the fist (`hand - 1.8 d - 0.85 n`); at `0.95*PALM` along d the staff showed in front of the knuckles. Plain skin AO on a 4 px hand makes it brown, so give the hand material `ao=0.25`. A palm-up hand seen end-on from the front stays dark: turn it sideways with `point` and add `bias`. A hand in front of the orb (cast) hid it, so the orb moved up 1.4 units. Stamps (buckle) and lines (bowstring) drew over hands until `overlay` learned the hand mask.
 - Diff vs T705 (albedo), near the hands / elsewhere: DarkSaddler 5876/3, Luna 3782/0, Grok 4606/0, Mira 6431/40. The rest are seam pixels from ray-march step changes. Normal maps drift by 1-17 levels near seams.
-- Results: `~/drop/T712/` (before/after x8 boards, sheets, 4 MP4s, lit Godot clip). Sources: `~/agent-work/research/2026-10-19/T712/chars` (tools: `crops.py`, `quick.py`, `dbg.py`, `diffmask.py`).
+- Results: `~/drop/T712/` (pruned; before/after x8 boards, sheets, 4 MP4s, lit Godot clip). Sources: `~/agent-work/research/2026-10-19/T712/chars` (tools: `crops.py`, `quick.py`, `dbg.py`, `diffmask.py`).
 
 ## Links
 - Code: `~/.claude/skills/pixel-avatar/` (SKILL.md, scripts/, templates/villager.py, tests/selftest.sh); T702 sources `~/agent-work/research/2026-10-19/T702/`
 - Tests: `~/.claude/skills/pixel-avatar/tests/selftest.sh` (gait invariants, follow() periodic, one lit frame + normal map, new-avatar refuses overwrite)
-- Results: `~/drop/T705/` (before/after MP4, sheets, Mira); old walk frames `~/agent-work/research/2026-10-19/T705/old-out`, `old-walk/`
+- Results: `~/drop/T705/` (pruned; before/after MP4, sheets, Mira); old walk frames `~/agent-work/research/2026-10-19/T705/old-out`, `old-walk/`

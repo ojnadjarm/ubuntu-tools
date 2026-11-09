@@ -27,4 +27,4 @@ ci-window && $S all && $S down
 ## Links
 - Code: ~/.claude/skills/moodle-upgrade-rehearsal/rehearse.sh
 - Tests: ~/.claude/skills/moodle-upgrade-rehearsal/tests/guard.test.sh (fixture HOME, no real env paths)
-- Results: ~/drop/money/samples/rehearsal-4.5-to-5.3.md
+- Results: ~/drop/money/samples/rehearsal-4.5-to-5.3.md (pruned; `rehearse.sh all` writes it again)

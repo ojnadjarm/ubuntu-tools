@@ -69,7 +69,7 @@ Regenerate: `pc help --md > ~/agents/KB/pc-cli.md`. Never hand-edit.
 | `pc snap` | snapd's refresh window and its disabled revisions, ledgered. | `pc snap                              timer, minutes it shares with the fenced windows, disabled revisions` | — |
 | `pc stale` | services still running on replaced libraries (needrestart): restart the safe ones, hold network/access/fleet units for the reboot. | `pc stale [--apply]` | — |
 | `pc timers` | every system+user timer: next run, last start/end and CPU s from the journal; overlapping runs; the first free slot. | `pc timers [--since 7d] [--overlap] [--free 45m] [--json]` | — |
-| `pc tmp` | /tmp (tmpfs, RAM) leftovers: leaked test dirs, finished tickets' scratch, old build caches; dry run lists them. | `pc tmp [--apply] [--if-over <size>]` | — |
+| `pc tmp` | /tmp (tmpfs, RAM) leftovers: leaked test dirs, finished tickets' scratch, old build caches; finished liaison jobs' caches and frames (disk); dry run lists them. | `pc tmp [--apply] [--if-over <size>]` | — |
 | `pc units` | systemd units/timers (user+system), per-unit cost, journal tail, guarded restart and reset-failed. | `pc units [list\|timers\|fleet\|show\|cost\|log\|deps\|start\|stop\|restart\|reset-failed\|disable\|mask\|enable\|unmask] [args]` | 0.04 s |
 
 ## Safety net — the change ledger, docs, benchmarks, health

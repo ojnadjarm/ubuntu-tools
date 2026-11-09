@@ -70,7 +70,7 @@ cd ~/agent-work/research/2026-09-23/T65/tts/scripts && cat run_all.sh     # r_*.
   fallback is **Azure Speech** with the same voice name (~$0.014/min, needs an Azure account). It needs network: an offline render fails.
 - Edge clips end in ~0.8 s of silence, which would stretch every sentence gap. The renderer cuts each sentence 0.15 s after the last word's end.
   Edge speed: unit `speed` maps to `rate` (0.95 → `-5%`); the Kokoro-tuned 0.92 is not a tested choice for Alvaro (the proof used 1.0).
-- Rejected for Spanish (T1428 page `~/drop/tts-es/`): Qwen3-TTS local (RTF 11–29 on this CPU, one variant misread 2 of 3 lines),
+- Rejected for Spanish (T1428 page `~/drop/tts-es/`, pruned; research `~/agent-work/research/2026-10-29/T1428/`): Qwen3-TTS local (RTF 11–29 on this CPU, one variant misread 2 of 3 lines),
   OpenRouter `openai/gpt-audio` (~$0.083/min) and `-mini` (~$0.005/min). Those are chat models that answer the line unless told
   "your spoken reply is only this text", and they give no word timings.
 

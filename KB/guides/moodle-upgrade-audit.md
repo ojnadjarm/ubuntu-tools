@@ -14,6 +14,7 @@ never on the 4.5 / Vass env.
 
 ## Exact commands
 ```bash
+mkdir -p ~/drop/money/samples   # pruned; audit.py does not create it
 python3 ~/.claude/skills/moodle-upgrade-audit/audit.py --container moodle52-app-1 --label "Moodle 5.2 demo site" \
   --md ~/drop/money/samples/upgrade-audit-5.2.md --html ~/drop/money/samples/upgrade-audit-5.2.html
 bash ~/.claude/skills/moodle-upgrade-audit/tests/audit.test.sh

@@ -39,4 +39,4 @@ gltf_validator -o $O/darksaddler.glb            # 0 errors, 0 warnings
 ## Links
 - Code: `~/agents/skills/char3d/` (`scripts/char3d`, `scripts/c3d/stages/*.py`, `specs/`), credits `CREDITS.md`
 - Tests: `tests/smoke.test.sh` (~5 s), `tests/export.test.sh` (~60 s, MPFB fixture `T1032/export-docs/fixture/` or `CHAR3D_EXPORT_FIXTURE`), `tests/<lane>.test.sh`
-- Design / results: `~/agent-work/research/2026-10-20/T1032/ARCH.md`, `.../T1032/research/*.md`, previews `~/drop/T1032/index.html`
+- Design / results: `~/agent-work/research/2026-10-20/T1032/ARCH.md`, `.../T1032/research/*.md`, previews `~/drop/T1032/index.html` (pruned; `~/agent-work/evidence/T1032/check.json` remains)

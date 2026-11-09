@@ -77,6 +77,6 @@ python3 $S/sheet.py ~/drop/<T>                              # boards x3/x8 day+n
 ## Links
 - Code: `~/.claude/skills/pixel-foliage/` (SKILL.md, scripts/, templates/foliage_anim.gd; legacy/ = T713 scripts, shaders, reference, selftest)
 - Tests: `~/.claude/skills/pixel-foliage/tests/selftest.sh` (prints `SELFTEST ok 12 presets`)
-- T715: `~/agent-work/research/2026-10-20/T715/` (RESEARCH.md, ARCH.md, rounds/R1-R6 + CRITIQUE.md, tools/compare.py, scene/ = T707 copy on atlases), `~/drop/T715/`
-- Design / results: `~/agent-work/research/2026-10-19/T710/` (rounds r1-r9, compare.py, godot/), `~/drop/T710/`
-- T713: `~/agent-work/research/2026-10-20/T713/` (diagnosis.md, boards r0-b17, tools/board.py, tools/motion.py, scene/ = T707 copy on pixel-foliage), `~/drop/T713/`
+- T715: `~/agent-work/research/2026-10-20/T715/` (RESEARCH.md, ARCH.md, rounds/R1-R6 + CRITIQUE.md, tools/compare.py, scene/ = T707 copy on atlases), `~/drop/T715/` (pruned)
+- Design / results: `~/agent-work/research/2026-10-19/T710/` (rounds r1-r9, compare.py, godot/), `~/drop/T710/` (pruned)
+- T713: `~/agent-work/research/2026-10-20/T713/` (diagnosis.md, boards r0-b17, tools/board.py, tools/motion.py, scene/ = T707 copy on pixel-foliage), `~/drop/T713/` (pruned)

@@ -56,5 +56,16 @@ U="$WORK/u"; mkdir -p "$U/guides" "$U/skills"
 eq "an underscore name is one term: CI_UNITS finds its trigger" "guide" "$(GUIDES_DIR="$U/guides" SKILLS_DIR="$U/skills" "$G" CI_UNITS 2>/dev/null | grep '/ci-guard\.md' | cut -d' ' -f1)"
 eq "its parts still hit: gpu finds GAMEDEV_GPU_PIN" 1 "$(GUIDES_DIR="$U/guides" SKILLS_DIR="$U/skills" "$G" gpu 2>/dev/null | grep -c '/pin\.md')"
 
+lag=$(python3 - "$HOME/agents/KB/guides" <<'PY'
+import re, sys, glob, os
+d = sys.argv[1]
+idx = {m[1]: m[2] for m in re.finditer(r'^- ([a-z0-9-]+) — .*verified (\d{4}-\d\d-\d\d)$', open(d + '/INDEX.md').read(), re.M)}
+for f in sorted(glob.glob(d + '/*.md')):
+    m = re.search(r'Last verified:\s*(\d{4}-\d\d-\d\d)', open(f).read())
+    s = os.path.basename(f)[:-3]
+    if m and s in idx and idx[s] < m[1]: print(s)
+PY
+)
+eq "live INDEX.md verified dates are not older than the guide headers" "" "$lag"
 [ "$bad" = 0 ] && echo "all guide fixtures pass"
 exit $bad
