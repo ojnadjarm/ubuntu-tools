@@ -25,6 +25,9 @@ U
 out="" dur="" vo="" vo_at=0 music="" music_db=-14 duck=8 cues="" sfx=() target=web fit=none fitinfo="" game=() duck_on=vo
 LOUDNESS=$(dirname "$(readlink -f "$0")")/../loudness.json
 while [[ $# -gt 0 ]]; do
+  case $1 in --out|--duration|--vo|--vo-at|--music|--music-db|--sfx|--cues|--duck|--duck-on|--game|--target|--fit)
+    [[ $# -ge 2 ]] || { echo "mv-mix: $1 needs a value" >&2; exit 2; } ;;
+  esac
   case $1 in
     --out) out=$2; shift 2 ;;
     --duration) dur=$2; shift 2 ;;
@@ -54,9 +57,12 @@ in=() fc="" mixin="" n=0 i=0
 ms() { echo "$1 * 1000 / 1" | bc; }
 cue_at() {
   local name=$1 off=0 t
-  [[ $1 =~ ^(.+)([+-][0-9]+)$ ]] && name=${BASH_REMATCH[1]} off=${BASH_REMATCH[2]}
   [[ -n $cues ]] || { echo "mv-mix: cue:$name needs --cues cues.json" >&2; exit 2; }
   t=$(jq -r --arg n "$name" '[.clips[].marks[$n] // empty][0] // empty' "$cues")
+  if [[ -z $t && $1 =~ ^(.+)([+-][0-9]+)$ ]]; then
+    name=${BASH_REMATCH[1]} off=${BASH_REMATCH[2]}
+    t=$(jq -r --arg n "$name" '[.clips[].marks[$n] // empty][0] // empty' "$cues")
+  fi
   [[ -n $t ]] || { echo "mv-mix: unknown cue '$name'; known: $(jq -r '[.clips[].marks | keys[]] | unique | join(" ")' "$cues")" >&2; exit 2; }
   echo "$t + $vo_at + ${off#+} / 1000" | bc -l
 }

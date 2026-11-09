@@ -85,13 +85,14 @@ met() {
 
 # True when the polled file exists, is unchanged for STALL seconds and no process has it open for writing.
 stalled() {
-  local mtime fd flags
+  local mtime fd flags pat
+  pat=$(printf '%s' "$target" | sed 's/[][*?\\]/\\&/g')
   mtime=$(stat -c %Y -- "$target" 2>/dev/null) || return 1
   [ $(( $(date +%s) - mtime )) -ge "$STALL" ] || return 1
   while read -r fd; do
     flags=$(sed -n 's/^flags:\s*//p' "${fd/\/fd\//\/fdinfo\/}" 2>/dev/null)
     [ -n "$flags" ] && (( 8#$flags & 3 )) && return 1
-  done < <(find /proc/[0-9]*/fd -maxdepth 1 -lname "$target" 2>/dev/null)
+  done < <(find /proc/[0-9]*/fd -maxdepth 1 -lname "$pat" 2>/dev/null)
   return 0
 }
 

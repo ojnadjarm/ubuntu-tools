@@ -57,4 +57,4 @@ python3 ~/agent-work/motion/T1451/measure.py audio/mix.wav audio/vo.wav 0.8 time
 ## Links
 - Code: `~/.claude/skills/copperplate/scripts/copperplate.py`; film `~/agent-work/motion/T1465/film/film.py`
 - Tests: `bash ~/.claude/skills/copperplate/tests/smoke.test.sh`
-- Design / results: `~/drop/T1465/script.md`, `~/drop/T1465/index.html`
+- Result: `~/drop/videos/room-for-one-more-16x9.mp4`, `~/drop/videos/room-for-one-more-4x5.mp4`; script.md and index.html pruned with the T1465 drop folder (T1505)

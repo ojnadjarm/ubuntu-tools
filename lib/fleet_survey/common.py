@@ -1,8 +1,10 @@
 """Shared roots, the CLI seam and the helpers more than one fleet-survey section uses."""
 import datetime, glob, os, re, statistics, subprocess, time
 
+from agent_work import agent_work
+
 AG = os.environ.get('HARNESS_HOME') or os.path.expanduser('~/agents')
-AW = os.environ.get('AGENT_WORK') or os.path.expanduser('~/agent-work')
+AW = agent_work()
 SKILL_ROOTS = [os.path.join(AG, 'skills'), os.path.expanduser('~/.claude/skills')]
 TIMEOUT = 25
 TIMINGS = os.path.join(AG, 'state', 'test-timings-history.tsv')

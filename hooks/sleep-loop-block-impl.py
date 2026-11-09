@@ -390,9 +390,17 @@ def resolve(base, p, env):
 
 
 def git_writes(toks, cwd, env, depth=0):
-    """(subcommand, target dir or None) of each git commit/push in toks, following cd, pushd, x=dir, export, env -C, xargs, -C, --git-dir, GIT_DIR= and bash -c strings."""
-    out, cur = [], cwd
+    """(subcommand, target dir or None) of each git commit/push in toks, following cd, pushd, x=dir, export, declare -x, ( ) scopes, env -C, xargs, xargs -I, -C, --git-dir, GIT_DIR= and bash -c strings."""
+    out, cur, scopes = [], cwd, []
     for i, t in enumerate(toks):
+        if t == '(':
+            scopes.append((dict(env), cur))
+            continue
+        if t == ')' and scopes:
+            saved, cur = scopes.pop()
+            env.clear()
+            env.update(saved)
+            continue
         if depth < 3 and 'git' in t and any(c in t for c in ' \n;&|'):
             out += git_writes(shell_words(t) or [], cur, env, depth + 1)
             continue
@@ -401,16 +409,21 @@ def git_writes(toks, cwd, env, depth=0):
         if ASSIGN.match(t):
             k, v = t.split('=', 1)
             env[k] = os.path.expanduser(v) if v.startswith('~') else v
+            if 'export ' + k in env and all(ASSIGN.match(a) for a in args_of(toks, i)):
+                env['export ' + k] = resolve(cur, env[k], env)
             continue
         args = args_of(toks, i)
-        if t in ('export', 'unset'):
+        if t in ('export', 'unset', 'declare', 'typeset'):
+            exported = t == 'export' or t != 'unset' and any(a.startswith('-') and 'x' in a for a in args)
             for a in args:
+                if a.startswith('-'):
+                    continue
                 k, _, v = a.partition('=')
                 if '=' in a:
                     env[k] = os.path.expanduser(v) if v.startswith('~') else v
                 if k in GIT_ENV:
                     env.pop('export ' + k, None)
-                    if t == 'export' and k in env:
+                    if exported and k in env:
                         env['export ' + k] = resolve(cur, env[k], env)
             continue
         if t in ('cd', 'pushd', 'popd'):
@@ -432,19 +445,23 @@ def git_writes(toks, cwd, env, depth=0):
         for a in pre:
             if a.startswith(('GIT_DIR=', 'GIT_WORK_TREE=')):
                 d = resolve(base, a.split('=', 1)[1], env)
-        j = 0
-        while j < len(args) and args[j].startswith('-'):
-            a = args[j]
-            if a == '-C' and j + 1 < len(args):
-                d, j = resolve(d, args[j + 1], env), j + 2
-            elif a in ('--git-dir', '--work-tree') and j + 1 < len(args):
-                d, j = resolve(base, args[j + 1], env), j + 2
-            elif a.startswith(('--git-dir=', '--work-tree=')):
-                d, j = resolve(base, a.split('=', 1)[1], env), j + 1
-            else:
-                j += 2 if a in GIT_OPT_ARG else 1
-        if j < len(args) and args[j] in ('commit', 'push'):
-            out.append((args[j], d))
+        ph = next((a[2:] or ''.join(pre[n + 1:n + 2]) for n, a in enumerate(pre) if 'xargs' in pre[:n] and a.startswith('-I')), None)
+        fed = args_of(toks[:k - 1][::-1], -1)[-2::-1] if ph and k > 1 and toks[k - 1] == '|' else []
+        d0 = d
+        for args in [[a.replace(ph, f) for a in args] for f in fed] or [args]:
+            d, j = d0, 0
+            while j < len(args) and args[j].startswith('-'):
+                a = args[j]
+                if a == '-C' and j + 1 < len(args):
+                    d, j = resolve(d, args[j + 1], env), j + 2
+                elif a in ('--git-dir', '--work-tree') and j + 1 < len(args):
+                    d, j = resolve(base, args[j + 1], env), j + 2
+                elif a.startswith(('--git-dir=', '--work-tree=')):
+                    d, j = resolve(base, a.split('=', 1)[1], env), j + 1
+                else:
+                    j += 2 if a in GIT_OPT_ARG else 1
+            if j < len(args) and args[j] in ('commit', 'push'):
+                out.append((args[j], d))
     return out
 
 

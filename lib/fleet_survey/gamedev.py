@@ -39,9 +39,15 @@ def _cpp_ci(root):
     except OSError:
         out.append('cpp-ci stages: no scripts/cpp-ci')
     led = os.path.join(AG, 'log', 'creative-ci.jsonl')
+    ledger = []
     try:
         with open(led, errors='replace') as fh:
-            ledger = [json.loads(r) for r in fh if '"cpp-ci"' in r]
+            for r in fh:
+                if '"cpp-ci"' in r:
+                    try:
+                        ledger.append(json.loads(r))
+                    except ValueError:
+                        pass
     except OSError:
         return out + [f'cpp-ci last none: no {short(led)}']
     for r in reversed(ledger):

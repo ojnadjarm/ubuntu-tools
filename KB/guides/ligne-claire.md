@@ -48,4 +48,4 @@ python3 audio/score.py && ./encode.sh ~/drop/<T> && ./deliver.sh ~/drop/<T>
 ## Links
 - Code: `~/.claude/skills/ligne-claire/scripts/{lc,art}.py`, film `~/agent-work/motion/T1462/film/`
 - Tests: `bash ~/.claude/skills/ligne-claire/tests/smoke.test.sh`
-- Result: `~/drop/T1462/` (script.md has the beats and sources)
+- Result: `~/drop/videos/what-makes-you-you-16x9.mp4`, `~/drop/videos/what-makes-you-you-4x5.mp4`; script.md (beats and sources) pruned with the T1462 drop folder (T1505)

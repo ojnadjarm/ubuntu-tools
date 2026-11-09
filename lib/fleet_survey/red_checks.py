@@ -55,7 +55,7 @@ def rows(ctx):
         if d.get('ok'):
             continue
         tag = _tag(d)
-        row = f'{d.get("ticket", "?"):6} rc {d.get("rc", "?")}  {d.get("started", "")[:16]}  {d.get("check", "")[:90]}'
+        row = f'{d.get("ticket") or "?":6} rc {d.get("rc", "?")}  {(d.get("started") or "")[:16]}  {(d.get("check") or "")[:90]}'
         verdict = d.get('verdict') or ((d.get('runs') or [{}])[-1]).get('verdict')
         full = row + (f'  [{tag}]' if tag else '') + (f'  [verdict {verdict}]' if verdict else '')
         (sup if tag.startswith('superseded') else window if tag else red).append(full)

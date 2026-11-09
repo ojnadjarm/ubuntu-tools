@@ -89,6 +89,16 @@ for body in ('{"a": {"tx": null}}', '{"a": {"tx": "x.jsonl", "at": "soon"}}'):
         check("claims %s: no raise, headless unit kept" % body, "T14-headless (headless)" in [r["label"] for r in os_.running(NOW)])
     except Exception as e:
         check("claims %s: no raise" % body, False, repr(e))
+yday = "2026-01-01T09:30:00"
+check("done: a stamp from an earlier day shows its date", os_.done(["- a", "- b"], None, (yday, 1)) == ("2026-01-01 09:30", ["- b"]), os_.done(["- a", "- b"], None, (yday, 1)))
+today = os_.datetime.now().strftime("%Y-%m-%dT08:05:00")
+check("done: a stamp from today shows the time only", os_.done(["- a"], None, (today, 1))[0] == "08:05", os_.done(["- a"], None, (today, 1)))
+os.makedirs(stamp + ".tmp")
+try:
+    os_.mark({"history_lines": 3})
+    check("mark: does not depend on a shared .tmp name", os_._stamp(None)[1] == 3, os_._stamp(None))
+except OSError as e:
+    check("mark: does not depend on a shared .tmp name", False, repr(e))
 
 home = sandbox(tree=False)
 with open(home + "/bin/systemctl", "w") as f:

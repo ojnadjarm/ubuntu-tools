@@ -69,6 +69,9 @@ in=$1 out=$2; shift 2
 preset=h264-master x265=${MV_X265_PRESET:-slow} crf="" fps="" trc="" loud=0 target=web audio="" hw=0 lut="" burn="" subs="" finish=none grain=2
 LUT_DIR=$(cd "$(dirname "$(readlink -f "$0")")/../luts" && pwd)
 while [[ $# -gt 0 ]]; do
+  case $1 in --preset|--crf|--x265-preset|--fps|--target|--audio|--lut|--burn|--subs|--finish|--grain)
+    [[ $# -ge 2 ]] || { echo "mv-encode: $1 needs a value" >&2; exit 2; } ;;
+  esac
   case $1 in
     --preset) preset=$2; shift 2 ;;
     --crf) crf=$2; shift 2 ;;

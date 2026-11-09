@@ -45,4 +45,4 @@ python3 ~/agent-work/motion/T1451/measure.py audio/mix.wav audio/vo.wav 0.8 time
 ## Links
 - Code: `~/.claude/skills/riso-print/scripts/riso.py`; film `~/agent-work/motion/T1463/film/film.py`
 - Tests: `bash ~/.claude/skills/riso-print/tests/smoke.test.sh`
-- Design / results: `~/drop/T1463/script.md`, `~/drop/T1463/index.html`
+- Result: `~/drop/videos/light-is-two-things-16x9.mp4`, `~/drop/videos/light-is-two-things-4x5.mp4`; script.md and index.html pruned with the T1463 drop folder (T1505)

@@ -46,6 +46,16 @@ printf '{"asset":{"version":"2.0"},"buffers":[{"uri":"my%%20buf.bin","byteLength
 c=$(python3 -I -c 'import os, sys; sys.path.insert(0, sys.argv[1]); import glb; g, b = glb.load(sys.argv[2]); print(len(b), glb.images(g, b, os.path.dirname(sys.argv[2]))[0]["codec"])' "$A/lib" "$TMP/sp/s.gltf" 2>&1 | tail -1)
 ok "$([[ $c == '4 png' ]] && echo 1 || echo 0)" "lib load + images: percent-encoded uris ($c)"
 
+printf '\xef\xbb\xbf{"asset":{"version":"2.0"}}' >"$TMP/bom.gltf"
+o=$("$BIN" "$TMP/bom.gltf" 2>&1); rc=$?
+ok "$([[ $rc == 0 ]] && echo 1 || echo 0)" ".gltf with a UTF-8 BOM is read (rc $rc: ${o:0:80})"
+printf '{"asset":{"version":"2.0"},"nodes":[{"children":[1]},{"children":[0],"mesh":0}],"meshes":[{"primitives":[]}]}' >"$TMP/cycle.gltf"
+o=$("$BIN" "$TMP/cycle.gltf" 2>&1); rc=$?
+ok "$([[ $rc == 2 && $o == *"node cycle"* && $(wc -l <<<"$o") == 1 ]] && echo 1 || echo 0)" "node cycle: rc 2, one line (rc $rc: ${o: -80})"
+printf '{"asset":{"version":"2.0"},"nodes":[{"mesh":0}],"meshes":[{"primitives":[{"attributes":{"POSITION":0}}]}],"accessors":[{"componentType":5126,"count":0,"type":"VEC3"}]}' >"$TMP/empty.gltf"
+o=$("$BIN" "$TMP/empty.gltf" 2>&1); rc=$?
+ok "$([[ $rc == 0 ]] && echo 1 || echo 0)" "POSITION accessor with count 0 and no min/max: rc 0 (rc $rc: ${o: -80})"
+
 printf 'not a model\n' >"$TMP/x.glb"
 o=$("$BIN" "$TMP/x.glb" 2>&1); rc=$?
 ok "$( [[ $rc == 2 && $(wc -l <<<"$o") == 1 && $o == "glb-info: $TMP/x.glb: "* ]] && echo 1 || echo 0)" "non-glb: rc 2, one line (rc $rc: $o)"

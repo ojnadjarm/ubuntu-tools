@@ -293,6 +293,14 @@ grep -q "^n/a: not in ~/agents/bin  harness context --worker$" <<<"$cl" && ok "c
 is "cli: 3 runs of claims list (+1 claims section)" "$(grep -cx 'claims list' "$CALLS")" 4
 is "plain run: no measure section" "$(survey | grep -cE '^### (ci reds|hooks|cli|tmp|dup)')" 0
 
+printf '{"ts":"x","tool":"cpp-ci","proj\n' >>"$A/log/creative-ci.jsonl"
+out=$(survey --creative)
+is "gd: a torn cpp-ci ledger line is skipped" "$(sec 'creative gamedev' | sed -n 4p)" "cpp-ci last cpp configure:pass perf:pass  ~/agents/log/creative-ci/real.json, 4 h old"
+mkdir -p "$E/T9"; echo '{"ticket":null,"rc":1,"ok":false,"check":"nulls-here","started":null}' >"$E/T9/check.json"
+out=$(survey); is "red check.json: null ticket and started do not break the section" "$(sec 'red check.json' | grep -c 'nulls-here')" 1
+mkdir -p "$W/alt/evidence/T1"; echo '{"ticket":"T1","rc":1,"ok":false,"check":"from-config"}' >"$W/alt/evidence/T1/check.json"
+echo "AGENT_WORK=$W/alt" >"$W/cfg.env"
+is "AGENT_WORK from the config.env line" "$(HARNESS_CONFIG="$W/cfg.env" survey | grep -c 'from-config')" 1
 stub agents-log 'echo "agents-log: error: argument --by: invalid choice: ticket" >&2; exit 2'
 t=$(survey | awk '$0=="### tokens by ticket"{getline; print}')
 case "$t" in "n/a: agents-log --tokens --by ticket --since 24h rc 2: agents-log: error: argument --by: invalid choice"*) ok "failing CLI: n/a with why";; *) nok "failing CLI: n/a with why" "$t";; esac

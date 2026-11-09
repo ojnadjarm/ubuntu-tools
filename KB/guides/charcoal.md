@@ -51,4 +51,4 @@ $PY ~/agent-work/motion/T1451/measure.py audio/mix.wav audio/vo.wav 0.8 timeline
 ## Links
 - Code: `~/.claude/skills/charcoal/scripts/{charcoal,schwarzschild}.py`, film `~/agent-work/motion/T1466/film/`
 - Tests: `bash ~/.claude/skills/charcoal/tests/smoke.test.sh`
-- Design / results: `~/drop/T1466/script.md` (beats, facts and sources, survey)
+- Result: `~/drop/videos/every-clock-is-honest-16x9.mp4`, `~/drop/videos/every-clock-is-honest-4x5.mp4`; script.md (beats, facts and sources, survey) pruned with the T1466 drop folder (T1505)

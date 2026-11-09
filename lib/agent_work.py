@@ -9,7 +9,7 @@ def agent_work():
         cfg = os.environ.get("HARNESS_CONFIG", os.path.expanduser("~/.config/pc-harness/config.env"))
         try:
             with open(cfg) as f:
-                val = next((re.split(r"\s+#", l.split("=", 1)[1])[0].strip().strip("\"'") for l in f if l.startswith("AGENT_WORK=")), "")
+                val = next((re.split(r"\s+#", l.split("=", 1)[1])[0].strip().strip("\"'") for l in f if re.match(r"\s*(export\s+)?AGENT_WORK=", l)), "")
         except OSError:
             pass
     return os.path.expanduser(os.path.expandvars(val or "~/agent-work"))

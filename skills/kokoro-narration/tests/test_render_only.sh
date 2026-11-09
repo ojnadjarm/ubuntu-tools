@@ -32,4 +32,7 @@ check() { python3 -c "import json,sys; c=json.load(open('$T/out/cues.json'))['cl
 run b || { echo "FAIL: no cues.json crashed"; fail=1; }; check "no cues.json"
 echo '{"clips":{"b":{"src":"audio/b"}}}' > "$T/out/cues.json"
 run b || { echo "FAIL: clip missing from cues.json crashed"; fail=1; }; check "clip missing from cues.json"
+cp "$T/out/cues.json" "$T/before.json"
+err=$(PATH="$T/bin:$PATH" PYTHONPATH="$T/stub" python3 "$HERE/render_narration.py" "$T/u.json" "$T/out" typo 2>&1 >/dev/null); rc=$?
+{ [ $rc = 2 ] && echo "$err" | grep -q "typo" && cmp -s "$T/out/cues.json" "$T/before.json"; } || { echo "FAIL: unknown clip id rc $rc: $err"; fail=1; }
 [ $fail = 0 ] && echo "ok test_render_only"; exit $fail

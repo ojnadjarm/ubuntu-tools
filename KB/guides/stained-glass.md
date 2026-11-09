@@ -54,4 +54,4 @@ $PY ~/agent-work/motion/T1451/measure.py audio/mix.wav audio/vo.wav 0.8 timeline
 ## Links
 - Code: `~/.claude/skills/stained-glass/scripts/{stainedglass,lancet}.py`; film `~/agent-work/motion/T1467/film/{film,church}.py`
 - Tests: `bash ~/.claude/skills/stained-glass/tests/smoke.test.sh`
-- Design / results: `~/drop/T1467/script.md`, `~/drop/T1467/index.html`
+- Result: `~/drop/videos/the-light-never-went-out-16x9.mp4`, `~/drop/videos/the-light-never-went-out-4x5.mp4`; script.md and index.html pruned with the T1467 drop folder (T1505)

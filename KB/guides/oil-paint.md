@@ -57,4 +57,4 @@ $PY ~/agent-work/motion/T1451/measure.py audio/mix.wav audio/vo.wav 0.8 timeline
 ## Links
 - Code: `~/.claude/skills/oil-paint/scripts/{oilpaint.py,oilc.c}`; film `~/agent-work/motion/T1468/film/film.py`
 - Tests: `bash ~/.claude/skills/oil-paint/tests/smoke.test.sh`
-- Design / results: `~/drop/T1468/script.md`, `~/drop/T1468/index.html`
+- Result: `~/drop/videos/marys-room-16x9.mp4`, `~/drop/videos/marys-room-4x5.mp4`; script.md and index.html pruned with the T1468 drop folder (T1505)

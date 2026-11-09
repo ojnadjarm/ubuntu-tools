@@ -51,4 +51,4 @@ python3 ~/agent-work/motion/T1451/measure.py audio/mix.wav audio/vo.wav 0.8 time
 ## Links
 - Code: `~/.claude/skills/paper-cutout/scripts/papercut.py`; film `~/agent-work/motion/T1464/film/film.py`
 - Tests: `bash ~/.claude/skills/paper-cutout/tests/smoke.test.sh`
-- Design / results: `~/drop/T1464/script.md`, `~/drop/T1464/index.html`
+- Result: `~/drop/videos/which-way-is-time-going-16x9.mp4`, `~/drop/videos/which-way-is-time-going-4x5.mp4`; script.md and index.html pruned with the T1464 drop folder (T1505)

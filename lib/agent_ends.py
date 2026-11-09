@@ -55,7 +55,7 @@ def fold(raw, m):
             continue
         try:
             t = iso_s(json.loads(line).get("timestamp", ""))
-        except ValueError:
+        except (ValueError, AttributeError):
             continue
         for tid, status in notes:
             if t >= m[1].get(tid, (0,))[0]:
@@ -75,6 +75,8 @@ def journal(wf):
         try:
             j = json.loads(line)
         except ValueError:
+            continue
+        if not isinstance(j, dict):
             continue
         if j.get("type") == "started":
             starts.append((j.get("label"), j.get("agentId")))

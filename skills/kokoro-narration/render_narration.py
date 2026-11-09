@@ -116,6 +116,9 @@ RAW.mkdir(parents=True, exist_ok=True)
 (OUT / "audio").mkdir(parents=True, exist_ok=True)
 sheet = {"voice": UNIT["voice"] if ENGINE == "kokoro" else {**UNIT["voice"], "engine": "edge-tts", "voice": voice}, "bias": BIAS, "clips": {}}
 only = set(sys.argv[3:])
+if only - {c["id"] for c in UNIT["clips"]}:
+    print(f"render_narration: no clip {sorted(only - {c['id'] for c in UNIT['clips']})} in {sys.argv[1]}; known: {[c['id'] for c in UNIT['clips']]}", file=sys.stderr)
+    sys.exit(2)
 prev = json.loads((OUT / "cues.json").read_text()) if (OUT / "cues.json").exists() and only else None
 if prev and "kbps" in prev:
     if KBPS and KBPS != str(prev["kbps"] or "default"):

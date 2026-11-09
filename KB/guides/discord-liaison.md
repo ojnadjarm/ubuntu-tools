@@ -158,7 +158,7 @@ runaway loop), `LIAISON_IMAGES_PER_DAY` (5), `LIAISON_JOBS_MAX` (3), `LIAISON_JO
   waited for the UTC day. The debounce batches a burst into one run.
 - A retry of a crashed worker runs inline: requeuing it would launch a transient unit with the running unit's name.
 
-- Postmortem T1482 (119 jobs, 2026-10-27..11-04, `~/drop/T1482/postmortem.md`): 82 done, 36 superseded, 1 lost;
+- Postmortem T1482 (119 jobs, 2026-10-27..11-04, doc pruned with the T1482 drop folder by T1505): 82 done, 36 superseded, 1 lost;
   median 16 min, p90 47 min; 5 escalations, none after 10-28. Superseded jobs had run 320 min (12 over 5 min, one 115 min)
   and the next job did not know them: `JOB.md` now sends it to the predecessor's folder and branch. Process lessons
   (every ask numbered, one subject first, sound by default, facts from the group's sources) live in `JOB.md` "Lessons";

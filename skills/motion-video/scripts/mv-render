@@ -47,7 +47,8 @@ case $cmd in
     cp -r "$SKILL_DIR/templates/$src" "$dir"
     echo "mv-render: new $kind project at $dir" ;;
   remotion)
-    dir=$1 comp=${2:-Main} out=${3:-out/$comp.mp4}; shift $(( $# < 3 ? $# : 3 ))
+    pos=(); while [[ $# -gt 0 && $1 != -- && ${#pos[@]} -lt 3 ]]; do pos+=("$1"); shift; done
+    dir=${pos[0]} comp=${pos[1]:-Main}; out=${pos[2]:-out/$comp.mp4}
     [[ ${1:-} == -- ]] && shift
     deps "$dir"; [[ $out = /* ]] || out=$dir/$out
     t=$(now)

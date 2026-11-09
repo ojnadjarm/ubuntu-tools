@@ -67,6 +67,21 @@ check("resumed: a later start with the same label after the silence",
 check("resumed: no later start with the label", not ae.resumed("e2", starts, began, 0))
 check("iso_s: junk is 0", ae.iso_s("not a time") == 0 and ae.iso_s(None) == 0)
 
+tmp = tempfile.mkdtemp()
+with open(os.path.join(tmp, "journal.jsonl"), "w") as f:
+    f.write('[1]\n"s"\n{"type": "started", "label": "L", "agentId": "z1"}\n')
+try:
+    check("journal: a JSON line that is not an object is skipped", ae.journal(tmp)[1] == [("L", "z1")])
+except AttributeError as e:
+    check("journal: a JSON line that is not an object is skipped (%r)" % e, False)
+m = ae.memo()
+try:
+    ae.fold(b'["<task-id>a1</task-id><status>completed</status>"]\n', m)
+    check("fold: a JSON line that is not an object is skipped", m[1] == {})
+except AttributeError as e:
+    check("fold: a JSON line that is not an object is skipped (%r)" % e, False)
+shutil.rmtree(tmp)
+
 wall = time.monotonic() - t_start
 check(f"wall {wall:.2f} s <= {budget(2):.2f} s", wall <= budget(2))
 sys.exit(bad)

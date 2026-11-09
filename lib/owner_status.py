@@ -72,7 +72,8 @@ def done(lines, since_date, stamp):
     """History lines after the last-ask stamp, or dated since_date onwards; returns (since text, lines)."""
     at, count = stamp
     if since_date is None and count is not None and count <= len(lines):
-        return at[11:16] or at, lines[count:]
+        today = at[:10] == datetime.now().strftime("%Y-%m-%d")
+        return (at[11:16] if today else at[:16].replace("T", " ")) or at, lines[count:]
     day = since_date or datetime.now().strftime("%Y-%m-%d")
     return day, [l for l in lines if l[2:12] >= day]
 
@@ -103,7 +104,7 @@ def mark(data, home=None):
     """Record this ask so the next one shows only newer history lines."""
     p = stamp_path(home)
     os.makedirs(os.path.dirname(p), exist_ok=True)
-    tmp = p + ".tmp"
+    tmp = "%s.%d.tmp" % (p, os.getpid())
     with open(tmp, "w") as f:
         json.dump({"at": datetime.now().isoformat(timespec="seconds"), "lines": data["history_lines"]}, f)
     os.replace(tmp, p)

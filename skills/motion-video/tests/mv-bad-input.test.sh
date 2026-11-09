@@ -43,6 +43,21 @@ for c in new remotion bundle variants bench mc blender clean; do
   out=$("$S/mv-render" $c 2>&1 </dev/null); rc=$?
   ok "$([[ $rc == 2 && $out == usage:* && $out != *unbound* ]] && echo 1 || echo 0)" "mv-render $c without args: usage (rc $rc)"
 done
+clean 2 "mv-mix: option without its value" "$S/mv-mix" --duration 1 --out
+clean 2 "mv-encode: option without its value" "$S/mv-encode" tone.wav o.mp4 --preset
+clean 2 "mv-new: option without its value" "$S/mv-new" "$FX/proj" --kind
+
+echo '{"clips":{"vo":{"marks":{"shot-2":0.25,"go":0.5}}}}' >marks.json
+"$S/mv-mix" --out cue.wav --duration 1.5 --cues marks.json --sfx tone.wav@cue:shot-2 >/dev/null 2>cue.err
+ok "$([[ -s cue.wav ]] && echo 1 || echo 0)" "mv-mix: a cue name ending in -digits is found ($(head -c 80 cue.err))"
+"$S/mv-mix" --out cue2.wav --duration 1.5 --cues marks.json --sfx tone.wav@cue:go-200 >/dev/null 2>&1
+ok "$([[ -s cue2.wav ]] && echo 1 || echo 0)" "mv-mix: cue offset -MS still read when no mark has the full name"
+
+mkdir -p rem/node_modules stub; printf '#!/bin/sh\necho "$@" >"%s/npx.args"\n' "$FX" >stub/npx; chmod +x stub/npx
+PATH="$FX/stub:$PATH" "$S/mv-render" remotion rem -- --scale=0.5 >/dev/null 2>&1
+ok "$([[ $(cat npx.args 2>/dev/null) == "remotion render src/index.ts Main rem/out/Main.mp4 --log=error --scale=0.5" ]] && echo 1 || echo 0)" "mv-render remotion <dir> -- flags: comp stays Main ($(cat npx.args 2>/dev/null))"
+PATH="$FX/stub:$PATH" "$S/mv-render" remotion rem Intro -- --scale=0.5 >/dev/null 2>&1
+ok "$([[ $(cat npx.args 2>/dev/null) == "remotion render src/index.ts Intro rem/out/Intro.mp4 --log=error --scale=0.5" ]] && echo 1 || echo 0)" "mv-render remotion <dir> comp -- flags ($(cat npx.args 2>/dev/null))"
 
 echo "mv-bad-input.test: $((n - bad))/$n passed"
 [[ $bad == 0 ]]

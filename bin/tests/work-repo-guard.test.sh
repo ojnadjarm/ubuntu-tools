@@ -103,6 +103,18 @@ for c in "git -C $P commit -m x" "git commit -m x" "git -C ~/work/repo log | gre
          "cd ~/work/repo && ls; cd -- $P && git commit -m x" "pushd ~/work/repo; popd; git push" "MSG=\"see ~/work/repo\" git push"; do
   ! deny "$c" "$P"; check "PreToolUse allows: $c" $?
 done
+for c in "echo ~/work/repo | xargs -I{} git -C {} push --no-verify" "printf '%s\n' \$HOME/work/repo | xargs -I % git --git-dir %/.git push --no-verify" \
+         "declare -x GIT_DIR=~/work/repo/.git; git push --no-verify" "typeset -x GIT_DIR=~/work/repo/.git && git push --no-verify"; do
+  deny "$c" "$P"; check "PreToolUse denies: $c" $?
+done
+c="(cd $P && ls); git push --no-verify"; deny "$c" "$W"; check "PreToolUse denies from the work repo: $c" $?
+for c in "(export GIT_DIR=~/work/repo/.git; git log); git push" "(cd ~/work/repo && git status); git push" \
+         "echo $P | xargs -I{} git -C {} push" "declare GIT_DIR=~/work/repo/.git; git push"; do
+  ! deny "$c" "$P"; check "PreToolUse allows: $c" $?
+done
+c="echo $P | xargs -I{} git -C {} push"; ! deny "$c" "$W"; check "PreToolUse allows from the work repo: $c" $?
+c="export GIT_DIR=$P/.git; GIT_DIR=~/work/repo/.git; git push --no-verify"; deny "$c" "$P"; check "PreToolUse denies: $c" $?
+c="export GIT_DIR=$P/.git; GIT_DIR=~/work/repo/.git git status; git push"; ! deny "$c" "$P"; check "PreToolUse allows: $c" $?
 
 # Selftest 2: the real gitconfig and real work repos were not written by this run.
 check "selftest: real ~/.gitconfig unchanged" "$(is "$(sha256sum "$REAL_GCFG" 2>/dev/null)" "$sum0")"

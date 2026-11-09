@@ -182,6 +182,9 @@ rc, _, err = run("add", "T917", os.path.join(tmp, "rel", "x.txt"))
 check("add refuses an absolute path held as a relative one", rc == 3 and "overlap: T916" in err, (rc, err))
 rc, out, _ = run("check", os.path.join(tmp, "rel"))
 check("check sees a relative claim under an absolute dir", rc == 1 and "by T916" in out, out)
+run("add", "T916", os.path.join(tmp, "rel", "x.txt"))
+row = [l for l in open(BOARD).read().splitlines() if l.startswith("- T916 ")]
+check("a second add in the other form adds no duplicate word", len(row) == 1 and row[0].count("x.txt") == 1, row)
 run("done", "T916"); run("done", "T917")
 real = open(REAL).read() if os.path.exists(REAL) else ""
 check("no fixture ticket reached the real board", not any("- %s ·" % t in real for t in ("T900", "T901", "T902", "T903", "T904", "T910", "T911", "T912", "T913", "T914", "T915", "H30", "NODATE")))

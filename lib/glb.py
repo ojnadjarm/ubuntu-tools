@@ -24,6 +24,7 @@ def load(path):
         if len(d) >= o + 8 and d[o + 4:o + 8] == b"BIN\0":
             return gltf, d[o + 8:o + 8 + struct.unpack_from("<I", d, o)[0]]
         return gltf, b""
+    d = d.removeprefix(b"\xef\xbb\xbf")
     if d.lstrip()[:1] != b"{":
         raise ValueError("not a glTF (.glb or .gltf)")
     gltf = json.loads(d)
@@ -178,11 +179,13 @@ def node_matrices(gltf):
     parent = {c: i for i, nd in enumerate(nodes) for c in nd.get("children", [])}
     world = {}
 
-    def of(i):
+    def of(i, path=()):
         if i not in world:
+            if i in path:
+                raise ValueError(f"node cycle at node {i}")
             m = node_matrix(nodes[i])
             if i in parent:
-                p = of(parent[i])
+                p = of(parent[i], path + (i,))
                 m = [[sum(p[r][j] * m[j][c] for j in range(4)) for c in range(4)] for r in range(4)]
             world[i] = m
         return world[i]
@@ -203,6 +206,8 @@ def bounds(gltf, bin_):
             lo, hi = acc.get("min"), acc.get("max")
             if lo is None or hi is None:
                 rows = accessor(gltf, bin_, a)
+                if not rows:
+                    continue
                 lo, hi = [min(r[k] for r in rows) for k in range(3)], [max(r[k] for r in rows) for k in range(3)]
             m = world[i]
             for c in ((x, y, z) for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])):

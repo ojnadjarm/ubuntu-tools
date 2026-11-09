@@ -61,6 +61,13 @@ timeout 3 "$WF" --until "! pgrep -f '[${name:0:1}]${name:1}'" --every 0.2 >/dev/
 timeout 3 "$WF" --until "! pgrep -A -f $name" --every 0.2 >/dev/null 2>&1; eq "until: pgrep -A (ignore ancestors) runs" 0 $?
 timeout 3 "$WF" --until "! pgrep -x $name" --every 0.2 >/dev/null 2>&1; eq "until: pgrep without -f runs" 0 $?
 
+G="$WORK/job[1].log"; : >"$G"
+bash -c 'exec 5>>"$1"; sleep 30' _ "$G" & writer=$!
+sleep 0.3; touch -d '-1 hour' "$G"
+WAIT_FOR_STALL=60 timeout 1.5 "$WF" --file "$G" --match DONE --every 0.2 >/dev/null
+eq "file: a writer of a file with glob characters in its name is seen" 124 $?
+kill "$writer"
+
 timeout 3 "$WF" --until false --every abc >/dev/null 2>&1; eq "every: a non-number is refused, no busy loop" 2 $?
 timeout 3 "$WF" --until false --every 0 >/dev/null 2>&1; eq "every: 0 is refused" 2 $?
 "$WF" --until true --label >/dev/null 2>&1; eq "a flag without its value is a usage error" 2 $?

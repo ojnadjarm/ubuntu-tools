@@ -269,10 +269,10 @@ def main(argv):
         if o.cmd == "add":
             own = next((r for r in rs if r["ticket"] == o.ticket), None)
             if own:
-                held = set(paths_of(own["paths"]))
+                held = {absolute(p) for p in paths_of(own["paths"])}
                 words = []
                 for w in WORD.findall(o.paths):
-                    ps = set(paths_of(w))
+                    ps = {absolute(p) for p in paths_of(w)}
                     if not all(any(p == h or p.startswith(h + "/") for h in held) for p in ps):
                         words.append(w)
                         held |= ps
