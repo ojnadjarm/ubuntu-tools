@@ -1,7 +1,9 @@
 """T1412 P5: messages of a project with a `po` go to that PO once (po-ask); the PO's outbox replies are posted to their thread."""
 import io
+import json
 import os
 import shlex
+import unittest
 from contextlib import redirect_stdout
 
 from liaison import po
@@ -54,3 +56,18 @@ class TestPO(Base):
         self.assertEqual(sorted(os.listdir(os.path.join(self.outbox, 'sent'))), ['a.md'])
         self.assertEqual(sorted(os.listdir(os.path.join(self.outbox, 'refused'))), ['b.md', 'c.md'])
         self.assertEqual([f for f in os.listdir(self.outbox) if f.endswith('.md')], [])
+
+
+class TestRealRegistry(unittest.TestCase):
+    def test_every_po_has_a_po_inbox_seat_and_folder(self):
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        agents = os.path.dirname(here)
+        with open(os.path.join(here, 'projects.json')) as f:
+            pos = {p['po'] for p in json.load(f)['projects'] if p.get('po')}
+        with open(os.path.join(agents, 'org.json')) as f:
+            seats = {s['id']: s for s in json.load(f)['seats']}
+        self.assertEqual(pos, {'po-discord'})
+        for name in pos:
+            seat = seats.get(name.removeprefix('po-'), {})
+            self.assertEqual((seat.get('role'), seat.get('wake'), seat.get('parent')), ('po', 'po-inbox', 'orchestrator'))
+            self.assertTrue(os.path.isfile(os.path.join(agents, name, 'BRIEF.md')), name)

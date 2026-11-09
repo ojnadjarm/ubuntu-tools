@@ -21,6 +21,8 @@ orchestrator relays with `po-ask`. Not for fleet tooling, work repos (Vass) or r
   topic and files a tap that matches an unanswered `state/picks/<id>.json` as `po-ask <p> --from pick`; anything else dropped.
 - Discord: a project with `"po": "po-<p>"` in `discord-liaison/projects.json` — `discord-liaison inbox`/`map` hand its
   messages to the PO once (`state/po-asked.json`), `tick` first posts `po-<p>/outbox/discord/*.md` (`thread: <id>` line).
+  Live: `po-discord` (seat `discord` in `org.json`) holds all 3 Discord projects (T1515 P19); `test_po.py` checks that
+  every `po` in `projects.json` has a po-inbox seat and a folder.
 - `deploy-lock <env> --version '<cmd>' -- <cmd>`: one deployer per live env, second one waits and gets `DEPLOY_LIVE_BEFORE`.
 
 ## Exact commands

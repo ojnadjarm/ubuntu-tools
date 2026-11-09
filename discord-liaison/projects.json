@@ -13,7 +13,7 @@
     "daily": "the maintainer asked (2026-10-31): when a liaison PR has waited 2+ days unmerged, keep one daily branch with every open PR: `pr-daily-branch <clone> --test 'npm test' --apply` (liaison/diaria-<date>), open or keep its PR 'Rama diaria <date>', link it in the thread"
    },
    "skills": ["kokoro-narration", "motion-video", "concept-img", "frontend-design"],
-   "po": null
+   "po": "po-discord"
   },
   {
    "id": "spidey-pr-dashboard",
@@ -26,7 +26,7 @@
     "pr_flow": "work only on branch oscar-review (the maintainers' review branch for the owner): fetch, commit there, push over SSH, link it in the thread; a PR only into oscar-review; never push main, never merge"
    },
    "skills": ["frontend-design", "code-hero-render", "motion-video"],
-   "po": null
+   "po": "po-discord"
   },
   {
    "id": "mosaico",
@@ -40,7 +40,7 @@
     "repo_rules": "read the repo's AGENTS.md first: no stack approved yet, privacy (no personal images to any AI, synthetic fixtures only), do not rewrite the maintainers' docs (README, AGENTS, CLAUDE, docs/plan.md, .gitignore)"
    },
    "skills": ["frontend-design", "concept-img"],
-   "po": null
+   "po": "po-discord"
   }
  ]
 }

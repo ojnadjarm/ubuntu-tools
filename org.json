@@ -1,5 +1,6 @@
 {"seats": [
   {"id": "owner", "name": "You", "role": "owner", "parent": null, "wake": null, "match": null},
   {"id": "orchestrator", "name": "Orchestrator", "role": "ceo", "parent": "owner", "wake": "channel", "match": "~"},
-  {"id": "mooblox", "name": "Mooblox product owner", "role": "po", "parent": "orchestrator", "wake": "po-inbox", "match": "~/agents/po-mooblox"}
+  {"id": "mooblox", "name": "Mooblox product owner", "role": "po", "parent": "orchestrator", "wake": "po-inbox", "match": "~/agents/po-mooblox"},
+  {"id": "discord", "name": "Discord product owner", "role": "po", "parent": "orchestrator", "wake": "po-inbox", "match": "~/agents/po-discord"}
 ]}
