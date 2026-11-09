@@ -61,7 +61,7 @@ srv.on("request", (req, res) => {
     assert.strictEqual(await p.textContent(".chat .stream header h2"), "Mooblox", "cold load opens the hash's channel");
     assert.strictEqual(await p.evaluate(() => location.hash), "#chat?ch=dm-mooblox--owner", "cold load keeps the hash");
     const chans = await p.$$eval(".chat .chans a", (as) => as.map((a) => a.dataset.ch));
-    assert.deepStrictEqual(chans, ["harness", "org", "mooblox", "discord", "dm-orchestrator--owner", "dm-mooblox--owner", "dm-discord--owner", "dm-owner--vass"], "rooms, PO channels (no room for the pull seat vass) and a direct message per seat before any message");
+    assert.deepStrictEqual(chans, ["", "harness", "org", "mooblox", "discord", "dm-orchestrator--owner", "dm-mooblox--owner", "dm-discord--owner", "dm-owner--vass"], "Recent, rooms, PO channels (no room for the pull seat vass) and a direct message per seat before any message");
     await p.waitForFunction(() => /2/.test((document.querySelector('#subs [data-nav="chat"] i') || {}).textContent || ""), null, { timeout: 5000 });
     assert.strictEqual(await p.textContent('.chat [data-ch="org"] .unread'), "2", "unread badge on the channel");
 

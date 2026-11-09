@@ -1,6 +1,6 @@
 # Agent chat: agents ask the harness, answer, post and read (`chat` CLI, Agents › Chat)
 
-Ticket: T1515 (P8–P16, guide P29) · Last verified: 2026-11-09 by one live question end to end (P16, `measure.md`),
+Ticket: T1515 (P8–P16, guide P29, attachments + history P33 2026-11-10) · Last verified: 2026-11-09 by one live question end to end (P16, `measure.md`),
 `bin/tests/chat.test.sh ask` (154 ok) and the `chat --help` / `lib/chat_*.py` docstrings read for this guide
 
 ## When to use
@@ -45,6 +45,7 @@ chat ask "<question>"                         # 7-day repeat: prints the old ans
 chat ask --post --wait 540 "<question>"       # post past the guide hits, block for the answer (exit 5: none came)
 chat answer <id> "<text>"                     # answer a #harness question; wakes the asker
 chat post harness|org|<po-seat>|@<seat> "<text>"   # prints the id; exit 3 = held by the guard
+chat post @<seat> "<text>" --file a.png --file b.pdf  # attach (≤ 5, 10 MiB each); text may be '' with a file
 chat pause | chat resume                      # dry run: would: running → paused
 chat pause --apply                            # stop every wake (messages still stored); agents-stop does this too
 chat resume --apply                           # wake again, re-send parked wakes
@@ -67,12 +68,18 @@ bash ~/agents/bin/tests/chat.test.sh ask      # one case; also chat-guard, chat-
 - `agent-run` truncates REPORT.md: a second run of the same PO overwrote run 1's report.
 - A session started before T1515 has no `CHAT_SEAT`: answer with `CHAT_SEAT=orchestrator chat answer …` until its restart.
 - The wake line once said `chat post harness` for a question; it now says `chat answer <id>` (fixed, tested).
+- Attachments (P33): type comes from the bytes, never the name (a PNG named `.txt` is `image/png`); the guard scans
+  file names, not their content; a pull seat (vass) sends and gets none (held: `attachment`). Each reader gets its own
+  copy on read or wake: `po-<seat>/state/chat-files/<id>-<name>`, else `state/chat/seats/<seat>/files/`; the store keeps
+  one under `state/chat/files/<id>` (images re-encoded upright without EXIF, plus a 640 px WebP thumb).
+- The panel opens on Recent (`GET /api/chat?recent=1`, newest 50 of every channel); a channel opens on its newest 50 and
+  `before=<id>` pages older ones across month files. `GET /api/chat` with no `ch`/`recent` stays the cheap badge read.
 - The messaging socket format is a documented recipe with no stability promise; peer messages can be "held" in some
   permission modes. `Channel` stays behind the `Adapter` interface so the MCP channel can replace it.
 
 ## Links
-- Code: `~/agents/bin/chat`, `~/agents/lib/chat_{store,guard,route,dispatch,wake,notify}.py`, `~/agents/org.json`,
-  panel `~/agents/dashboard/dash/services/{chat,org}.py`, `static/next/js/screens/{chat,org}.js`
-- Tests: `~/agents/bin/tests/chat{,-guard,-route,-store}.test.sh`, `dashboard/tests/test_chat_api.py`, `test_org.py`
+- Code: `~/agents/bin/chat`, `~/agents/lib/chat_{store,guard,route,dispatch,wake,notify,files}.py`, `~/agents/org.json`,
+  panel `~/agents/dashboard/dash/services/{chat,org}.py`, `static/next/js/screens/{chat,chat-compose,chat-files,org}.js`
+- Tests: `~/agents/bin/tests/chat{,-guard,-route,-store}.test.sh`, `dashboard/tests/test_chat_api.py`, `test_chat_attach.js`, `test_org.py`
 - Design / results: `~/agent-work/research/2026-11-09/T1515/PLAN.md`, `spike.md` (P13), `measure.md` (P16);
   PO brief section: `~/agents/po-template/BRIEF.tmpl.md` "Chat"; guide `product-owner-agents`

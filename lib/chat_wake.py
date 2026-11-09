@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 
+import chat_files
 import chat_store
 import org
 import sessions
@@ -24,12 +25,14 @@ STALE_MS = (WINDOW + 40) * 1000
 BIN = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "bin")
 
 
-def render(msgs):
-    """The data header, then one line per message (id, channel, sender, kind, text), then how to answer."""
+def render(msgs, seat=None):
+    """The data header, then one line per message (id, channel, sender, kind, text, the seat's own copy of each
+    attachment), then how to answer."""
     lines = [HEADER]
     for m in msgs:
         kind = f" ({m['kind']})" if m.get("kind", "msg") != "msg" else ""
         lines.append(f"{m['id']} #{m['ch']} {m['from']}{kind}: {m['text']}")
+        lines += ["    " + f for f in chat_files.lines(seat, m.get("files"))]
     last, ch = msgs[-1], msgs[-1]["ch"]
     reply = f"chat answer {last['id']} <text>" if last.get("kind") == "ask" else f"chat post {ch} <text>"
     lines.append(f"Answer with `{reply}`; read more with `chat read {ch}`.")
@@ -97,7 +100,7 @@ class Channel(Adapter):
             return REFUSED
         path, token = found
         data = (json.dumps({"type": "auth", "token": token}) + "\n"
-                + json.dumps({"type": "user", "message": {"role": "user", "content": render(msgs)}}) + "\n")
+                + json.dumps({"type": "user", "message": {"role": "user", "content": render(msgs, seat)}}) + "\n")
         try:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
                 s.settimeout(TIMEOUT)
@@ -170,7 +173,7 @@ def flush(seat):
         return True
     cmd = [os.path.join(BIN, "po-ask"), seat, "--from", "chat", "--channel", "chat",
            "--thread", str(rows[-1]["id"]), "-"]
-    done = subprocess.run(cmd, input=render(rows), text=True, stdout=subprocess.DEVNULL).returncode == 0
+    done = subprocess.run(cmd, input=render(rows, seat), text=True, stdout=subprocess.DEVNULL).returncode == 0
     if not done:
         with _batch(seat) as state:
             state["msgs"] = pending + state["msgs"]

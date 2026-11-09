@@ -12,6 +12,7 @@ BIN = os.path.dirname(os.path.realpath(__file__))
 LIB = os.path.join(os.path.dirname(BIN), "lib")
 sys.path.insert(0, LIB)
 import chat_dispatch  # noqa: E402
+import chat_files  # noqa: E402
 import chat_guard  # noqa: E402
 import chat_notify  # noqa: E402
 import chat_route  # noqa: E402
@@ -68,8 +69,9 @@ def target(where, seat, seats):
     return where, []
 
 
-def show(rows, with_ch):
-    """Print messages one per line, extra text lines indented, after the data header."""
+def show(rows, with_ch, seat=None):
+    """Print messages one per line, extra text lines indented, then each attachment as a path in the seat's own folder,
+    after the data header."""
     if rows:
         print(HEADER)
     for r in rows:
@@ -77,20 +79,43 @@ def show(rows, with_ch):
         kind = f" ({r['kind']}{' re ' + str(r['re']) if r['re'] else ''})" if r["kind"] != "msg" else ""
         first, *rest = r["text"].split("\n")
         print(f"{r['id']} {r['ts'][11:19]}{' #' + r['ch'] if with_ch else ''} {r['from']}{to}{kind}: {first}")
-        for line in rest:
+        for line in rest + chat_files.lines(seat, r.get("files")):
             print("    " + line)
+
+
+def attachments(paths):
+    """[(bytes, name)] of the --file paths; ValueError over MAX_FILES, over the size cap or unreadable."""
+    if len(paths) > chat_files.MAX_FILES:
+        raise ValueError(f"at most {chat_files.MAX_FILES} files a message")
+    out = []
+    for p in paths:
+        try:
+            if os.path.getsize(p) > chat_files.MAX_BYTES:
+                raise ValueError(f"{p}: over the {chat_files.MAX_BYTES >> 20} MiB cap a file")
+            with open(p, "rb") as f:
+                out.append((f.read(), chat_files.clean_name(p)))
+        except OSError as e:
+            raise ValueError(f"cannot read {p}: {e.strerror}") from None
+    return out
 
 
 def post(a, seat, seats):
     ch, to = target(a.where, seat, seats)
     text = sys.stdin.read().rstrip("\n") if a.text == "-" else a.text
-    ok, rule = chat_guard.check(text, seat, ch, to)
+    blobs = attachments(a.file)
+    ok, rule = chat_guard.check(text, seat, ch, to, [n for _, n in blobs])
     if not ok:
         chat_store.audit({"held": True, "seat": seat, "ch": ch, "rule": rule})
         print(f"chat: held ({rule}): nothing was posted", file=sys.stderr)
         return HELD
-    msg = {"ch": ch, "from": seat, "to": to, "text": text}
-    mid = chat_store.post(msg)
+    files = [chat_files.save(data, name) for data, name in blobs]
+    msg = {"ch": ch, "from": seat, "to": to, "text": text, **({"files": files} if files else {})}
+    try:
+        mid = chat_store.post(msg)
+    except ValueError:
+        for f in files:
+            chat_files.drop(f["id"])
+        raise
     print(mid)
     chat_dispatch.dispatch({**msg, "id": mid, "kind": "msg", "hop": 0}, seats)
     chat_notify.alert({**msg, "id": mid}, seats)
@@ -118,7 +143,7 @@ def read(a, seat, seats):
         if got:
             chat_store.mark(seat, ch, got[-1]["id"])
         rows += [r for r in got if not (a.unread and r["from"] == seat)]
-    show(rows, with_ch=a.ch is None)
+    show(rows, with_ch=a.ch is None, seat=seat)
     return 0
 
 
@@ -254,7 +279,9 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("post", help="post text to a channel or @seat; prints the id, exit 3 when the guard holds it")
     s.add_argument("where", help="harness, org, a product owner's channel, or @<seat> for a direct message")
-    s.add_argument("text", help="the message (max 2000 characters), or - to read it from stdin")
+    s.add_argument("text", help="the message (max 2000 characters), or - to read it from stdin; may be empty with --file")
+    s.add_argument("--file", action="append", default=[], metavar="PATH",
+                   help="attach a file (repeatable, at most 5, 10 MiB each); readers get their own copy's path")
     s = sub.add_parser("read", help="no channel: your channels with unread counts; else the messages, marked read")
     s.add_argument("ch", nargs="?", help="a channel or @<seat>")
     s.add_argument("--unread", action="store_true", help="only messages since you last read, not your own")

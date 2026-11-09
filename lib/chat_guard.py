@@ -1,4 +1,4 @@
-"""Chat guard: check(text, seat, ch, to) allows a message or holds it with the rule's name; any error holds it."""
+"""Chat guard: check(text, seat, ch, to, names) allows a message or holds it with the rule's name; any error holds it."""
 import functools
 import os
 import re
@@ -99,15 +99,19 @@ def strict(text, seat, ch, to):
     return any(s['wake'] == 'pull' and s['id'] in parties for s in org.seats())
 
 
-def check(text, seat, ch=None, to=()):
+def check(text, seat, ch=None, to=(), names=()):
     """(True, '') to allow text from seat in ch to `to`, else (False, the rule that holds it); never names the matched
-    text. A message to, from or naming a pull seat also meets the STRICT rules."""
+    text. A message to, from or naming a pull seat also meets the STRICT rules and carries no attachment. Attachment
+    names meet the same rules as the text; their content is not scanned."""
     try:
-        if not isinstance(text, str):
+        if not isinstance(text, str) or not all(isinstance(n, str) for n in names):
             return False, 'not text'
-        rules = RULES + STRICT if strict(text, seat, ch, to) else RULES
+        tight = strict(text, seat, ch, to)
+        if names and tight:
+            return False, 'attachment'
+        rules = RULES + STRICT if tight else RULES
         for name, rule in rules:
-            if rule(text, seat):
+            if any(rule(t, seat) for t in (text, *names)):
                 return False, name
         return True, ''
     except Exception as e:

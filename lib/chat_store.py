@@ -10,6 +10,8 @@ import time
 KINDS = ("msg", "ask", "answer", "system")
 KEYS = ("ch", "from", "to", "kind", "text", "re", "hop")
 MAX_TEXT = 2000
+MAX_FILES = 5
+FILE_KEYS = {"id", "name", "size", "mime"}
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 FILE = re.compile(r"^([a-z0-9][a-z0-9-]*)\.(\d{4}-\d{2})\.jsonl$")
 
@@ -76,7 +78,7 @@ def _read_json(path, default):
 
 
 def _validate(msg):
-    extra = set(msg) - set(KEYS)
+    extra = set(msg) - set(KEYS) - {"files"}
     if extra:
         raise ValueError(f"unknown keys: {', '.join(sorted(extra))}")
     m = {"to": [], "kind": "msg", "re": None, "hop": 0, **msg}
@@ -88,7 +90,11 @@ def _validate(msg):
         _name(t, "to")
     if m["kind"] not in KINDS:
         raise ValueError(f"bad kind: {m['kind']!r} not in {KINDS}")
-    if not isinstance(m.get("text"), str) or not m["text"].strip():
+    files = m.get("files") or []
+    if not isinstance(files, list) or len(files) > MAX_FILES or any(
+            not isinstance(f, dict) or set(f) != FILE_KEYS for f in files):
+        raise ValueError(f"bad files: at most {MAX_FILES} of {{{', '.join(sorted(FILE_KEYS))}}}")
+    if not isinstance(m.get("text"), str) or not (m["text"].strip() or files):
         raise ValueError("bad text: empty")
     if len(m["text"]) > MAX_TEXT:
         raise ValueError(f"text over {MAX_TEXT} characters: put it in a file and send the path")
@@ -100,14 +106,14 @@ def _validate(msg):
 
 
 def post(msg):
-    """Store one message (ch, from, text; to, kind, re, hop optional); returns its id (UTC ms, rising)."""
+    """Store one message (ch, from, text; to, kind, re, hop, files optional); returns its id (UTC ms, rising)."""
     m = _validate(msg)
     with _locked():
         last_path = os.path.join(root(), "last-id")
         mid = max(_now_ms(), _read_json(last_path, 0) + 1)
         when = _utc(mid)
         row = {"id": mid, "ts": when.strftime("%Y-%m-%dT%H:%M:%S.") + f"{mid % 1000:03d}Z",
-               **{k: m[k] for k in KEYS}}
+               **{k: m[k] for k in KEYS}, **({"files": m["files"]} if m.get("files") else {})}
         _append(os.path.join(root(), f"{m['ch']}.{when:%Y-%m}.jsonl"), row)
         _write_json(last_path, mid)
         _append(os.path.join(root(), "audit.jsonl"), {k: row[k] for k in ("ts", "id", "ch", "from", "kind")})
@@ -144,13 +150,18 @@ def _rows(path):
                 continue
 
 
-def read(ch, after=None, limit=200):
-    """Messages of a channel, oldest first: the newest `limit`, or with `after` the first `limit` newer than it."""
+def read(ch, after=None, limit=200, before=None):
+    """Messages of a channel, oldest first: the newest `limit` (older than `before` when given), or with `after` the
+    first `limit` newer than it."""
     paths = _files().get(_channel(ch), [])
     if after is None:
+        before = None if before is None else int(before)
+        month = f"{_utc(before):%Y-%m}" if before else "9999"
         out = []
         for p in reversed(paths):
-            out = list(_rows(p)) + out
+            if FILE.match(os.path.basename(p)).group(2) > month:
+                continue
+            out = [r for r in _rows(p) if before is None or r["id"] < before] + out
             if len(out) >= limit:
                 break
         return out[-limit:] if limit else []
@@ -166,6 +177,21 @@ def read(ch, after=None, limit=200):
     return out[:limit]
 
 
+def recent(seat, after=None, before=None, limit=50):
+    """Messages of every channel the seat sees, oldest first: the newest `limit` (older than `before`), or with `after`
+    the first `limit` newer than it."""
+    rows = []
+    for c in visible(seat):
+        rows += read(c, after=after, before=before, limit=limit)
+    rows.sort(key=lambda r: r["id"])
+    return rows[:limit] if after is not None else rows[-limit:]
+
+
+def visible(seat):
+    """The channels with a file that the seat sees: direct messages only its own; the owner sees all."""
+    return [ch for ch in _files() if not ch.startswith("dm-") or seat == "owner" or seat in ch[3:].split("--")]
+
+
 def _cursors(seat):
     return os.path.join(root(), "cursors", f"{_name(seat, 'seat')}.json")
 
@@ -174,9 +200,9 @@ def channels(seat):
     """[{ch, unread}] the seat can see (direct messages only its own; the owner sees all); unread skips its own."""
     cur = _read_json(_cursors(seat), {})
     out = []
-    for ch, paths in _files().items():
-        if ch.startswith("dm-") and seat != "owner" and seat not in ch[3:].split("--"):
-            continue
+    files = _files()
+    for ch in visible(seat):
+        paths = files[ch]
         seen = cur.get(ch, 0)
         unread = sum(1 for p in paths for r in _rows(p) if r["id"] > seen and r["from"] != seat)
         out.append({"ch": ch, "unread": unread})
