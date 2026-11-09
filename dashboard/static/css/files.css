@@ -1,6 +1,6 @@
 /* Files: the pick column, the selection bar and the undo toast. */
 .fsel th.pk, .fsel td.pk { width: 1%; padding-right: 0; }
-.fsel td.pk label, .fsel th.pk label { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 28px; margin: -6px 0 -6px -6px; cursor: pointer; }
+.fsel td.pk label, .fsel th.pk label { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; margin: -8px 0 -8px -8px; cursor: pointer; }
 .fsel input[type=checkbox] { width: 15px; height: 15px; margin: 0; accent-color: var(--g); cursor: pointer; }
 .fsel tbody tr.pkd td { background: var(--w08); }
 .fsel tbody tr.pkd td.n { color: var(--g2); }

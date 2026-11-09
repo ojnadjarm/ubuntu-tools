@@ -495,6 +495,15 @@ mark { background: var(--gold-w); color: var(--gold); padding: 0 2px; }
 .lgraph g:hover circle { fill: var(--g); } .lgraph g:hover text { fill: var(--g2); }
 .lgraph .hit, .lgraph g:hover .hit { fill: transparent; stroke: none; }
 .links a em.miss { color: var(--mute); }
+
+/* @component .cell.tap — opt-in tap floor --tap (32 px, 44 px ≤ 820 px) for a cell's links and buttons; in-row targets grow around their line without moving it */
+.tap { --tap: 32px; }
+.tap :is(td.u, td.go, .stat b) :is(a, button) { display: inline-flex; align-items: center; justify-content: center; min-height: var(--tap); min-width: var(--tap); margin-block: calc((1lh - var(--tap)) / 2); }
+.tap td.n :is(a, button) { display: flex; align-items: center; min-height: var(--tap); min-width: var(--tap); margin-block: calc((1lh - var(--tap)) / 2); }
+.tap :is(.crumbs button, .fbar .btn, .fbar input, .btns .btn, .tn button) { min-height: var(--tap); }
+.tap :is(.fbar .btn, .btns .btn) { display: inline-flex; align-items: center; }
+.tap .tn button[data-tog] { width: var(--tap); }
+@media (max-width: 820px) { .tap { --tap: 44px; } .tap .tw tr:last-child { padding-bottom: 16px; } }
 /* == RESPONSIVE ============================================================ */
 @media (min-width: 1100px) {
   .page { width: min(100%, calc(230px + 60 * var(--pfs))); display: grid; grid-template-columns: 200px minmax(0, 1fr); column-gap: 30px; align-content: start; }
