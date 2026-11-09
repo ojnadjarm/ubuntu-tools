@@ -29,8 +29,9 @@ def render(msgs):
     for m in msgs:
         kind = f" ({m['kind']})" if m.get("kind", "msg") != "msg" else ""
         lines.append(f"{m['id']} #{m['ch']} {m['from']}{kind}: {m['text']}")
-    ch = msgs[-1]["ch"]
-    lines.append(f"Answer with `chat post {ch} <text>`; read more with `chat read {ch}`.")
+    last, ch = msgs[-1], msgs[-1]["ch"]
+    reply = f"chat answer {last['id']} <text>" if last.get("kind") == "ask" else f"chat post {ch} <text>"
+    lines.append(f"Answer with `{reply}`; read more with `chat read {ch}`.")
     return "\n".join(lines)
 
 
@@ -137,6 +138,13 @@ def _arm(seat):
         return subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
+
+
+def withdraw(seat, ids):
+    """Drop messages the seat has already read from its pending batch; the armed timer then files only the rest."""
+    if os.path.exists(os.path.join(_dir(), f"{seat}.json")):
+        with _batch(seat) as state:
+            state["msgs"] = [m for m in state["msgs"] if m["id"] not in ids]
 
 
 def _row(ch, mid):

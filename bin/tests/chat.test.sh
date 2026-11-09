@@ -337,6 +337,23 @@ PY
   out=$(printf 'from stdin\n' | CHAT_SEAT=fx chat ask -); rc=$?
   is 'ask -: question from stdin' "$rc $(last 'r["text"]')" '0 from stdin'
   CHAT_SEAT=fx chat ask >/dev/null 2>&1; is 'ask: no question: rc 2' "$?" 2
+
+  # P16: an answer read while blocked is withdrawn from the asker's batch, so its armed timer files no extra wake.
+  local P="$HARNESS_HOME/po-fx" flush
+  rm -rf "$ST" "$P" "$WORK/systemd-run.log"; mkdir -p "$P/inbox"; : >"$P/BRIEF.md"
+  (timeout 20 wait-for --label p16-q --every 0.2 --until "grep -q 'zzw waited' $ST/harness.*.jsonl" >/dev/null
+   CHAT_SEAT=orchestrator chat answer "$(last 'r["id"]')" 'waited answer' >/dev/null) &
+  out=$(CHAT_SEAT=fx chat ask --post 'zzw waited' --wait 30); rc=$?
+  wait
+  ev 'ask --wait: own answer read while blocked: rc 0' '[ "$rc" = 0 ] && grep -q "(answer re .*): waited answer$" <<<"$out"'
+  is 'ask --wait: the answer armed one timer for fx' "$(grep -c 'flush fx$' "$WORK/systemd-run.log")" 1
+  is 'ask --wait: the answer is withdrawn from the batch' "$(python3 -c "import json; print(json.load(open('$ST/wake/fx.json'))['msgs'])")" '[]'
+  flush=$(sed -n 's/.* --setenv=HARNESS_HOME=[^ ]* //p' "$WORK/systemd-run.log"); $flush
+  is 'ask --wait: the timer files no extra wake' "$(find "$P/inbox" -type f | wc -l)" 0
+  rm -rf "$P"
+  is 'ask: the wake line for a question says chat answer <id>' "$(python3 -c "import sys; sys.path.insert(0, '$BIN/../lib')
+import chat_wake; print(chat_wake.render([{'id': 7, 'ch': 'harness', 'from': 'fx', 'kind': 'ask', 'text': 'q'}]).split(chr(10))[-1])")" \
+     'Answer with `chat answer 7 <text>`; read more with `chat read harness`.'
   unset GUIDES_DIR SKILLS_DIR
 }
 

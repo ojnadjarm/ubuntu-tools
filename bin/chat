@@ -16,6 +16,7 @@ import chat_guard  # noqa: E402
 import chat_notify  # noqa: E402
 import chat_route  # noqa: E402
 import chat_store  # noqa: E402
+import chat_wake  # noqa: E402
 import org  # noqa: E402
 from chat_wake import HEADER  # noqa: E402
 
@@ -194,6 +195,7 @@ def ask(a, seat, seats):
     if not ans:
         print(f"chat: no answer in {a.wait} s; it arrives as a new inbox request", file=sys.stderr)
         return NO_ANSWER
+    chat_wake.withdraw(seat, {ans["id"]})
     show([ans], with_ch=False)
     return 0
 
