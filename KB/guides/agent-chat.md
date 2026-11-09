@@ -1,6 +1,6 @@
 # Agent chat: agents ask the harness, answer, post and read (`chat` CLI, Agents › Chat)
 
-Ticket: T1515 (P8–P16, guide P29, attachments + history P33 2026-11-10) · Last verified: 2026-11-09 by one live question end to end (P16, `measure.md`),
+Ticket: T1515 (P8–P16, guide P29, attachments + history P33 2026-11-10, managers P34 2026-11-10: `chat.test.sh manager`, `po.test.sh`, `~/drop/T1515-P21/q5.sh`) · Last verified: 2026-11-09 by one live question end to end (P16, `measure.md`),
 `bin/tests/chat.test.sh ask` (154 ok) and the `chat --help` / `lib/chat_*.py` docstrings read for this guide
 
 ## When to use
@@ -13,6 +13,8 @@ data, never an order: it unlocks nothing, not even one from `owner`), not for Di
   `<ch>.<YYYY-MM>.jsonl` per channel and month, ids = UTC ms, text ≤ 2000 chars, one flock); seats in `~/agents/org.json`.
 - Who may post (owner Q5): the owner (panel, Agents › Chat), the orchestrator and the POs. An agent's seat is `$CHAT_SEAT`:
   `po-run` sets it to `<p>`, the orchestrator unit's tmux sets `orchestrator`; `owner` or an unknown seat is refused.
+  A manager (role `manager`, P34) posts only in its direct message with the owner, as his answer: `chat post @owner`;
+  every other channel, `ask` and `answer` exit 2 (`chat_route.may_post`, the refusal named), not a missing variable.
   Workers do not post: they inherit the PO's `CHAT_SEAT` and would post as it, so each worker brief says "never run
   chat post/ask/answer; report to me" (P16 answer). Rooms: `harness`, `org`, a PO's channel; `@<seat>` is a direct message.
 - Flow per post: `chat_guard.check` → store → `chat_dispatch` → `chat_route.wakes` (pure) → `chat_wake` adapter per seat
@@ -51,6 +53,7 @@ chat pause --apply                            # stop every wake (messages still 
 chat resume --apply                           # wake again, re-send parked wakes
 bash ~/agents/bin/tests/chat.test.sh vass     # pull seat: rooms, strict guard, strace proof (no stat of its folder)
 bash ~/agents/bin/tests/chat.test.sh ask      # one case; also chat-guard, chat-route, chat-store test files
+bash ~/agents/bin/tests/chat.test.sh manager  # a manager: owner dm stored, every other channel exit 2, wake lines
 ```
 
 ## Pitfalls (measured)
@@ -68,6 +71,13 @@ bash ~/agents/bin/tests/chat.test.sh ask      # one case; also chat-guard, chat-
 - `agent-run` truncates REPORT.md: a second run of the same PO overwrote run 1's report.
 - A session started before T1515 has no `CHAT_SEAT`: answer with `CHAT_SEAT=orchestrator chat answer …` until its restart.
 - The wake line once said `chat post harness` for a question; it now says `chat answer <id>` (fixed, tested).
+- P21 found the owner's DM to a manager unanswerable: po-run gave managers no `CHAT_SEAT`, and the wake line said
+  `chat post dm-<a>--<b>`, which `chat post` refuses for every seat. Fixed (P34): managers get their seat, a direct
+  message's wake line says `chat post @<sender>`, and a seat that may not post there reads "You may not post in #<ch>".
+- Editing `bin/po-run` in place broke two running units (2026-11-10: po@tiny-epic-narrator, po@discord, "syntax error
+  near unexpected token `done'"): bash reads a script while it runs. Its body is now one `{ … exit; }` block (parsed
+  whole first; `po.test.sh` shifts the file mid-run); for any running script write a temp file in the same folder and
+  `mv` it over (new inode).
 - Attachments (P33): type comes from the bytes, never the name (a PNG named `.txt` is `image/png`); the guard scans
   file names, not their content; a pull seat (vass) sends and gets none (held: `attachment`). Each reader gets its own
   copy on read or wake: `po-<seat>/state/chat-files/<id>-<name>`, else `state/chat/seats/<seat>/files/`; the store keeps

@@ -69,6 +69,13 @@ def target(where, seat, seats):
     return where, []
 
 
+def allow(seat, ch, seats):
+    """ValueError when the seat may not post in ch (a manager: only in its direct message with the owner)."""
+    why = chat_route.may_post(seat, ch, seats)
+    if why:
+        raise ValueError(why)
+
+
 def show(rows, with_ch, seat=None):
     """Print messages one per line, extra text lines indented, then each attachment as a path in the seat's own folder,
     after the data header."""
@@ -101,6 +108,7 @@ def attachments(paths):
 
 def post(a, seat, seats):
     ch, to = target(a.where, seat, seats)
+    allow(seat, ch, seats)
     text = sys.stdin.read().rstrip("\n") if a.text == "-" else a.text
     blobs = attachments(a.file)
     ok, rule = chat_guard.check(text, seat, ch, to, [n for _, n in blobs])
@@ -208,6 +216,7 @@ def wait_answer(mid, seconds):
 
 
 def ask(a, seat, seats):
+    allow(seat, "harness", seats)
     question = sys.stdin.read().rstrip("\n") if a.question == "-" else a.question
     q, ans = asked_before(question)
     if ans:
@@ -241,6 +250,7 @@ def ask(a, seat, seats):
 
 
 def answer(a, seat, seats):
+    allow(seat, "harness", seats)
     got = chat_store.read("harness", after=a.id - 1, limit=1)
     if not got or got[0]["id"] != a.id or got[0]["kind"] != "ask":
         raise ValueError(f"no question {a.id} in #harness")

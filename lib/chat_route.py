@@ -14,6 +14,14 @@ def next_hop(sender, parent):
     return parent["hop"] + 1
 
 
+def may_post(seat, ch, org):
+    """'' when seat may post in ch, else the refusal; a manager posts only in its direct message with the owner."""
+    role = next((s["role"] for s in org if s["id"] == seat), None)
+    if role == "manager" and ch != "dm-" + "--".join(sorted((seat, "owner"))):
+        return f"a manager posts only in its direct message with the owner (chat post @owner), not in {ch}"
+    return ""
+
+
 def _targets(msg, seats):
     """[(seat id, reason)] the message addresses, first reason per seat, sender and owner left out."""
     out = []

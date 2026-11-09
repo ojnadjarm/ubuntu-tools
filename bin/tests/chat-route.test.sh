@@ -91,6 +91,15 @@ check("one message, mixed: per-seat verdict", sorted((x["seat"], x["queue"]) for
 m = msg("dm-ceo--moo", "ceo"); c = {"moo": 1}; snap = (repr(m), repr(ORG), repr(c))
 r.wakes(m, ORG, c)
 check("pure: inputs unchanged", snap == (repr(m), repr(ORG), repr(c)))
+
+# P34: a manager posts only in its own direct message with the owner; owners, the ceo and POs keep every channel.
+MORG = ORG + [{"id": "mgr", "name": "Mgr", "role": "manager", "parent": "disc", "wake": "po-inbox", "match": "~/agents/po-mgr"},
+              {"id": "mg2", "name": "Mg2", "role": "manager", "parent": "disc", "wake": "po-inbox", "match": "~/agents/po-mg2"}]
+check("manager: its owner dm is allowed", r.may_post("mgr", "dm-mgr--owner", MORG) == "")
+for ch in ("harness", "org", "disc", "dm-mg2--mgr", "dm-disc--mgr", "dm-mg2--owner"):
+    why = r.may_post("mgr", ch, MORG)
+    check(f"manager: {ch} refused, reason named", why.startswith("a manager posts only in its direct message with the owner"), why)
+check("po and ceo keep every channel", [r.may_post(s, ch, MORG) for s in ("moo", "ceo") for ch in ("harness", "org", "dm-mgr--moo")] == [""] * 6)
 sys.exit(bad)
 PY
 [ $? = 0 ] || bad=1

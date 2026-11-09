@@ -11,6 +11,7 @@ import sys
 import time
 
 import chat_files
+import chat_route
 import chat_store
 import org
 import sessions
@@ -25,16 +26,24 @@ STALE_MS = (WINDOW + 40) * 1000
 BIN = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "bin")
 
 
-def render(msgs, seat=None):
+def render(msgs, seat=None, seats=None):
     """The data header, then one line per message (id, channel, sender, kind, text, the seat's own copy of each
-    attachment), then how to answer."""
+    attachment), then how to answer: the command the seat may run there, or that it may not post there."""
     lines = [HEADER]
     for m in msgs:
         kind = f" ({m['kind']})" if m.get("kind", "msg") != "msg" else ""
         lines.append(f"{m['id']} #{m['ch']} {m['from']}{kind}: {m['text']}")
         lines += ["    " + f for f in chat_files.lines(seat, m.get("files"))]
     last, ch = msgs[-1], msgs[-1]["ch"]
-    reply = f"chat answer {last['id']} <text>" if last.get("kind") == "ask" else f"chat post {ch} <text>"
+    if seat and chat_route.may_post(seat, ch, org.seats() if seats is None else seats):
+        lines.append(f"You may not post in #{ch}: put what matters in REPORT.md; read more with `chat read {ch}`.")
+        return "\n".join(lines)
+    if last.get("kind") == "ask":
+        reply = f"chat answer {last['id']} <text>"
+    elif ch.startswith("dm-"):
+        reply = f"chat post @{last['from']} <text>"
+    else:
+        reply = f"chat post {ch} <text>"
     lines.append(f"Answer with `{reply}`; read more with `chat read {ch}`.")
     return "\n".join(lines)
 
@@ -99,8 +108,9 @@ class Channel(Adapter):
         if not found or not msgs:
             return REFUSED
         path, token = found
+        content = render(msgs, seat, list(self.seats.values()))
         data = (json.dumps({"type": "auth", "token": token}) + "\n"
-                + json.dumps({"type": "user", "message": {"role": "user", "content": render(msgs, seat)}}) + "\n")
+                + json.dumps({"type": "user", "message": {"role": "user", "content": content}}) + "\n")
         try:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
                 s.settimeout(TIMEOUT)

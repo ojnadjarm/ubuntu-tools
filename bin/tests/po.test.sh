@@ -167,7 +167,7 @@ case "$out" in *"waiting"*"live before 2"*"saw 2"*"live after 2 (exit 0)"*) ok '
 deploy-lock fx -- false >/dev/null; is 'deploy-lock: passes the exit code' "$?" 1
 DEPLOY_LOCK_WAIT=0 deploy-lock 'bad/env' -- true >/dev/null 2>&1; is 'deploy-lock: bad env exits 2' "$?" 2
 
-# managers (T1515 P31): po-new --parent, agent-to-agent cap, no chat seat, ESCALATE lines go to the parent once
+# managers (T1515 P31): po-new --parent, agent-to-agent cap, chat seat (owner dm only, P34), ESCALATE lines go to the parent once
 po-new mgr "Mgr Game" --parent fx >/dev/null; is 'manager: po-new --parent exit 0' "$?" 0
 M="$HARNESS_HOME/po-mgr"
 ev 'manager: PARENT in agent.env, manager brief, project block left to fill' 'grep -q "^PARENT=fx " "$M/agent.env" && grep -q "po-mgr, the manager of Mgr Game" "$M/BRIEF.md" && grep -q "goes to po-fx" "$M/BRIEF.md" && grep -qx "{{PROJECT}}" "$M/BRIEF.md"'
@@ -177,12 +177,25 @@ po-ask mgr --from router "routed 13" >/dev/null 2>&1; is 'manager: 13th router w
 is 'manager: 12 filed, the 13th not' "$(ls "$M/inbox" | wc -l)" 12
 po-ask mgr --from liaison "a Discord member" >/dev/null; is 'manager: liaison handoffs are not capped' "$?" 0
 po-run mgr >/dev/null 2>&1; is 'manager: po-run exit 0' "$?" 0
-is 'manager: no CHAT_SEAT for a manager run' "$(cat "$WORK/seat.log")" ''
+is 'manager: po-run gives a manager CHAT_SEAT=<p> (T1515-P34)' "$(cat "$WORK/seat.log")" mgr
+ev 'manager: the brief says the owner dm is its only chat channel (P34)' 'grep -q "chat post @owner" "$M/BRIEF.md"'
 f=$(grep -l '^from: manager' "$P"/inbox/*.md 2>/dev/null)
 is 'manager: its ESCALATE line filed once to the parent' "$(printf '%s' "$f" | grep -c .)" 1
 ev 'manager: the parent request quotes it' 'grep -qx "po-mgr: ESCALATE: fx decision" $f'
 po-ask mgr --from liaison "again" >/dev/null; po-run mgr >/dev/null 2>&1
 is 'manager: the same line is not filed again' "$(grep -l '^from: manager' "$P"/inbox/*.md | wc -l)" 1
+
+# P34: a running po-run survives an in-place edit of its own file (bash parses the whole body before it runs it).
+mkdir -p "$WORK/edit/bin" "$WORK/edit/stubs"; cp "$BIN/po-run" "$BIN/polib.sh" "$WORK/edit/bin/"
+cat >"$WORK/edit/stubs/agent-run" <<'STUB'
+#!/usr/bin/env bash
+python3 -c 'import sys; p = sys.argv[1]; t = open(p).read(); open(p, "w").write("#" * 200 + "\n" + t)' "$WORK/edit/bin/po-run"
+d="$HARNESS_HOME/$1"; for r in "$d"/current/*.md; do mv "$r" "$d/done/"; done
+STUB
+chmod +x "$WORK/edit/stubs/agent-run"
+po-ask fx "edited mid-run" >/dev/null
+PATH="$WORK/edit/stubs:$PATH" bash "$WORK/edit/bin/po-run" fx >"$WORK/edit.out" 2>&1
+is 'po-run: an in-place edit of its file mid-run breaks nothing (rc 0, no syntax error)' "$? $(grep -c 'syntax error' "$WORK/edit.out")" '0 0'
 
 # units
 U="$BIN/../units"
