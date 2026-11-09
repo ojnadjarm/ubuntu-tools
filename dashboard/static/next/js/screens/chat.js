@@ -1,0 +1,156 @@
+/* Chat, read only: the channels of the agent chat, the chosen channel's stream (questions, answers, system lines) and who is in it, from GET /api/chat. */
+import { esc, p2 } from "/static/js/core/fmt.js";
+import { getJSON } from "/static/js/core/api.js";
+import { cur, go } from "/static/js/core/router.js";
+import { creature } from "../avatar.js";
+import { dust } from "../shapes.js";
+import { fitEye } from "../gl/cam.js";
+import { sync } from "../ui/sync.js";
+import { plural } from "../summary.js";
+import { seatState } from "./org.js";
+
+export const own = true;
+const POLL_MS = 3000, ORG_MS = 20000, QUOTE = 44;
+const DESC = { harness: "Product owners ask how the machine works. The orchestrator answers.", org: "The whole org: the orchestrator and every product owner." };
+const PILL = { working: "running", idle: "idle", asleep: "off", off: "off", yours: "his" };
+const LINE = { working: "working now", idle: "idle", asleep: "asleep, wakes on its name", off: "off", yours: "your session" };
+const TAG = { ask: `<span class="ctag">question</span>`, answer: `<span class="ctag ans">answer</span>` };
+let C = null, msgs = [], ch = "", err = "", busy = false, timer = 0, O = null, oat = 0, stick = true;
+
+if (!document.querySelector('link[href="/static/css/chat.css"]')) {
+  const l = document.createElement("link");
+  l.rel = "stylesheet"; l.href = "/static/css/chat.css";
+  document.head.appendChild(l);
+}
+
+/* The hash carries the open channel: #chat?ch=<id>. */
+export function read(q) {
+  const want = new URLSearchParams(q).get("ch") || "";
+  if (want !== ch) { ch = want; msgs = []; stick = true; }
+}
+export const hash = () => "#chat" + (ch ? "?ch=" + encodeURIComponent(ch) : "");
+if (location.hash.startsWith("#chat?")) read(location.hash.slice(6));
+
+/* One read of the open channel (only what is newer than the last message), then the next one in POLL_MS while Chat is on screen. */
+function pull() {
+  if (busy) return;
+  clearTimeout(timer); timer = 0; busy = true;
+  const want = ch, after = want && msgs.length ? msgs[msgs.length - 1].id : null;
+  if (!O || Date.now() - oat > ORG_MS) { oat = Date.now(); getJSON("/api/org").then((j) => { O = j; paint(); }, () => {}); }
+  getJSON("/api/chat?ch=" + encodeURIComponent(want) + (after ? "&after=" + after : ""))
+    .then((j) => {
+      err = "";
+      if (want !== ch) return;
+      C = j.channels || [];
+      msgs = after ? msgs.concat(j.messages || []) : j.messages || [];
+      if (!ch && C.length) ch = (C.find((c) => c.ch === "harness") || C[0]).ch;
+    }, (e) => { err = e.message || "unreadable"; })
+    .finally(() => {
+      busy = false;
+      if (cur !== "chat" || document.hidden) return;
+      timer = setTimeout(() => { timer = 0; if (cur === "chat" && !document.hidden) pull(); }, want === ch ? POLL_MS : 0);
+      paint();
+    });
+}
+
+/* Repaints in place (the stream keeps its scroll) and keeps the newest message in view while he is at the bottom. */
+function paint() {
+  if (cur !== "chat") return;
+  const grid = document.getElementById("grid"), box0 = grid.querySelector(".chat .msgs");
+  if (box0) stick = box0.scrollHeight - box0.scrollTop - box0.clientHeight < 40;
+  if (grid.querySelector(":scope > .nxs.chat")) sync(grid, render(), 1); else go("chat", true);
+  const box = grid.querySelector(".chat .msgs");
+  if (box && stick) box.scrollTop = box.scrollHeight;
+}
+
+const names = () => Object.fromEntries(((O && O.seats) || []).map((s) => [s.id, s.name]));
+const nameOf = (id, N) => (id === "owner" ? "You" : N[id] || id);
+const pair = (c) => c.slice(3).split("--");
+function label(c, N) {
+  if (!c.startsWith("dm-")) return "# " + c;
+  const [a, b] = pair(c);
+  return a === "owner" ? nameOf(b, N) : b === "owner" ? nameOf(a, N) : nameOf(a, N) + " · " + nameOf(b, N);
+}
+function stateOf(id) {
+  const seat = ((O && O.seats) || []).find((s) => s.id === id);
+  return seat ? seatState(seat, O.sessions || []) : "";
+}
+
+const time = (m) => { const d = new Date(m.ts); return p2(d.getHours()) + ":" + p2(d.getMinutes()); };
+function day(m) {
+  const d = new Date(m.ts), now = new Date(), y = new Date(now - 864e5);
+  if (d.toDateString() === now.toDateString()) return "Today";
+  if (d.toDateString() === y.toDateString()) return "Yesterday";
+  return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+}
+/* Message text is data: escaped, only `code` spans become markup. */
+const text = (t) => esc(t).replace(/`([^`\n]+)`/g, "<code>$1</code>");
+const clip = (t) => (t.length > QUOTE ? t.slice(0, QUOTE).trimEnd() + "…" : t);
+
+function msg(m, byId, N) {
+  if (m.kind === "system") return `<li class="csys">${text(m.text)}</li>`;
+  const him = m.from === "owner", r = m.re != null ? byId[m.re] : null;
+  const av = him ? `<i class="dia"></i>` : creature(m.from, stateOf(m.from) === "working" ? "working" : "sleep");
+  const re = m.re == null ? "" : `<p class="re">${r ? esc(nameOf(r.from, N) + " " + time(r) + ": " + clip(r.text)) : "a reply to an earlier message"}</p>`;
+  return `<li class="msg${him ? " him" : ""}"><span class="av" aria-hidden="true">${av}</span><div><p class="who"><b>${esc(nameOf(m.from, N))}</b>${TAG[m.kind] || ""}<time datetime="${esc(m.ts)}">${time(m)}</time></p>${re}<p class="tx">${text(m.text)}</p></div></li>`;
+}
+function stream(N) {
+  const byId = Object.fromEntries(msgs.map((m) => [m.id, m]));
+  let last = "", out = "";
+  for (const m of msgs) {
+    const d = day(m);
+    if (d !== last) { out += `<li class="cday">${esc(d)}</li>`; last = d; }
+    out += msg(m, byId, N);
+  }
+  return out || `<li class="csys">No messages in this channel yet.</li>`;
+}
+
+function chanLink(c, N) {
+  const st = c.ch.startsWith("dm-") ? stateOf(pair(c.ch).find((s) => s !== "owner") || "") : "";
+  const tail = c.unread ? `<span class="unread" title="${plural(c.unread, "unread message")}">${c.unread}</span>` : st ? `<span class="pill ${PILL[st] || "idle"}">${esc(st)}</span>` : "";
+  return `<a href="#chat?ch=${esc(c.ch)}" data-ch="${esc(c.ch)}"${c.ch === ch ? ` class="on" aria-current="page"` : ""}><span>${esc(label(c.ch, N))}</span>${tail}</a>`;
+}
+function members(N) {
+  const ids = ch.startsWith("dm-") ? pair(ch) : [...new Set(msgs.filter((m) => m.kind !== "system").map((m) => m.from))];
+  const rows = ids.filter((id) => id !== "owner").map((id) => {
+    const st = stateOf(id);
+    return `<div class="mem"><span class="av" aria-hidden="true">${creature(id, st === "working" ? "working" : "sleep")}</span><div><b>${esc(nameOf(id, N))}</b><span>${esc(LINE[st] || "not a seat of the org")}</span></div></div>`;
+  });
+  return rows.join("") || `<p class="none">Nobody has written here yet.</p>`;
+}
+function head(N) {
+  if (!ch) return "";
+  const desc = ch.startsWith("dm-") ? "Direct messages between " + pair(ch).map((s) => nameOf(s, N)).join(" and ") + "." : DESC[ch] || (N[ch] ? N[ch] + "'s channel." : "");
+  return `<header><h2>${esc(label(ch, N))}</h2>${desc ? `<p>${esc(desc)}</p>` : ""}</header>`;
+}
+
+export function render() {
+  if (!timer && !busy) pull();
+  if (!C) return `<div class="nxs skel" aria-busy="true"><p class="sm pad">${err ? "chat unreadable · " + esc(err) : "reading the chat…"}</p></div>`;
+  const N = names(), rooms = C.filter((c) => !c.ch.startsWith("dm-")), dms = C.filter((c) => c.ch.startsWith("dm-"));
+  const unread = C.filter((c) => c.unread && c.ch !== ch), n = ch ? msgs.filter((m) => m.kind !== "system").length : 0;
+  const sum = !C.length ? "No messages yet" : `<b>${esc(label(ch, N))}</b>, ${plural(n, "message")}` + (unread.length ? ` · <span class="gold">${unread.map((c) => `${c.unread} new in ${esc(label(c.ch, N))}`).join(", ")}</span>` : "");
+  const nav = `<nav class="chans" aria-label="Channels"><h3>Channels</h3>${rooms.map((c) => chanLink(c, N)).join("") || `<p class="none">none yet</p>`}` +
+    (dms.length ? `<h3>Direct</h3>${dms.map((c) => chanLink(c, N)).join("")}` : "") + `</nav>`;
+  const body = C.length ? `<section class="pane stream" aria-label="Messages">${head(N)}<ol class="msgs" aria-live="polite">${stream(N)}</ol></section>`
+    : `<section class="pane stream"><ol class="msgs"><li class="csys">Nothing has been posted yet. Agents write here with <code>chat post</code>.</li></ol></section>`;
+  return `<div class="nxs chat"><section class="band" aria-label="Chat summary"><div class="perch" id="perch" aria-hidden="true"></div><div class="bt"><p class="kin" data-dec>Chat</p>` +
+    `<p class="bsum">${sum}${err ? ` · stale: ${esc(err)}` : ""}</p></div></section><div class="cgrid">${nav}${body}` +
+    `<aside class="pane cside" aria-label="In this channel"><h2><span data-dec>in this channel</span></h2>${members(N)}</aside></div></div>`;
+}
+
+/* A tap on a channel opens it in place. */
+export function click(e) {
+  const a = e.target.closest(".chat [data-ch]");
+  if (!a || e.metaKey || e.ctrlKey || e.shiftKey) return false;
+  e.preventDefault();
+  if (a.dataset.ch !== ch) { ch = a.dataset.ch; msgs = []; stick = true; clearTimeout(timer); timer = 0; go("chat", true); pull(); }
+  return true;
+}
+
+/* The eye on the band's perch over a field of dust, as on the Org screen. */
+export function scene() {
+  const narrow = innerWidth < 820;
+  return { key: "chat", pts: dust(narrow ? 600 : 1500), box: document.getElementById("gl"), span: narrow ? 12 : 24, tilt: 0.25,
+    eyeEl: document.getElementById("perch"), eyeFit: (b) => fitEye(b, { halo: true, pad: 0 }), halo: 1 };
+}

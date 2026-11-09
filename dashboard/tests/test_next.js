@@ -75,7 +75,7 @@ const ROOT = path.join(__dirname, "..", "static"), NEXT = path.join(ROOT, "next"
 
   const tokens = (css) => new Set([...(/:root\s*{([^}]*)}/.exec(css) || [, ""])[1].matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
   const eye = tokens(fs.readFileSync(path.join(ROOT, "eye.css"), "utf8"));
-  for (const f of ["next.css", "voice.css", "../css/org.css"]) {
+  for (const f of ["next.css", "voice.css", "../css/org.css", "../css/chat.css"]) {
     const css = fs.readFileSync(path.join(NEXT, f), "utf8");
     const clash = [...css.matchAll(/:root\s*{([^}]*)}/g)].flatMap((m) => [...m[1].matchAll(/(--[\w-]+)\s*:/g)].map((x) => x[1])).filter((t) => eye.has(t));
     assert.deepStrictEqual(clash, [], f + " redefines no eye.css token");

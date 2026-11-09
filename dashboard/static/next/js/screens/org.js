@@ -33,7 +33,7 @@ const prot = (s) => !("pid" in s);
 const pill = (st) => `<span class="pill ${PILL[st] || "idle"}">${esc(st)}</span>`;
 
 /* A seat's state from its own sessions: working, idle, yours (a protected session), else asleep (or off for the always-on seat). */
-function seatState(seat, S) {
+export function seatState(seat, S) {
   const mine = S.filter((s) => s.seat === seat.id);
   if (mine.some(prot)) return "yours";
   if (mine.some((s) => s.state === "working")) return "working";

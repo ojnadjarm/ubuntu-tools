@@ -1,0 +1,52 @@
+/* Agents › Chat, read only: channel list, message stream, who is in the channel (T1515-P9); eye.css tokens only. */
+.chat { display: grid; gap: 1rem; }
+.chat .cgrid { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr); align-items: start; }
+.chat .pill.off { color: var(--mute); border-color: var(--line); border-style: dashed; }
+.chat .pill.his { color: var(--gold); border-color: var(--gold-w); background: var(--gold-w); }
+.chat .gold { color: var(--gold); }
+.chat .none { color: var(--mute); font-size: max(11px, .84rem); }
+.chat .chans { display: flex; gap: .4rem; overflow-x: auto; scrollbar-width: none; padding-bottom: .2rem; min-width: 0; }
+.chat .chans h3 { display: none; }
+.chat .chans a { display: inline-flex; align-items: center; gap: .5rem; min-height: 2.75rem; padding: 0 .8rem; border: 1px solid var(--line2); color: var(--mid); white-space: nowrap; font-size: max(11px, .88rem); background: var(--bg2); }
+.chat .chans a.on { color: var(--hi); border-color: var(--line3); background: var(--w08); }
+.chat .chans a span:first-child { overflow: hidden; text-overflow: ellipsis; }
+.chat .unread { min-width: 1.4rem; padding: 0 .35rem; text-align: center; font-size: max(11px, .74rem); color: var(--bg); background: var(--gold); }
+.chat .stream { padding: 0; display: flex; flex-direction: column; }
+.chat .stream header { padding: .8rem 1.1rem; border-bottom: 1px solid var(--line); }
+.chat .stream header h2 { font-size: 1.1rem; color: var(--hi); font-weight: 600; letter-spacing: 0; text-transform: none; margin: 0; }
+.chat .stream header p { color: var(--mid); font-size: max(11px, .84rem); }
+.chat .msgs { list-style: none; margin: 0; padding: .4rem 1.1rem 1rem; display: grid; gap: .1rem; }
+.chat .msg { display: grid; grid-template-columns: 2.4rem minmax(0, 1fr); gap: .8rem; padding: .6rem 0; }
+.chat .msg .av svg { width: 100%; height: auto; display: block; }
+.chat .msg .who { font-size: max(11px, .84rem); color: var(--mid); display: flex; flex-wrap: wrap; gap: .2rem .6rem; align-items: center; }
+.chat .msg .who b { color: var(--g2); font-weight: 600; }
+.chat .msg .tx { color: var(--txt); max-width: 74ch; overflow-wrap: anywhere; white-space: pre-line; }
+.chat code { color: var(--g2); background: var(--w08); padding: 0 .25rem; font-family: var(--mono); font-size: .92em; }
+.chat .msg .re { color: var(--mute); font-size: max(11px, .78rem); border-left: 2px solid var(--line3); padding-left: .5rem; margin: .15rem 0; overflow-wrap: anywhere; }
+.chat .msg.him { background: linear-gradient(90deg, var(--gold-w), transparent 70%); margin: 0 -1.1rem; padding: .6rem 1.1rem; border-left: 2px solid var(--gold); }
+.chat .msg.him .who b { color: var(--gold); }
+.chat .msg.him .tx { color: var(--hi); }
+.chat .dia { display: block; width: 1.3rem; height: 1.3rem; margin: .5rem; border: 1.5px solid var(--gold); transform: rotate(45deg); background: var(--gold-w); }
+.chat .ctag { font-size: max(11px, .68rem); letter-spacing: .14em; text-transform: uppercase; padding: 0 .35rem; border: 1px solid var(--line3); color: var(--g2); }
+.chat .ctag.ans { color: var(--bg); background: var(--g); border-color: var(--g); }
+.chat .csys { color: var(--mute); font-size: max(11px, .78rem); padding: .15rem 0 .15rem 3.2rem; overflow-wrap: anywhere; }
+.chat .cday { text-align: center; color: var(--mute); font-size: max(11px, .74rem); letter-spacing: .2em; text-transform: uppercase; padding: .6rem 0 .2rem; }
+.chat .cside { display: none; }
+.chat .cside .mem { display: grid; grid-template-columns: 2.6rem minmax(0, 1fr); gap: .7rem; align-items: center; margin-bottom: .8rem; }
+.chat .cside .mem svg { width: 100%; height: auto; display: block; }
+.chat .cside .mem b { color: var(--hi); display: block; font-weight: 600; }
+.chat .cside .mem span { color: var(--mid); font-size: max(11px, .82rem); }
+@media (min-width: 900px) {
+  .chat .cgrid { grid-template-columns: 14rem minmax(0, 1fr); }
+  .chat .chans { flex-direction: column; overflow: visible; position: sticky; top: calc(var(--rail) + 1rem); }
+  .chat .chans h3 { display: block; font-size: max(11px, .72rem); letter-spacing: .2em; text-transform: uppercase; color: var(--mute); font-weight: 400; margin: .6rem 0 .1rem; }
+  .chat .chans a { justify-content: space-between; border-color: transparent; background: none; }
+  .chat .chans a.on { border-color: var(--line3); background: var(--w08); }
+  .chat .stream { height: calc(100svh - var(--rail) - 17rem); min-height: 26rem; }
+  .chat .msgs { flex: 1; align-content: start; overflow-y: auto; scrollbar-width: thin; }
+}
+@media (min-width: 1300px) {
+  .chat .cgrid { grid-template-columns: 15rem minmax(0, 1fr) 19rem; }
+  .chat .cside { display: block; position: sticky; top: calc(var(--rail) + 1rem); }
+}
+@media (max-width: 700px) { .chat .csys { padding-left: 0; } }
