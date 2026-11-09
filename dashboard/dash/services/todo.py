@@ -20,6 +20,15 @@ def checked():
         return [], "%s: %s" % (type(e).__name__, e)
 
 
+def recent_done(n=3):
+    """The n most recently done items, newest first; [] on any ledger problem."""
+    try:
+        got = [i for i in owner_todo.items(HOME, all=True) if i["done"]]
+    except Exception:
+        return []
+    return sorted(got, key=lambda i: i["done_at"], reverse=True)[:n]
+
+
 @route("GET", "/api/owner-todo")
 def list_route(h, path):
     h.json(open_items())

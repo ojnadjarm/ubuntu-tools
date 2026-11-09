@@ -15,7 +15,14 @@ export function render(grid,d){D=d;
       +'<button class="btn gold" data-done="'+esc(x.id)+'">done</button></div></li>';
   }).join("");
   return cell("wide","waiting on you","<s>"+it.length+" open · oldest first</s>",
-    it.length?'<ol class="todos">'+rows+'</ol>':'<div class="empty"><b>nothing.</b> no step waits on you</div>',0);
+    it.length?'<ol class="todos">'+rows+'</ol>':'<div class="empty"><b>nothing.</b> no step waits on you'+((D.todo_done||[]).length?" · last done:":"")+'</div>'+recent(D.todo_done||[]),0);
+}
+/* The last done steps, so an empty list still shows what was cleared. */
+function recent(dn){
+  if(!dn.length)return "";
+  return '<ol class="todos" aria-label="last done">'+dn.map(function(x){
+    return '<li class="todo"><h3><b>'+esc(x.id)+'</b>'+esc(x.text)+'</h3><div class="tf"><s>done '+esc(when(x.done_at))+(x.note?" · "+esc(x.note):"")+'</s></div></li>';
+  }).join("")+'</ol>';
 }
 export function click(e){
   var c=e.target.closest("[data-copy]");if(c){var x=find(c.dataset.copy);if(x)copied(c,copyText(x.how));return true;}

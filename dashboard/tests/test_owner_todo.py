@@ -57,6 +57,19 @@ class OwnerTodo(unittest.TestCase):
         todo.done_route(h, "")
         self.assertEqual(h.out, (400, {"error": "item 2 is already done"}))
 
+    def test_recent_done_newest_three(self):
+        ev = [{"op": "add", "id": str(i), "text": "t%d" % i, "ts": "2026-11-0%dT10:00:00+01:00" % i} for i in range(1, 6)]
+        ev += [{"op": "done", "id": i, "ts": "2026-11-09T1%s:00:00+01:00" % h} for i, h in (("2", 1), ("5", 2), ("1", 3), ("3", 4), ("4", 5))]
+        ev += [{"op": "reopen", "id": "4", "ts": "2026-11-09T16:00:00+01:00"}]
+        os.environ["OWNER_TODO_LEDGER"] = os.path.join(self.home, "l.jsonl")
+        with open(os.environ["OWNER_TODO_LEDGER"], "w") as f:
+            f.write("".join(json.dumps(e) + "\n" for e in ev))
+        self.assertEqual([i["id"] for i in todo.recent_done()], ["3", "1", "5"])
+
+    def test_recent_done_survives_a_broken_reader(self):
+        with mock.patch.object(todo.owner_todo, "items", side_effect=RuntimeError("boom")):
+            self.assertEqual(todo.recent_done(), [])
+
 
 GOOD = b'{"op": "add", "id": "1", "text": "Good row", "ts": "t"}\n'
 BROKEN = {"int id": GOOD + b'{"op": "add", "id": 2, "text": "Int id"}\n',

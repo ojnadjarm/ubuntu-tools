@@ -424,6 +424,7 @@ def payload():
     out.update(swr(BLOCKS))
     out["stale"], out["errors"], out["stale_since"] = cache_meta(BLOCKS)
     out["todo"], out["todo_error"] = todo.checked()
+    out["todo_done"] = todo.recent_done() if not out["todo"] else []
     out["verdict"] = verdict(out["status"], out["agents"], out["events"], out["todo"])
     out["events"] = out["events"][:20]
     out["host"] = HOST
