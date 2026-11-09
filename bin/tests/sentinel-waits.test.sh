@@ -135,6 +135,29 @@ good = len(rows) == 1 and rows[0]["agent"] == "sentinel"
 print(("PASS" if good else "FAIL") + f" audit row is filed under agent sentinel (got {[r['agent'] for r in rows]})")
 sys.exit(not good)
 PY
+  # main() with the snapshot stubbed (T1506): a wait-for started after the snapshot keeps its registration; a pid
+  # reused by another process is no registered wait (never reaped as one) and its stale file goes.
+  python3 - "$SW" <<'PY' || exit 1
+import importlib.machinery, os, sys, tempfile
+reg = tempfile.mkdtemp(); os.environ["WAIT_FOR_DIR"] = reg; os.environ["SENTINEL_STATE_DIR"] = tempfile.mkdtemp()
+m = importlib.machinery.SourceFileLoader("sw8", sys.argv[1]).load_module()
+m.DRY = False
+me, reaped = os.getpid(), []
+m.owner = lambda procs, pid, waiting=False: (True, "agent gone00")
+m.reap = lambda procs, pid, why: reaped.append(pid)
+f = os.path.join(reg, f"{me}.json"); bad = 0
+open(f, "w").write("{}")
+m.snapshot = lambda: {}
+m.main()
+good = os.path.exists(f) and not reaped; bad += not good
+print(("PASS" if good else "FAIL") + f" wait-for started after the snapshot keeps its registration (file {os.path.exists(f)}, reaped {reaped})")
+open(f, "w").write("{}")
+m.snapshot = lambda: {me: {"comm": "python3", "ppid": 1, "state": "S", "cpu": 0, "age": 5, "start": "1", "cmd": "python3"}}
+m.main()
+good = not os.path.exists(f) and not reaped; bad += not good
+print(("PASS" if good else "FAIL") + f" reused pid: not reaped as a registered wait, stale file removed (file {os.path.exists(f)}, reaped {reaped})")
+sys.exit(bad)
+PY
   exec bwrap --dev-bind / / --unshare-pid --proc /proc --die-with-parent \
     env IN_SANDBOX=1 OUTSIDE_CLAUDE="$(pgrep -x claude | tr '\n' ' ')" bash "$0"
 fi

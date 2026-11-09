@@ -2,6 +2,7 @@
 # maintenance-run: the MAINT_AUTO_REBOOT switch, under a fixture config with shutdown/sudo/notify stubbed.
 set -uo pipefail
 BIN="$HOME/agents/bin"
+unset HARNESS_ENV_LOADED HARNESS_HOST ${!MAINT_*}   # the fixture config decides, not the caller's exported harness environment
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"; [ -f "$WORK.summary" ] && mv "$WORK.summary" "$HOME/agents/maintenance/state/last-summary.txt"' EXIT
 . "$HOME/agents/bin/tests/lib/assert.sh"
 has() { grep -q -- "$3" <<<"$2" && ok "$1" || nok "$1" "missing '$3' in: $2"; }

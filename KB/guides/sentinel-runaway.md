@@ -1,6 +1,6 @@
 # Runaway processes the sentinel kills, and forgotten headless browsers
 
-Ticket: T113, T114, T115 (rules 1-5: EF03, T67, TSP-016) · Last verified: 2026-10-20 (T846: `--help`, paths, env knobs, thresholds 50 %/1800 s/2 strikes, 15-min timer read); 2026-10-15 by `sentinel-runaway.test.sh` (63 checks, 8 for rule 6, 4 for the rule-3 read-back, 10 for rule 4), `sentinel-check.test.sh`; real `sentinel-runaway --dry-run` last run 2026-09-26 (0.12 s, no rule-3 or rule-6 line)
+Ticket: T113, T114, T115, T1506 (rules 1-5: EF03, T67, TSP-016) · Last verified: 2026-11-09 (T1506: `sentinel-runaway.test.sh` 75 checks, live `--dry-run` 0.19 s, no line); 2026-10-20 (T846: `--help`, paths, env knobs, thresholds 50 %/1800 s/2 strikes, 15-min timer read); 2026-10-15 by `sentinel-runaway.test.sh` (63 checks, 8 for rule 6, 4 for the rule-3 read-back, 10 for rule 4), `sentinel-check.test.sh`; real `sentinel-runaway --dry-run` last run 2026-09-26 (0.12 s, no rule-3 or rule-6 line)
 
 ## When to use
 - A process burned CPU or memory for hours and the sentinel did not catch it: add or tune a rule in `bin/sentinel-runaway`.
@@ -25,7 +25,8 @@ Ticket: T113, T114, T115 (rules 1-5: EF03, T67, TSP-016) · Last verified: 2026-
   body pid is read back in `/proc`. `down` exits 0 on a pid it cannot see, so a survivor is logged `failed to take down
   sandbox <name>: pid N survived` and killed by pid (`stop_pid 3`). "took down" is logged only when the pid is gone.
 - Rule 6 (T113): any process whose argv[0] is `chrome`/`chromium`/`headless_shell` is a Chrome process; the one without
-  `--type=` is the browser root. Children's `pct` is summed onto the root by walking `ppid` (renderers and the
+  `--type=` is the browser root. Only a headless root is judged (`--headless` in argv or a `*headless*` binary, T1506): a
+  browser with a window is the owner's and is never closed. Children's `pct` is summed onto the root by walking `ppid` (renderers and the
   `--type=gpu-process` sit 2-3 levels down). Tree >= 50% of a core on 2 consecutive runs (strikes in
   `state/runaway-browsers.tsv`) and no `mcp__playwright__*` tool call in `~/agents/log/actions.jsonl` for 30 min → TERM the
   root (KILL after 10 s). `playwright-mcp` stays up; its backend drops a disconnected browser and the next tool call relaunches it.
@@ -48,6 +49,10 @@ grep 'rule6' ~/agents/sentinel/state/sentinel.log        # past browser closes
   100-165% of a core; the box idled at 11% CPU instead of 1%. No rule matched Chrome before rule 6.
 - The CPU is in the gpu-process grandchild, not the root: a per-process rule on the root would never fire.
 - A Chrome driven by a node script (not the MCP) logs no Playwright tool call: if it stays >= 50% for 30 min it is closed too.
+- 2026-11-09 (T1506): the strike key was `pid:<start epoch>`; the epoch is `now - whole uptime seconds + starttime/HZ`, so it
+  moved 1 s between ticks and the strikes reset. The key is now `pid:<raw starttime ticks>` (column 2 of `runaway.tsv`).
+- Rule 2 (T1506): a pipe reader run through `sudo` has unreadable fds, so it looked like "no reader". A capture is spared
+  when a process of its own process group has an unreadable `/proc/<pid>/fd`.
 - Cheapest prevention: `browser_close` at the end of every browser task (`/browser` skill, working rules).
 - Fixtures use pids above `pid_max` so the non-dry baseline ticks cannot signal a real process (FLEET §5.6).
 

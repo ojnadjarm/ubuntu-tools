@@ -283,7 +283,9 @@ def main():
     registered = set()
     for f in glob.glob(os.path.join(REG, "*.json")):
         pid = int(os.path.basename(f)[:-5]) if os.path.basename(f)[:-5].isdigit() else -1
-        if not alive(procs, pid):
+        if pid not in procs and os.path.exists(f"/proc/{pid}"):
+            continue  # started after the snapshot
+        if not alive(procs, pid) or "wait-for" not in procs[pid]["cmd"]:
             if not DRY:
                 os.remove(f)
             continue

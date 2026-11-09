@@ -190,6 +190,19 @@ wipe_scratch() {
   log "runaway removed $dir (rule5: dead session's scratchpad, $((age/3600))h old)"
 }
 
+# hidden_peer <pgrp> — true when a process of that group has fds this user cannot read (root, via sudo).
+hidden_peer() {
+  local s l f
+  for s in "$PROC"/[0-9]*/stat; do
+    [ -r "${s%stat}fd" ] && continue
+    l=$(<"$s") || continue
+    # shellcheck disable=SC2206
+    f=(${l##*\) })
+    [ "${f[2]:-}" = "$1" ] && return 0
+  done 2>/dev/null
+  return 1
+}
+
 now="${SENTINEL_RUNAWAY_NOW:-$(date +%s)}"   # fixtures pin the clock
 read -r uptime_s _ <"$PROC/uptime" 2>/dev/null || uptime_s=0
 boot_epoch=$((now - ${uptime_s%.*}))
@@ -216,7 +229,7 @@ for d in "$PROC"/[0-9]*; do
   # state ppid pgrp session tty tpgid flags minflt cminflt majflt cmajflt utime stime cutime cstime priority nice nthreads itrealvalue starttime vsize rss...
   # shellcheck disable=SC2206  # numeric fields, no glob characters; an array split costs a third of a here-string read (T988)
   sf=($after)
-  ppid=${sf[1]:-} utime=${sf[11]:-} stime=${sf[12]:-} starttime=${sf[19]:-} rss_pages=${sf[21]:-}
+  ppid=${sf[1]:-} pgrp=${sf[2]:-} utime=${sf[11]:-} stime=${sf[12]:-} starttime=${sf[19]:-} rss_pages=${sf[21]:-}
   [ -n "${starttime:-}" ] || continue
   # Kernel threads (kthreadd, pid 2, and its children) match no rule: ~40 % of /proc (T988).
   [ "$ppid" = 2 ] || [ "$pid" = 2 ] && continue
@@ -244,7 +257,7 @@ for d in "$PROC"/[0-9]*; do
   [ "$pid" = "$$" ] && continue
 
   # --- rule 4 + legacy: CPU-strike tracking, shared across both kill-list and restart-list ---
-  key="$pid:$start"
+  key="$pid:$starttime"   # raw ticks: the start epoch moves 1 s with boot_epoch
   strikes=0
   if [ -n "${PREV[$key]:-}" ]; then
     pv=${PREV[$key]}; pcpu=${pv%%:*}; pv=${pv#*:}; pts=${pv%%:*}; pstrikes=${pv#*:}   # no here-string per process (T988)
@@ -269,12 +282,12 @@ for d in "$PROC"/[0-9]*; do
       strikes=0
     fi
   fi
-  printf '%s\t%s\t%s\t%s\t%s\n' "$pid" "$start" "$cpu" "$now" "$strikes" >>"$new"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$pid" "$starttime" "$cpu" "$now" "$strikes" >>"$new"
 
   # --- rule 6: Chrome processes; the browser root is the one without --type=, judged after the pass ---
   if chrome_bin "$fname"; then
     CH_PCT[$pid]=$pct
-    if [[ "$cmd" != *" --type="* ]]; then
+    if [[ "$cmd" != *" --type="* ]] && [[ "$fname" == *headless* || "$cmd" == *" --headless"* ]]; then
       udd=""; for a in "${argv[@]}"; do [[ "$a" == --user-data-dir=* ]] && udd=" $a"; done
       BR_CMD[$pid]="$fname$udd"; BR_KEY[$pid]="$key"
       [ -n "${PREV[$key]:-}" ] && BR_PREV[$pid]=1
@@ -304,7 +317,7 @@ for d in "$PROC"/[0-9]*; do
       if [[ "$target" =~ ^pipe:\[([0-9]+)\]$ ]]; then
         inode="${BASH_REMATCH[1]}"
         holders=$(find "$PROC" -maxdepth 3 -path '*/fd/*' -lname "pipe:\\[${inode}\\]" 2>/dev/null | grep -vc "^$d/fd/")
-        [ "${holders:-0}" -eq 0 ] && orphan=1
+        [ "${holders:-0}" -eq 0 ] && ! hidden_peer "$pgrp" && orphan=1
       elif [[ "$target" == /* ]] && [ ! -e "$target" ]; then
         orphan=1
       fi

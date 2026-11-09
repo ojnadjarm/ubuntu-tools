@@ -117,6 +117,18 @@ check_absent "rule2: young capture spared"          "would kill pid 205"
 check_absent "rule2: socket with a reader spared"   "would kill pid 206"
 check_absent "rule2: socket stdout never judged"   "would kill pid 208"
 check_absent "rule2: anon_inode stdout spared"     "would kill pid 209"
+# T1506: a reader whose fds cannot be read (root, via sudo) in the capture's process group may hold the pipe.
+PROC="$WORK/proc2b"; TMP="$WORK/tmp2b"; mkdir -p "$PROC" "$TMP"
+BOOT=$(( $(date +%s) - UPTIME )); sync_uptime
+setpgrp() { sed -i "s/) S \([0-9]*\) 1 /) S \1 $2 /" "$PROC/$1/stat"; }
+mkproc 210 tail 2000 1 500 tail -f /var/log/syslog;            setfd 210 1 'pipe:[9010]'; setpgrp 210 210
+mkproc 211 sudo 2000 1 500 sudo grep x;                         setpgrp 211 210; chmod 000 "$PROC/211/fd"
+mkproc 212 tail 2000 1 500 tail -f /var/log/syslog;            setfd 212 1 'pipe:[9012]'; setpgrp 212 212
+mkproc 213 sudo 2000 1 500 sudo grep x;                         setpgrp 213 213; chmod 000 "$PROC/213/fd"
+run
+chmod 700 "$PROC/211/fd" "$PROC/213/fd"
+check_absent "rule2: pipe into an unreadable reader of its group spared" "would kill pid 210"
+check        "rule2: unreadable process of another group does not spare" "would kill pid 212 (rule2"
 
 # ---------- Rule 3: hand-run eye-render/main.js outside dark-eye.service, > 2h ----------
 PROC="$WORK/proc3"; TMP="$WORK/tmp3"; mkdir -p "$PROC" "$TMP"
@@ -260,6 +272,14 @@ tick4b $(( T4 - 1800 )) 10 >/dev/null                 # tick 1: baseline, no pre
 tick4b $(( T4 - 900 )) $(( 10 + CPU_STEP )) >/dev/null   # tick 2: strike 1, persisted
 tick4b "$T4" $(( 10 + 2 * CPU_STEP )) --dry-run       # tick 3: strike 2, should trigger
 check "rule4: hot helper restarted after strikes" "would restart org.gnome.SettingsDaemon.Color.service (pid 403"
+# T1506: boot_epoch (now - whole uptime seconds) moves by 1 s between ticks; the strike key must not.
+PROC="$WORK/proc4c"; TMP="$WORK/tmp4c"; mkdir -p "$PROC" "$TMP"
+BOOT=$(( T4 - UPTIME ))
+rm -rf "$WORK/state"; mkdir -p "$WORK/state"
+tick4b $(( T4 - 1800 )) 10 >/dev/null
+BOOT=$(( BOOT + 1 )); tick4b $(( T4 - 900 )) $(( 10 + CPU_STEP )) >/dev/null
+BOOT=$(( BOOT - 1 )); tick4b "$T4" $(( 10 + 2 * CPU_STEP )) --dry-run
+check "rule4: strikes survive a 1 s boot-epoch jitter" "would restart org.gnome.SettingsDaemon.Color.service (pid 403"
 
 # ---------- Rule 5: scratchpad of a dead session, > 24h ----------
 PROC="$WORK/proc5"; TMP="$WORK/tmp5"; mkdir -p "$PROC" "$TMP"
@@ -356,6 +376,10 @@ tick6() {  # tick6 <epoch> <gpu_cpu_seconds> <actions_file> [--dry-run]
   mkproc "$((B + 10))" chrome 90000 5 5000 /opt/google/chrome/chrome --headless --user-data-dir=/srv/x/agents/browser/profile-clean
   mkproc "$((B + 12))" chrome 90000 7 500 /opt/google/chrome/chrome --type=gpu-process --headless
   setppid "$((B + 12))" "$((B + 10))"
+  # a third, hot browser with a window (no --headless): the owner's, never closed
+  mkproc "$((B + 20))" chrome 90000 5 5000 /opt/google/chrome/chrome --user-data-dir=/srv/x/.config/google-chrome
+  mkproc "$((B + 22))" chrome 90000 "$cpu" 500 /opt/google/chrome/chrome --type=gpu-process
+  setppid "$((B + 22))" "$((B + 20))"
   sync_uptime "$at"
   AGENT_SCRATCH_GLOBS="$DEFAULT_GLOBS" SENTINEL_RUNAWAY_NOW="$NOW" SENTINEL_RUNAWAY_ACTIONS="$actions" \
   SENTINEL_STATE_DIR="$WORK/state" SENTINEL_RUNAWAY_PROC="$PROC" SENTINEL_RUNAWAY_TMPROOT="$TMP" \
@@ -377,6 +401,7 @@ check        "rule6: idle hot browser tree closed at its root" "would kill pid $
 check        "rule6: kill names the idle time and the profile"  "no Playwright call for 120 min): chrome $UDD"
 check_absent "rule6: gpu child not killed on its own"           "would kill pid $((B + 2))"
 check_absent "rule6: cool browser tree spared"                  "would kill pid $((B + 10))"
+check_absent "rule6: hot browser with a window spared"          "would kill pid $((B + 20))"
 
 { pwline 7200 mcp__playwright__browser_navigate; pwline 300 mcp__playwright__browser_snapshot; pwline 60 Bash; } >"$WORK/actions-driven.jsonl"
 run6 "$WORK/actions-driven.jsonl"

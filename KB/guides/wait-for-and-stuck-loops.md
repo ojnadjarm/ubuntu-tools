@@ -1,6 +1,6 @@
 # Wait on a background job, and how the sentinel catches stuck wait loops
 
-Ticket: T67, T408, T438, T449, T1406 · Last verified: 2026-10-27 (T1406: `wait-for.test.sh` 25, `sentinel-waits.test.sh` 33); before: 2026-10-20 (T947: dash front read from code, miss/hit timed); before: 2026-10-20 by T846 audit (`wait-for`/`sentinel-waits --help`, MIN_AGE 1200 / STALL 900 / WAITING_IDLE 10800 / HANDBACK_IDLE 120, 15-min timer, hook registration; suites not run); before: 2026-10-19 (T449: `wait-for.test.sh` 18, `sentinel-waits.test.sh` 29, `wait-nudge.test.py` 29, the 4 pgrep forms below re-measured; T438: 2 handback-schema checks, replay of the T429 transcript; T408: `wait-for.test.sh` 18, `sentinel-waits.test.sh` 4 new owner checks, replay of the T407 transcript); before: 2026-09-24 by both fixture suites (12 + 17 checks pass; the 2 workflow-owner fixtures added 2026-09-24 by code-review F04 not yet run under bwrap) and `sentinel-waits --dry-run`
+Ticket: T67, T408, T438, T449, T1406 · Last verified: 2026-11-09 (T1506: `sentinel-waits.test.sh` 35); before: 2026-10-27 (T1406: `wait-for.test.sh` 25, `sentinel-waits.test.sh` 33); before: 2026-10-20 (T947: dash front read from code, miss/hit timed); before: 2026-10-20 by T846 audit (`wait-for`/`sentinel-waits --help`, MIN_AGE 1200 / STALL 900 / WAITING_IDLE 10800 / HANDBACK_IDLE 120, 15-min timer, hook registration; suites not run); before: 2026-10-19 (T449: `wait-for.test.sh` 18, `sentinel-waits.test.sh` 29, `wait-nudge.test.py` 29, the 4 pgrep forms below re-measured; T438: 2 handback-schema checks, replay of the T429 transcript; T408: `wait-for.test.sh` 18, `sentinel-waits.test.sh` 4 new owner checks, replay of the T407 transcript); before: 2026-09-24 by both fixture suites (12 + 17 checks pass; the 2 workflow-owner fixtures added 2026-09-24 by code-review F04 not yet run under bwrap) and `sentinel-waits --dry-run`
 
 ## When to use
 - You started something long (a build, a benchmark, a render, a subagent's log) and need to be told when it ends: use `wait-for`.
@@ -47,6 +47,9 @@ condition held (exit 3)`, `stalled: … (exit 3)`, `killed by SIGTERM after N s,
 (`wait-for …; tail -1 f` exits as `tail`) hides wait-for's: read that line, or `echo rc=$?` right after wait-for.
 
 ## Pitfalls (measured)
+- 2026-11-09 (T1506): `sentinel-waits` deleted the registration of a `wait-for` started after its `/proc` snapshot, and took any
+  live process on a registered pid for the wait (pid reuse after a `kill -9`). It now keeps a file whose pid is in `/proc` but not in
+  the snapshot, and drops one whose pid's command line has no `wait-for`.
 - Age alone cannot judge a wait: in 87 background loops from this machine's transcripts, the finished ones took p50 2 min,
   p90 26 min, max 178 min (pcbench), and 16 never notified anyone. Hence liveness, not a timeout; unregistered loops are
   judged only after 20 min (N), a file counts as stalled after 15 min unchanged with no writer (M, 30x the slowest 30 s poll).
