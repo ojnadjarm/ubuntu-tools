@@ -23,6 +23,17 @@
 .org .pos > li::before { left: -1rem; top: var(--elb); width: 1rem; border-top-width: 1px; }
 .org .pos > li::after { left: -1rem; top: -1rem; bottom: 0; border-left-width: 1px; }
 .org .pos > li:last-child::after { bottom: auto; height: calc(1rem + var(--elb)); }
+.org .seat .hang, .org .seat .msg { grid-column: -2 / -1; }
+.org .seat .msg { justify-self: start; display: inline-flex; align-items: center; min-height: 32px; padding: 0 .9rem; margin-top: .5rem; font-size: max(var(--fs-min), .72rem); text-decoration: none; }
+.org .hang { width: 100%; margin-top: .5rem; padding-top: .5rem; border-top: 1px solid var(--line); text-align: left; }
+.org .seat .hang .hn { color: var(--mute); font-size: max(var(--fs-min), .72rem); letter-spacing: var(--ls-label); text-transform: uppercase; }
+.org .crew li, .org .folded li { display: grid; grid-template-columns: 1.7rem minmax(0, 1fr) auto; gap: .5rem; align-items: center; padding: .25rem 0; }
+.org .mini svg { width: 100%; height: auto; display: block; }
+.org .crew b, .org .folded b { color: var(--txt); font-weight: 400; font-size: max(var(--fs-min), .82rem); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.org .fold summary { display: flex; align-items: center; min-height: 32px; color: var(--mid); font-size: max(var(--fs-min), .8rem); cursor: pointer; }
+.org .fold summary:hover { color: var(--txt); }
+.org .fold summary::before { content: "▸"; margin-right: .5rem; color: var(--g); }
+.org .fold[open] summary::before { content: "▾"; }
 .org .ses { width: 100%; border-collapse: collapse; font-size: max(var(--fs-min), .86rem); }
 .org .ses th { text-align: left; color: var(--mute); font-weight: 400; font-size: max(var(--fs-min), .72rem); letter-spacing: .14em; text-transform: uppercase; padding: .3rem .6rem .5rem 0; }
 .org .ses td { padding: .55rem .6rem .55rem 0; border-top: 1px solid var(--line); vertical-align: middle; overflow-wrap: anywhere; }
@@ -39,6 +50,7 @@
   .org .seat { position: relative; width: min(100%, 17rem); grid-template-columns: minmax(0, 1fr); justify-items: center; text-align: center; }
   .org .seat .av { grid-row: auto; width: 3.4rem; }
   .org .seat h3 { justify-content: center; }
+  .org .seat .msg { justify-self: center; }
   .org .seat.him { max-width: none; }
   .org .otree > li > .pos { --g: 1.4rem; position: relative; width: max-content; max-width: 100%; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--g) 0; margin: var(--g) 0 0; padding: 0; }
   .org .otree > li > .pos::before { content: ""; position: absolute; left: 50%; top: calc(-1 * var(--g)); height: var(--g); border-left: 1px solid var(--line3); }
@@ -60,6 +72,15 @@
   .org .pos .pos > li:last-child::before { right: 50%; }
   .org .pos .pos > li::after, .org .pos .pos > li:last-child::after { left: 50%; top: 0; bottom: auto; height: var(--g); }
   .org .pos .pos .seat { width: 100%; }
+  .org .pos .pos .crew li, .org .pos .pos .folded li { grid-template-columns: 1.7rem minmax(0, 1fr); }
+  .org .pos .pos .crew .pill, .org .pos .pos .folded .pill { grid-column: 2; justify-self: start; }
+}
+/* 768–1199: the seats two levels down stack in a column under their parent, one drop each, so a third of the row never
+   squeezes three cards side by side. */
+@media (min-width: 768px) and (max-width: 1199px) {
+  .org .pos .pos { flex-direction: column; align-items: center; }
+  .org .pos .pos > li { flex: none; width: min(100%, 17rem); }
+  .org .pos .pos > li::before { display: none; }
 }
 @media (min-width: 2200px) { .org .ocols { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: start; } }
 @media (max-width: 700px) {

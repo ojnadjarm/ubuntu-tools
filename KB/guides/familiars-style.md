@@ -1,6 +1,6 @@
 # Familiars: the agent creature look (3D on the stage, SVG in lists)
 
-Ticket: T1515-V2, T1515-V4 · Last verified: 2026-11-10 by `node tests/test_next.js`, `tools/shots.mjs` at 5 widths, draw-call and fps count on the iGPU
+Ticket: T1515-V2, T1515-V4, T1515-P21 · Last verified: 2026-11-10 by `node tests/test_next.js`, `tools/shots.mjs` at 5 widths, draw-call and fps count on the iGPU
 
 ## When to use
 An agent needs a face: a new panel screen, another project, a new role or state. Load skill `/familiars-style` (rules + kit).
@@ -54,6 +54,12 @@ every label on screen shows the orchestrator's display name (owner, 2026-11-10).
   24 live canvases on one page fall to 24 fps at 2560, so lists use the SVG twin and pass motes only from 48 px up;
   the stage scissor (x ±1.2 size, y −1.2…+1.6 size) bounds the mote rings (radius 1.3 units round y 2.2).
 - Model sheet, 5 poses video, perf: `~/drop/T1515-V4/` (`index.html`, `poses.mp4`, `perf.json`, `before/`, `after/`).
+
+## Manager gear (T1515-P21, 2026-11-10)
+Role `manager` (the Discord project managers in `org.json`): one small accessory, a violet bow tie at the chest
+(SVG `<g class="gear-manager">`, 3D two cones + a knot on the hip at `0.33 * W` forward); never the PO's headset or the
+worker's hard hat. Every role's SVG gear sits in `<g class="gear-<role>">`, so a test can tell roles apart.
+- Pitfall: a role missing from `ROLES` falls back to `worker`; managers wore hard hats until `manager` was added.
 
 ## Links
 - Code: `~/agents/dashboard/static/next/js/familiars/`, `.../gl/familiars/`, `.../gl/creatures.js`

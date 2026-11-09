@@ -10,9 +10,10 @@ import { plural } from "../summary.js";
 
 export const own = true;
 const STALE_MS = 20000;
-const ROLE = { ceo: "Runs the fleet and answers questions about the harness.", po: "Product owner." };
+const ROLE = { ceo: "Runs the fleet and answers questions about the harness.", po: "Product owner.", manager: "Project manager. Never posts." };
 const WAKE = { channel: "Always on; woken through its chat channel.", "po-inbox": "Asleep until someone writes to its inbox.", pull: "Reads its messages when it next runs." };
 const PILL = { working: "running", idle: "idle", asleep: "off", off: "off", yours: "his" };
+const SHOWN = 3;
 let O = null, at = 0, busy = false, err = "";
 
 if (!document.querySelector('link[href="/static/css/org.css"]')) {
@@ -41,12 +42,24 @@ export function seatState(seat, S) {
   return seat.wake === "channel" ? "off" : "asleep";
 }
 
+/* The owner's direct message with seat `id`, as Chat names it. */
+export const dmOf = (id) => "dm-" + ["owner", id].sort().join("--");
+
+const worker = (s) => `<li><span class="mini" aria-hidden="true">${creature("pid" + s.pid, s.state === "working" ? "working" : "idle", "worker")}</span><b>${esc(s.name || "pid " + s.pid)}</b>${pill(s.state)}</li>`;
+
+/* The sessions a seat started, working first: SHOWN of them, the rest folded behind a "hidden N" line. */
+function crew(H) {
+  if (!H.length) return "";
+  const all = [...H.filter((s) => s.state === "working"), ...H.filter((s) => s.state !== "working")], rest = all.slice(SHOWN);
+  return `<div class="hang"><p class="hn">${plural(H.length, "worker")}, ${H.filter((s) => s.state === "working").length} working</p><ul class="crew">${all.slice(0, SHOWN).map(worker).join("")}</ul>` +
+    (rest.length ? `<details class="fold"><summary>hidden ${rest.length}</summary><ul class="folded">${rest.map(worker).join("")}</ul></details>` : "") + `</div>`;
+}
+
 function seatCard(seat, S) {
   if (seat.role === "owner") return `<div class="seat him"><span class="av dia" aria-hidden="true"><i></i></span><h3>${esc(seat.name)}</h3><p><b>Read every channel, write anywhere, message anyone.</b></p><p>Only your words change what an agent may do.</p></div>`;
-  const st = seatState(seat, S), helpers = S.filter((s) => !s.seat && s.parent === seat.id), hw = helpers.filter((s) => s.state === "working").length;
-  const line = (WAKE[seat.wake] || "") + (helpers.length ? ` ${plural(helpers.length, "helper session")}, ${hw} working.` : "");
-  return `<div class="seat"><span class="av" aria-hidden="true">${creature(seat.id, st === "working" || st === "idle" ? st : "sleep", seat.role)}</span><h3>${esc(seat.name)} ${pill(st)}</h3>` +
-    `<p><b>${esc(ROLE[seat.role] || "")}</b></p><p>${esc(line)}</p></div>`;
+  const st = seatState(seat, S), helpers = S.filter((s) => !s.seat && s.parent === seat.id);
+  return `<div class="seat" data-seat="${esc(seat.id)}"><span class="av" aria-hidden="true">${creature(seat.id, st === "working" || st === "idle" ? st : "sleep", seat.role)}</span><h3>${esc(seat.name)} ${pill(st)}</h3>` +
+    `<p><b>${esc(ROLE[seat.role] || "")}</b></p><p>${esc(WAKE[seat.wake] || "")}</p>${crew(helpers)}<a class="btn msg" href="#chat?ch=${esc(dmOf(seat.id))}">Message</a></div>`;
 }
 
 /* The seat tree: the owner and the seats reporting to the owner one above the other, every deeper level as a grid under its parent. */

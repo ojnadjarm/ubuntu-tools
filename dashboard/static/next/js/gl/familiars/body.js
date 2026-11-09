@@ -71,6 +71,11 @@ export function build(g) {
     const tab = group(arms[1], [0.02, -0.36, 0.06], true);
     add(tab, G.box, mSet, { s: [0.2, 0.27, 0.025], outline: 1 }); add(tab, G.box, lit(MINT), { p: [0, 0, 0.014], s: [0.16, 0.22, 0.004] });
   }
+  if (g.role === "manager") {
+    const mTie = toon([0.54, 0.36, 0.96], { shade: [0.25, 0.14, 0.55] }), z = 0.33 * W;
+    [-1, 1].forEach((d) => add(hip, G.cone, mTie, { p: [d * 0.06, 0.13, z], s: [0.055, 0.09, 0.035], r: [0, 0, d * Math.PI / 2], outline: 1 }));
+    add(hip, G.lo, toon([0.36, 0.23, 0.66]), { p: [0, 0.13, z + 0.01], s: 0.03, outline: 1 });
+  }
   if (g.role === "worker") {
     const mHat = toon([1, 0.8, 0.2], { shade: [0.8, 0.45, 0.05] });
     add(head, G.dome, mHat, { p: [0, top - 0.07, -0.05], s: [A * 0.56, 0.17, C * 0.56], outline: 1 });

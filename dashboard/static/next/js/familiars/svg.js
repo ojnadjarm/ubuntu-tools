@@ -32,8 +32,9 @@ export function svg(g, state) {
   s += `<ellipse cx="${f(50 - 24 * W)}" cy="70" rx="5" ry="3" fill="#ff9ec4" opacity=".6"/><ellipse cx="${f(50 + 24 * W)}" cy="70" rx="5" ry="3" fill="#ff9ec4" opacity=".6"/>`;
   s += p === "talking" || err ? `<ellipse cx="50" cy="78" rx="6" ry="${err ? 4 : 6}" fill="${INK}"/>` : `<path d="M43 76q7 7 14 0" stroke="${INK}" stroke-width="3" fill="none" stroke-linecap="round"/>`;
   if (g.mouth === 3 && !err && p !== "talking") s += `<path d="M53 78l1.8 4l1.8 -4.6z" fill="#fff"/>`;
-  if (g.role === "po") s += `<path d="M${f(50 - 37 * W)} 56a${f(37 * W)} 36 0 0 1 ${f(74 * W)} 0" fill="none" stroke="#2c3a40" stroke-width="5"/><rect x="${f(44 - 37 * W)}" y="48" width="11" height="20" rx="5" fill="#2c3a40" stroke="${INK}" stroke-width="2"/><path d="M${f(50 - 34 * W)} 66q2 14 20 13" fill="none" stroke="#2c3a40" stroke-width="3"/>`;
-  if (g.role === "worker") s += `<path d="M${f(50 - 30 * W)} 36a${f(30 * W)} 26 0 0 1 ${f(60 * W)} 0Z" fill="#ffcc33" stroke="${INK}" stroke-width="2.5"/><rect x="${f(50 - 36 * W)}" y="34" width="${f(72 * W)}" height="6" rx="3" fill="#ffcc33" stroke="${INK}" stroke-width="2.5"/>`;
+  if (g.role === "po") s += `<g class="gear-po"><path d="M${f(50 - 37 * W)} 56a${f(37 * W)} 36 0 0 1 ${f(74 * W)} 0" fill="none" stroke="#2c3a40" stroke-width="5"/><rect x="${f(44 - 37 * W)}" y="48" width="11" height="20" rx="5" fill="#2c3a40" stroke="${INK}" stroke-width="2"/><path d="M${f(50 - 34 * W)} 66q2 14 20 13" fill="none" stroke="#2c3a40" stroke-width="3"/></g>`;
+  if (g.role === "manager") s += `<g class="gear-manager"><path d="M50 87L37 80v15zM50 87l13 -7v15z" fill="#8a5cf6" stroke="${INK}" stroke-width="2.5" stroke-linejoin="round"/><circle cx="50" cy="87" r="4" fill="#5b3aa8" stroke="${INK}" stroke-width="2"/></g>`;
+  if (g.role === "worker") s += `<g class="gear-worker"><path d="M${f(50 - 30 * W)} 36a${f(30 * W)} 26 0 0 1 ${f(60 * W)} 0Z" fill="#ffcc33" stroke="${INK}" stroke-width="2.5"/><rect x="${f(50 - 36 * W)}" y="34" width="${f(72 * W)}" height="6" rx="3" fill="#ffcc33" stroke="${INK}" stroke-width="2.5"/></g>`;
   if (g.role === "crew") s += `<path d="M26 86q24 12 48 0" stroke="#ff7359" stroke-width="8" fill="none" stroke-linecap="round"/>`;
   return s + mark(p) + "</svg>";
 }

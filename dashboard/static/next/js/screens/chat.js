@@ -7,7 +7,7 @@ import { dust } from "../shapes.js";
 import { fitEye } from "../gl/cam.js";
 import { sync } from "../ui/sync.js";
 import { plural } from "../summary.js";
-import { seatState } from "./org.js";
+import { seatState, dmOf } from "./org.js";
 import { composer, bind, forget } from "./chat-compose.js";
 import { store } from "../store.js";
 
@@ -84,11 +84,10 @@ function paint() {
 const names = () => Object.fromEntries(((O && O.seats) || []).map((s) => [s.id, s.name]));
 const nameOf = (id, N) => (id === "owner" ? "You" : N[id] || id);
 const pair = (c) => c.slice(3).split("--");
-const dmOf = (id) => "dm-" + ["owner", id].sort().join("--");
 /* Every channel he can open: the rooms and a direct message per seat even before a first message, then the agents' own direct messages. */
 function listed() {
   const seats = ((O && O.seats) || []).filter((s) => s.role !== "owner"), have = (id) => C.find((c) => c.ch === id) || { ch: id, unread: 0 };
-  const rooms = [...new Set([...ROOMS, ...seats.filter((s) => s.role === "po").map((s) => s.id), ...C.filter((c) => !c.ch.startsWith("dm-")).map((c) => c.ch)])].map(have);
+  const rooms = [...new Set([...ROOMS, ...seats.filter((s) => s.role === "po" && s.wake !== "pull").map((s) => s.id), ...C.filter((c) => !c.ch.startsWith("dm-")).map((c) => c.ch)])].map(have);
   const mine = seats.map((s) => have(dmOf(s.id)));
   return { rooms, dms: [...mine, ...C.filter((c) => c.ch.startsWith("dm-") && !mine.some((m) => m.ch === c.ch))] };
 }
@@ -148,7 +147,7 @@ function members(N) {
 /* Agent-caused wakes per seat today against the daily cap; his own messages never count. */
 function wakes(N) {
   if (!W) return "";
-  const rows = ((O && O.seats) || []).filter((s) => s.role !== "owner").map((s) => {
+  const rows = ((O && O.seats) || []).filter((s) => s.role !== "owner" && s.wake !== "pull").map((s) => {
     const n = W.today[s.id] || 0;
     return `<div class="wk"><span>${esc(nameOf(s.id, N))}</span><b>${n} of ${W.cap}</b><progress max="${W.cap}" value="${Math.min(n, W.cap)}" aria-label="${esc(nameOf(s.id, N))}: ${n} of ${W.cap} wakes"></progress></div>`;
   });

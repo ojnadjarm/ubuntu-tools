@@ -8,7 +8,8 @@ const ORG = { seats: [
   { id: "owner", name: "You", role: "owner", parent: null, wake: null, match: null },
   { id: "orchestrator", name: "Orchestrator", role: "ceo", parent: "owner", wake: "channel", match: "~" },
   { id: "mooblox", name: "Mooblox", role: "po", parent: "orchestrator", wake: "po-inbox", match: "~/agents/po-mooblox" },
-  { id: "discord", name: "Discord", role: "po", parent: "orchestrator", wake: "po-inbox", match: "~/agents/po-discord" }], sessions: [], hidden: 0 };
+  { id: "discord", name: "Discord", role: "po", parent: "orchestrator", wake: "po-inbox", match: "~/agents/po-discord" },
+  { id: "vass", name: "Vass seat", role: "po", parent: "orchestrator", wake: "pull", match: null }], sessions: [], hidden: 0 };
 const T0 = Date.UTC(2026, 10, 9, 21, 0);
 const row = (id, ch, from, text, kind = "msg") => ({ id, ts: new Date(id).toISOString(), ch, from, to: [], kind, text, re: null, hop: 0 });
 const STORE = {
@@ -60,7 +61,7 @@ srv.on("request", (req, res) => {
     assert.strictEqual(await p.textContent(".chat .stream header h2"), "Mooblox", "cold load opens the hash's channel");
     assert.strictEqual(await p.evaluate(() => location.hash), "#chat?ch=dm-mooblox--owner", "cold load keeps the hash");
     const chans = await p.$$eval(".chat .chans a", (as) => as.map((a) => a.dataset.ch));
-    assert.deepStrictEqual(chans, ["harness", "org", "mooblox", "discord", "dm-orchestrator--owner", "dm-mooblox--owner", "dm-discord--owner"], "rooms, PO channels and a direct message per seat before any message");
+    assert.deepStrictEqual(chans, ["harness", "org", "mooblox", "discord", "dm-orchestrator--owner", "dm-mooblox--owner", "dm-discord--owner", "dm-owner--vass"], "rooms, PO channels (no room for the pull seat vass) and a direct message per seat before any message");
     await p.waitForFunction(() => /2/.test((document.querySelector('#subs [data-nav="chat"] i') || {}).textContent || ""), null, { timeout: 5000 });
     assert.strictEqual(await p.textContent('.chat [data-ch="org"] .unread'), "2", "unread badge on the channel");
 
@@ -101,10 +102,10 @@ srv.on("request", (req, res) => {
     await p.setViewportSize({ width: 1366, height: 768 });
     await p.waitForSelector(".chat .wakes .wk", { state: "visible", timeout: 5000 });
     const wk = await p.$$eval(".chat .wakes .wk", (r) => r.map((x) => x.querySelector("span").textContent + " " + x.querySelector("b").textContent));
-    assert.deepStrictEqual(wk, ["Orchestrator 5 of 12", "Mooblox 2 of 12", "Discord 0 of 12"], "wakes today per seat against the cap");
+    assert.deepStrictEqual(wk, ["Orchestrator 5 of 12", "Mooblox 2 of 12", "Discord 0 of 12"], "wakes today per seat against the cap; the pull seat vass is never woken");
     const fixed = await p.evaluate(() => getComputedStyle(document.querySelector(".chat .compose")).position);
     assert.strictEqual(fixed, "static", "from 900 px the composer sits under the stream");
     assert.deepStrictEqual(errs, [], "no page errors");
-    console.log("ok · cold #chat?ch= · 7 channels · unread + /seen · composer sent/woke/held · fixed at 400 · swipe-proof · wakes today");
+    console.log("ok · cold #chat?ch= · 8 channels, no vass room · unread + /seen · composer sent/woke/held · fixed at 400 · swipe-proof · wakes today");
   } finally { await b.close(); srv.close(); }
 })().catch((e) => { console.error(e); process.exit(1); });

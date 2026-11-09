@@ -1,7 +1,7 @@
 /* Familiars genome: the same id always gives the same creature; the role sets the gear. The SVG and the 3D body both read it. */
 import { rng } from "../shapes.js";
 
-export const ROLES = ["ceo", "po", "worker", "crew"], POSES = ["working", "idle", "talking", "error", "sleep"];
+export const ROLES = ["ceo", "po", "manager", "worker", "crew"], POSES = ["working", "idle", "talking", "error", "sleep"];
 const KATA = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎ";
 const HUES = [152, 172, 192, 118, 44, 238, 268, 318, 206, 88];
 const TOPPER = { ears: 0, none: 1, sprout: 2, horns: 3, ant: 4 }, MOUTH = { smile: 0, cat: 1, o: 2, fang: 3 };
