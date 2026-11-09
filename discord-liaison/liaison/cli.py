@@ -550,7 +550,7 @@ class App:
             return subprocess.call(tmpl.format(id=shlex.quote(jid)), shell=True, stdin=subprocess.DEVNULL)
         t = int(self.env.get('LIAISON_JOB_TIMEOUT', '1800'))
         return subprocess.call(['systemd-run', '--user', '--quiet', '--collect', f'--unit=discord-liaison-job-{jid}',
-                                f'--property=RuntimeMaxSec={t + 300}', f'--setenv=PATH={os.environ.get("PATH", "")}',
+                                f'--property=RuntimeMaxSec={MAX_ATTEMPTS * t + 300}', f'--setenv=PATH={os.environ.get("PATH", "")}',
                                 os.path.join(os.path.dirname(ME), 'bin', 'discord-liaison'), 'job-run', jid],
                                stdin=subprocess.DEVNULL)
 

@@ -15,7 +15,7 @@ if [ "${1:-}" = test ]; then
 fi
 # shellcheck source=/dev/null
 . "$D/agent.env"
-export LIAISON_RUNS_PER_DAY LIAISON_PRS_PER_DAY LIAISON_IMAGES_PER_DAY LIAISON_JOBS_MAX LIAISON_JOB_TIMEOUT MODEL
+export LIAISON_RUNS_PER_DAY LIAISON_PRS_PER_DAY LIAISON_IMAGES_PER_DAY LIAISON_JOBS_MAX LIAISON_JOB_TIMEOUT LIAISON_JOB_MODEL LIAISON_JOB_EFFORT MODEL
 export PYTHONPATH="$D:$B"
 py="$B/.venv/bin/python"
 # T1412 P5: PO replies are posted before each tick; PO-routed messages go to their PO when the LLM reads the inbox or maps a thread.

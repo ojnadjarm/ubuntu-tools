@@ -77,6 +77,31 @@ is 'test-dir: apply removes the 5' "$rc $(grep -o 'deleted [0-9]*, failed [0-9]*
 k=; for d in orbit-test-young keep-me t714-f.log; do [ -e "$R/root/$d" ] && k+=1; done
 is 'test-dir: young, unmatched and plain-file entries kept' "$k" 111
 
+dry=$("$BIN/pc-tmp"); kept=$(sed -n 's/^kept (o[p]en fd\/cwd): //p' <<<"$dry")
+is 'job: a fixture root without PC_TMP_JOBS reads no job store' "$(grep -c '^job' <<<"$dry")" 0
+J="$R/jobs"; now=$(date +%s)
+job() { mkdir -p "$J/$1"; printf '{"id":"%s","status":"%s"%s}\n' "$1" "$2" "${3:+,\"ended\":$3}" >"$J/$1/job.json"; }
+job old done $((now - 50 * 3600)).5; job new done $((now - 2 * 3600)); job run running; job sup superseded $((now - 50 * 3600)); job lck failed $((now - 50 * 3600))
+mkdir -p "$J/old/app/target/debug" "$J/old/src/target" "$J/old/web/node_modules/x" "$J/old/.venv" "$J/old/frames" "$J/old/few" "$J/new/node_modules" "$J/run/node_modules" "$J/sup/shots" "$J/lck/node_modules"
+: >"$J/old/app/target/CACHEDIR.TAG"; : >"$J/old/.venv/pyvenv.cfg"; echo x >"$J/old/src/target/main.rs"; echo x >"$J/old/frames/final.mp4"; echo x >"$J/old/out.mp4"
+for i in $(seq 50); do echo x >"$J/old/frames/$i.png"; echo x >"$J/sup/shots/$i.JPG"; echo x >"$J/old/$i.png"; done
+for i in 1 2 3; do echo x >"$J/old/few/$i.png"; done; : >"$J/lck/lock"
+sleep 600 8<"$J/lck/lock" & LCK=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do [ -e "/proc/$LCK/fd/8" ] && break; sleep 0.1; done
+export PC_TMP_JOBS="$J"
+dry=$("$BIN/pc-tmp")
+is 'job: dry run lists the old jobs'"'"' caches and frame dirs' "$(awk '$1 ~ /^job/ {print $1, $2}' <<<"$dry" | sed "s#$J/##" | LC_ALL=C sort | tr '\n' ';')" \
+  'job old/.venv;job old/app/target;job old/web/node_modules;job-frames old/frames;job-frames sup/shots;'
+is 'job: a job with a held lock is kept' "$(sed -n 's/^kept (o[p]en fd\/cwd): //p' <<<"$dry")" "$((${kept:-0} + 1))"
+out=$("$BIN/pc-tmp" --apply); rc=$?; kill "$LCK" 2>/dev/null
+is 'job: apply removes the 5' "$rc $(grep -o 'deleted [0-9]*, failed [0-9]*' <<<"$out")" '0 deleted 5, failed 0'
+is 'job: frames gone, the rest of the job kept' "$(cd "$J" && find . -type f ! -name job.json ! -name '[0-9]*.png' | LC_ALL=C sort | tr '\n' ' ')" \
+  './lck/lock ./old/frames/final.mp4 ./old/out.mp4 ./old/src/target/main.rs '
+is 'job: few frames and the job root keep theirs' "$(find "$J/old/few" "$J/old" -maxdepth 1 -name '*.png' | wc -l)" 53
+k=; for d in new/node_modules run/node_modules lck/node_modules; do [ -d "$J/$d" ] && k+=1; done
+is 'job: young, running and locked jobs untouched' "$k" 111
+unset PC_TMP_JOBS
+
 L="$R/root/tmp.locked"; mkdir -p "$L/d" "$R/root/tmp.free"; echo x >"$L/d/f"; echo x >"$R/root/tmp.free/f"
 age "$L" 30; age "$R/root/tmp.free" 30; chmod 000 "$L/d"
 if [ -r "$L/d" ]; then ok 'skip: chmod 000 is readable (root), rm failure not testable'; else

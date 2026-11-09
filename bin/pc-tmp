@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pc tmp [--apply] [--if-over <size>] — /tmp (tmpfs, RAM) leftovers: leaked test dirs, finished tickets' scratch, old build caches; dry run lists them.
+# pc tmp [--apply] [--if-over <size>] — /tmp (tmpfs, RAM) leftovers: leaked test dirs, finished tickets' scratch, old build caches; finished liaison jobs' caches and frames (disk); dry run lists them.
 set -uo pipefail
 BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 . "$BIN/pclib.sh"
@@ -16,13 +16,20 @@ Lists KIND PATH MB AGE REASON for what is safe to delete from $PC_TMP_ROOT (defa
   build     remotion-webpack-bundle-* and cc*.ltrans* idle > 24 h
   daemon    watchman whose TMPDIR is a dir under the root, gone or idle > 1 h (PATH = that TMPDIR,
             MB = RSS); --apply sends TERM, the git fsmonitor hook starts one again on demand
+  job       in $PC_TMP_JOBS/<id>/ (default ~/agents/discord-liaison/state/jobs, disk) whose job.json is
+            done|superseded|failed|stale and ended > 48 h ago: node_modules, .venv (pyvenv.cfg) and
+            target (CACHEDIR.TAG) directories
+  job-frames  same jobs: a subdirectory holding >= 50 png/jpg/jpeg/wav files; --apply deletes those
+            files only, the directory and its other files stay
 --if-over 2G  exits 0 with "nothing: /tmp X GB < limit" while df used on /tmp is below <size>.
 Idle = newest mtime anywhere in the tree. A path a process holds open (fd or cwd) is skipped.
---apply deletes the listed paths (daemon rows: TERM) and appends one ledger entry (after: "deleted N, failed M");
+--apply deletes the listed paths (daemon rows: TERM; job-frames rows: the frame files) and appends one ledger entry (after: "deleted N, failed M");
 a path still present after rm -rf is named on stderr and exits 1; nothing to roll back (scratch only).' "$@"
 
 PC_SUB='pc tmp'; PC_EXTRA_FLAGS=(--if-over:)
 pc_opt "$@"
+# A fixture root never reads the real job store.
+[ -n "${PC_TMP_ROOT-}" ] || : "${PC_TMP_JOBS=$HOME/agents/discord-liaison/state/jobs}"
 : "${PC_TMP_ROOT:=/tmp}" "${PC_TMP_HISTORY:=$HOME/agent-work/history.md}" "${PC_TMP_CLAIMS:=$HOME/agents/FILE-CLAIMS.md}"
 ROOT=$(readlink -f -- "$PC_TMP_ROOT")
 case $ROOT in /tmp|/tmp/*) ;; *) echo "pc tmp: refused, PC_TMP_ROOT must be under /tmp ($ROOT)" >&2; exit 2;; esac
@@ -33,6 +40,9 @@ if [ -n "${PC_OPT[--if-over]-}" ]; then
     awk -v u="$used" -v l="$limit" 'BEGIN {printf "nothing: /tmp %.1f GB < %.1f GB\n", u / 2^30, l / 2^30}'; exit 0
   fi
 fi
+JOBS=; [ -d "${PC_TMP_JOBS-}" ] && JOBS=$(readlink -f -- "$PC_TMP_JOBS")
+FRAMES=(-iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.wav')
+CACHES=(-name node_modules -o -name .venv -o -name target)
 printf -v NOW '%(%s)T' -1
 
 # idle_h <path> — hours since the newest mtime in the tree.
@@ -44,13 +54,13 @@ idle_h() {
 # Every path under ROOT that a process holds open, as fd target or cwd.
 OPEN=$(find "$PC_PROC"/[0-9]*/fd -maxdepth 1 -type l -printf '%l\n' 2>/dev/null
        find "$PC_PROC"/[0-9]*/cwd -maxdepth 0 -printf '%l\n' 2>/dev/null)
-OPEN=$(grep -F -- "$ROOT/" <<<"$OPEN" | sed 's/ (deleted)$//' | sort -u)
+OPEN=$(grep -F -e "$ROOT/" ${JOBS:+-e "$JOBS/"} <<<"$OPEN" | sed 's/ (deleted)$//' | sort -u)
 held() { [ -n "$OPEN" ] && awk -v p="$1" 'index($0, p) == 1 && (length($0) == length(p) || substr($0, length(p) + 1, 1) == "/") {f=1; exit} END {exit !f}' <<<"$OPEN"; }
 
 ROWS=(); SKIPPED=0
-add() {  # add <kind> <path> <idle_h> <reason>
+add() {  # add <kind> <path> <idle_h> <reason> [<mb>]
   if held "$2"; then SKIPPED=$((SKIPPED + 1)); return; fi
-  ROWS+=("$1"$'\t'"$2"$'\t'"$(du -sm -- "$2" 2>/dev/null | cut -f1)"$'\t'"$3h"$'\t'"$4")
+  ROWS+=("$1"$'\t'"$2"$'\t'"${5:-$(du -sm -- "$2" 2>/dev/null | cut -f1)}"$'\t'"$3h"$'\t'"$4")
 }
 
 me=$(id -u)
@@ -75,6 +85,27 @@ for p in "$ROOT"/claude-"$me"/*/*/scratchpad/*/; do
   case ${p,,} in *vass*|*char3d*) continue;; esac
   [[ ${p##*/} =~ (^|[^A-Za-z])[Tt][0-9]+ ]] && continue
   h=$(idle_h "$p"); [ "$h" -ge 24 ] && add scratch-idle "$p" "$h" "no ticket name, idle ${h}h > 24h"
+done
+
+for j in ${JOBS:+"$JOBS"/*/job.json}; do
+  [ -f "$j" ] || continue
+  d=${j%/job.json}
+  e=$(jq -r 'select(.status | IN("done", "superseded", "failed", "stale")) | .ended // empty | floor' "$j" 2>/dev/null)
+  [ -n "$e" ] || continue
+  h=$(( (NOW - e) / 3600 )); [ "$h" -ge 48 ] || continue
+  if held "$d"; then SKIPPED=$((SKIPPED + 1)); continue; fi
+  while IFS= read -r -d '' p; do
+    case ${p##*/} in
+      .venv) [ -e "$p/pyvenv.cfg" ] || continue;;
+      target) [ -e "$p/CACHEDIR.TAG" ] || continue;;
+    esac
+    add job "$p" "$h" "job ended ${h}h > 48h, build cache"
+  done < <(find "$d" -type d \( "${CACHES[@]}" \) -prune -print0 2>/dev/null)
+  while read -r -d '' n p; do
+    [ "$n" -ge 50 ] && [ "$p" != "$d" ] || continue
+    mb=$(find "$p" -maxdepth 1 -type f \( "${FRAMES[@]}" \) -printf '%k\n' | awk '{s += $1} END {print int(s / 1024)}')
+    add job-frames "$p" "$h" "job ended ${h}h > 48h, $n frame files" "$mb"
+  done < <(find "$d" -type d \( "${CACHES[@]}" \) -prune -o -type f \( "${FRAMES[@]}" \) -printf '%h\0' 2>/dev/null | sort -z | uniq -zc)
 done
 
 for c in "$PC_PROC"/[0-9]*/comm; do
@@ -104,7 +135,12 @@ for r in ${ROWS[@]+"${ROWS[@]}"}; do
     if grep -qs '^State:[[:space:]]*[^Z]' "$PC_PROC/$pid/status"; then FAILED+=("watchman $pid"); else deleted=$((deleted + 1)); fi
     continue
   fi
-  case $p in "$ROOT"/?*) rm -rf -- "$p" 2>/dev/null;; esac
+  if [ "$k" = job-frames ]; then
+    find "$p" -maxdepth 1 -type f \( "${FRAMES[@]}" \) -delete 2>/dev/null
+    if [ -n "$(find "$p" -maxdepth 1 -type f \( "${FRAMES[@]}" \) -print -quit 2>/dev/null)" ]; then FAILED+=("$p"); else deleted=$((deleted + 1)); fi
+    continue
+  fi
+  case $p in "$ROOT"/?*|"${JOBS:-$ROOT}"/?*) rm -rf -- "$p" 2>/dev/null;; esac
   if [ -e "$p" ] || [ -L "$p" ]; then FAILED+=("$p"); else deleted=$((deleted + 1)); fi
 done
 after="deleted $deleted, failed ${#FAILED[@]}"

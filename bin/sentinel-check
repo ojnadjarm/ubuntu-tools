@@ -226,7 +226,7 @@ if [ -n "$PROFILE" ]; then
   exit 0
 fi
 mkdir -p "$st/tries"
-for f in "$st"/tries/*; do
+grep -q '^status\.probe' <<<"$all" || for f in "$st"/tries/*; do
   [ -e "$f" ] && ! grep -q "^${f##*/}"$'\t' <<<"$all" && rm -f "$f"
 done
 fails="$(owner_only --push <<<"$all" | profile_only)"

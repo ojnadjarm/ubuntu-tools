@@ -1,6 +1,6 @@
 # Free RAM held in /tmp: sweep leaked test dirs, finished tickets' scratch, old build caches
 
-Ticket: T636 · Last verified: 2026-10-20 by T846 audit (`pc tmp --help`, /tmp tmpfs, maintenance timer Sun 04:00, ledger path); 2026-10-19 by bin/tests/pc-tmp.test.sh (10/10) and a live dry run
+Ticket: T636 · Last verified: 2026-11-09 by T1499 (bin/tests/pc-tmp.test.sh 37/37, live dry run); 2026-10-20 by T846 audit (`pc tmp --help`, /tmp tmpfs, maintenance timer Sun 04:00, ledger path); 2026-10-19 by bin/tests/pc-tmp.test.sh (10/10) and a live dry run
 
 ## When to use
 /tmp is tmpfs (RAM; `free -m` "shared"). Use `pc tmp` when shared memory is high or tests get OOM-killed.
@@ -21,11 +21,19 @@ systemctl --user list-timers pc-tmp.timer   # next scheduled sweep
 pc-tmp.timer/pc-tmp.service run `pc tmp --apply` daily at 03:30 and `pc tmp --apply --if-over 2G` hourly
 outside 03:xx; maintenance-run also calls `pc tmp --apply` each run (weekly, Sun 04:00).
 
+Kinds `job` and `job-frames` (T1499, TSP-059) reach outside /tmp: `~/agents/discord-liaison/state/jobs/<id>` whose
+job.json is done, superseded, failed or stale, ended > 48 h ago, with no open fd. `job` removes `node_modules`,
+`.venv` and Cargo `target` dirs; `job-frames` deletes the png/jpg/jpeg/wav files of a subdirectory holding >= 50
+of them (never the job root, never mp4 or sources). `PC_TMP_JOBS=<dir>` overrides the store.
+
 ## Pitfalls (measured)
 - Idle = newest mtime in the whole tree, not the dir's own mtime (a dir's mtime ignores nested writes).
 - Session project dirs start with `-` (`-home-...`): always absolute paths or `--`, else ls/rm parse them as flags.
 - 2026-10-19: 1309 MB of done, unclaimed scratch was all < 6 h idle, so the live dry run listed 0 MB; it frees once idle.
 - Multi-phase tickets get a history line per phase while still running: the claims row and the 6 h idle gate guard them.
+- 2026-11-09: the jobs store was 46 G (196 jobs; Rust `target` 17.7 GB, frame dumps ~24 GB) because nothing reaped
+  finished jobs; the first dry run listed 74 paths, 28225 MB in 7.2 s.
+- With `PC_TMP_ROOT` set and `PC_TMP_JOBS` unset the job kinds are off, so fixture runs never read the real store.
 
 ## Links
 - Code: ~/agents/bin/pc-tmp, ~/agents/bin/maintenance-run, ~/.config/systemd/user/pc-tmp.{timer,service}

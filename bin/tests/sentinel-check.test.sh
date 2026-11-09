@@ -114,6 +114,8 @@ tick "$LOOP"
 [ "$(grep -c 'notify-owner.*agents.unit_loops' "$CALLS")" = 1 ] && ok "a unit loop failing >= 2 h is pushed once" || nok "2 h loop push" "$(cat "$CALLS")"
 tick "$LOOP"
 grep -q 'notify-owner' "$CALLS" && nok "the loop push is bounded" "$(cat "$CALLS")" || ok "the loop push is bounded (no second push)"
+tick '!'
+[ -e "$ST/tries/agents.unit_loops" ] && ok "a failed status probe keeps the episode" || nok "probe failure keeps tries" "tries file removed"
 tick ''
 [ ! -e "$ST/tries/agents.unit_loops" ] && ok "a cleared loop resets its episode" || nok "loop episode reset" "tries file left"
 # T350: pc status FAILs services.ssh only when ssh.service and ssh.socket are both down.

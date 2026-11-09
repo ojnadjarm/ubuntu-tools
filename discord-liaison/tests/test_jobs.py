@@ -1,8 +1,11 @@
 """T1414: work requests become background jobs; a cap on concurrent jobs, a queue, and triage keeps running meanwhile."""
 import os
 import unittest
+from unittest import mock
 
+from liaison.cli import App
 from liaison.jobs import GRACE, JobQueue
+from liaison.routing import MAX_ATTEMPTS
 from liaison.runlock import run_lock
 
 from .test_liaison import Base
@@ -89,6 +92,12 @@ class JobBase(Base):
 
 
 class TestJobCli(JobBase):
+    async def test_unit_runtime_covers_every_attempt(self):
+        env = {k: v for k, v in self.env.items() if k != 'LIAISON_JOB_LAUNCH'}
+        with mock.patch('liaison.cli.subprocess.call', return_value=0) as call:
+            App(dict(env, LIAISON_JOB_TIMEOUT='100'), None).launch('j1')
+        self.assertIn(f'--property=RuntimeMaxSec={MAX_ATTEMPTS * 100 + 300}', call.call_args[0][0])
+
     async def test_job_from_inbox_starts_then_queues_over_the_cap(self):
         (a,) = await self.inbox('haz un PR con la voz')
         b = await self.other('y una imagen del héroe')

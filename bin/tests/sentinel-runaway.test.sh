@@ -205,7 +205,13 @@ setunit 401 app.slice/xdg-desktop-portal-gtk.service
 setunit 404 app.slice/xdg-desktop-portal-gnome.service
 setunit 405 session.slice/org.gnome.SettingsDaemon.Power.service
 setunit 406 app.slice/app-gnome-foo-1234.scope
+mkproc 407 gjs 2000 5 100000 /usr/bin/gjs; setunit 407 session.slice/dbus.service
+mkproc 408 gjs 2000 5 100000 /usr/bin/gjs; setunit 408 session.slice/org.gnome.Shell@ubuntu.service
 run
+check        "rule4: gjs inside the session bus is killed, the bus not restarted" "would kill pid 407 (rule4"
+check        "rule4: gjs inside gnome-shell's unit is killed" "would kill pid 408 (rule4"
+check_absent "rule4: never restarts dbus.service" "would restart dbus.service"
+check_absent "rule4: never restarts gnome-shell" "would restart org.gnome.Shell@"
 check        "rule4: fat portal helper restarted"   "would restart xdg-desktop-portal-gtk.service (pid 401"
 check_absent "rule4: quiet small helper spared"     "(pid 402"
 check        "rule4: truncated comm resolved via argv[0]" "would restart xdg-desktop-portal-gnome.service (pid 404"

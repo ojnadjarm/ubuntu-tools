@@ -30,11 +30,13 @@ class Rest:
         for _ in range(5):
             async with self._session.request(method, self.base + path, json=json, params=params,
                                              data=form() if form else None, proxy=self.proxy) as r:
+                try:
+                    body = await r.json(content_type=None) if r.status != 204 else None
+                except ValueError:
+                    raise RestError(r.status, None)
                 if r.status == 429:
-                    body = await r.json(content_type=None)
                     await asyncio.sleep(float(body.get('retry_after', 1)))
                     continue
-                body = await r.json(content_type=None) if r.status != 204 else None
                 if r.status >= 400:
                     raise RestError(r.status, body)
                 return body

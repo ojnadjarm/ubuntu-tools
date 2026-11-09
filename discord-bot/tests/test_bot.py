@@ -8,13 +8,14 @@ from types import SimpleNamespace
 
 import aiohttp
 import discord
+from aiohttp import web
 from aiohttp.test_utils import TestServer
 
 from discordbot.config import Config
 from discordbot.core import ACK, HELLO, ForumBot
 from discordbot.gateway import stay_connected
 from discordbot.jobs import BadJob, Spool, validate
-from discordbot.rest import Rest
+from discordbot.rest import Rest, RestError
 from discordbot.runner import Runner, parse_answer, render
 from discordbot.sanitize import clean
 from discordbot.store import RateLimiter, Store
@@ -159,6 +160,29 @@ class TestForumBot(Base):
         await self.bot.dispatch('MESSAGE_CREATE', ev('MESSAGE_CREATE_STARTER'))
         self.assertEqual(self.pending(), [])
         self.assertTrue(os.path.exists(os.path.join(self.bot.store.dir, 'liaison.nudge')))
+
+    async def test_network_error_in_a_handler_stays_inside_dispatch_and_deliver(self):
+        await self.server.close()
+        with self.assertLogs('discordbot', 'ERROR'):
+            await self.bot.dispatch('THREAD_CREATE', ev('THREAD_CREATE'))
+        with self.assertLogs('discordbot', 'ERROR'):
+            await self.bot.deliver({'kind': 'answer', 'thread_id': '400', 'reply': 'x'})
+
+    async def test_html_error_body_is_a_rest_error(self):
+        async def bad(q):
+            return web.Response(status=502, text='<html>Bad Gateway</html>', content_type='text/html')
+        app = web.Application()
+        app.router.add_get('/users/@me', bad)
+        server = TestServer(app)
+        await server.start_server()
+        rest = Rest(str(server.make_url('')), 't')
+        try:
+            with self.assertRaises(RestError) as c:
+                await rest.me()
+            self.assertEqual(c.exception.status, 502)
+        finally:
+            await rest.close()
+            await server.close()
 
     async def test_empty_content_flags_intent(self):
         await self.bot.dispatch('THREAD_CREATE', ev('THREAD_CREATE'))

@@ -142,6 +142,7 @@ unit_of() {
 restart_helper() {
   local pid="$1" comm="$2" why="$3" unit
   unit=$(unit_of "$pid")
+  case "$unit" in dbus*.service|org.gnome.Shell@*) unit="";; esac
   if [ -z "$unit" ]; then stop_pid 4 "$pid" "$why, in no user unit, killed instead" "$comm"; return; fi
   if dry_for 4; then log "runaway would restart $unit (pid $pid, rule4: $why)"; return; fi
   if systemctl --user restart "$unit" >>"$st/sentinel.log" 2>&1; then

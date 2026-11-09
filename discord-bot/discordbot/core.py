@@ -36,6 +36,8 @@ class ForumBot:
             await handler(d)
         except RestError as e:
             log.warning('%s failed: rest %s', t, e.status)
+        except Exception:
+            log.exception('%s failed', t)
         self.store.set_status(last_event_at=int(self.clock()))
 
     async def on_ready(self, d):
@@ -249,3 +251,5 @@ class ForumBot:
                 await self.set_tag(tid, 'done')
         except RestError as e:
             log.warning('deliver failed: rest %s', e.status)
+        except Exception:
+            log.exception('deliver failed')
