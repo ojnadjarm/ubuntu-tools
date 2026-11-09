@@ -15,7 +15,7 @@ cp "$SRC/fleet-ci-daily" "$SRC/ci-autofix" "$SRC/auditlib.py" "$SRC/ci-window" "
 cp "$SRC/tests/run.sh" "$B/tests/"
 cp "$SRC/../ci-fix/BRIEF.template.md" "$H/agents/ci-fix/"
 unset CI_AUTOFIX_RERUN
-export CI_UNITS= RUN_TESTS_LOCK="$WORK/suite.lock" RUN_TESTS_SKIP_DEPS="$WORK/dpkg" CI_LOADAVG="$WORK/loadavg" WAIT_FOR_DIR="$WORK/waits" CI_QUIET_EVERY=1 CI_QUIET_CAP=2 FIX="$WORK"
+export CI_UNITS= RUN_TESTS_LOCK="$WORK/suite.lock" RUN_TESTS_SKIP_DEPS="$WORK/dpkg" CI_LOADAVG="$WORK/loadavg" WAIT_FOR_DIR="$WORK/waits" CI_QUIET_EVERY=1 CI_QUIET_CAP=2
 for s in agent-run notify-owner pc; do
   printf '#!/bin/sh\n# STUB\nprintf "%%s\\n" "$*" >>"%s/%s.calls"\n' "$WORK" "$s" >"$B/$s"
   cp "$B/$s" "$WORK/path/$s"
@@ -25,11 +25,12 @@ printf 'case "$*" in "${PC_FAIL:-@none@}"*) exit 5;; esac\n' >>"$B/pc"
 printf '[ -n "${QUIET_AFTER_FIX:-}" ] && echo "1.00 1 1 1/100 1" >"%s"\n' "$CI_LOADAVG" >>"$B/agent-run"
 printf '[ -n "${TOUCH_AFTER_FIX:-}" ] && touch "%s"\nexit 0\n' "$B/tests/a.test.sh" >>"$B/agent-run"
 # Fixture suite: a.test.sh always green; b.test.sh red for its first FAILS runs.
-printf '#!/bin/sh\necho x >>"$FIX/a.runs"; echo a fine\n' >"$B/tests/a.test.sh"
-cat >"$B/tests/b.test.sh" <<'EOF'
+# run.sh starts each file from a clean env: the fixtures carry $WORK and read FAILS and OD from files run() writes.
+printf '#!/bin/sh\necho x >>"%s/a.runs"; echo a fine\n' "$WORK" >"$B/tests/a.test.sh"
+cat >"$B/tests/b.test.sh" <<EOF
 #!/bin/sh
-n=$(cat "$FIX/b.count" 2>/dev/null || echo 0); n=$((n + 1)); echo $n >"$FIX/b.count"
-[ "$n" -le "${FAILS:-0}" ] && { echo "FAIL b run $n"; exit 1; }
+n=\$(cat "$WORK/b.count" 2>/dev/null || echo 0); n=\$((n + 1)); echo \$n >"$WORK/b.count"
+[ "\$n" -le "\$(cat "$WORK/fails")" ] && { echo "FAIL b run \$n"; exit 1; }
 echo "b fine"
 EOF
 # Stub systemctl first on PATH (T1108): prints AIL_STATE (oneshot default activating) for the first AIL_ACTIVE polls, then inactive; rc 0 only for active.
@@ -42,7 +43,7 @@ LOG="$H/agents/log/fleet-ci/$(date +%F).txt"; FIRST="${LOG%.txt}.first.txt"; NOT
 calls() { grep -c . "$WORK/$1.calls" 2>/dev/null || echo 0; }
 run() {
   rm -rf "$WORK"/*.calls "$WORK/b.count" "$WORK/a.runs" "$H/agents/state/ci-fix"
-  echo "${LOAD:-1.00} 1 1 1/100 1" >"$CI_LOADAVG"
+  echo "${LOAD:-1.00} 1 1 1/100 1" >"$CI_LOADAVG"; echo "${FAILS:-0}" >"$WORK/fails"; echo "${OD:-6473}" >"$WORK/od"
   HOME="$H" PATH="$WORK/path:$PATH" bash "$B/ci-autofix" --repo "$H/agents" --log "$LOG" "fleet nightly" -- "$B/fleet-ci-daily"
 }
 
@@ -134,7 +135,7 @@ printf 'FAIL 1/2 files in 3 s\n' >"$D/2026-10-19.txt"
 ok "doctor: newest red run is a WARN" yes "$(has 'WARN 2026-10-19.txt: FAIL 1/2 files' "$(row)")"
 
 # Skip-unchanged (T717): Mon–Sat a heavy green skill test nothing touched is skipped; Sunday and FLEET_CI_FULL=1 run it.
-S="$H/agents/skills/heavy/tests"; mkdir -p "$S"; printf 'touch "$FIX/heavy.ran"\n' >"$S/h.test.sh"; : >"$WORK/dpkg"
+S="$H/agents/skills/heavy/tests"; mkdir -p "$S"; printf 'touch "%s/heavy.ran"\n' "$WORK" >"$S/h.test.sh"; : >"$WORK/dpkg"
 mkdir -p "$H/agents/state/skip-deps"
 day() {
   find "$H/agents/skills" "$WORK/dpkg" "$H/agents/state/skip-deps" -exec touch -h -d '1 hour ago' {} +; rm -f "$WORK/heavy.ran"
@@ -166,7 +167,7 @@ ok "agent-verify fails: the log says so" yes "$(has 'fleet-ci-daily: agent-verif
 rm -f "$B/agent-verify"
 # Recheck (T853): the newest log's red files re-run alone; all green → reset-failed + need resolve via pc (stub); any red → nothing cleared.
 grep -v 'is-active' "$B/fleet-ci-daily" | grep -q 'systemctl'; ok "selftest: recheck reaches systemd only through pc" 1 $?
-L="${LOG%/*}"; recheck() { rm -f "$WORK/pc.calls" "$WORK/b.count"; echo "1.00 1 1 1/100 1" >"$CI_LOADAVG"; HOME="$H" bash "$B/fleet-ci-daily" --recheck; }
+L="${LOG%/*}"; recheck() { rm -f "$WORK/pc.calls" "$WORK/b.count"; echo "${FAILS:-0}" >"$WORK/fails"; echo "1.00 1 1 1/100 1" >"$CI_LOADAVG"; HOME="$H" bash "$B/fleet-ci-daily" --recheck; }
 rm -f "$L"/*.txt; printf 'FAIL 1/2 files\n✖ fleet ci red: bin/tests/a.test.sh\n' >"$L/2026-10-18.txt"
 printf 'FAIL 0/2 files\n✖ fleet ci red: bin/tests/a.test.sh bin/tests/b.test.sh\n' >"$L/2026-10-19.txt"; : >"$L/2026-10-19.first.txt"
 out="$(FAILS=0 recheck)"; ok "recheck green: rc 0" 0 $?
@@ -195,7 +196,7 @@ ok "selftest: no unit started or stopped" 0 "$(grep -cE '(^| )(start|stop|restar
 ok "night after a deferral: full suite on a Wednesday, flag gone" "ran no" "$(day env FLEET_CI_DOW=3) $([ -e "$H/agents/state/fleet-ci-full" ] && echo yes || echo no)"
 
 # TSP-058: OWNER lines (run.sh, `# owner-data` tests) keep the night green; one high push per new message, none for a repeat.
-printf '#!/bin/sh\n# owner-data: fixture\necho "FAIL index over the cap: chars ${OD:-6473} > 6000"; exit 1\n' >"$B/tests/od.test.sh"
+printf '#!/bin/sh\n# owner-data: fixture\necho "FAIL index over the cap: chars $(cat "%s/od") > 6000"; exit 1\n' "$WORK" >"$B/tests/od.test.sh"
 rm -rf "$H/agents/state/fleet-ci"; FAILS=0 run; ok "owner-data: the night is green" 0 $?
 ok "owner-data: OWNER line in the log, no fix attempt" "1 0" "$(grep -c '^OWNER bin/tests/od.test.sh: ' "$LOG") $(calls agent-run)"
 ok "owner-data: one high push naming the file" "1 yes" "$(calls notify-owner) $(has '-p high -t fleet owner-data OWNER bin/tests/od.test.sh: FAIL index over the cap' "$(cat "$WORK/notify-owner.calls")")"

@@ -17,6 +17,8 @@
 #      RUN_TESTS_LOCK (full-run lock, default $XDG_RUNTIME_DIR/fleet-suite.lock; --no-wait exits 75 while it is held),
 #      RUN_TESTS_SKILLS (skill dirs, colon-separated, default ~/.claude/skills:<root>/skills; symlinks followed, counted once)
 #      RUN_TESTS_SKIP_DEPS (--skip-unchanged inputs besides the skill, colon-separated, default ~/opt/gamedev:the vcpkg baseline)
+#      Every file starts from a clean env: HOME LANG TERM TMPDIR USER LOGNAME SHELL XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS DISPLAY
+#      WAYLAND_DISPLAY FLEET_FRESH from the caller, plus what this runner sets; no other caller variable reaches it.
 #      Every file gets a private TMPDIR, removed when it exits (timed out or killed too), unless it mounts its own `--tmpfs /tmp`;
 #      `tmp residue: N dirs` counts new tmp.* left in the base TMPDIR.
 #      CREATIVE_CI_LOG is the run's own ledger for every file; rows or summary copies added to the real one (inherited CREATIVE_CI_LOG,
@@ -212,7 +214,13 @@ run_one() {
   # A neutral dir name, not the file stem: test greps for words like `push` or `composer` must not match the TMPDIR path.
   grep -qF -- '--tmpfs /tmp' "$path" || tmp=$(mktemp -d "$runroot/t.XXXX")
   # Empty CI_UNITS: ci-window inside a test never sees the live CI units (its own scope sits outside the CI's cgroup).
-  cmd=(env "PATH=$p" "SUDO_SHIM_TEST=$rel" CI_UNITS= ${tmp:+"TMPDIR=$tmp"} ${rlog:+"PC_TEST_ROOT_LOG=$rlog"} "${cmd[@]}")
+  # Clean env (T1514): the caller's exported fleet config (env.sh keys) never reaches a file; only the session and runner vars do.
+  local v keep=()
+  for v in HOME LANG TERM TMPDIR USER LOGNAME SHELL XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS DISPLAY WAYLAND_DISPLAY \
+           SUDO_SHIM_LOG CREATIVE_CI_LOG RUN_TESTS_ID FLEET_SUITE_HOLDER FLEET_FRESH; do
+    [[ -n ${!v+x} ]] && keep+=("$v=${!v}")
+  done
+  cmd=(env -i "${keep[@]}" "PATH=$p" "PWD=${path%/*}" "SUDO_SHIM_TEST=$rel" CI_UNITS= ${tmp:+"TMPDIR=$tmp"} ${rlog:+"PC_TEST_ROOT_LOG=$rlog"} "${cmd[@]}")
   # Own scope per file: the cgroup OOM killer hits only this file; the wrapper marks an oom_kill for the report.
   local unit=rt-$BASHPID-$RANDOM.scope
   [[ -n $scoped ]] && cmd=(systemd-run --user --scope -q --slice=agents.slice --unit="$unit" --expand-environment=no -p "MemoryMax=$mem" -p MemorySwapMax=0 -p OOMPolicy=continue

@@ -350,7 +350,7 @@ has 'ledger: its row lands in the run root ledger' "$(cat "$L/own.out" 2>/dev/nu
 is  'ledger: the real ledger is unchanged' "$(cat "$RL")" '{"seed": 1}'
 is  'ledger: no summary copy in the real dir' "$(find "${RL%/*}" -name '*.json' | wc -l)" 0
 has 'ledger: the run ledger is removed at exit' "$(test -e "$(cut -d' ' -f1 "$L/own.out")" && echo left || echo gone)" gone
-printf 'source %q; echo "{}" >s.json; CREATIVE_CI_LOG= ci_log cpp-ci demo true "[]" s.json\n' "$LIB" >"$L/bin/tests/force.test.sh"
+printf 'source %q; echo "{}" >s.json; HARNESS_HOME=%q CREATIVE_CI_LOG= ci_log cpp-ci demo true "[]" s.json\n' "$LIB" "$HARNESS_HOME" >"$L/bin/tests/force.test.sh"
 out=$(RUN_TESTS_ROOT="$L" bash "$RUN" 2>&1); rc=$?
 is  'ledger: forcing the real path exits 1' "$rc" 1
 has 'ledger: the write is named' "$out" '^run\.sh: tests wrote the real creative ledger \(1 rows, 1 summary copies in '
@@ -398,6 +398,15 @@ has 'owner-data: OWNER line names file and message' "$out" '^OWNER bin/tests/od\
 has 'owner-data: summary counts it apart' "$(tail -1 <<<"$out")" '^PASS 2/2 files in [0-9]+ s, owner-data 1$'
 printf 'exit 1\n' >"$O/bin/tests/red.test.sh"; out=$(RUN_TESTS_ROOT="$O" bash "$RUN" 2>&1); rc=$?
 is  'owner-data: a real red beside it still fails the run' "$rc $(tail -1 <<<"$out" | grep -cE '^FAIL 2/3 files in [0-9]+ s, owner-data 1$')" '1 1'
+
+# Clean env (T1514): a file starts from an allow-list, so a caller's exported fleet config never reaches it.
+E="$W/envc"; mkdir -p "$E/bin/tests"
+printf '[ -z "${PLANTED_LEAK+x}${HARNESS_BRAND+x}${BOOT_CHECK_ENVS+x}${MOODLE_ENVS_DIR+x}" ] || { echo "FAIL caller env leaked"; exit 1; }\nenv | cut -d= -f1 | sort >%q\n' "$E/vars" >"$E/bin/tests/env.test.sh"
+out=$(PLANTED_LEAK=1 HARNESS_BRAND=leak BOOT_CHECK_ENVS=leak MOODLE_ENVS_DIR=/leak RUN_TESTS_ROOT="$E" bash "$RUN" 2>&1); rc=$?
+is  'clean env: planted caller vars do not reach a file' "$rc $(grep -c 'caller env leaked' <<<"$out")" '0 0'
+for v in PATH HOME TMPDIR SUDO_SHIM_TEST SUDO_SHIM_LOG CREATIVE_CI_LOG RUN_TESTS_ID CI_UNITS; do
+  is "clean env: $v is kept" "$(grep -cx "$v" "$E/vars" 2>/dev/null)" 1
+done
 
 [ $fail = 0 ] && echo "run-sh.test.sh: all green" || echo "run-sh.test.sh: FAILURES"
 exit $fail

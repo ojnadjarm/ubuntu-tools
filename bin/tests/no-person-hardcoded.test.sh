@@ -31,24 +31,19 @@ hits() { # hits <label> <ere> [file list]
   if [ -z "$out" ]; then truthy "no $1" 1; else truthy "no $1" 0; printf '%s\n' "$out" | cut -c1-160 | head -8; fi
 }
 
-# Intentional samples, one `file:line` each with its reason.
+# Intentional samples, one `file user` each with its reason; any line of that file may carry /home/<user>.
 ALLOW_HOME='
-discord-bot/tests/test_bot.py:46 redaction sample the bot must scrub from replies
-discord-bot/tests/test_bot.py:247 redaction sample the bot must scrub from replies
-discord-bot/tests/test_bot.py:249 asserts the redaction sample is gone
-discord-bot/tests/test_bot.py:296 asserts the redaction sample is gone
-bin/tests/auditlib.test.py:53 fake error text for the audit error classifier
-discord-liaison/tests/test_liaison.py:217 redaction sample the liaison must scrub from posts
-discord-liaison/tests/test_liaison.py:223 asserts the redaction sample is gone
-discord-liaison/tests/test_liaison.py:494 redaction sample the liaison must scrub from posts
+discord-bot/tests/test_bot.py someone redaction sample the bot must scrub from replies
+discord-bot/tests/test_bot.py me redaction sample the bot must scrub from replies
+discord-liaison/tests/test_liaison.py x redaction sample the liaison must scrub from posts
+discord-liaison/tests/test_liaison.py someone redaction sample the liaison must scrub from posts
 '
 HOME_RE='/home/[A-Za-z0-9._-]+'
 
 home_hits() { # home_hits <dir> <file list>: /home/<user> literals, minus $VAR/home fixtures and ALLOW_HOME
-  local allow
-  allow="$(printf '%s\n' "$ALLOW_HOME" | awk 'NF {print $1 ":"}')"
-  (cd "$1" && printf '%s\n' "$2" | tr '\n' '\0' | xargs -0 grep -nIE --devices=skip "$HOME_RE" 2>/dev/null) \
-    | grep -vF -f <(printf '%s\n' "$allow") \
+  (cd "$1" && printf '%s\n' "$2" | tr '\n' '\0' | xargs -0 grep -HnIE --devices=skip "$HOME_RE" 2>/dev/null) \
+    | awk -v allow="$ALLOW_HOME" 'BEGIN { n = split(allow, r, "\n"); for (i = 1; i <= n; i++) if (split(r[i], c, " ") > 1) { gsub(/\./, "\\.", c[2]); a[c[1]] = a[c[1]] " /home/" c[2] } }
+        { f = $0; sub(/:.*/, "", f); m = split(a[f], l, " "); for (i = 1; i <= m; i++) gsub(l[i] "([^A-Za-z0-9._-]|$)", " "); print }' \
     | sed -E 's#\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/home/[A-Za-z0-9._-]*##g' | grep -E "$HOME_RE"
 }
 
@@ -59,6 +54,17 @@ printf '%s\n' 'cd "$SBX/home/a" && cat /home/'"$u/notes" >"$sbx/mixed.sh"
 printf '%s\n' "LOG=/home/$u/agents/x.log" >"$sbx/real.sh"
 truthy "selftest: \$VAR/home fixture prefixes are ignored" "$([ -z "$(home_hits "$sbx" fixture.sh)" ] && echo 1 || echo 0)"
 truthy "selftest: a real /home/<user> literal still fails" "$([ "$(home_hits "$sbx" "$(printf 'real.sh\nmixed.sh')" | wc -l)" = 2 ] && echo 1 || echo 0)"
+
+s=sample
+printf '%s\n' "x = '/home/$s/a.log'" "assert '/home/$s' not in x" >"$sbx/allowed.py"
+cp "$sbx/allowed.py" "$sbx/other.py"
+allow_hits() { ALLOW_HOME='allowed.py sample fixture sample' home_hits "$sbx" "$1" | wc -l; }
+truthy "selftest: an allowed file + literal is ignored" "$([ "$(allow_hits allowed.py)" = 0 ] && echo 1 || echo 0)"
+sed -i '1i #\n#\n#\n#\n#' "$sbx/allowed.py"
+truthy "selftest: still ignored after the file shifts by 5 lines" "$([ "$(sed -n 6p "$sbx/allowed.py" | grep -c sample)$(allow_hits allowed.py)" = 10 ] && echo 1 || echo 0)"
+truthy "selftest: the same literal in another file still fails" "$([ "$(allow_hits other.py)" = 2 ] && echo 1 || echo 0)"
+echo "y = '/home/$u/b' + '/home/${s}s'" >>"$sbx/allowed.py"
+truthy "selftest: another literal in an allowed file still fails" "$([ "$(allow_hits allowed.py)" = 1 ] && echo 1 || echo 0)"
 
 code="$(printf '%s\n' "$files" | grep -vE "$SKIPSHAPE")"
 out="$(home_hits "$DIR" "$code")"
