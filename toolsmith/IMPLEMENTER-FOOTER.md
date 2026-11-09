@@ -2,7 +2,7 @@
 
 Fixed rules for this session, in addition to the proposal above:
 
-1. FLEET §5 applies in full: never `git commit`/`git push`/`git add` in `~/agents`; never
+1. FLEET §5 applies in full: commit only your claimed files (`git commit -- <paths>`, `TSP-nnn: …`) and push (§5.1, 2026-10-23); never
    touch `~/CLAUDE.md`, `AGENTS.md`, KB, or anything outside the proposal's named files
    without saying so; no reboot, no stopping fleet units, no owner data moved.
 2. FLEET §5.6: any test, benchmark or experiment runs only against a fixture inside a
@@ -23,7 +23,7 @@ Fixed rules for this session, in addition to the proposal above:
    (next Sunday 02:00)".
 9. Set the BACKLOG.md row's status to match: `measuring` when the metric awaits the weekly
    run, `done` only once a real after-number lands.
-10. Never commit or push. The owner reviews `git diff` by hand.
+10. Commit only the files you changed (`git -C ~/agents commit -- <paths>`) and push; never force-push or rewrite history.
 
 11. Never smoke-test a guard, refusal or safety rule with the real command on the real machine (no real `sudo shutdown`, `git push`, `tailscale down`), even expecting a refusal. Prove refusals only with the test stubs (AGENTS.md §5.6).
 12. Never `git stash`, `checkout`, `reset` or `restore` to reproduce a "before" state; copy the file to a temp dir instead. Any test that runs a fleet script must run under a fake `$HOME` as well as fake data dirs (2026-09-07: a "before" check overwrote the real Moodle dump in `~/agents/backups`).
