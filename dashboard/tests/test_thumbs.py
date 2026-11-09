@@ -97,6 +97,10 @@ class Thumbs(unittest.TestCase):
         self.assertFalse(os.path.exists(stale))
         self.assertTrue(any(n.endswith(".webp") for n in os.listdir(thumbs.CACHE)))
 
+    def test_non_ascii_digit_width_falls_back(self):
+        r, body = self.get("/thumb/tall.png?w=%C2%B2")
+        self.assertEqual((r.status, Image.open(__import__("io").BytesIO(body)).size), (200, (320, 200)))
+
     def test_refuses_traversal_and_non_images(self):
         for p in ("../outside.png", "sub/../../outside.png", "%2e%2e/outside.png", ".hidden.png", "", "note.txt", "missing.png"):
             self.assertEqual(self.get("/thumb/" + p)[0].status, 404, p)

@@ -30,6 +30,7 @@ values() {
 patterns() {
   values | awk 'length($0) >= 4' | sort -u | while IFS= read -r v; do
     e="$(printf '%s' "$v" | sed 's/[][\.*^$+?(){}|/]/\\&/g')"
+    printf '%s' "$v" | grep -qiE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' && e="$(printf '%s' "$v" | sed 's/:/[:_-]/g')"
     printf '(^|[^[:alnum:]])%s([^[:alnum:]]|$)\n' "$e"
   done
 }
@@ -53,6 +54,11 @@ mkdir -p "$tmp/fx" && git -C "$tmp/fx" init -q && echo "clean" > "$tmp/fx/a.txt"
 [ -z "$(scan "$tmp/fx" "$tmp/pat")" ] && truthy "selftest: clean fixture passes" 1 || truthy "selftest: clean fixture passes" 0
 printf 'url http://%s:8070/\n' "$(hostname)" > "$tmp/fx/b.txt"
 [ -n "$(scan "$tmp/fx" "$tmp/pat")" ] && truthy "selftest: planted value caught" 1 || truthy "selftest: planted value caught" 0
+mac="$(values | grep -iEm1 '^([0-9a-f]{2}:){5}[0-9a-f]{2}$')"
+if [ -n "$mac" ]; then
+  printf 'card bluez_card.%s\n' "$(printf '%s' "$mac" | tr ':a-f' '_A-F')" > "$tmp/fx/b.txt"
+  [ -n "$(scan "$tmp/fx" "$tmp/pat")" ] && truthy "selftest: MAC written with _ caught" 1 || truthy "selftest: MAC written with _ caught" 0
+fi
 
 out="$(scan "$REPO" "$tmp/pat")"
 if [ -z "$out" ]; then truthy "no machine values in $(basename "$REPO")" 1

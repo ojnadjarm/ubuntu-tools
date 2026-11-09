@@ -57,7 +57,7 @@ def thumb_route(h, path):
     if not hit or not hit[1] or not os.path.isfile(hit[0]) or os.path.splitext(hit[0])[1].lower() not in EXTS:
         return h.send(404, b"not found\n", "text/plain")
     raw = urllib.parse.parse_qs(h.path.partition("?")[2]).get("w", ["320"])[0]
-    w = min(WIDTHS, key=lambda x: abs(x - int(raw))) if raw.isdigit() else 320
+    w = min(WIDTHS, key=lambda x: abs(x - int(raw))) if raw.isdecimal() else 320
     try:
         body, etag = thumb(hit[0], w)
     except (OSError, Image.DecompressionBombError, ValueError):

@@ -394,7 +394,10 @@ def stats_route(h, path):
 
 @route("POST", "/api/voice/clip")
 def clip_route(h, path):
-    size, mime = int(h.headers.get("Content-Length") or 0), h.headers.get("Content-Type") or ""
+    size, mime = h.headers.get("Content-Length") or "0", h.headers.get("Content-Type") or ""
+    if not (size.isascii() and size.isdigit()):
+        return h.json({"error": "bad Content-Length"}, 400)
+    size = int(size)
     if size > CLIP_MAX:
         code, out = 413, {"error": "clip too big: %d bytes, limit %d" % (size, CLIP_MAX)}
     else:

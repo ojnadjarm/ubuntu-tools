@@ -162,6 +162,27 @@ class Http(unittest.TestCase):
         print("keep-alive worst %.4f s, budget %.3f s" % (worst, budget))
         self.assertLess(worst, budget, "keep-alive worst %.4f s over budget %.3f s" % (worst, budget))
 
+    def test_unread_post_body_leaves_the_connection_usable(self):
+        big = b'{"id": "%s"}' % (b"a" * 5000)
+        for path, body, headers in (("/nope", b"x" * 50, {}), ("/api/voice/delete", big, {"Content-Type": "application/json"}),
+                                    ("/api/voice/delete", b'{"id": 1}', {"Content-Type": "application/json", "Origin": "http://other"}),
+                                    ("/api/voice/delete", b'{"id": 1}', {"Content-Type": "text/plain"})):
+            self.conn.request("POST", path, body, headers)
+            self.conn.getresponse().read()
+            r, _ = self.get("/api/ls")
+            self.assertEqual(r.status, 200, (path, headers))
+
+    def test_bad_content_length_is_a_400(self):
+        for path, ctype in (("/api/voice/clip", "audio/webm"), ("/api/voice/delete", "application/json")):
+            for length in ("abc", "-1"):
+                conn = http.client.HTTPConnection("127.0.0.1", self.srv.server_address[1], timeout=3)
+                conn.putrequest("POST", path)
+                conn.putheader("Content-Type", ctype)
+                conn.putheader("Content-Length", length)
+                conn.endheaders()
+                self.assertEqual(conn.getresponse().status, 400, (path, length))
+                conn.close()
+
     def test_brand_in_page_titles(self):
         from dash import http as dh
         was = dh.BRAND

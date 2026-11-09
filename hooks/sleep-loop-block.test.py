@@ -332,26 +332,36 @@ def p50(cmd):
     return sorted(ts)[5]
 
 
-def miss_ms(raw):
-    """Median wall ms of 21 front runs on a raw event that carries no trigger bytes."""
-    ts = []
+REF = ['/bin/dash', '-c', 'c=cat; [ -x /usr/bin/gnucat ] && c=gnucat; buf=$($c; echo x)']
+
+
+def miss_ms(raw, hook=HOOK):
+    """(median wall ms, ratio to a bare dash read of the same event) of 21 front runs on a raw event without trigger bytes."""
+    ts, rs = [], []
     for _ in range(21):
-        t0 = time.time()
-        subprocess.run([HOOK], input=raw, capture_output=True, text=True, env=ENV, cwd=WORK, timeout=10)
-        ts.append((time.time() - t0) * 1000)
-    return sorted(ts)[10]
+        for argv, out in (REF, rs), ([hook], ts):
+            t0 = time.time()
+            subprocess.run(argv, input=raw, capture_output=True, text=True, env=ENV, cwd=WORK, timeout=10)
+            out.append((time.time() - t0) * 1000)
+    return sorted(ts)[10], sorted(ts)[10] / sorted(rs)[10]
 
 
 kms = p50("pkill -f 'wait-for --label x'")
 print(f'     hook p50 on a pkill command {kms:.0f} ms')
 load, ncpu = os.getloadavg()[0], os.cpu_count()
 u = f', unjudged at load {load:.2f}' if load > ncpu / 2 else ''
-ms = miss_ms(event('ls -la; git status'))
-check(f'front miss median {ms:.1f} ms (budget 8 ms{u})', ms <= 8 or u)
-ms = miss_ms(event('systemctl --user status netdata; systemctl show x'))
-check(f'front read-only systemctl miss median {ms:.1f} ms, no python (budget 10 ms{u})', ms <= 10 or u)
-ms = miss_ms(event('cat <<EOF\n' + 'a' * 100000 + '\nEOF'))
-check(f'front 100 KB miss median {ms:.1f} ms (budget 15 ms{u})', ms <= 15 or u)
+ms, x = miss_ms(event('ls -la; git status'))
+check(f'front miss median {ms:.1f} ms, {x:.2f}x a bare read (budget 8 ms or 1.6x{u})', ms <= 8 or x <= 1.6 or u)
+ms, x = miss_ms(event('systemctl --user status netdata; systemctl show x'))
+check(f'front read-only systemctl miss median {ms:.1f} ms, {x:.2f}x, no python (budget 10 ms or 1.6x{u})', ms <= 10 or x <= 1.6 or u)
+ms, x = miss_ms(event('cat <<EOF\n' + 'a' * 100000 + '\nEOF'))
+check(f'front 100 KB miss median {ms:.1f} ms, {x:.2f}x (budget 15 ms or 5x{u})', ms <= 15 or x <= 5 or u)
+slow = os.path.join(WORK, 'slow-front')
+with open(slow, 'w') as f:
+    f.write(f'#!/bin/dash\n/usr/bin/python3 -IS -c pass\nexec {HOOK}\n')
+os.chmod(slow, 0o755)
+ms, x = miss_ms(event('ls -la; git status'), slow)
+check(f'a front that starts python on a miss is over both budgets ({ms:.1f} ms, {x:.2f}x{u})', ms > 8 and x > 1.6 or u)
 
 trig = [c for c, _ in DENY + KILL_DENY + KILL_OWN][:20] + [c for c, _ in HINT]
 same = [c for c in trig if subprocess.run([HOOK], input=event(c).encode(), capture_output=True, env=ENV, cwd=WORK).stdout

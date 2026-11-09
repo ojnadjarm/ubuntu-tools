@@ -35,7 +35,7 @@ AUDIO = {'set-default-sink': 'pc audio default sink <name> --apply', 'set-defaul
          'set-sink-mute': 'pc audio mute <node> on|off|toggle --apply',
          'set-source-mute': 'pc audio mute <node> on|off|toggle --apply',
          'move-sink-input': 'pc audio move <stream-id|app-name> <sink-name|earbuds|tv> --apply'}
-PREFIX = re.compile(r'^(?:sudo|nice|timeout|env|exec|command|-\S*|\d+[smhd]?|\w+=\S*)$')
+PREFIX = re.compile(r'^(?:sudo|nice|nohup|timeout|env|exec|command|builtin|-\S*|\d+[smhd]?|\w+=.*)$', re.S)
 PREFIX_ARG = {'-u', '-g', '--user', '--group', '-s', '--signal', '-k', '--kill-after'}
 KEYWORD = {'do', 'then', 'else', 'elif', 'if', 'while', 'until', 'time', '{', '!'}
 READ_ONLY = ('list', 'get', 'info', 'stat', 'subscribe', 'version')
@@ -57,7 +57,7 @@ SUDO_HINT = ('sudo-loop nudge (T1147): `sudo` in a loop body or after xargs runs
              '(11,606 calls in 2 min on 10-21); one root shell: `sudo -n bash -c \'…loop…\'` or '
              '`sudo -n find … -exec du -sk {} +`')
 XARGS_ARG = {'-I', '-n', '-P', '-d', '-L', '-s', '-E', '-a', '--max-args', '--max-procs', '--delimiter', '--arg-file'}
-ASSIGN = re.compile(r'^\w+=\S*$')
+ASSIGN = re.compile(r'^\w+=.*$', re.S)
 GIT_OPT_ARG = {'-c', '--exec-path', '--namespace', '--config-env', '--super-prefix', '--list-cmds', '--attr-source'}
 WORK_REASON = ('work-repo guard (T1251, decisions/vass.md): `git {}` targets work repo {}; agents never commit or push '
                'there, the owner does it by hand. Read-only git (status, diff, log) is fine.')
@@ -388,7 +388,7 @@ def resolve(base, p, env):
 
 
 def git_writes(toks, cwd, env, depth=0):
-    """(subcommand, target dir or None) of each git commit/push in toks, following cd, x=dir, -C, --git-dir, GIT_DIR= and bash -c strings."""
+    """(subcommand, target dir or None) of each git commit/push in toks, following cd, pushd, x=dir, -C, --git-dir, GIT_DIR= and bash -c strings."""
     out, cur = [], cwd
     for i, t in enumerate(toks):
         if depth < 3 and 'git' in t and any(c in t for c in ' \n;&|'):
@@ -401,8 +401,9 @@ def git_writes(toks, cwd, env, depth=0):
             env[k] = os.path.expanduser(v) if v.startswith('~') else v
             continue
         args = args_of(toks, i)
-        if t == 'cd':
-            cur = resolve(cur, args[0], env) if args else os.path.expanduser('~')
+        if t in ('cd', 'pushd', 'popd'):
+            args = [a for a in args if a == '-' or not a.startswith('-')]
+            cur = None if t == 'popd' else resolve(cur, args[0], env) if args else os.path.expanduser('~')
             continue
         if os.path.basename(t) != 'git':
             continue

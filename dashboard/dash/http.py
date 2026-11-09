@@ -70,6 +70,8 @@ class Handler(BaseHTTPRequestHandler):
         if etag and not post and code == 200:
             self.send_header("ETag", etag)
         self.send_header("Cache-Control", "no-store" if post else cache)
+        if post:
+            self.send_header("Connection", "close")
         self.end_headers()
         if not getattr(self, "head_only", False):
             self.wfile.write(body)
@@ -120,7 +122,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get_content_type() != "application/json":
             return empty
         try:
-            raw = self.rfile.read(min(int(self.headers.get("Content-Length") or 0), limit))
+            raw = self.rfile.read(max(0, min(int(self.headers.get("Content-Length") or 0), limit)))
             return json.loads(raw) if raw else empty
         except ValueError:
             return empty

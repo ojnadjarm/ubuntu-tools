@@ -80,8 +80,14 @@ for c in "git -C $W commit -m x" "git -C ~/work/repo commit --no-verify -m x" "c
          "d=~/work/repo; git -C \$d push"; do
   deny "$c" "$W" || deny "$c" "$T"; check "PreToolUse denies: $c" $?
 done
+for c in "pushd ~/work/repo && git push --no-verify" "cd -- ~/work/repo && git push --no-verify" "cd -P ~/work/repo; git push --no-verify" \
+         "builtin cd ~/work/repo && git push --no-verify" "cd ~/work/repo && GIT_SSH_COMMAND=\"ssh -i k\" git push --no-verify" \
+         "cd ~/work/repo && nohup git push --no-verify &"; do
+  deny "$c" "$P"; check "PreToolUse denies: $c" $?
+done
 for c in "git -C $P commit -m x" "git commit -m x" "git -C ~/work/repo log | grep commit" "git -C ~/personal/repo push" \
-         "T=\$(mktemp -d); cd \$T && git commit -qm init; ls ~/work/repo"; do
+         "T=\$(mktemp -d); cd \$T && git commit -qm init; ls ~/work/repo" \
+         "cd ~/work/repo && ls; cd -- $P && git commit -m x" "pushd ~/work/repo; popd; git push" "MSG=\"see ~/work/repo\" git push"; do
   ! deny "$c" "$P"; check "PreToolUse allows: $c" $?
 done
 
