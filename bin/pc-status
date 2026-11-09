@@ -355,7 +355,7 @@ while read -r _u; do
 done < <(cached failed_transient 60 _failed)
 gate failed_units [ "${#h_failed[@]}" -gt 0 ]
 V[failed_transient]=OK; [ "${#h_failed_transient[@]}" -gt 0 ] && V[failed_transient]=WARN
-# A failed unit that is not ours (PC_NOT_OURS, Vass) is information: a WARN, never a host FAIL (T721).
+# A failed unit of a protected project (PC_NOT_OURS) is information: a WARN, never a host FAIL (T721).
 V[failed_foreign]=OK; [ "${#h_foreign[@]}" -gt 0 ] && V[failed_foreign]=WARN
 V[ci_verdict]=OK; [ "${#h_verdict[@]}" -gt 0 ] && V[ci_verdict]=WARN
 # A failed crash-report upload (T442) is a WARN naming each /var/crash report, never a host FAIL.
@@ -413,7 +413,7 @@ mapfile -t a_fleet < <(cached fleet 60 _fleet)
 [ -n "${a_fleet[0]:-}" ] || a_fleet=()
 gate fleet [ "${#a_fleet[@]}" -gt 0 ]
 a_loops=$(slow unit_loops 60 pc_unit_loops)
-# A loop of a unit that is not ours (PC_NOT_OURS, Vass) is a WARN row of its own, never unit_loops (T734).
+# A loop of a protected project's unit (PC_NOT_OURS) is a WARN row of its own, never unit_loops (T734).
 a_loops_foreign=$(sed -n 's/^foreign: //p' <<<"$a_loops"); a_loops=$(grep -v '^foreign: ' <<<"$a_loops")
 gate unit_loops [ -n "$a_loops" ]
 V[unit_loops_foreign]=OK; [ -n "$a_loops_foreign" ] && V[unit_loops_foreign]=WARN
@@ -633,7 +633,7 @@ add host os "$(. /etc/os-release; echo "$PRETTY_NAME")"
 joined() { local -n _a=$1; local o; printf -v o '%s, ' "${_a[@]}"; printf '%s' "${o%, }"; }
 add host failed_units "${#h_failed[@]}$([ ${#h_failed[@]} -gt 0 ] && echo ": $(joined h_failed)")" "${V[failed_units]}"
 add host failed_transient "${#h_failed_transient[@]}$([ ${#h_failed_transient[@]} -gt 0 ] && echo ": $(joined h_failed_transient)")" "${V[failed_transient]}"
-add host failed_foreign "${#h_foreign[@]}$([ ${#h_foreign[@]} -gt 0 ] && echo ": $(joined h_foreign) (not ours)")" "${V[failed_foreign]}"
+add host failed_foreign "${#h_foreign[@]}$([ ${#h_foreign[@]} -gt 0 ] && echo ": $(joined h_foreign) (protected)")" "${V[failed_foreign]}"
 add host ci_verdict "$([ ${#h_verdict[@]} -gt 0 ] && echo "${#h_verdict[@]} red: $(joined h_verdict)" || echo none)" "${V[ci_verdict]}"
 add host crash_report "$([ ${#h_crash[@]} -gt 0 ] && joined h_crash || echo none)" "${V[crash_report]}"
 add host reboot_required "$h_reboot" "${V[reboot]}"
@@ -716,7 +716,7 @@ add agents orchestrator "$a_orch" "${V[orchestrator]}"
 nt=$(awk 'NF{print $NF" at "$1" "$2" "$3; exit}' <<<"$timers")
 add agents fleet "$([ ${#a_fleet[@]} -gt 0 ] && joined a_fleet || echo "enabled fleet units running")" "${V[fleet]}"
 add agents unit_loops "${a_loops:-no timer-driven unit failing >= 10/h}" "${V[unit_loops]}"
-add agents unit_loops_foreign "${a_loops_foreign:-none}${a_loops_foreign:+ (not ours)}" "${V[unit_loops_foreign]}"
+add agents unit_loops_foreign "${a_loops_foreign:-none}${a_loops_foreign:+ (protected)}" "${V[unit_loops_foreign]}"
 add agents moodle_upgrade "$([ ${#a_mup[@]} -gt 0 ] && echo "pending: $(joined a_mup)" || echo "none pending")" "${V[moodle_upgrade]}"
 add agents sentinel_age "$([ "$a_sent" -ge 0 ] && echo "$a_sent min" || echo "no tick recorded")" "${V[sentinel]}"
 add agents user_timers "$a_timers${nt:+ (next: $nt)}"

@@ -19,7 +19,8 @@
 #   pc_fleet_enabled                the enabled user units matching PC_FLEET_GLOBS, one per line
 #   pc_fleet_states [--system] <u…> "unit<TAB>active<TAB>sub<TAB>OK|FAIL" per unit (failed, failed oneshot, enabled but down)
 #   pc_unit_loops                   timer-driven user units failing >= 10/h in the last hour; exit 1 when any is ours
-#   PC_NOT_OURS                     ERE of unit names the fleet must never touch (Vass): listed `not ours`, never a fleet failure
+#   PC_NOT_OURS                     ERE of protected units (`protected ere unit`): never a fleet failure
+#   protected_match <kind> <value>  the protected project a repo/path/container/unit/text belongs to (pclib.sh, protected projects)
 #   pc_guard <cmd-string…>          exit 3 with the FLEET §5 line when the command is on the deny-list
 #   pc_guard_unit <unit>            exit 3 when the unit is guarded, by bare name or with any type suffix
 #   pc_unit_why <unit>              the reason string for a guarded unit, empty when it is allowed
@@ -172,8 +173,107 @@ pc_smart_json() {  # an empty read (sudo or smartctl failed) is not cached
 }
 
 ## --- fleet unit verdicts (T347-10) -------------------------------------------
-# Units that are not ours (decisions/vass.md); pc-failures reads this default too (T721).
-: "${PC_NOT_OURS:=^(moodle45|vass)}"
+## --- protected projects (T1513): one config, one matcher; every guard asks it ----
+#
+# Config (config.env; keys in config.example.env). PROTECTED_PROJECTS="<name>…", then per project, N = the name
+# upper-cased with every non-alphanumeric as _, space-separated lists:
+#   PROTECTED_N_REPOS       git roots: agents never commit, push, merge or rebase under them (work-repo-guard, git hooks)
+#   PROTECTED_N_PATHS       more paths cleanups never reap (repo roots count as paths too)
+#   PROTECTED_N_CONTAINERS  globs on container, compose project and env dir names: pc docker never stops/starts/recreates
+#   PROTECTED_N_UNITS       systemd unit globs: labelled "protected", never a fleet failure (PC_NOT_OURS)
+#   PROTECTED_N_WORDS       words that mark the project in free text (session dirs, file and row names); default: N
+# Fallback: with PROTECTED_PROJECTS empty, legacy WORK_REPO_ROOTS (T1251) is project "work" (repos only, no words).
+#
+# API:
+#   protected_projects                  the project names, one per line
+#   protected_entries <kind> [name]     a kind's entries, one per line (repo|path: absolute, readlink -m)
+#   protected_match <kind> <value>      print the first project whose entry matches; return 1 when none
+#                                       repo|path: value is a root or under it; container|unit: value matches a glob;
+#                                       text: value contains a word, any case
+#   protected_ere <kind> [name]         one POSIX ERE (also valid Python re) for bulk matching; '^$' when nothing is
+#                                       protected; text EREs are lowercase: match them against the lowercased value
+# Kinds: repo path container unit text.
+
+# A process that inherited HARNESS_ENV_LOADED from before T1513 skips env.sh: read the keys from config.env then.
+if [ -z "${PROTECTED_PROJECTS+x}" ]; then
+  _pcf=${HARNESS_CONFIG:-$HOME/.config/pc-harness/config.env}
+  [ -r "$_pcf" ] && eval "$(grep -E '^[[:space:]]*(export[[:space:]]+)?(PROTECTED_[A-Za-z0-9_]*|WORK_REPO_ROOTS)=' "$_pcf")"
+  unset _pcf
+fi
+
+protected_projects() {
+  local n
+  for n in ${PROTECTED_PROJECTS:-}; do printf '%s\n' "$n"; done
+  [ -n "${PROTECTED_PROJECTS:-}" ] || [ -z "${WORK_REPO_ROOTS:-}" ] || echo work
+}
+
+# _protected_words <kind> <name> — the raw config words of one kind of one project.
+_protected_words() {
+  local kind=$1 n=$2 k v
+  if [ -z "${PROTECTED_PROJECTS:-}" ]; then
+    case $kind in repo|path) printf '%s\n' $WORK_REPO_ROOTS;; esac
+    return
+  fi
+  k=${n^^}; k=PROTECTED_${k//[^A-Z0-9]/_}
+  case $kind in
+    repo) v=${k}_REPOS; v=${!v:-} ;;
+    path) v=${k}_REPOS; v="${!v:-}"; k=${k}_PATHS; v="$v ${!k:-}" ;;
+    container) v=${k}_CONTAINERS; v=${!v:-} ;;
+    unit) v=${k}_UNITS; v=${!v:-} ;;
+    text) v=${k}_WORDS; v=${!v:-$n} ;;
+    *) echo "protected: unknown kind $kind (repo path container unit text)" >&2; return 2 ;;
+  esac
+  set -f; printf '%s\n' $v; set +f
+}
+
+protected_entries() {
+  local kind=$1 n w
+  for n in ${2:-$(protected_projects)}; do
+    while IFS= read -r w; do
+      [ -n "$w" ] || continue
+      case $kind in
+        repo|path) w=${w/#\~/$HOME}; readlink -m "${w//\$HOME/$HOME}" ;;
+        text) printf '%s\n' "${w,,}" ;;
+        *) printf '%s\n' "$w" ;;
+      esac
+    done < <(_protected_words "$kind" "$n")
+  done
+}
+
+protected_match() {
+  local kind=$1 v=$2 n w
+  case $kind in repo|path) v=$(readlink -m "$v") ;; text) v=${v,,} ;; esac
+  for n in $(protected_projects); do
+    while IFS= read -r w; do
+      [ -n "$w" ] || continue
+      # shellcheck disable=SC2053  # container/unit entries are globs
+      case $kind in
+        repo|path) [[ $v == "$w" || $v == "$w"/* ]] ;;
+        text) [[ $v == *"$w"* ]] ;;
+        *) [[ $v == $w ]] ;;
+      esac && { printf '%s\n' "$n"; return 0; }
+    done < <(protected_entries "$kind" "$n")
+  done
+  return 1
+}
+
+protected_ere() {
+  local kind=$1 w e alt=
+  while IFS= read -r w; do
+    [ -n "$w" ] || continue
+    e=$(printf '%s' "$w" | sed 's/[.^$+(){}|\\]/\\&/g')
+    case $kind in
+      text) ;;
+      repo|path) e="^$e(/|$)" ;;
+      *) e=${e//\*/.*}; e="^${e//\?/.}$" ;;
+    esac
+    alt="$alt${alt:+|}$e"
+  done < <(protected_entries "$kind" ${2:+"$2"})
+  if [ -n "$alt" ]; then printf '(%s)\n' "$alt"; else echo '^$'; fi
+}
+
+# Units of protected projects: listed "protected", never a fleet failure (T721).
+[ -n "${PC_NOT_OURS:-}" ] || PC_NOT_OURS=$(protected_ere unit)
 # User units the fleet owns by name (AGENTS.md §5): an enabled one is judged even off a roster.
 PC_FLEET_GLOBS='dark-eye*.service sentinel*.service agent@*.service'
 pc_fleet_enabled() {

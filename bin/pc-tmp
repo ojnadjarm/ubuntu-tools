@@ -10,9 +10,9 @@ Lists KIND PATH MB AGE REASON for what is safe to delete from $PC_TMP_ROOT (defa
   test-dir  tmp*, orbit-test-*, run-tests.*, night-probe-*, t<n>-* directories idle > 24 h
   scratch   <scratchpad>/T<n>*/ idle > 6 h whose T<n> has a done line in $PC_TMP_HISTORY
             (default ~/agent-work/history.md, "- <date> T<n>") and no row on $PC_TMP_CLAIMS
-            (default ~/agents/FILE-CLAIMS.md); Vass sessions are never read
+            (default ~/agents/FILE-CLAIMS.md); protected projects'"'"' sessions are never read
   scratch-idle  <scratchpad>/<dir>/ with no T<n> in its name idle > 24h, any session
-            (live ones too); names or sessions with vass or char3d are never read
+            (live ones too); names or sessions with a protected word (`protected entries text`) or char3d are never read
   build     remotion-webpack-bundle-* and cc*.ltrans* idle > 24 h
   daemon    watchman whose TMPDIR is a dir under the root, gone or idle > 1 h (PATH = that TMPDIR,
             MB = RSS); --apply sends TERM, the git fsmonitor hook starts one again on demand
@@ -74,7 +74,7 @@ for p in "$ROOT"/remotion-webpack-bundle-* "$ROOT"/cc*.ltrans*; do
 done
 for p in "$ROOT"/claude-"$me"/*/*/scratchpad/T[0-9]*/; do
   p=${p%/}; [ -d "$p" ] || continue
-  case $p in *vass*) continue;; esac
+  protected_match text "$p" >/dev/null && continue
   t=$(grep -oE '^T[0-9]+' <<<"${p##*/}")
   grep -qE "^- [0-9]{4}-[0-9]{2}-[0-9]{2} $t([^0-9]|$)" "$PC_TMP_HISTORY" 2>/dev/null || continue
   grep -qE "^- $t([^0-9]|$)" "$PC_TMP_CLAIMS" 2>/dev/null && continue
@@ -82,7 +82,8 @@ for p in "$ROOT"/claude-"$me"/*/*/scratchpad/T[0-9]*/; do
 done
 for p in "$ROOT"/claude-"$me"/*/*/scratchpad/*/; do
   p=${p%/}; [ -d "$p" ] && [ ! -L "$p" ] || continue
-  case ${p,,} in *vass*|*char3d*) continue;; esac
+  case ${p,,} in *char3d*) continue;; esac
+  protected_match text "$p" >/dev/null && continue
   [[ ${p##*/} =~ (^|[^A-Za-z])[Tt][0-9]+ ]] && continue
   h=$(idle_h "$p"); [ "$h" -ge 24 ] && add scratch-idle "$p" "$h" "no ticket name, idle ${h}h > 24h"
 done

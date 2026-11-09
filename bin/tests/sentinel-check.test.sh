@@ -66,6 +66,7 @@ status_json() {
 
 TICKDIR="$WORK/tick"; mkdir -p "$TICKDIR"
 export CALLS TICK="$TICKDIR" SENTINEL_BRIEF_CMD=false   # no brief line: every tick reads the status stub
+export PROTECTED_PROJECTS=vass PROTECTED_VASS_UNITS='vass* moodle45*'  # fixture protected project (T1513)
 out="$WORK/transcript.txt"
 : >"$out"
 

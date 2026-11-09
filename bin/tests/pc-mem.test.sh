@@ -6,6 +6,7 @@ WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 . "$HOME/agents/bin/tests/lib/assert.sh"
 mkdir -p "$WORK/dstub"; printf '#!/bin/sh\necho "$*" >>"$WORK/docker.log"; cat "$WORK/dps" 2>/dev/null\n' >"$WORK/dstub/docker"; chmod +x "$WORK/dstub/docker"
 export WORK PATH="$WORK/dstub:$PATH" PC_MEM_NAMES="$WORK/names.tsv"
+export PROTECTED_PROJECTS=vass PROTECTED_VASS_CONTAINERS='vass* moodle45*'  # fixture protected project (T1513)
 mem() { PC_SYS="$WORK/sys" PC_PROC="$WORK/proc" PC_MEM_LOG="$WORK/mem.tsv" PC_LEDGER="$WORK/l.jsonl" "$BIN/pc-mem" "$@"; }
 
 # cg <path> <mem> <swap> <anon> <pid…> — a cgroup dir with byte counters and its procs.
@@ -95,7 +96,7 @@ is 'young: 2 h / 4 samples rising, not a LEAK' "$(grep moodle52 <<<"$G" | awk '{
 is 'LEAK needs n >= 6: 8 h / 5 samples is young' "$(grep five.service <<<"$G" | awk '{print $4, $NF}')" '5 young'
 is 'LEAK: 8 h / 9 samples rising' "$(grep rise.service <<<"$G" | awk '{print $3, $4, $NF}')" '8.0 9 LEAK'
 is 'docker scope named from names.tsv' "$(grep -c 'moodle52-app-1 (docker) ' <<<"$G")" 1
-is 'Vass container keeps its owner-only tag' "$(grep -c 'moodle45-app-1 (Vass, owner-only)' <<<"$G")" 1
+is 'Vass container keeps its owner-only tag' "$(grep -c 'moodle45-app-1 (protected, owner-only)' <<<"$G")" 1
 is 'unknown docker id stays the id' "$(grep -c "docker-$I3.scope" <<<"$G")" 1
 is 'span under 1 h left out' "$(grep -c blip <<<"$G")" 0
 is 'rows older than the window left out' "$(grep -c old.service <<<"$G")" 0
@@ -226,7 +227,7 @@ cp "$CL" "$R.1"; : >"$R"; is 'cpu: empty log after copytruncate still reads <log
 { printf 'ts\tunit\tscope\tcpu_usec\n'; for u in $(seq 1 16) $I1 $I2; do printf '%s\tu%s.service\tsystem\t0\n%s\tu%s.service\tsystem\t%s\n' $((N - H)) $u $N $u $(( ${#u} * M )); done; } | sed "s/u$I1.service/docker-$I1.scope/; s/u$I2.service/docker-$I2.scope/" >"$WORK/many.tsv"
 O=$(CPU_LOG="$WORK/many.tsv" cpu)
 is 'cpu: top 15 per hour' "$(sed 1d <<<"$O" | wc -l)" 15
-is 'cpu: docker scopes named, Vass tagged' "$(head -3 <<<"$O" | sed 1d | awk '{print $3, $4, $5}' | sort | tr '\n' ,)" 'moodle45-app-1 (Vass, owner-only),moodle52-app-1 (docker) 64.0,'
+is 'cpu: docker scopes named, Vass tagged' "$(head -3 <<<"$O" | sed 1d | awk '{print $3, $4, $5}' | sort | tr '\n' ,)" 'moodle45-app-1 (protected, owner-only),moodle52-app-1 (docker) 64.0,'
 printf 'ts\tunit\tscope\tcpu_usec\n%s\tz.service\tsystem\t5\n' $N >"$WORK/one.tsv"
 is 'cpu: one sample says nothing:' "$(CPU_LOG="$WORK/one.tsv" cpu)" 'nothing: no unit used CPU between two samples in the window'
 exit $bad

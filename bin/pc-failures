@@ -19,7 +19,7 @@ One read-only screen of what failed in the window (default 24h; 30m, 6h, 7d):
   audit   ~/agents/log/actions.jsonl (+ rotations) failed tool calls / calls with an outcome; bench, sandbox hidden
   need    open "need you" pushes (pc need)
   check   red ticket CHECKs: $AGENT_WORK/evidence/*/check.json last run in the window (re-run by agent-verify --recheck)
-Units the fleet must never touch (PC_NOT_OURS, pclib.sh: moodle45*, vass*) are tagged `not ours`."""
+Units of protected projects (PC_NOT_OURS, else `protected ere unit`) are tagged `protected`."""
 if '-h' in sys.argv[1:] or '--help' in sys.argv[1:]:
     print(USAGE)
     sys.exit(0)
@@ -33,11 +33,9 @@ BIN = os.path.dirname(os.path.realpath(__file__))
 
 
 def not_ours():
-    """PC_NOT_OURS from the environment, else its one definition in pclib.sh."""
-    pat = os.environ.get('PC_NOT_OURS')
-    if not pat:
-        with open(os.path.join(BIN, 'pclib.sh')) as f:
-            pat = re.search(r'PC_NOT_OURS:=([^}]+)\}', f.read()).group(1)
+    """PC_NOT_OURS from the environment, else the protected units' ERE (`protected ere unit`, T1513)."""
+    pat = os.environ.get('PC_NOT_OURS') or subprocess.run(
+        [os.path.join(BIN, 'protected'), 'ere', 'unit'], capture_output=True, text=True, check=True, timeout=10).stdout.strip()
     return re.compile(pat)
 
 
@@ -316,7 +314,7 @@ def table(d, every=False):
     rows = []
     live = [u for u in d['units'] if not u.get('gone') and not u.get('test_oom')]
     for u in live:
-        note = [u['result'], 'not ours' if not u['ours'] else '', 'FAILED NOW' if u['failed_now'] else '']
+        note = [u['result'], 'protected' if not u['ours'] else '', 'FAILED NOW' if u['failed_now'] else '']
         rows.append(('unit', f"{u['unit']} ({u['scope']})", u['count'], stamp(u['last']), '  '.join(filter(None, note))))
     for label, us in (('test oom: {} run.sh scopes', [u for u in d['units'] if u.get('test_oom')]),
                       ('gone: {} one-off units', [u for u in d['units'] if u.get('gone') and not u.get('test_oom')])):

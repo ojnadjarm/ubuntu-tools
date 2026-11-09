@@ -3,9 +3,10 @@
 set -uo pipefail
 BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 . "$BIN/env.sh"
+. "$BIN/pclib.sh"
 usage='usage: work-repo-guard [status|install|uninstall] [--apply]
 
-status     per WORK_REPO_ROOTS root (config.env): is the includeIf line in the global gitconfig, and per repo
+status     per protected repo root (`protected entries repo`: PROTECTED_<NAME>_REPOS, else WORK_REPO_ROOTS): is the includeIf line in the global gitconfig, and per repo
            under it (depth 3) does core.hooksPath come from the guard include (a repo-local override, e.g. husky,
            wins over it and is flagged). Exit 1 on any gap.
 install    add `includeIf "gitdir:<root>/".path = <include>` per root to the global gitconfig ($GIT_CONFIG_GLOBAL or
@@ -29,8 +30,8 @@ INC="$HOME/.config/pc-harness/work-repo-guard.gitconfig"
 GCFG="${GIT_CONFIG_GLOBAL:-$HOME/.gitconfig}"
 BAK="$HARNESS_HOME/backups/gitconfig.T1251.bak"
 roots=()
-for r in ${WORK_REPO_ROOTS:-}; do roots+=("$(readlink -m "${r/#\~/$HOME}")"); done
-[ ${#roots[@]} -gt 0 ] || { echo "work-repo-guard: WORK_REPO_ROOTS is empty in config.env" >&2; exit 2; }
+while IFS= read -r r; do [[ " ${roots[*]-} " == *" $r "* ]] || roots+=("$r"); done < <(protected_entries repo)
+[ ${#roots[@]} -gt 0 ] || { echo "work-repo-guard: no protected repo roots (PROTECTED_<NAME>_REPOS or WORK_REPO_ROOTS in config.env)" >&2; exit 2; }
 key() { printf 'includeIf.gitdir:%s/.path' "$1"; }
 
 status() {

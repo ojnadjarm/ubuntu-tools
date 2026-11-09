@@ -104,6 +104,17 @@ for verb in stop start restart; do for v in 4.5 moodle45 vass-services vass mood
     "$BIN/pc-docker" "$verb" "$v" --apply --force >/dev/null 2>&1; is "$verb $v refused (exit 3)" "$?" 3
 done; done
 is 'Vass stop/start/restart refusals call no docker at all' "$(wc -c <"$WORK/docker.log")" 0
+# 7a2. T1513: a second protected project from config alone (fixture acme: container globs + an env dir).
+mkdir -p "$ENVS/9.9"; printf 'name: acme-site\n' >"$ENVS/9.9/docker-compose.yml"
+acme() { PROTECTED_PROJECTS=acme PROTECTED_ACME_CONTAINERS='acme* 9.9' STUB_DIR=$WORK PATH="$WORK/bin:$PATH" \
+  PC_ENVS="$ENVS" XDG_RUNTIME_DIR="$WORK" PC_LEDGER="$WORK/rc.jsonl" "$BIN/pc-docker" "$@"; }
+for verb in stop start restart recreate; do for v in acme-site acme-db-1 9.9; do
+  acme "$verb" "$v" --apply --force >/dev/null 2>&1; is "acme: $verb $v refused (exit 3)" "$?" 3
+done; done
+is 'acme: refusal names the project' "$(acme stop acme-db-1 --apply 2>&1)" \
+  'pc docker: refused — protected project acme: acme-db-1 is never stopped, started or recreated by agents'
+is 'acme refusals call no docker at all' "$(wc -c <"$WORK/docker.log")" 0
+case "$(acme stop moodle52-app-1 2>&1)" in would:*) ok 'acme config: an unprotected container still dry-runs';; *) nok 'acme: unprotected' x;; esac
 OTHERS=moodle52 rc shared --apply >/dev/null 2>&1; is 'recreate shared refused while moodle52 up' "$?" 3
 grep -q "^compose" "$WORK/docker.log" && nok 'refused shared runs no compose' called || ok 'refused shared runs no compose'
 case "$(OTHERS=moodle52 rc shared --force)" in would:*) ok 'recreate shared --force passes the guard';; *) nok 'shared --force' x;; esac

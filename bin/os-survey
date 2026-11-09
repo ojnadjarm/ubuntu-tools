@@ -8,13 +8,14 @@ by profile), agent-work (bytes written per window, top writer dirs), docker (sta
 transcripts), caches (~/.cache top dirs), daemons (watchman / browser MCP / node MCP: count, RSS, inotify watches),
 netdata (cgroup CPU over OS_SURVEY_NETDATA_WAIT s as s/h, top 5 threads s/h, charts per plugin), sudo (COMMAND counts),
 journal-sources (1 h user + system lines by identifier), io (GB written per cgroup since boot, gone remainder). Every probe has a timeout (OS_SURVEY_TIMEOUT, default and max 10 s) and
-fails soft to one `n/a: <why>` row; rows naming Vass containers end `(Vass, owner-only)`. Never launches a browser.
+fails soft to one `n/a: <why>` row; rows naming a protected project (`protected eres text`) end `(protected <name>, owner-only)`. Never launches a browser.
 Roots: AGENT_WORK (else ~/agent-work), HARNESS_HOME (else ~/agents), OS_SURVEY_PROJECTS (else ~/.claude/projects),
 OS_SURVEY_CACHE (else ~/.cache), OS_SURVEY_PROC (else /proc), OS_SURVEY_CGROUP (else /sys/fs/cgroup); OS_SURVEY_BIN = the only dir commands run from (tests). Exit 0 (2 on usage).
 """
 import argparse, calendar, glob, json, os, re, shutil, signal, subprocess, sys, time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+import protectedlib
 
 HOME = os.path.expanduser('~')
 AW = os.environ.get('AGENT_WORK') or os.path.join(HOME, 'agent-work')
@@ -25,8 +26,6 @@ PROC = os.environ.get('OS_SURVEY_PROC') or '/proc'
 CGROUP = os.environ.get('OS_SURVEY_CGROUP') or '/sys/fs/cgroup'
 BIN = os.environ.get('OS_SURVEY_BIN')
 TIMEOUT = min(10.0, float(os.environ.get('OS_SURVEY_TIMEOUT') or 10))
-VASS = re.compile(r'vass|moodle45', re.I)
-TAG = ' (Vass, owner-only)'
 RG_BATCH = 1000
 NETDATA_WAIT = max(0.1, min(TIMEOUT, float(os.environ.get('OS_SURVEY_NETDATA_WAIT') or 5)))
 NETDATA_URL = os.environ.get('NETDATA_URL') or 'http://127.0.0.1:19999'
@@ -405,13 +404,15 @@ def main():
     except ValueError:
         ap.error(f'--since: want <n>m|h|d, got {a.since!r}')
     t0 = time.time()
+    proj = protectedlib.eres('text')
     todo = [(n, fn) for n, quick, fn in SECTIONS if quick or not a.quick]
     with ThreadPoolExecutor(4) as ex:
         res = list(ex.map(lambda s: (s[0], section(s[1], a)), todo))
     for name, rows in res:
         print(f'## {name}')
         for r in rows:
-            print(r + TAG if VASS.search(r) else r)
+            p = protectedlib.project(proj, r.lower())
+            print(f'{r} (protected {p}, owner-only)' if p else r)
     na = sum(any(r.startswith('n/a') or ': n/a: ' in r for r in rows) for _, rows in res)
     print(f'--- {len(res) - na}/{len(res)} sections clean in {time.time() - t0:.1f} s (since {a.since})')
 

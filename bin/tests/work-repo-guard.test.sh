@@ -4,12 +4,12 @@
 set -uo pipefail
 SELF=$(readlink -f "$0"); BIN=$(cd "$(dirname "$SELF")/.." && pwd); HOOK="$BIN/../hooks/sleep-loop-block.py"
 REAL_HOME=$HOME; REAL_GCFG="$REAL_HOME/.gitconfig"
-REAL_ROOTS=$(sed -n 's/^WORK_REPO_ROOTS=//p' "$REAL_HOME/.config/pc-harness/config.env" 2>/dev/null | tr -d "\"'")
+REAL_ROOTS=$("$BIN/protected" entries repo 2>/dev/null | sort -u | paste -sd' ')
 REAL_ROOTS=${REAL_ROOTS:-~/moodle-envs/vass ~/moodle-envs/4.5}
 T=$(mktemp -d /tmp/wrg-XXXXXX); trap 'rm -rf "$T"' EXIT
 stamp="$T/stamp"; touch "$stamp"; sum0=$(sha256sum "$REAL_GCFG" 2>/dev/null)
 MARKERS="CLAUDECODE CLAUDE_CODE_ENTRYPOINT HARNESS_AGENT OPENCODE GEMINI_CLI CODEX_SANDBOX CODEX_THREAD_ID"
-for v in $MARKERS WORK_REPO_ROOTS GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_CEILING_DIRECTORIES; do unset "$v"; done
+for v in $MARKERS WORK_REPO_ROOTS PROTECTED_PROJECTS GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_CEILING_DIRECTORIES; do unset "$v"; done
 export HOME="$T" GIT_CONFIG_GLOBAL="$T/gitconfig" GIT_CONFIG_NOSYSTEM=1 HARNESS_CONFIG="$T/config.env" HARNESS_HOME="$T/harness"
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 fail=0
@@ -115,6 +115,20 @@ done
 c="echo $P | xargs -I{} git -C {} push"; ! deny "$c" "$W"; check "PreToolUse allows from the work repo: $c" $?
 c="export GIT_DIR=$P/.git; GIT_DIR=~/work/repo/.git; git push --no-verify"; deny "$c" "$P"; check "PreToolUse denies: $c" $?
 c="export GIT_DIR=$P/.git; GIT_DIR=~/work/repo/.git git status; git push"; ! deny "$c" "$P"; check "PreToolUse allows: $c" $?
+check "refusal names the legacy project (work)" "$(grep -q 'protected project work: git commit refused' "$T/err"; echo $?)"
+
+# T1513: a second protected project from config alone (fixture acme); legacy WORK_REPO_ROOTS is then ignored.
+printf 'PROTECTED_PROJECTS="acme"\nPROTECTED_ACME_REPOS="~/acme"\nWORK_REPO_ROOTS="~/work"\n' > "$HARNESS_CONFIG"
+mk "$T/acme/repo"; A="$T/acme/repo"
+out=$("$BIN/work-repo-guard" install); check "acme: install would add only the acme root" "$(is "$(grep -c 'includeIf' <<<"$out")$(grep -c "gitdir:$T/acme/" <<<"$out")" 11)"
+"$BIN/work-repo-guard" install --apply >/dev/null; check "acme: install --apply, status ok" $?
+echo a > "$A/f"; git -C "$A" add f
+CLAUDECODE=1 git -C "$A" commit -qm agent 2>"$T/err"; check "acme: agent commit refused" "$(is "$?$(n "$A")" 11)"
+check "acme: refusal names protected project acme" "$(grep -q 'protected project acme: git commit refused' "$T/err"; echo $?)"
+git -C "$A" commit -qm human; check "acme: human commit allowed" "$(is "$?$(n "$A")" 02)"
+deny "git -C $A push --no-verify" "$T"; check "acme: PreToolUse denies a push" $?
+check "acme: deny reason names the project" "$(ev "git -C $A push" "$T" | "$HOOK" | grep -q 'protected project acme'; echo $?)"
+! deny "cd ~/work/repo && git push --no-verify" "$T"; check "acme: legacy root ignored once PROTECTED_PROJECTS is set (PreToolUse)" $?
 
 # Selftest 2: the real gitconfig and real work repos were not written by this run.
 check "selftest: real ~/.gitconfig unchanged" "$(is "$(sha256sum "$REAL_GCFG" 2>/dev/null)" "$sum0")"

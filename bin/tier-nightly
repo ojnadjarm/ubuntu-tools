@@ -8,7 +8,7 @@ MCI="${TIER_MCI:-$HOME/.claude/skills/moodle-ci/scripts/mci}"
 STATE="${TIER_STATE:-$HOME/agents/state/tier-nightly}"
 OUTDIR="${TIER_LOGDIR:-$HOME/agents/log/tier-nightly}"
 LOCK="${TIER_PERF_LOCK:-/tmp/mooblox-perf.lock}"
-NEVER="${TIER_NEVER:-$HOME/moodle-envs/vass $HOME/moodle-envs/4.5}"
+NEVER="${TIER_NEVER:-$("$BIN/protected" entries path | paste -sd' ')}"
 
 case "${1:-}" in
   -h|--help) cat <<EOF

@@ -26,7 +26,8 @@ sample  appends one row per *.service and *.scope cgroup (system and user manage
 growth  ranks units by MB/day of anon+swap (least-squares slope over the window), units with at
         least two samples spanning >= $PC_MEM_MIN_SPAN s (default 3600); "LEAK" marks > 100 MB/day over
         >= 6 h and >= 6 samples, "young" the same rate on less. Docker scopes print as <name> (docker),
-        Vass ones as <name> (Vass, owner-only), from $PC_MEM_NAMES; unknown ids stay the scope name.
+        protected projects'"'"' ones (`protected entries container`) as <name> (protected, owner-only), from $PC_MEM_NAMES;
+        unknown ids stay the scope name.
 cpu     HOUR UNIT S/H from cpu.tsv: CPU s per hour between consecutive samples of a unit, credited to the
         hour holding the interval midpoint (a counter that went down is a restart: the new counter is the
         delta); top 15 per hour, or every hour of --unit U (user units print and match as user/<unit>). "BURST" marks an hour
@@ -50,7 +51,7 @@ NAMES_AWK='
   function nm(u,  id) {
     if (u !~ /^docker-[0-9a-f]+\.scope$/ || length(u) != 77) return u
     id = substr(u, 8, 12); if (!(id in dn)) return u
-    return dn[id] (tolower(dn[id]) ~ notours ? " (Vass, owner-only)" : " (docker)")
+    return dn[id] (tolower(dn[id]) ~ notours ? " (protected, owner-only)" : " (docker)")
   }'
 HDR=$'ts\tunit\tscope\tmem_kb\tswap_kb\tanon_kb\ttop_pid\ttop_cmd\ttop_rss_kb\ttop_swap_kb'
 
@@ -157,7 +158,7 @@ cpu() {
         }
       }
     }' $(logs "$PC_MEM_CPU_LOG") | sort -t$'\t' -k1,1n -k2,2gr |
-    awk -F'\t' -v all="${unit:+1}" -v names="$PC_MEM_NAMES" -v notours="$PC_NOT_OURS" "$NAMES_AWK"'
+    awk -F'\t' -v all="${unit:+1}" -v names="$PC_MEM_NAMES" -v notours="$(protected_ere container)" "$NAMES_AWK"'
       BEGIN { load(names) }
       !all && c[$1]++ >= 15 { next }
       { if (!NR0++) printf "%-11s  %-50s %8s\n", "HOUR", "UNIT", "S/H"
@@ -186,7 +187,7 @@ growth() {
         printf "%+.1f\t%.0f\t%.1f\t%d\t%s\t%s\t%s%s\n", m, last[k], (t1[k] - t0[k]) / 3600, c[k], u[1], u[2], top[k], (m > 100 ? (t1[k] - t0[k] >= 21600 && c[k] >= 6 ? "\tLEAK" : "\tyoung") : "")
       }
     }' $(logs "$PC_MEM_LOG") | sort -t$'\t' -k1,1gr | head -n "$n" |
-    awk -F'\t' -v min="$PC_MEM_MIN_SPAN" -v names="$PC_MEM_NAMES" -v notours="$PC_NOT_OURS" "$NAMES_AWK"'
+    awk -F'\t' -v min="$PC_MEM_MIN_SPAN" -v names="$PC_MEM_NAMES" -v notours="$(protected_ere container)" "$NAMES_AWK"'
       BEGIN { load(names) }
       { printf "%-10s %8s %7s %4s  %-6s %-40s %s%s\n", $1, $2, $3, $4, $5, nm($6), $7, $8 ? "  " $8 : "" }
       END { if (!NR) print "(no unit has two samples " min " s apart in the window)" }'

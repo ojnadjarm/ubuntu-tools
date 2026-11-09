@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fixtures for ~/agents/bin/os-survey: every section prints from stub commands (OS_SURVEY_BIN), Vass rows tagged,
+# Fixtures for ~/agents/bin/os-survey: every section prints from stub commands (OS_SURVEY_BIN), protected-project rows tagged,
 # probe timeout kills grandchildren, missing command fails soft, zero-match apparmor, test-helper noise dropped,
 # rg batches, footer counts probe n/a rows, --quick subset, usage exit 2; daemons/netdata/io from a fake /proc and
 # cgroup tree (OS_SURVEY_PROC, OS_SURVEY_CGROUP) incl. bwrap/node args naming mcp, walk deadline, sudo and
@@ -86,8 +86,11 @@ out=$("$SRC" 2>&1); ok "full: rc 0" 0 $?
 miss=0; for s in $SECTIONS; do grep -qx "## $s" <<<"$out" || { echo "  missing ## $s"; miss=$((miss+1)); }; done
 ok "full: every section prints" 0 "$miss"
 ok "full: no n/a rows from stubs" 0 "$(grep -c 'n/a' <<<"$out")"
-ok "full: Vass row tagged" yes "$(has 'vass-services-mongo-1 1.2% (Vass, owner-only)' "$out")"
-ok "full: non-Vass row untagged" no "$(has 'moodle52-app-1 0.0% (Vass' "$out")"
+ok "full: Vass row tagged" yes "$(has 'vass-services-mongo-1 1.2% (protected vass, owner-only)' "$out")"
+ok "full: non-Vass row untagged" no "$(has 'moodle52-app-1 0.0% (protected' "$out")"
+a=$(PROTECTED_PROJECTS=acme PROTECTED_ACME_WORDS=moodle52 "$SRC" 2>&1)
+ok "acme (T1513): a second project's row tagged, the unlisted vass row not" "yes no" \
+  "$(has 'moodle52-app-1 0.0% (protected acme, owner-only)' "$a") $(has 'vass-services-mongo-1 1.2% (protected' "$a")"
 ok "status: only non-OK rows" "yes no" "$(has ci_verdict "$out") $(has failed_units "$out")"
 ok "journal: unit and count only" "yes no" "$(has 'kernel 2' "$out") $(has 'UFW BLOCK' "$out")"
 ok "apparmor: DENIED by profile" "yes yes" "$(has 'DENIED 24h: 2' "$out") $(has 'who 2' "$out")"
@@ -139,9 +142,10 @@ ok "footer: probe n/a row counts" yes "$(has '--- 12/13 sections' "$out")"
 ok "no browser in the source" 0 "$(grep -iE 'chrom|firefox|playwright' "$SRC" | grep -vc '^DAEMONS = ')"
 
 # Mutations: without the tag, the inotify count, the anchored regex, the gone remainder, the quoting skip, the line anchor, the install ctime, the per-call dedupe or the timeout the matching check goes red.
-M="$WORK/mut"; sed 's/(Vass, owner-only)/(x)/' "$SRC" >"$M"; chmod +x "$M"
+ln -s "$(dirname "$SRC")/protectedlib.py" "$WORK/protectedlib.py"
+M="$WORK/mut"; sed 's/(protected {p}, owner-only)/(x)/' "$SRC" >"$M"; chmod +x "$M"
 printf '#!/bin/sh\necho "stub $*"\n' >"$S/systemd-analyze"; chmod +x "$S/systemd-analyze"
-ok "mutation: no Vass tag goes red" no "$(has '(Vass, owner-only)' "$("$M" 2>&1)")"
+ok "mutation: no Vass tag goes red" no "$(has '(protected vass, owner-only)' "$("$M" 2>&1)")"
 sed 's/startswith(.inotify.)/startswith("x")/' "$SRC" >"$M"; chmod +x "$M"
 ok "mutation: no inotify count goes red" no "$(has 'inotify watches 5' "$("$M" 2>&1)")"
 sed "s|('playwright-mcp', r'[^']*')|('playwright-mcp', r'playwright-mcp')|" "$SRC" >"$M"; chmod +x "$M"

@@ -61,7 +61,7 @@ ASSIGN = re.compile(r'^\w+=.*$', re.S)
 GIT_PREFIX = re.compile(PREFIX.pattern[:-2] + r'|xargs)$', re.S)
 GIT_ENV = ('GIT_DIR', 'GIT_WORK_TREE')
 GIT_OPT_ARG = {'-c', '--exec-path', '--namespace', '--config-env', '--super-prefix', '--list-cmds', '--attr-source'}
-WORK_REASON = ('work-repo guard (T1251, decisions/vass.md): `git {}` targets work repo {}; agents never commit or push '
+WORK_REASON = ('work-repo guard (T1251): protected project {}: `git {}` targets work repo {}; agents never commit or push '
                'there, the owner does it by hand. Read-only git (status, diff, log) is fine.')
 ISO = re.compile(r'^(\d{4}-\d\d-\d\d|@\d+$)')
 EFFECT = {'pkill': 'which then dies with exit 144 and loses the rest of the command',
@@ -364,19 +364,12 @@ def sudo_loop(toks):
     return False
 
 
-def work_roots():
-    """Work repo roots from $WORK_REPO_ROOTS, else from config.env (space separated, ~ and $HOME expanded)."""
-    raw = os.environ.get('WORK_REPO_ROOTS')
-    if raw is None:
-        try:
-            with open(os.environ.get('HARNESS_CONFIG') or os.path.expanduser('~/.config/pc-harness/config.env')) as f:
-                for line in f:
-                    m = re.match(r'\s*(?:export\s+)?WORK_REPO_ROOTS=(.*)', line)
-                    if m:
-                        raw = m.group(1).split(' #')[0].strip().strip('"\'')
-        except OSError:
-            pass
-    return [os.path.realpath(os.path.expanduser(os.path.expandvars(r))) for r in (raw or '').split()]
+def protected_repo(d):
+    """The protected project (`protected match repo`, T1513) that dir d belongs to, else None."""
+    import subprocess
+    exe = os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'bin', 'protected')
+    r = subprocess.run([exe, 'match', 'repo', d], capture_output=True, text=True, timeout=5)
+    return r.stdout.strip() if r.returncode == 0 else None
 
 
 def resolve(base, p, env):
@@ -466,13 +459,12 @@ def git_writes(toks, cwd, env, depth=0):
 
 
 def work_repo_git(cmd, cwd):
-    """Deny reason when a git commit/push in cmd targets a dir under a work root, else None (unresolvable dirs are the git hooks' to judge)."""
+    """Deny reason when a git commit/push in cmd targets a dir in a protected repo, else None (unresolvable dirs are the git hooks' to judge)."""
     cwd = os.path.realpath(cwd if isinstance(cwd, str) and cwd else os.getcwd())
-    writes = [w for w in git_writes(shell_words(cmd) or [], cwd, {'HOME': os.path.expanduser('~')}) if w[1]]
-    roots = work_roots() if writes else []
-    for sub, d in writes:
-        if any(d == r or d.startswith(r + '/') for r in roots):
-            return WORK_REASON.format(sub, d)
+    for sub, d in git_writes(shell_words(cmd) or [], cwd, {'HOME': os.path.expanduser('~')}):
+        p = protected_repo(d) if d else None
+        if p:
+            return WORK_REASON.format(p, sub, d)
     return None
 
 

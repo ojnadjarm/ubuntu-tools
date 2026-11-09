@@ -6,7 +6,9 @@ for v in CLAUDECODE HARNESS_AGENT OPENCODE GEMINI_CLI CODEX_SANDBOX CODEX_THREAD
   eval "[ -n \"\${$v:-}\" ]" && { agent=$v; break; }
 done
 refuse() {
-  echo "work-repo-guard (T1251): $1 refused in this work repo because $agent is set; agents never write git here, the owner does it by hand." >&2
+  top=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+  proj=$("$(dirname "$(readlink -f "$0")")/../bin/protected" match repo "$top" 2>/dev/null)
+  echo "work-repo-guard (T1251): protected project ${proj:-?}: $1 refused because $agent is set; agents never write git here, the owner does it by hand." >&2
   exit 1
 }
 own="$(git rev-parse --git-common-dir 2>/dev/null)/hooks/$name"

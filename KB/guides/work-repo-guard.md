@@ -3,9 +3,10 @@
 Ticket: T1251 · Last verified: 2026-11-09 by `bash ~/agents/bin/tests/work-repo-guard.test.sh` (60 ok) and `git hook run` on the real repos
 
 ## When to use
-An agent must never commit, push, merge or rebase in the owner's work repos (roots in `WORK_REPO_ROOTS`, config.env),
+An agent must never commit, push, merge or rebase in the owner's work repos (roots: `protected entries repo`, i.e.
+`PROTECTED_<NAME>_REPOS` in config.env, legacy `WORK_REPO_ROOTS` while `PROTECTED_PROJECTS` is empty; `guide protected-projects`),
 while the owner at his own terminal keeps full git. Personal repos (~/agents, ~/the-dark-eye, …) are not covered.
-Adding a root: edit `WORK_REPO_ROOTS`, then `work-repo-guard install --apply`.
+Adding a root: edit `PROTECTED_<NAME>_REPOS`, then `work-repo-guard install --apply`. Refusals name the project (T1513).
 
 ## The path we took
 Two layers, no file written inside a work repo:

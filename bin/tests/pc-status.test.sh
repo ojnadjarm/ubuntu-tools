@@ -202,7 +202,7 @@ has "no transient unit is OK 0"         "$(st "$j" host failed_transient)" "OK 0
 has "no foreign unit is OK 0"           "$(st "$j" host failed_foreign)" "OK 0"
 # T721: a failed unit matching PC_NOT_OURS is a WARN row of its own, never a host FAIL.
 jf=$(FX_FOREIGN=1 run_faults --json)
-has "foreign unit listed apart"         "$(st "$jf" host failed_foreign)" "WARN 1: user:fx-foreign-cron.service (not ours)"
+has "foreign unit listed apart"         "$(st "$jf" host failed_foreign)" "WARN 1: user:fx-foreign-cron.service (protected)"
 has "foreign unit not in failed_units"  "$(st "$jf" host failed_units)" "FAIL 2: fx-sys.service, user:fx-user.service"
 jo=$(FX_FOREIGN=only run_faults --json)
 has "only foreign failed: failed_units OK 0" "$(st "$jo" host failed_units)" "OK 0"
@@ -248,7 +248,7 @@ has "timer unit loop is FAIL"             "$(st "$j" agents unit_loops)" "FAIL f
 has "no foreign unit loop is OK none"     "$(st "$j" agents unit_loops_foreign)" "OK none"
 # T734: a timer loop of a unit matching PC_NOT_OURS is a WARN row of its own, never unit_loops.
 jl=$(FX_FOREIGN_LOOP=1 run_faults --json)
-has "foreign loop listed apart"           "$(st "$jl" agents unit_loops_foreign)" "WARN fx-foreign-cron.service 48 fails/h (not ours)"
+has "foreign loop listed apart"           "$(st "$jl" agents unit_loops_foreign)" "WARN fx-foreign-cron.service 48 fails/h (protected)"
 case "$(st "$jl" agents unit_loops)" in "FAIL fx-cron.service 12 fails/h: upgrade pending") ok "foreign loop not in unit_loops";; *) nok "foreign loop not in unit_loops" "$(st "$jl" agents unit_loops)";; esac
 jl=$(FX_FOREIGN_LOOP=only run_faults --json)
 has "only foreign loop: unit_loops OK"    "$(st "$jl" agents unit_loops)" "OK no timer-driven unit failing >= 10/h"

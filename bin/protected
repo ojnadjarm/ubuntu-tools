@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# protected [list|projects|match|entries|ere|eres] — the protected projects every guard refuses to touch (T1513).
+set -uo pipefail
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/pclib.sh"
+usage='usage: protected [list]                    project, kind and entries, one row per non-empty kind
+       protected projects                  the project names
+       protected match <kind> <value>      print the project the value belongs to; exit 1 when none
+       protected entries <kind> [project]  the kind'"'"'s entries (repo|path absolute)
+       protected ere <kind> [project]      one ERE for bulk matching (text: lowercase, match lowercased values)
+       protected eres <kind>               project<TAB>ERE per project with entries of that kind
+
+Kinds: repo (git: no agent commit/push/merge/rebase), path (cleanups never reap), container (pc docker never
+stops/starts/restarts/recreates), unit (labelled protected, never a fleet failure), text (words in free text).
+Config: PROTECTED_PROJECTS and PROTECTED_<NAME>_{REPOS,PATHS,CONTAINERS,UNITS,WORDS} in config.env
+(config.example.env); with PROTECTED_PROJECTS empty, legacy WORK_REPO_ROOTS is project "work". Guide: guide protected-projects.'
+kinds=' repo path container unit text '
+kind_ok() { [[ $kinds == *" ${1:-} "* ]] || { echo "protected: unknown kind '${1:-}' (repo path container unit text)" >&2; exit 2; }; }
+case ${1:-list} in
+  -h|--help) echo "$usage" ;;
+  list)
+    for n in $(protected_projects); do
+      for k in $kinds; do
+        e=$(protected_entries "$k" "$n" | paste -sd' ')
+        [ -z "$e" ] || printf '%s\t%s\t%s\n' "$n" "$k" "$e"
+      done
+    done ;;
+  projects) protected_projects ;;
+  match) [ $# -eq 3 ] || { echo "$usage" >&2; exit 2; }; kind_ok "$2"; protected_match "$2" "$3" ;;
+  entries) kind_ok "${2:-}"; protected_entries "$2" ${3:+"$3"} ;;
+  ere) kind_ok "${2:-}"; protected_ere "$2" ${3:+"$3"} ;;
+  eres)
+    kind_ok "${2:-}"
+    for n in $(protected_projects); do
+      [ -z "$(protected_entries "$2" "$n")" ] || printf '%s\t%s\n' "$n" "$(protected_ere "$2" "$n")"
+    done ;;
+  *) echo "protected: unknown verb $1" >&2; echo "$usage" >&2; exit 2 ;;
+esac

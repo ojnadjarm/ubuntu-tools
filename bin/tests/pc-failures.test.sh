@@ -6,6 +6,7 @@ REAL_HOME=$HOME
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 . "$HOME/agents/bin/tests/lib/assert.sh"
 
+export PROTECTED_PROJECTS=vass PROTECTED_VASS_UNITS="vass* moodle45*"  # fixture protected project (T1513)
 export HOME="$WORK/home" PC_FIXTURE="$WORK/fx" PC_CRASH_DIR="$WORK/crash" AGENT_WORK="$WORK/aw" CREATIVE_CI_LOG="$WORK/creative-ci.jsonl"
 mkdir -p "$AGENT_WORK/evidence/T1" "$AGENT_WORK/evidence/T2" "$AGENT_WORK/evidence/T3" "$HOME/agents/log" "$HOME/agents/state/ci-fix" "$HOME/agents/a1/logs" "$PC_FIXTURE/bin" "$PC_CRASH_DIR"
 now=$(date +%s); us() { echo $(( (now - $1) * 1000000 )); }
@@ -92,6 +93,8 @@ is 'moodle45*/vass* are not ours' "$(jq -r '[.units[] | select(.ours | not) | .u
   'moodle45-cron.service vass-services.service'
 is 'not-ours pattern is PC_NOT_OURS (pclib.sh default, env override)' \
   "$(PC_NOT_OURS='^discord' "$BIN/pc-failures" --json | jq -r '[.units[] | select(.ours | not) | .unit] | join(" ")')" 'discord-bot.service'
+is 'acme (T1513): a second protected project from config alone, unit globs' \
+  "$(PC_NOT_OURS= PROTECTED_PROJECTS=acme PROTECTED_ACME_UNITS='discord-*' "$BIN/pc-failures" --json | jq -r '[.units[] | select(.ours | not) | .unit] | join(" ")')" 'discord-bot.service'
 is 'agent runs: exit != 0 in window only' "$(jq -r '[.agents[] | "\(.agent):\(.exit)"] | join(" ")' <<<"$j")" 'a1:1'
 is 'ci reds in window only' "$(jq -r '[.ci[] | .rc] | join(" ")' <<<"$j")" 1
 is 'creative: red runs in window only, latest first' "$(jq -r '[.creative[] | "\(.tool):\(.project):\(.count):\(.failed | join(","))"] | join(" ")' <<<"$j")" \
@@ -109,7 +112,7 @@ is '--since 7d widens agents, ci, crashes, audit' \
   "$(jq -r '"\(.agents | length) \(.ci | length) \(.crashes | length) \(.audit.calls) \(.checks | length)"' <<<"$j7")" '2 2 2 5 2'
 is '--since 7d reads the rotated .1.gz' "$(jq .audit.failed <<<"$j7")" 2
 t=$("$BIN/pc-failures")
-grep -q '^unit .*vass-services.service (system) .*not ours  FAILED NOW' <<<"$t" && ok 'table tags not ours and failed now' || nok table "$t"
+grep -q '^unit .*vass-services.service (system) .*protected  FAILED NOW' <<<"$t" && ok 'table tags protected and failed now' || nok table "$t"
 grep -qE '^ci +cpp-ci demo +1 [0-9-]+ [0-9:]+ +golden,perf$' <<<"$t" && ok 'table: ci <tool> <project> N LAST <failed stages>' || nok 'table creative' "$t"
 grep -q 'game-ci old' <<<"$t" && nok 'creative window' "$t" || ok 'creative: old red run outside the window hidden'
 grep -q '^check  T1 1d ' <<<"$t" && ok 'table: check <ticket> <age since first red>' || nok 'table check' "$t"
@@ -119,7 +122,7 @@ is 'json marks the run.sh scope oom as test_oom' "$(jq -r '[.units[] | select(.t
 grep -q '^unit .*gone: 3 one-off units .* 4 .*(t459-fleet-ci-probe, pcbench-fail, tmux-spawn)$' <<<"$t" && ok 'table folds gone units into one row' || nok 'gone row' "$t"
 grep -q '^unit .*test oom: 1 run.sh scopes ' <<<"$t" && ok 'table counts run.sh scope oom as test oom' || nok 'test oom row' "$t"
 grep -qE 't459|pcbench|run-p' <<<"$(grep -v -e gone -e 'test oom' <<<"$t")" && nok 'gone units hidden' "$t" || ok 'gone units have no own row'
-grep -q 'exit-code  not ours$' <<<"$t" && ok 'NOTE parts separated by 2 spaces' || nok 'note spacing' "$t"
+grep -q 'exit-code  protected$' <<<"$t" && ok 'NOTE parts separated by 2 spaces' || nok 'note spacing' "$t"
 mkdir -p "$WORK/sum" "$WORK/scr"
 printf '{"project":"%s"}' "$WORK/scr/game" >"$WORK/sum/game.json"
 printf '{"project":"%s"}' "$WORK/agent-work/games/showcase" >"$WORK/sum/showcase.json"
