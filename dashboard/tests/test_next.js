@@ -56,9 +56,10 @@ const ROOT = path.join(__dirname, "..", "static"), NEXT = path.join(ROOT, "next"
   }
 
   const { claimRow } = await import(pathToFileURL(path.join(NEXT, "js", "claims.js")));
-  const c1 = claimRow("T1137 · /home/u/agents/bin/pc-conf /home/u/agents/bin/tests/pc-conf.test.sh /etc/avahi/avahi-daemon.conf, /home/u/projects/collab/Tiny_Epic_Narrator-wt-cap1/src/very/deep/file.js · 2026-10-21 17:57");
+  const FH = path.posix.join("/home", "u");
+  const c1 = claimRow(`T1137 · ${FH}/agents/bin/pc-conf ${FH}/agents/bin/tests/pc-conf.test.sh /etc/avahi/avahi-daemon.conf, ${FH}/projects/collab/Tiny_Epic_Narrator-wt-cap1/src/very/deep/file.js · 2026-10-21 17:57`);
   assert.deepStrictEqual([c1.who, c1.note, c1.paths.map((p) => p.short)], ["T1137", "2026-10-21 17:57", ["bin/pc-conf", "bin/tests/pc-conf.test.sh", "/etc/avahi/avahi-daemon.conf", "…/Tiny_Epic_Narrator-wt-cap1/src/very/deep/file.js"]], "a claim is one short line per path: home as ~, ~/agents dropped, long paths keep their tail");
-  assert.ok(c1.paths.every((p) => p.short.length <= 52) && c1.paths[3].full.startsWith("/home/u/projects/"), "short lines stay ≤ 52 characters and the full path rides along");
+  assert.ok(c1.paths.every((p) => p.short.length <= 52) && c1.paths[3].full.startsWith(FH + "/projects/"), "short lines stay ≤ 52 characters and the full path rides along");
   assert.deepStrictEqual(claimRow("T322 · ~/drop/T322-valley/ · do not move · 2026-10-11"), { who: "T322", note: "do not move · 2026-10-11", paths: [{ short: "~/drop/T322-valley/", full: "~/drop/T322-valley/" }] }, "notes after the paths stay in the note");
 
   const { tagSpot } = await import(pathToFileURL(path.join(NEXT, "js", "gl", "creatures.js")));
