@@ -28,6 +28,8 @@ Every web page, screen or component, for every agent and ticket (exception: aile
 
 ## Delegation
 
+- **Planning = Fable (owner 2026-11-10):** plans, architecture and ticket tables run on `planner` (claude-fable-5-2, high);
+  implementation and review stay on `worker` (Opus high).
 - **Audiovisual = Fable 5.2, medium reasoning (owner 2026-11-09; was Opus xhigh):** every art/content task (3D assets, motion videos, pixel
   art, scenes, characters, illustration, music/sound design) runs on `worker-max` (claude-fable-5-2, medium), or
   `MODEL=claude-fable-5-2 EFFORT=medium` for `agent-exec` runs (Discord jobs: `LIAISON_JOB_MODEL`/`LIAISON_JOB_EFFORT`). Plain how-it-works screen videos with a basic narration stay `worker`.
