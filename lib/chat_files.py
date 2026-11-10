@@ -1,5 +1,6 @@
 """Chat attachments (T1515-P33): store a file under the chat store, type from its bytes, images without metadata, a
 seat's own copy."""
+import glob
 import io
 import json
 import os
@@ -13,6 +14,7 @@ import chat_store
 MAX_BYTES = 10 << 20
 MAX_FILES = 5
 THUMB_PX = 640
+MAX_PIXELS = 40_000_000
 FID = re.compile(r"^[0-9a-f]{16}$")
 IMAGES = ((b"\x89PNG\r\n\x1a\n", "image/png"), (b"\xff\xd8\xff", "image/jpeg"), (b"GIF87a", "image/gif"),
           (b"GIF89a", "image/gif"))
@@ -65,11 +67,13 @@ def meta(fid):
 
 
 def _image(data, mime):
-    """(bytes without EXIF/XMP/text metadata, upright, ICC kept; WebP thumbnail) of an image; None when it does not decode.
-    A GIF keeps its bytes: the format has no EXIF."""
+    """(bytes without EXIF/XMP/text metadata, upright, ICC kept; WebP thumbnail) of an image; None when it does not decode
+    or is over MAX_PIXELS. A GIF keeps its bytes: the format has no EXIF."""
     from PIL import Image, ImageOps
     try:
         with Image.open(io.BytesIO(data)) as im:
+            if im.width * im.height > MAX_PIXELS:
+                return None
             im.load()
             icc, out = im.info.get("icc_profile"), io.BytesIO()
             if mime == "image/gif":
@@ -103,7 +107,7 @@ def _write(p, data):
 
 def save(data, name):
     """Store bytes under the name; {id, name, size, mime}. Images are stored without metadata, with a thumbnail; an
-    image that does not decode is kept as application/octet-stream. ValueError when empty or over MAX_BYTES."""
+    image that does not decode or is over MAX_PIXELS is kept as application/octet-stream. ValueError when empty or over MAX_BYTES."""
     if not data:
         raise ValueError("empty file")
     if len(data) > MAX_BYTES:
@@ -147,6 +151,16 @@ def orphans(days=2, now=None):
                   and os.path.getmtime(os.path.join(_folder(), n)) < cut)
 
 
+def copies(days=30, now=None):
+    """Paths of seats' own attachment copies older than `days` (give() copies again on the next read)."""
+    root = chat_store.root()
+    folders = glob.glob(os.path.join(root, "seats", "*", "files")) + glob.glob(
+        os.path.join(os.path.dirname(os.path.dirname(root)), "po-*", "state", "chat-files"))
+    cut = (time.time() if now is None else now) - days * 86400
+    return sorted(p for d in folders for p in glob.glob(os.path.join(d, "*"))
+                  if FID.match(os.path.basename(p)[:16]) and os.path.isfile(p) and os.path.getmtime(p) < cut)
+
+
 def size(fid):
     """Bytes on disk of a stored file with its thumbnail and metadata."""
     return sum(os.path.getsize(p) for p in (path(fid), path(fid, thumb=True), path(fid) + ".json") if os.path.exists(p))
@@ -174,11 +188,14 @@ def give(seat, m):
     return dest
 
 
-def lines(seat, files):
+def lines(seat, files, pull=False):
     """One `file: <path> (<mime>, <size> bytes)` line per attachment, each copied for the seat; `file: <name> (missing)`
-    when the store lost it."""
+    when the store lost it; a pull seat gets `file: <name> (not sent to this seat)` and no copy."""
     out = []
     for f in files or ():
+        if pull:
+            out.append(f"file: {f['name']} (not sent to this seat)")
+            continue
         try:
             out.append(f"file: {give(seat, f)} ({f['mime']}, {f['size']} bytes)")
         except OSError:

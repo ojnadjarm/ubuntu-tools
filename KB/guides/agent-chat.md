@@ -102,7 +102,9 @@ bash ~/agents/bin/tests/chat.test.sh manager  # a manager: owner dm stored, ever
   copy on read or wake: `po-<seat>/state/chat-files/<id>-<name>`, else `state/chat/seats/<seat>/files/`; the store keeps
   one under `state/chat/files/<id>` (images re-encoded upright without EXIF, plus a 640 px WebP thumb).
   A panel upload never posted stays there until the weekly `maintenance-run` calls `chat prune --apply` (no message
-  carries it, older than 2 days; `chat prune` alone is the dry run; P30).
+  carries it, older than 2 days; `chat prune` alone is the dry run; P30). The same run drops seats' own copies older
+  than `--copies-days` (default 30; the next read copies again); a pull seat's read prints `file: <name> (not sent to
+  this seat)` and makes no copy; an image over 40 megapixels is stored as a plain file, no thumbnail (T1546-X9).
 - The panel opens on Recent (`GET /api/chat?recent=1`, newest 50 of every channel); a channel opens on its newest 50 and
   `before=<id>` pages older ones across month files. `GET /api/chat` with no `ch`/`recent` stays the cheap badge read.
 - Search (T1545-C): `GET /api/chat/search?q=<words>[&ch=<id>]` (tailnet only) gives `{q, messages}`, rows with `ch`, every

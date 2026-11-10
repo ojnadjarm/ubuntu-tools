@@ -169,6 +169,16 @@ class ChatApi(unittest.TestCase):
         self.assertEqual(([m["id"] for m in body["messages"]], body["more"]), (ids[:10], False))
         self.assertEqual(self.req("/api/chat?ch=harness&before=x")[0], 400)
 
+    def test_pixel_cap_keeps_a_huge_image_as_a_plain_file(self):
+        from PIL import Image
+        b = io.BytesIO()
+        Image.new("L", (7000, 7000)).save(b, "PNG")
+        t = time.monotonic()
+        code, f = self.upload(b.getvalue(), "scan.png")
+        self.assertLess(time.monotonic() - t, 1.0)
+        self.assertEqual((code, f["mime"]), (200, "application/octet-stream"))
+        self.assertFalse(os.path.exists(os.path.join(self.tmp.name, "state", "chat", "files", f["id"] + ".thumb.webp")))
+
     def png(self):
         from PIL import Image
         b = io.BytesIO()
