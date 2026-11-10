@@ -1,6 +1,6 @@
 # Discord liaison: the agent that answers the #foro forum and @agents in #general, and turns requests into PRs
 
-Ticket: T1409, T1411, T1413, T1414, T1415, T1416, T1421, T1482, T1515 P31, P32, P36, P40, T1536 · Last verified: 2026-11-10 (T1546 L1-L5: 94 fixture tests, po-asked.json saved per hand-off, a failed image download is skipped; T1536: 81 fixture tests, hand-off posts nothing; P40: relay on outbox write; P36: 77 fixture tests, a manager's reply images reach its thread, 8 bad paths refused; P32: 76 fixture tests, an image reaches only its manager; P31: 75 fixture tests,
+Ticket: T1409, T1411, T1413, T1414, T1415, T1416, T1421, T1482, T1515 P31, P32, P36, P40, T1536 · Last verified: 2026-11-10 (T1546-M2: 6 approval fixture tests, the owner's ✅ reaches the manager once; T1546 L1-L5: 94 fixture tests, po-asked.json saved per hand-off, a failed image download is skipped; T1536: 81 fixture tests, hand-off posts nothing; P40: relay on outbox write; P36: 77 fixture tests, a manager's reply images reach its thread, 8 bad paths refused; P32: 76 fixture tests, an image reaches only its manager; P31: 75 fixture tests,
 `test_managers.py` 5: code routing to one manager per project); 2026-11-04 (T1482 postmortem of 119 jobs, lessons in `JOB.md`, guarded by `tests/test_lessons.py`); 2026-10-31 (caps re-read from agent.env, F71); 2026-10-27 by 63 liaison fixture tests (T1421: 6 batch/supersede/stale tests) + a live nudge → wake run; before: 57 (T1416: 8 routing tests, job vs escalate); before: 49 (T1415: job media + reply); before: 47 liaison fixture tests (T1414: 7 job tests, a transient-unit probe, a live tick) and eval 57 fixtures on opus (T1413: old brief 45/57 twice, new brief + context 55/57 twice); before: 25 liaison fixture tests + 25 orchestrator-pulse checks + 31 discord-bot tests, live ticks on #foro and #general
 
 ## When to use
@@ -28,6 +28,11 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
   message wakes no triage. No project / a 2nd project named → the router. The triage keeps #general, projects without
   `po` and failed handoffs. Context map and SOLID: `$AGENT_WORK/research/2026-11-09/T1515/P31-architecture.md`;
   guide `product-owner-agents`. Rollback: drop `router` and set `po` back (one commit).
+- The owner's ✅ (T1546-M2, owner 2026-11-10): the bot writes `discord-bot/state/approvals/<message>.json` and nudges;
+  `run_tick` → `po.approvals` re-checks it (user = `DISCORD_OWNER_ID`, his ✅ in `reactors` on Discord, thread mapped to a
+  project with a manager) and files one `po-ask --owner` item "the owner approved this message (✅): message <id>:
+  "<first 200 chars>"" for that manager. `state/approved.json` keeps it to once per message; anyone else's ✅, a
+  project without a manager or #general: nothing. A REST error or failed po-ask keeps the record for the next tick.
 - Reply first (T1515 P40): no code ack (T1536): `po.handoff` posts nothing in the thread; the manager's first reply is
   the ack. The manager's first act is a one-line plan reply, then work, then the result. `discord-liaison-relay@<p>.path`
   (PathModified on `po-<p>/outbox/discord`, dot files ignored) runs `discord-liaison relay` on each outbox `mv`; the
@@ -98,8 +103,8 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
 - Eval (`discord-liaison/eval/`): `run_eval.py <brief> --model opus --context liaison|none --out r.jsonl` (tool-less
   `claude -p`, one JSON decision per fixture, ~$0.04 and ~5 s per opus call, `--show` prints prompts) and
   `score.py r.jsonl` (deterministic regex/field checks, per-class %). Change the brief → run both, twice each.
-- Split with discord-bot: `DISCORD_FORUM_REPLIES=liaison` in config.env. The bot still tags posts and runs the owner's
-  approved jobs; it no longer sends its English ACK or tool-less answers. Its sandbox is unchanged.
+- Split with discord-bot: `DISCORD_FORUM_REPLIES=liaison` in config.env. The bot only tags posts and nudges; it no longer
+  sends its English ACK or tool-less answers, and since T1546-M2 runs no approved jobs (his ✅ goes to the manager). Its sandbox is unchanged.
 
 ## Exact commands
 ```bash

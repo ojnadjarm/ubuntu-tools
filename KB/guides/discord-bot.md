@@ -1,10 +1,11 @@
 # Discord forum bot: requests from family and friends (and their agents) in a Forum channel
 
-Ticket: T348, T361, T448 · Last verified: 2026-10-20 by T846 read-only audit (`--help`, paths, code); before: 2026-10-19 by 28 fixture tests (29 `test_` functions now), sandbox selftest, a live gateway connect through the sandbox
+Ticket: T348, T361, T448, T1546-M2 · Last verified: 2026-11-10 by 36 fixture tests (T1546-M2: liaison mode + owner ✅ leaves `pending/` empty, writes one approval record); 2026-10-20 by T846 read-only audit (`--help`, paths, code); before: 2026-10-19 by 28 fixture tests (29 `test_` functions now), sandbox selftest, a live gateway connect through the sandbox
 
 ## When to use
 Run, check, change or debug the `agents` Discord bot, post into its forum, or build another sandboxed chat bot.
-Conversation in #foro (Spanish replies, collab PRs): guide `discord-liaison`; with `DISCORD_FORUM_REPLIES=liaison` the bot only tags and runs approved jobs (T1409).
+Conversation in #foro (Spanish replies, collab PRs): guide `discord-liaison`; with `DISCORD_FORUM_REPLIES=liaison` the bot only tags and nudges (T1409): the approved tag starts nothing, the owner's ✅
+writes `state/approvals/<message>.json` for discord-liaison to pass to the thread's manager (T1546-M2); no bot worker runs.
 Not for a Discord bridge into an interactive Claude session: that is the official `discord@claude-plugins-official`
 channel plugin (`--channels`), which gives the chat that session's tools.
 
@@ -18,6 +19,9 @@ channel plugin (`--channels`), which gives the chat that session's tools.
 - Approval = moderated `approved` tag set by the owner himself (the guild audit log, THREAD_UPDATE 111, names who
   added it; a moderator's tag starts nothing), or the guild owner's ✅, or an allowlisted author
   (`DISCORD_ALLOWLIST`, empty). Bot and runner both check; fail closed. Owner id comes from the guild at start (`discord-bot setup`).
+- Liaison mode (T1546-M2, owner 2026-11-10: "his ✅ reaches the manager"): `on_thread_update` only nudges;
+  `on_message_reaction_add` with the owner's ✅ writes the approval record (gateway `user_id`, atomic) and nudges.
+  Before M2 his ✅ started a fleet agent with none of the project's rules beside the project's manager.
 - Limits per member per UTC day: `DISCORD_REQUESTS_PER_DAY` (10) answers, `DISCORD_JOBS_PER_DAY` (3) jobs, the
   latter counted again by the runner. Every reply passes `sanitize.clean` (paths, IPs, hosts, emails, tokens,
   config values) twice.

@@ -172,6 +172,25 @@ class TestForumBot(Base):
         self.assertEqual(self.tag_name('400'), ['done'])
         self.assertEqual(self.pending(), [])
 
+    async def test_liaison_mode_owner_check_mark_only_records_and_nudges(self):
+        self.bot.cfg.forum_replies = 'liaison'
+        await self.bot.dispatch('THREAD_CREATE', ev('THREAD_CREATE'))
+        nudge, rec = (os.path.join(self.bot.store.dir, n) for n in ('liaison.nudge', 'approvals/400.json'))
+        await self.bot.dispatch('MESSAGE_REACTION_ADD', ev('REACTION_OTHER'))
+        await self.bot.dispatch('THREAD_UPDATE', ev('THREAD_UPDATE_APPROVED',
+                                                    applied_tags=self.fake.tag_by('400', 'approved', '1')))
+        self.assertFalse(os.path.exists(rec))
+        self.assertTrue(os.path.exists(nudge))
+        os.unlink(nudge)
+        await self.bot.dispatch('MESSAGE_REACTION_ADD', ev('REACTION_OWNER'))
+        self.assertEqual(self.pending(), [])
+        self.assertTrue(os.path.exists(nudge))
+        with open(rec) as f:
+            self.assertEqual({k: v for k, v in json.load(f).items() if k != 'at'},
+                             {'channel_id': '400', 'message_id': '400', 'user_id': '1'})
+        self.assertFalse(any('Aprobado' in m for m in self.fake.sent('400')))
+        self.assertEqual(self.tag_name('400'), ['approved', 'new'])
+
     async def test_network_error_in_a_handler_stays_inside_dispatch_and_deliver(self):
         await self.server.close()
         with self.assertLogs('discordbot', 'ERROR'):

@@ -195,11 +195,13 @@ class App:
 
     async def run_tick(self):
         msgs, _ = await self.check()
+        from . import po
         if self.registry.router:
-            from . import po
             n = await po.handoff(self, self.env)
             if n:
                 print(f'handed {n} message(s) to their manager or the router')
+        if await po.approvals(self, self.env):
+            print('passed the owner\'s ✅ to the manager')
         print(f'{len(msgs)} new, inbox {len(self.state.inbox)}')
         self.nudge()
         if not self.state.inbox:

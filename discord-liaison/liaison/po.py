@@ -73,6 +73,48 @@ async def deliver(app, env, to, m, pid):
             os.unlink(f)
 
 
+async def approvals(app, env):
+    """Pass each owner ✅ the bot recorded (`approvals/<message>.json` beside its nudge file) to the thread's manager once,
+    as his word: re-checked on Discord, the message's id and first 200 characters. Returns the number passed."""
+    folder = os.path.join(os.path.dirname(app.nudge_file), 'approvals')
+    path = os.path.join(app.home, 'state', 'approved.json')
+    try:
+        with open(path) as f:
+            done = set(json.load(f))
+    except (OSError, ValueError):
+        done = set()
+    n = 0
+    for f in sorted(glob.glob(os.path.join(glob.escape(folder), '*.json'))):
+        try:
+            with open(f) as fh:
+                rec = json.load(fh)
+            tid, mid = str(rec['channel_id']), str(rec['message_id'])
+        except (OSError, ValueError, KeyError):
+            os.unlink(f)
+            continue
+        pid = (app.state.thread(tid) or {}).get('project', '')
+        to = app.registry.route(pid) if pid else None
+        if mid in done or not app.owner or rec.get('user_id') != app.owner or to in (None, 'liaison'):
+            os.unlink(f)
+            continue
+        try:
+            if app.owner not in {u['id'] for u in await app.rest.reactors(tid, mid, '✅')}:
+                os.unlink(f)
+                continue
+            text = (await app.rest.call('GET', f'/channels/{tid}/messages/{mid}')).get('content', '')
+        except (RestError, aiohttp.ClientError, asyncio.TimeoutError):
+            continue
+        m = {'id': mid, 'thread_id': tid, 'thread': (app.state.thread(tid) or {}).get('title', ''), 'author_id': app.owner,
+             'author': 'owner', 'content': f'the owner approved this message (✅): message {mid}: "{text[:200]}"'}
+        if subprocess.call(ask(env, to, m, pid), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL) != 0:
+            continue
+        done.add(mid)
+        save_json(path, sorted(done))
+        os.unlink(f)
+        n += 1
+    return n
+
+
 def ask(env, to, m, pid, images=(), notes=''):
     """The po-ask command that files one Discord message for agent `to` (the router also gets the thread's project);
     `--owner` only when its author id is DISCORD_OWNER_ID."""

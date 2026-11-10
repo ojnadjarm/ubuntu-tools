@@ -7,6 +7,7 @@ from .approval import tag_added_by
 from .config import APPROVE_EMOJI, APPROVED_TAG, STATUS_TAGS
 from .rest import RestError
 from .sanitize import chunks, clean
+from .store import save_json
 
 log = logging.getLogger('discordbot')
 FORUM = 15
@@ -170,12 +171,23 @@ class ForumBot:
         with open(os.path.join(self.store.dir, 'liaison.nudge'), 'w') as f:
             f.write(f'{self.clock():.3f}\n')
 
+    def record_approval(self, d):
+        """The owner's ✅ for discord-liaison to pass to the project's manager: approvals/<message>.json, then a nudge."""
+        folder = os.path.join(self.store.dir, 'approvals')
+        os.makedirs(folder, exist_ok=True)
+        save_json(os.path.join(folder, f'{int(d["message_id"])}.json'), {
+            'channel_id': d['channel_id'], 'message_id': d['message_id'], 'user_id': d['user_id'], 'at': int(self.clock())})
+        self.nudge()
+
     async def history(self, tid):
         msgs = await self.rest.messages(tid, 20)
         return [{'author': m.get('author', {}).get('username', '?'), 'self': m.get('author', {}).get('id') == self.me_id,
                  'content': m.get('content', '')} for m in reversed(msgs)]
 
     async def on_thread_update(self, d):
+        if self.cfg.forum_replies == 'liaison':
+            self.nudge()
+            return
         if d.get('parent_id') != self.forum_id or APPROVED_TAG not in self.tags:
             return
         tag = self.tags[APPROVED_TAG]
@@ -197,6 +209,9 @@ class ForumBot:
 
     async def on_message_reaction_add(self, d):
         if d.get('emoji', {}).get('name') != APPROVE_EMOJI or not self.owner_id or d.get('user_id') != self.owner_id:
+            return
+        if self.cfg.forum_replies == 'liaison':
+            self.record_approval(d)
             return
         if await self.is_forum_thread(d['channel_id']):
             await self.start_work(d['channel_id'], {'kind': 'reaction', 'message_id': d['message_id']})

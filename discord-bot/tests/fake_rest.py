@@ -49,6 +49,8 @@ class FakeDiscord:
         r.add_patch('/channels/{c}', self.patch_channel)
         r.add_get('/channels/{c}/messages', lambda q: web.json_response(
             list(reversed(self.messages.get(q.match_info['c'], [])))))
+        r.add_get('/channels/{c}/messages/{m}', lambda q: web.json_response(next(
+            m for m in self.messages.get(q.match_info['c'], []) if m['id'] == q.match_info['m'])))
         r.add_post('/channels/{c}/messages', self.send)
         r.add_post('/channels/{c}/threads', self.create_post)
         r.add_put('/channels/{c}/messages/{m}/reactions/{e}/@me', self.react)
