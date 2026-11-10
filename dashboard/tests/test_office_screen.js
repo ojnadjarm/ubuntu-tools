@@ -112,7 +112,7 @@ const STAFF = {
   "fleet-backup": ["Status", "Schedule", "Unit", "Next run", "Last check", "Result", "Took", "Report"],
   "night-relay": ["Status", "Schedule", "Unit", "Up since", "Unit state", "Tmux", "Report"],
   "ci-fix": ["Status", "Schedule", ...LAST4],
-  "tiny-epic-narrator": ["Workers", "Folder", "Started by", "Last active", ...LAST4],
+  "tiny-epic-narrator": ["Workers", "Folder", "Started by", "Last active", ...LAST4, "Files held"],
   vass: ["Workers", "Folder", "Last active"],
 };
 /* The staff cards on the list path: row labels per runner kind, the id line, gold when bad, dim when off, no Message, the Unassigned room. */
