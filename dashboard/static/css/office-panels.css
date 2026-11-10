@@ -1,0 +1,24 @@
+/* Agents › Office: the boards under the office (Next runs, Sessions, Claims), each a fold (T1601-09); eye.css tokens only. */
+.office .ob > summary { display: flex; align-items: center; min-height: 32px; list-style: none; cursor: pointer; }
+.office .ob > summary::-webkit-details-marker { display: none; }
+.office .ob > summary h2 { flex: 1; margin: 0; }
+.office .ob > summary h2 span::before { content: "▸"; display: inline-block; margin-right: .5em; transition: transform .2s var(--ei); }
+.office .ob[open] > summary { margin-bottom: .7rem; }
+.office .ob[open] > summary h2 span::before { transform: rotate(90deg); }
+.office .ob > summary:hover h2, .office .ob > summary:focus-visible h2 { color: var(--hi); }
+.office .ob > summary:focus-visible { outline: 1px solid var(--g); outline-offset: 2px; }
+.office .onext { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr)); column-gap: 1.6rem; list-style: none; margin: 0; padding: 0; }
+.office .onext li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; column-gap: .6rem; padding: .2rem 0 .35rem; font-size: max(11px, .86rem); color: var(--mid); }
+.office .onext .who { min-width: 0; }
+.office .onext .who b { color: var(--hi); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.office .onext .bm { font-style: normal; color: var(--gold); font-size: max(11px, .75rem); }
+.office .onext .in { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.office .onext progress { grid-column: 1 / -1; display: block; width: 100%; height: 2px; border: 0; appearance: none; background: var(--line); color: var(--g); }
+.office .onext progress::-webkit-progress-bar { background: var(--line); }
+.office .onext progress::-webkit-progress-value { background: currentColor; }
+.office .onext progress::-moz-progress-bar { background: currentColor; }
+.office .onext .bad progress { color: var(--gold); }
+.office .onext .bad .who b { color: var(--gold); }
+.office .ob .claims { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 24rem), 1fr)); align-items: start; column-gap: 1.6rem; margin: 0; padding: 0; }
+.office .ob .claims li { font-size: max(11px, .82rem); }
+@media (max-width: 899px), (pointer: coarse) { .office .ob > summary { min-height: 44px; } }
