@@ -85,6 +85,10 @@ def main(argv):
     if "-h" in argv or "--help" in argv:
         print(USAGE)
         return 0
+    bad = [a for a in argv if a.startswith("-") and a not in ("--json", "--check", "--cached")]
+    if bad:
+        print(USAGE, file=sys.stderr)
+        return 2
     check = None
     if "--check" in argv:
         try:

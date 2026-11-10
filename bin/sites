@@ -17,7 +17,7 @@ declare -A BUILD_ENV=(  # extra env for the build: the local ailearning site car
 
 usage() {
   cat <<EOF
-sites — local mirror of $PAGES, served like GitHub Pages ($URL/<site>/)
+usage: sites <publish|verify|status|check> — local mirror of $PAGES, served like GitHub Pages ($URL/<site>/)
 
   sites publish <site> [--no-build]   npm run build in the repo (ailearning: REVIEW=toggle), then swap dist/ into $ROOT/<site>/ atomically
                                       --no-build: snapshot the repo's current dist/ as it is

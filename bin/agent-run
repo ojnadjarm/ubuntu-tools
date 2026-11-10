@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Run one persistent agent once: agent-exec with the fleet preamble, logs, index row, REPORT.md.
 set -uo pipefail
-usage() { echo "usage: agent-run <name>" >&2; exit 2; }
-[ $# -eq 1 ] || usage
-case "$1" in -h|--help) usage ;; esac
+usage() { echo "usage: agent-run <name>"; }
+case "${1:-}" in -h|--help) usage; exit 0 ;; -*) usage >&2; exit 2 ;; esac
+[ $# -eq 1 ] || { usage >&2; exit 2; }
 . "$HOME/agents/bin/fleetlib.sh"
 name="$1"
 agent_name_check agent-run "$name" || exit 2

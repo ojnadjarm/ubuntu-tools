@@ -16,10 +16,6 @@ PASSTHRU=" pc "   # pc <sub> [args]: runs pc-<sub> with the rest
 # Known red at T997, outside its file set: <cli> <help|bogus...>. Each is a FOLLOWUPS line; drop the row once fixed.
 declare -A KNOWN=()
 while read -r c k; do KNOWN[$c]=$k; done <<'EOF'
-agent-disable help
-agent-enable help
-agent-now help
-agent-run help
 agents-start help bogus
 agents-stop help bogus
 baseline.sh help
@@ -27,22 +23,16 @@ boot-check.sh help bogus
 code-review-sandbox help bogus
 compose-services help bogus
 fleetlib.sh help bogus
-harness help
 lockcheck.sh help bogus
 moodle-login-check help bogus
 mv-lut bogus
-notify-owner help
 orbit-hook help bogus
 orchestrator-pulse help bogus
 pc_dbus.py help bogus
 pc-selftest bogus
-plan-usage bogus
 playwright-mcp help bogus
 power-profile-auto help bogus
 pulse-5h-reset help bogus
-push-ready help bogus
-sentinel-waits bogus
-sites help
 spotify_api.py help
 EOF
 

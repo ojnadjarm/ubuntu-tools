@@ -22,6 +22,7 @@ Instruction files are read from $HARNESS_CONTEXT_DIR (default ~/.claude).
 U
 }
 
+case "${1:-}" in -h|--help) usage; exit 0 ;; esac
 [ "${1:-}" = context ] || { usage >&2; exit 2; }
 shift
 BRIEF=0; WORKER=0; JSON=0; FORCE=0

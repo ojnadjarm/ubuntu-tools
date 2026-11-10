@@ -28,6 +28,9 @@ AUDIT = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks",
 if sys.argv[1:2] in (["-h"], ["--help"]):
     print(__doc__.strip())
     sys.exit(0)
+if any(a.startswith("-") and a != "--dry-run" for a in sys.argv[1:]):
+    print(__doc__.strip(), file=sys.stderr)
+    sys.exit(2)
 DRY = "--dry-run" in sys.argv[1:]
 SHELLS = {"bash", "sh", "dash", "zsh"}
 TOOL_SHELL = "/.claude/shell-snapshots/snapshot-"

@@ -17,7 +17,7 @@ VECTOR_MARK='push-ready: test vector'
 usage() { echo "usage: push-ready [--untracked] <repo-dir>" >&2; exit 2; }
 MODE=check; [ "${1:-}" = --untracked ] && { MODE=untracked; shift; }
 [ $# -eq 1 ] || usage
-case "$1" in -h|--help) usage ;; esac
+case "$1" in -h|--help) echo "usage: push-ready [--untracked] <repo-dir>"; exit 0 ;; -*) usage ;; esac
 REPO="$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" || { echo "push-ready: not a git repo: $1" >&2; exit 2; }
 NAME="$(basename "$REPO")"
 tmp="$(mktemp -d)"; chmod 700 "$tmp"; trap 'rm -rf "$tmp"' EXIT

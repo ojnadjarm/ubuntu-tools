@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Enable the timer for one agent: agent-enable <name> "<OnCalendar>".
 set -euo pipefail
-usage() { echo 'usage: agent-enable <name> "<OnCalendar>"' >&2; exit 2; }
-[ $# -eq 2 ] || usage
-case "$1" in -h|--help) usage ;; esac
+usage() { echo 'usage: agent-enable <name> "<OnCalendar>"'; }
+case "${1:-}" in -h|--help) usage; exit 0 ;; -*) usage >&2; exit 2 ;; esac
+[ $# -eq 2 ] || { usage >&2; exit 2; }
 . "$HOME/agents/bin/fleetlib.sh"
 name="$1"; cal="$2"
 agent_name_check agent-enable "$name" || exit 2

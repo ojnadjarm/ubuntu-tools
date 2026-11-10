@@ -11,10 +11,13 @@ LOG_FILE="${NTFY_LOG_FILE:-$HOME/agents/log/notify.log}"
 KEYS_FILE="${NTFY_KEYS_FILE:-$HOME/agents/log/notify-keys.tsv}"
 
 usage() {
-  echo 'usage: notify-owner [-p min|low|default|high|urgent] [-t title] [-g tags] [-k cause-key] [-a "label=body;…"] "message"' >&2
-  echo '  -a: up to 3 ntfy buttons; a tap POSTs body to the reply topic (NTFY_REPLY_TOPIC, else <topic>-picks), read by po-picks' >&2
-  echo '  -p high: same key (-k, else the text; digits and a trailing " · path" dropped) sent in 24 h → logged dup in notify-keys.tsv, not sent' >&2
-  exit 2
+  local rc=${1:-2} fd=2; [ "$rc" = 0 ] && fd=1
+  {
+  echo 'usage: notify-owner [-p min|low|default|high|urgent] [-t title] [-g tags] [-k cause-key] [-a "label=body;…"] "message"'
+  echo '  -a: up to 3 ntfy buttons; a tap POSTs body to the reply topic (NTFY_REPLY_TOPIC, else <topic>-picks), read by po-picks'
+  echo '  -p high: same key (-k, else the text; digits and a trailing " · path" dropped) sent in 24 h → logged dup in notify-keys.tsv, not sent'
+  } >&"$fd"
+  exit "$rc"
 }
 
 prio=default
@@ -22,6 +25,7 @@ title="${HARNESS_HOST:-$(hostname)}"
 tags=
 key=
 actions=
+case "${1:-}" in -h|--help) usage 0 ;; esac
 while getopts ':p:t:g:k:a:h' opt; do
   case "$opt" in
     p) prio=$OPTARG ;;
@@ -29,6 +33,7 @@ while getopts ':p:t:g:k:a:h' opt; do
     g) tags=$OPTARG ;;
     k) key=$OPTARG ;;
     a) actions=$OPTARG ;;
+    h) usage 0 ;;
     *) usage ;;
   esac
 done
