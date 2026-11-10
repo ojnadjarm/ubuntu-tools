@@ -15,7 +15,7 @@ export function ceoSvg(state, o = {}) {
   const out = (d, w, c) => `<path d="${d}" fill="none" stroke="${INK}" stroke-width="${w + 5}" stroke-linecap="round"/><path d="${d}" fill="none" stroke="${c}" stroke-width="${w}" stroke-linecap="round"/>`;
   let s = `<svg viewBox="0 0 100 100" class="cr ceo ${state}" role="img" aria-hidden="true">`;
   s += out("M66 82Q93 87 93 64Q93 50 87 43", 10, NAVY) + `<path d="M93 60Q92.6 49 87 43" fill="none" stroke="${CREAM}" stroke-width="10" stroke-linecap="round"/><path d="M82.5 44.5l8.5 -4" stroke="${GOLD}" stroke-width="3.2" stroke-linecap="round"/>`;
-  if (!shut && lamp === LAMP.talking) s += `<circle cx="86" cy="32" r="12.6" fill="none" stroke="${lamp}" stroke-width="1.8"/>`;
+  if (!shut && lamp === LAMP.talking) s += `<circle class="ring" cx="86" cy="32" r="12.6" fill="none" stroke="${lamp}" stroke-width="1.8"/>`;
   if (!shut && lamp === RED) s += `<path d="M86 17.5v-5M94.8 22.4l3.4 -3.6M77.4 22.4l-2.4 -2.6" stroke="${RED}" stroke-width="3" stroke-linecap="round"/>`;
   s += `<circle cx="86" cy="32" r="${shut ? 8 : 10}" fill="${lamp}" stroke="${INK}" stroke-width="2.5" opacity="${shut ? 0.85 : 1}"/>` + (shut ? "" : lamp === RED ? `<path d="M86 26.5v6.5" stroke="#fff" stroke-width="3" stroke-linecap="round"/><circle cx="86" cy="37.4" r="1.6" fill="#fff"/>` : `<circle cx="83" cy="29" r="2.6" fill="#fff" opacity=".8"/>`);
   s += `<path d="M50 44L17 90q6.6 7 13.2 0q6.6 7 13.2 0q6.6 7 13.2 0q6.6 7 13.2 0q6.6 7 13.2 0Z" fill="${NAVY}" stroke="${INK}" stroke-width="3" stroke-linejoin="round"/>`;
@@ -37,7 +37,7 @@ export function ceoSvg(state, o = {}) {
       : `<g class="lid"><circle cx="${x}" cy="40" r="6" fill="#fffaf2"/><circle cx="${x}" cy="40.8" r="${err ? 3.8 : 4.8}" fill="${GOLD}"/><circle cx="${x}" cy="40.8" r="${err ? 2 : 2.7}" fill="${INK}"/><circle cx="${x + 1.7}" cy="39.6" r="1.1" fill="#fff"/><path d="M${x - 6.8} ${lid}V37Q${x} 29.5 ${x + 6.8} 37V${lid}Z" fill="${LID}"/><path d="M${x - 6.4} ${lid}h12.8" stroke="${INK}" stroke-width="2.2" stroke-linecap="round"${err ? ` transform="rotate(${i ? -12 : 12} ${x} ${lid})"` : ""}/></g>`;
   });
   s += `<path d="M30 46.5l4.6 1.6M70 46.5l-4.6 1.6" stroke="${CORAL}" stroke-width="3" stroke-linecap="round"/>`;
-  s += p === "talking" || err ? `<ellipse cx="50" cy="50" rx="3.2" ry="${err ? 2.2 : 3.2}" fill="${INK}"/>` : `<path d="M45.6 48.2q2.2 3.2 4.4 0q2.2 3.2 4.4 0" stroke="${INK}" stroke-width="2" fill="none" stroke-linecap="round"/>`;
+  s += p === "talking" || err ? `<ellipse class="mouth" cx="50" cy="50" rx="3.2" ry="${err ? 2.2 : 3.2}" fill="${INK}"/>` : `<path d="M45.6 48.2q2.2 3.2 4.4 0q2.2 3.2 4.4 0" stroke="${INK}" stroke-width="2" fill="none" stroke-linecap="round"/>`;
   const hy = shut ? 19 : 8, hc = CORAL;
   s += `<g transform="rotate(${err ? -28 : -12} 50 ${hy})"><ellipse cx="50" cy="${hy}" rx="14" ry="4.6" fill="none" stroke="${INK}" stroke-width="5.5"/><ellipse cx="50" cy="${hy}" rx="14" ry="4.6" fill="none" stroke="${hc}" stroke-width="3"/>`;
   if (!shut) s += `<path d="M50 ${hy - 7}v-3.4M50 ${hy + 7}v3.4M33 ${hy}h-3.6M67 ${hy}h3.6M38 ${hy - 5}l-2.6 -2.4M62 ${hy - 5}l2.6 -2.4M38 ${hy + 5}l-2.6 2.4M62 ${hy + 5}l2.6 2.4" stroke="${hc}" stroke-width="2.4" stroke-linecap="round"/>`;

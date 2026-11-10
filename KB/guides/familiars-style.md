@@ -1,6 +1,6 @@
 # Familiars: the agent creature look (3D on the stage, SVG in lists)
 
-Ticket: T1515-V2, T1515-V4, T1515-V5, T1515-P21 · Last verified: 2026-11-10 by `node tests/test_next.js`, `tools/shots.mjs` at 5 widths, draw-call and fps count on the iGPU
+Ticket: T1515-V2, T1515-V3, T1515-V4, T1515-V5, T1515-P21 · Last verified: 2026-11-10 by `node tests/test_next.js`, `tools/shots.mjs` at 5 widths, draw-call and fps count on the iGPU
 
 ## When to use
 An agent needs a face: a new panel screen, another project, a new role or state. Load skill `/familiars-style` (rules + kit).
@@ -69,6 +69,19 @@ Role `manager` (the Discord project managers in `org.json`): one small accessory
 (SVG `<g class="gear-manager">`, 3D two cones + a knot on the hip at `0.33 * W` forward); never the PO's headset or the
 worker's hard hat. Every role's SVG gear sits in `<g class="gear-<role>">`, so a test can tell roles apart.
 - Pitfall: a role missing from `ROLES` falls back to `worker`; managers wore hard hats until `manager` was added.
+
+## Lists that move (T1515-V3, 2026-11-10)
+Org and Chat draw `familiars/alive.js` `familiar(id, state, role, messageId?)`: the SVG twin in a `.fam` box that
+`static/css/familiars.css` animates. A new chat message makes its sender talk for 2 s (`familiars/talk.js` `heard`,
+`talking`, `watch`); a screen with no chat feed hears through `familiars/ear.js` `listen(on)`.
+- Measured (Iris Xe, 1366x768): 60.2 fps at rest and mid-talk, 1 WebGL context (the stage), 21 animations on Org, 30 on Chat.
+- Pitfall: animating the `<svg>` and its parts every frame took the main thread from 6 % to 14 % at rest and 34 % mid-talk
+  on Chat (wall time); the box now moves on the
+  compositor and blink / working ring change in steps: about +4 points on Org, +6 on Chat over a still page.
+- Pitfall: class `.lb` is the fullscreen viewer in `eye.css` (fixed, opacity 0); a label with that class vanished and
+  swallowed clicks. Grep `eye.css` before naming a class.
+- Pitfall: under load 8 to 16 one 5 s CPU sample swings 2x; compare on/off in the same run, 10 s windows, 3 rounds.
+- Test hooks: `.fam.talking`, `svg.cr.talking`, `data-fam="<id>"`; hidden pause via `html.away`.
 
 ## Links
 - Code: `~/agents/dashboard/static/next/js/familiars/`, `.../gl/familiars/`, `.../gl/creatures.js`

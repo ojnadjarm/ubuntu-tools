@@ -1,8 +1,9 @@
-/* Chat: Recent (every channel, newest last) or a channel's stream (newest 50, older on scroll-up), the channels and direct messages, a composer with attachments, who is in it and today's wakes, from GET /api/chat. */
+/* Chat: Recent (every channel, newest last) or a channel's stream (newest 50, older on scroll-up), the channels and direct messages, a composer with attachments, who is in it, who is thinking and today's wakes, from GET /api/chat. */
 import { esc, p2 } from "/static/js/core/fmt.js";
 import { getJSON, postJSON } from "/static/js/core/api.js";
 import { cur, go } from "/static/js/core/router.js";
-import { creature } from "../avatar.js";
+import { familiar } from "../familiars/alive.js";
+import { heard, watch as onTalk } from "../familiars/talk.js";
 import { dust } from "../shapes.js";
 import { fitEye } from "../gl/cam.js";
 import { sync } from "../ui/sync.js";
@@ -20,7 +21,7 @@ const LINE = { working: "working now", idle: "idle", asleep: "asleep, wakes on i
 const TAG = { ask: `<span class="ctag">question</span>`, answer: `<span class="ctag ans">answer</span>` };
 const ROOMS = ["harness", "org"];
 let C = null, msgs = [], ch = "", err = "", busy = false, timer = 0, O = null, oat = 0, stick = true, W = null;
-let more = false, jump = true, early = false, io = null, watched = null;
+let more = false, jump = true, early = false, io = null, watched = null, T = [];
 const seen = {};
 
 if (!document.querySelector('link[href="/static/css/chat.css"]')) {
@@ -50,8 +51,9 @@ function pull() {
     .then((j) => {
       err = "";
       if (want !== ch) return;
-      C = j.channels || []; W = j.wakes || null;
+      C = j.channels || []; W = j.wakes || null; T = j.thinking || [];
       msgs = after ? msgs.concat(j.messages || []) : j.messages || [];
+      if (after) heard(j.messages || []);
       if (!after) more = !!j.more;
       markRead();
     }, (e) => { err = e.message || "unreadable"; })
@@ -116,6 +118,8 @@ function paint() {
   watch(grid);
 }
 
+onTalk(() => paint());
+
 const names = () => Object.fromEntries(((O && O.seats) || []).map((s) => [s.id, s.name]));
 const nameOf = (id, N) => (id === "owner" ? "You" : N[id] || id);
 const pair = (c) => c.slice(3).split("--");
@@ -152,10 +156,18 @@ const clip = (t) => (t.length > QUOTE ? t.slice(0, QUOTE).trimEnd() + "…" : t)
 function msg(m, byId, N) {
   if (m.kind === "system") return `<li class="csys">${text(m.text)}</li>`;
   const him = m.from === "owner", r = m.re != null ? byId[m.re] : null;
-  const av = him ? `<i class="dia"></i>` : creature(m.from, stateOf(m.from) === "working" ? "working" : "sleep", roleOf(m.from));
+  const av = him ? `<i class="dia"></i>` : familiar(m.from, stateOf(m.from), roleOf(m.from), m.id);
   const re = m.re == null ? "" : `<p class="re">${r ? esc(nameOf(r.from, N) + " " + time(r) + ": " + clip(r.text)) : "a reply to an earlier message"}</p>`;
   const where = ch ? "" : `<a class="chtag" href="#chat?ch=${esc(m.ch)}" data-ch="${esc(m.ch)}">${esc(label(m.ch, N))}</a>`;
   return `<li class="msg${him ? " him" : ""}"><span class="av" aria-hidden="true">${av}</span><div><p class="who"><b>${esc(nameOf(m.from, N))}</b>${where}${TAG[m.kind] || ""}<time datetime="${esc(m.ts)}">${time(m)}</time></p>${re}${m.text ? `<p class="tx">${text(m.text)}</p>` : ""}${attachments(m.files)}</div></li>`;
+}
+/* "<seat> is thinking" (or "woken, starting") for an agent woken from channel c and still running. */
+const busyLine = (t, N) => esc(nameOf(t.seat, N)) + (t.state === "thinking" ? " is thinking" : " woken, starting");
+function thinking(N) {
+  return T.filter((t) => !ch || t.ch === ch).map((t) => {
+    const where = ch ? "" : `<a class="chtag" href="#chat?ch=${esc(t.ch)}" data-ch="${esc(t.ch)}">${esc(label(t.ch, N))}</a>`;
+    return `<li class="thinking"><span class="av" aria-hidden="true">${familiar(t.seat, "working", roleOf(t.seat))}</span><p><b>${busyLine(t, N)}</b><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>${where}</p></li>`;
+  }).join("");
 }
 function stream(N) {
   const byId = Object.fromEntries(msgs.map((m) => [m.id, m]));
@@ -165,29 +177,30 @@ function stream(N) {
     if (d !== last) { out += `<li class="cday">${esc(d)}</li>`; last = d; }
     out += msg(m, byId, N);
   }
-  return (more ? `<li class="older"><button type="button" class="btn" data-older>Older messages</button></li>` : "") + out ||
-    `<li class="csys">No messages ${ch ? "in this channel" : "anywhere"} yet.</li>`;
+  return ((more ? `<li class="older"><button type="button" class="btn" data-older>Older messages</button></li>` : "") + out ||
+    `<li class="csys">No messages ${ch ? "in this channel" : "anywhere"} yet.</li>`) + thinking(N);
 }
 
 function chanLink(c, N) {
-  const st = c.ch.startsWith("dm-") ? stateOf(pair(c.ch).find((s) => s !== "owner") || "") : "";
-  const tail = c.unread ? `<span class="unread" title="${plural(c.unread, "unread message")}">${c.unread}</span>` : st ? `<span class="pill ${PILL[st] || "idle"}">${esc(st)}</span>` : "";
-  return `<a href="#chat${c.ch ? "?ch=" + esc(c.ch) : ""}" data-ch="${esc(c.ch)}"${c.ch === ch ? ` class="on" aria-current="page"` : ""}><span>${esc(label(c.ch, N))}</span>${tail}</a>`;
+  const who = c.ch.startsWith("dm-") ? pair(c.ch).find((s) => s !== "owner") || "" : "", st = who ? stateOf(who) : "";
+  const think = T.filter((t) => t.ch === c.ch).map((t) => `<span class="think" title="${busyLine(t, N)}"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></span>`).join("");
+  const tail = c.unread ? `<span class="unread" title="${plural(c.unread, "unread message")}">${c.unread}</span>` : st && !think ? `<span class="pill ${PILL[st] || "idle"}">${esc(st)}</span>` : "";
+  return `<a href="#chat${c.ch ? "?ch=" + esc(c.ch) : ""}" data-ch="${esc(c.ch)}"${c.ch === ch ? ` class="on" aria-current="page"` : ""}>${who ? familiar(who, st, roleOf(who)) : ""}<span class="cn">${esc(label(c.ch, N))}</span>${think}${tail}</a>`;
 }
 function members(N) {
   const ids = ch.startsWith("dm-") ? pair(ch) : [...new Set(msgs.filter((m) => m.kind !== "system").map((m) => m.from))];
   const rows = ids.filter((id) => id !== "owner").map((id) => {
     const st = stateOf(id);
-    return `<div class="mem"><span class="av" aria-hidden="true">${creature(id, st === "working" ? "working" : "sleep", roleOf(id))}</span><div><b>${esc(nameOf(id, N))}</b><span>${esc(LINE[st] || "not a seat of the org")}</span></div></div>`;
+    return `<div class="mem"><span class="av" aria-hidden="true">${familiar(id, st, roleOf(id))}</span><div><b>${esc(nameOf(id, N))}</b><span>${esc(LINE[st] || "not a seat of the org")}</span></div></div>`;
   });
   return rows.join("") || `<p class="none">Nobody has written here yet.</p>`;
 }
-/* Agent-caused wakes per seat today against the daily cap; his own messages never count. */
+/* Agent-caused wakes per seat today, a plain count (no limit); his own messages never count. */
 function wakes(N) {
   if (!W) return "";
   const rows = ((O && O.seats) || []).filter((s) => s.role !== "owner" && s.wake !== "pull").map((s) => {
     const n = W.today[s.id] || 0;
-    return `<div class="wk"><span>${esc(nameOf(s.id, N))}</span><b>${n} of ${W.cap}</b><progress max="${W.cap}" value="${Math.min(n, W.cap)}" aria-label="${esc(nameOf(s.id, N))}: ${n} of ${W.cap} wakes"></progress></div>`;
+    return `<div class="wk"><span>${esc(nameOf(s.id, N))}</span><b>${n}</b></div>`;
   });
   return `<section class="wakes" aria-label="Wakes today"><h2><span data-dec>wakes today</span></h2>${rows.join("") || `<p class="none">no seats</p>`}<p class="none">Agents only: your messages never count.</p></section>`;
 }

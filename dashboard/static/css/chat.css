@@ -1,4 +1,4 @@
-/* Agents › Chat: channel list, message stream, composer, who is in the channel, wakes today, attachments and Recent (T1515-P9, P10, P33); eye.css tokens only. */
+/* Agents › Chat: channel list, message stream, composer, who is in the channel, who is thinking, wakes today, attachments and Recent (T1515-P9, P10, P33, P38); eye.css tokens only. */
 .chat { display: grid; gap: 1rem; }
 .chat .cgrid { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr); align-items: start; }
 .chat .pill.off { color: var(--mute); border-color: var(--line); border-style: dashed; }
@@ -9,7 +9,8 @@
 .chat .chans h3 { display: none; }
 .chat .chans a { display: inline-flex; align-items: center; gap: .5rem; min-height: 2.75rem; padding: 0 .8rem; border: 1px solid var(--line2); color: var(--mid); white-space: nowrap; font-size: max(11px, .88rem); background: var(--bg2); }
 .chat .chans a.on { color: var(--hi); border-color: var(--line3); background: var(--w08); }
-.chat .chans a span:first-child { overflow: hidden; text-overflow: ellipsis; }
+.chat .chans a .cn { overflow: hidden; text-overflow: ellipsis; }
+.chat .chans a .fam { flex: none; width: 1.6rem; }
 .chat .unread { min-width: 1.4rem; padding: 0 .35rem; text-align: center; font-size: max(11px, .74rem); color: var(--bg); background: var(--gold); }
 .chat .stream { padding: 0; display: flex; flex-direction: column; }
 .chat .stream header { padding: .8rem 1.1rem; border-bottom: 1px solid var(--line); }
@@ -59,10 +60,18 @@
 .chat .wakes { border-top: 1px solid var(--line); padding-top: .9rem; margin-top: .4rem; }
 .chat .wakes .wk { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .2rem .6rem; margin-bottom: .6rem; font-size: max(11px, .82rem); color: var(--mid); }
 .chat .wakes .wk b { color: var(--hi); font-weight: 600; }
-.chat .wakes progress { grid-column: 1 / -1; width: 100%; height: 6px; appearance: none; border: 0; background: var(--w08); }
-.chat .wakes progress::-webkit-progress-bar { background: var(--w08); }
-.chat .wakes progress::-webkit-progress-value { background: var(--g); }
-.chat .wakes progress::-moz-progress-bar { background: var(--g); }
+.chat .thinking { display: grid; grid-template-columns: 2.4rem minmax(0, 1fr); gap: .8rem; align-items: center; padding: .5rem 0; font-size: max(11px, .84rem); color: var(--mid); }
+.chat .thinking .av svg { width: 100%; height: auto; display: block; }
+.chat .thinking p { display: flex; flex-wrap: wrap; align-items: center; gap: .2rem .5rem; }
+.chat .thinking b { color: var(--g2); font-weight: 600; }
+.chat .dots { display: inline-flex; align-items: center; gap: .22rem; }
+.chat .dots i { width: .34rem; height: .34rem; border-radius: 50%; background: var(--g); opacity: .25; animation: chat-dot 1.2s ease-in-out infinite; }
+.chat .dots i:nth-child(2) { animation-delay: .2s; }
+.chat .dots i:nth-child(3) { animation-delay: .4s; }
+.chat .think { display: inline-flex; align-items: center; flex: none; padding: 0 .2rem; }
+.chat .think .dots i { width: .26rem; height: .26rem; }
+@keyframes chat-dot { 0%, 70%, 100% { opacity: .25; transform: none; } 35% { opacity: 1; transform: translateY(-.18rem); } }
+@media (prefers-reduced-motion: reduce) { .chat .dots i { animation: none; opacity: .8; } }
 .chat .cside { display: none; }
 .chat .cside .mem { display: grid; grid-template-columns: 2.6rem minmax(0, 1fr); gap: .7rem; align-items: center; margin-bottom: .8rem; }
 .chat .cside .mem svg { width: 100%; height: auto; display: block; }
@@ -73,6 +82,7 @@
   .chat .chans { flex-direction: column; overflow: visible; position: sticky; top: calc(var(--rail) + 1rem); }
   .chat .chans h3 { display: block; font-size: max(11px, .72rem); letter-spacing: .2em; text-transform: uppercase; color: var(--mute); font-weight: 400; margin: .6rem 0 .1rem; }
   .chat .chans a { justify-content: space-between; border-color: transparent; background: none; }
+  .chat .chans a .cn { flex: 1; min-width: 0; }
   .chat .chans a.on { border-color: var(--line3); background: var(--w08); }
   .chat .stream { height: calc(100svh - var(--rail) - 17rem); min-height: 26rem; }
   .chat .msgs { flex: 1; align-content: start; overflow-y: auto; scrollbar-width: thin; }
@@ -84,6 +94,7 @@
 @media (max-width: 820px) { .chat .chtag { --tap: 44px; } }
 @media (max-width: 899px) {
   .chat { padding-bottom: 7.5rem; }
+  .chat .chans a { flex: none; }
   #board.on .chat .stream { animation: none; }
   .chat .compose { position: fixed; z-index: 25; left: 0; right: 0; bottom: var(--dock); padding: .6rem var(--gut); box-shadow: 0 -12px 24px -12px var(--bg); }
 }

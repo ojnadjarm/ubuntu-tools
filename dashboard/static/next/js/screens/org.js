@@ -2,7 +2,10 @@
 import { esc } from "/static/js/core/fmt.js";
 import { getJSON } from "/static/js/core/api.js";
 import { cur, go } from "/static/js/core/router.js";
-import { creature } from "../avatar.js";
+import { familiar } from "../familiars/alive.js";
+import { watch } from "../familiars/talk.js";
+import { listen } from "../familiars/ear.js";
+import { sync } from "../ui/sync.js";
 import { dust } from "../shapes.js";
 import { fitEye } from "../gl/cam.js";
 import { ago } from "./court.js";
@@ -29,6 +32,12 @@ function pull() {
   getJSON("/api/org").then((j) => { O = j; err = ""; }, (e) => { err = e.message || "unreadable"; })
     .finally(() => { busy = false; at = Date.now(); if (cur === "org") go("org", true); });
 }
+
+/* A seat starts or stops talking: the tree is patched in place. */
+watch(() => {
+  const grid = document.getElementById("grid");
+  if (cur === "org" && O && grid.querySelector(":scope > .nxs.org")) sync(grid, render(), 1);
+});
 
 const prot = (s) => !("pid" in s);
 const pill = (st) => `<span class="pill ${PILL[st] || "idle"}">${esc(st)}</span>`;
@@ -58,7 +67,7 @@ export function seatState(seat, S) {
 /* The owner's direct message with seat `id`, as Chat names it. */
 export const dmOf = (id) => "dm-" + ["owner", id].sort().join("--");
 
-const worker = (s) => `<li><span class="mini" aria-hidden="true">${creature("pid" + s.pid, s.state === "working" ? "working" : "idle", "worker")}</span><b>${esc(s.name || "pid " + s.pid)}</b>${dot(s.state)}</li>`;
+const worker = (s) => `<li><span class="mini" aria-hidden="true">${familiar("pid" + s.pid, s.state === "working" ? "working" : "idle", "worker")}</span><b>${esc(s.name || "pid " + s.pid)}</b>${dot(s.state)}</li>`;
 
 /* The sessions a seat started, working first: SHOWN of them, the rest folded behind a "hidden N" line. */
 function crew(H) {
@@ -71,7 +80,7 @@ function crew(H) {
 function seatCard(seat, S) {
   if (seat.role === "owner") return `<div class="seat him">${av(seat.id, seat.name, "<i></i>", ["Read every channel, write anywhere, message anyone.", "Only your words change what an agent may do."], " dia")}<h3>${esc(seat.name)}</h3></div>`;
   const st = seatState(seat, S), helpers = S.filter((s) => !s.seat && s.parent === seat.id), msg = "Message " + seat.name;
-  return `<div class="seat" data-seat="${esc(seat.id)}">${av(seat.id, seat.name, creature(seat.id, st === "working" || st === "idle" ? st : "sleep", seat.role), [ROLE[seat.role], WAKE[seat.wake], "Now " + st + "."])}<h3>${esc(seat.name)} ${dot(st)}</h3>` +
+  return `<div class="seat" data-seat="${esc(seat.id)}">${av(seat.id, seat.name, familiar(seat.id, st, seat.role), [ROLE[seat.role], WAKE[seat.wake], "Now " + st + "."])}<h3>${esc(seat.name)} ${dot(st)}</h3>` +
     `${crew(helpers)}<a class="btn msg" href="#chat?ch=${esc(dmOf(seat.id))}" aria-label="${esc(msg)}" title="${esc(msg)}">${BUBBLE}</a></div>`;
 }
 
@@ -93,6 +102,7 @@ function row(s, names) {
 
 export function render() {
   pull();
+  listen(() => cur === "org");
   if (!O) return `<div class="nxs skel" aria-busy="true"><p class="sm pad">${err ? "org unreadable · " + esc(err) : "reading the org…"}</p></div>`;
   const S = O.sessions || [], seats = O.seats || [], names = Object.fromEntries(seats.map((s) => [s.id, s.name]));
   const work = S.filter((s) => s.state === "working").length;

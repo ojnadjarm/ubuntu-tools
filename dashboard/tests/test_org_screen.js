@@ -1,6 +1,7 @@
 // Org screen (T1515-P21): a message button per seat opens its direct message in Chat, workers hang under the seat that
 // started them (3 shown, the rest folded behind a "hidden N" line), managers wear their own gear, no sideways scroll.
 // P35: a card shows avatar, name, state dot and a message icon; the state and description lines live in the avatar's tooltip.
+// V3: every creature is a moving Familiar; a new message makes its sender talk for about 2 s, the owner never.
 // Run: node tests/test_org_screen.js   (fixture API only; POSTs never leave this file's server)
 "use strict";
 const assert = require("assert");
@@ -17,10 +18,19 @@ sessions: [
   work(11, "w-a", "orchestrator", "idle"), work(12, "w-b", "orchestrator", "working"), work(13, "w-c", "orchestrator", "idle"),
   work(14, "w-d", "orchestrator", "working"), work(15, "w-e", "orchestrator", "idle"), work(21, "m-a", "mosaico", "working")], hidden: 0 };
 
-const srv = serveStatic((u) => {
+const CHAT = [];
+let reads = 0;
+const say = (from) => CHAT.push({ id: CHAT.length + 1, ts: new Date().toISOString(), ch: "org", from, to: [], kind: "msg", text: "hello", re: null, hop: 0 });
+
+const shownTip = (p) => p.$eval('.org .seat[data-seat="mooblox"] .av svg', (e) => !!e.querySelector(".mouth") && !!e.querySelector(".say"));
+const srv = serveStatic((u, res) => {
   if (u === "/api/status") return STATUS;
   if (u === "/api/org") return ORG;
-  if (u === "/api/chat") return { messages: [], channels: [], wakes: { cap: 12, today: {} } };
+  if (u === "/api/chat") {
+    const after = new URL(res.req.url, "http://x").searchParams.get("after");
+    if (after != null) reads++;
+    return { messages: CHAT.filter((m) => after == null || m.id > +after), channels: [], wakes: { cap: 12, today: {} } };
+  }
 });
 
 (async () => {
@@ -87,11 +97,36 @@ const srv = serveStatic((u) => {
     await ph.tap(".org .band");
     assert.strictEqual(await tips.count(), 0, "a tap elsewhere closes it");
 
+    const talkers = () => p.$$eval(".org .seat:has(.av .cr.talking)", (l) => l.map((x) => x.dataset.seat));
+    const anim = () => p.$eval(orch + " .fam", (e) => [getComputedStyle(e).animationName, getComputedStyle(e).animationPlayState]);
+    assert.strictEqual(await p.$$eval(".org .seat .av .fam svg.cr, .org .crew .fam svg.cr", (l) => l.length), 8, "every seat and shown worker is a Familiar in a .fam box");
+    assert.deepStrictEqual(await p.$eval('.org .seat[data-seat="mooblox"] .av svg', (e) => e.getAttribute("class")), "cr sleep", "an asleep seat rests");
+    assert.deepStrictEqual(await anim(), ["fam-bob", "running"], "a working creature moves");
+    while (reads < 1) await p.waitForTimeout(200);
+    say("owner");
+    const n0 = reads;
+    while (reads < n0 + 2) await p.waitForTimeout(200);
+    assert.deepStrictEqual(await talkers(), [], "the owner's own message animates nothing");
+    say("mooblox");
+    await p.waitForSelector('.org .seat[data-seat="mooblox"] .av .cr.talking', { timeout: 6000 });
+    const t0 = Date.now();
+    assert.deepStrictEqual(await talkers(), ["mooblox"], "a new message makes only its sender talk");
+    assert.strictEqual(await shownTip(p), true, "the talking creature keeps its mouth and bubble");
+    await p.waitForFunction(() => !document.querySelector(".org .cr.talking"), null, { timeout: 4000 });
+    assert.ok(Date.now() - t0 > 1200 && Date.now() - t0 < 3200, "talking lasts about 2 s");
+    await p.evaluate(() => { Object.defineProperty(document, "hidden", { get: () => true, configurable: true }); document.dispatchEvent(new Event("visibilitychange")); });
+    assert.strictEqual((await anim())[1], "paused", "animations pause while the page is hidden");
+    await p.evaluate(() => { delete document.hidden; document.dispatchEvent(new Event("visibilitychange")); });
+    assert.strictEqual((await anim())[1], "running", "and run again when it is back");
+    await p.emulateMedia({ reducedMotion: "reduce" });
+    assert.strictEqual((await anim())[0], "none", "prefers-reduced-motion stops the motion");
+    await p.emulateMedia({ reducedMotion: "no-preference" });
+
     await p.click('.org .seat[data-seat="mooblox"] a.msg');
     await p.waitForSelector(".chat .stream header h2", { timeout: 15000 });
     assert.strictEqual(await p.evaluate(() => location.hash), "#chat?ch=dm-mooblox--owner", "the button lands on the direct message");
     assert.strictEqual(await p.textContent(".chat .stream header h2"), "Mooblox", "Chat opens that direct message");
     assert.deepStrictEqual(errs, [], "no page errors");
-    console.log("ok · avatar tooltip on hover/focus/tap, inside 400 · state dot · message icon · 4 message buttons -> dm · workers under parent, 3 + hidden 2 · manager gear · no sideways scroll 400/768/1366/1920");
+    console.log("ok · avatar tooltip on hover/focus/tap, inside 400 · state dot · message icon · 4 message buttons -> dm · workers under parent, 3 + hidden 2 · manager gear · Familiars move, sender talks ~2 s, owner silent, paused hidden, reduced motion · no sideways scroll 400/768/1366/1920");
   } finally { await b.close(); srv.close(); }
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -1,0 +1,30 @@
+/* Familiars in lists (Org, Chat): rest motion per pose and the talking act on the SVG twin (T1515-V3). The box moves on the
+   compositor; blink and the working ring change in steps, so a resting list costs no frame work between steps. */
+.fam { display: block; transform-origin: 50% 100%; will-change: transform; animation: fam-breathe 6.4s ease-in-out infinite alternate; }
+.fam .cr { display: block; width: 100%; height: auto; }
+.fam.idle { animation-duration: 3.6s; }
+.fam.working { animation: fam-bob 1.2s ease-in-out infinite alternate; }
+.fam.talking { animation: fam-bob .34s ease-in-out infinite alternate; }
+.fam.ph1 { animation-delay: -.9s; } .fam.ph2 { animation-delay: -1.9s; } .fam.ph3 { animation-delay: -2.8s; }
+.fam :is(.lid, .mouth, .spin, .ring, .say circle) { transform-box: fill-box; transform-origin: 50% 50%; }
+.fam.idle .lid { animation: fam-blink 5.2s step-end infinite; }
+.fam.idle.ph1 .lid { animation-delay: -1.3s; } .fam.idle.ph2 .lid { animation-delay: -2.7s; } .fam.idle.ph3 .lid { animation-delay: -4s; }
+.fam.working .spin { animation: fam-spin 2.4s steps(8) infinite; }
+.fam.talking .mouth { animation: fam-flap .17s ease-in-out infinite alternate; }
+.fam.talking .ring { animation: fam-ring .6s ease-out infinite; }
+.fam.talking .say { transform-box: fill-box; transform-origin: 0% 100%; animation: fam-pop .25s ease-out both; }
+.fam.talking .say circle { animation: fam-dot .6s ease-in-out infinite; }
+.fam.talking .say circle:nth-of-type(2) { animation-delay: .12s; }
+.fam.talking .say circle:nth-of-type(3) { animation-delay: .24s; }
+@keyframes fam-breathe { to { transform: scale(1.015, 1.035); } }
+@keyframes fam-bob { to { transform: translateY(-5%); } }
+@keyframes fam-blink { 0%, 100% { transform: none; } 96% { transform: scaleY(.1); } }
+@keyframes fam-spin { to { transform: rotate(360deg); } }
+@keyframes fam-flap { from { transform: scaleY(.3); } }
+@keyframes fam-ring { from { transform: scale(.8); opacity: 1; } to { transform: scale(1.25); opacity: 0; } }
+@keyframes fam-pop { from { transform: scale(0); } }
+@keyframes fam-dot { 0%, 60%, 100% { transform: none; } 30% { transform: translateY(-3.2px); } }
+/* The stream's older rows stand still: only the message being said moves there. */
+.chat .msgs .fam:not(.talking), .chat .msgs .fam:not(.talking) * { animation: none; will-change: auto; }
+.away .fam, .away .fam * { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) { .fam, .fam * { animation: none !important; } }
