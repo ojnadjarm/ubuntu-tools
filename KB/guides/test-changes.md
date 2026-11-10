@@ -1,6 +1,6 @@
 # Changing an existing test: a declared, reviewed step (test-changes)
 
-Ticket: T1591 · Last verified: 2026-11-10 by `bin/tests/test-changes.test.sh` (39/39), `agent-verify.test.sh`, `brief-check.test.sh`, moodle-ci `mci.test.sh` + `moodle-stop-reminder.test.sh`, and `mci quick` on an mfixture plugin in 5.2
+Ticket: T1591 · Last verified: 2026-11-10 by `bin/tests/test-changes.test.sh` (39/39), `agent-verify.test.sh`, `brief-check.test.sh`, moodle-ci `mci.test.sh` + `moodle-stop-reminder.test.sh`, and an mfixture plugin in 5.2 (`mci quick` without a note: testchanges red; `mci full` with `MCI_TEST_NOTE`: 16 ok, 0 red)
 
 ## When to use
 Any work that touches an existing test file (PHPUnit, Behat, node/vitest, pytest, `*.test.sh`). Owner *intent* (2026-11-10):
@@ -48,6 +48,9 @@ Brief line: `Test changes: existing tests are frozen; a changed test needs a "Te
   counts uncommitted files only when the ticket claimed them, else only its `T<n>:` commits.
 - Shell lines count as assertions only with `ok`/`nok` (or `assert*`); a bare `[ … ]` line before an `&& ok` on the next line
   is not listed, so the file still shows but the line may not: read the diff it names.
+- `mci full` on a plugin that is its own fresh git repo: grunt went red (moodle-plugin-ci restores its backup over `.git/objects`,
+  which git makes read-only: "Permission denied"); `chmod -R u+w .git` made it green (fixture, 5.2). A fixture without a privacy
+  provider is red in privacy, not in testchanges.
 - New CLI in ~/agents/bin: `~/agents/install.sh --links` (live sessions get "command not found" otherwise).
 
 ## Links
