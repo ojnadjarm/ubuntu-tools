@@ -200,12 +200,21 @@ reload() {
     || { echo "pc conf: reload failed: systemctl ${a[*]}" >&2; return 1; }
 }
 
+# internal <verb> <path> <src> — exit 2 unless path passes check, the call runs nested under pc_apply and src sits under $PC_CONF_BACKUP.
+internal() {
+  check "$2"
+  [ "${PC_NESTED:-0}" = 1 ] || refuse "pc conf $1 runs only under pc_apply (pc conf put --apply, pc undo)"
+  case $(readlink -m -- "$3") in "$(readlink -m -- "$PC_CONF_BACKUP")"/?*) ;; *) refuse "pc conf $1 source outside \$PC_CONF_BACKUP: $3";; esac
+}
+
 case "${ARGS[0]:-}" in
-  state) token "${ARGS[1]:?path}";;
+  state) check "${ARGS[1]:?path}"; token "${ARGS[1]}";;
   write)  # write <path> <src> [mode unit user]
+    internal write "${ARGS[1]:-}" "${ARGS[2]:-}"
     install_to "${ARGS[1]}" "${ARGS[2]}" || exit 1
     etc_commit "${ARGS[1]}"; reload "${ARGS[1]}" "${ARGS[@]:3}";;
   restore)  # restore <path> <backupdir> [mode unit user]
+    internal restore "${ARGS[1]:-}" "${ARGS[2]:-}"
     if [ -e "${ARGS[2]}/absent" ]; then as "${ARGS[1]}" rm -f -- "$(fs "${ARGS[1]}")" || exit 1
     else install_to "${ARGS[1]}" "${ARGS[2]}/old" || exit 1; fi
     etc_commit "${ARGS[1]}"; reload "${ARGS[1]}" "${ARGS[@]:3}";;

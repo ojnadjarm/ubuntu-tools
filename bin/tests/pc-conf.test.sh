@@ -196,5 +196,18 @@ is 'unreadable existing file: exit 1, nothing written' "$rc|$(cat "$R/etc/sysctl
 printf 'a\n+b\n' >"$R/etc/sysctl.d/96-c.conf"
 is 'counts blank and +/- lines' "$(pc put /etc/sysctl.d/96-c.conf --line '' --line '-x' --line '+y' | head -1 | grep -o '(+[0-9]* -[0-9]*)')" '(+3 -2)'
 
+# internal write/restore/state: the same path check, and write/restore only nested under pc_apply from a backup dir
+unset PC_NESTED; echo 'PermitRootLogin yes' >"$WORK/evil"; mkdir -p "$R/etc/sudoers.d" "$WORK/gone" "$PC_CONF_BACKUP/b"
+echo keep >"$R/etc/sudoers.d/owner"; : >"$WORK/gone/absent"; : >"$PC_CONF_BACKUP/b/absent"; cp "$WORK/evil" "$PC_CONF_BACKUP/b/new"
+echo keep >"$R/etc/sysctl.d/95-keep.conf"; calls >/dev/null
+refused() { local o rc; o=$("$@" 2>&1); rc=$?; [ $rc = 2 ] && grep -q '^refused: ' <<<"$o" || echo "rc=$rc $o"; }
+is 'direct write to a denied path refused' "$(refused pc write /etc/ssh/sshd_config "$WORK/evil")|$([ -e "$R/etc/ssh/sshd_config" ] && echo file)" '|'
+is 'direct restore to a denied path refused' "$(refused pc restore /etc/sudoers.d/owner "$WORK/gone")|$(cat "$R/etc/sudoers.d/owner")" '|keep'
+is 'direct write to an allowed path refused (not nested)' "$(refused pc write /etc/sysctl.d/94-x.conf "$PC_CONF_BACKUP/b/new")|$([ -e "$R/etc/sysctl.d/94-x.conf" ] && echo file)" '|'
+is 'direct restore to an allowed path refused (not nested)' "$(refused pc restore /etc/sysctl.d/95-keep.conf "$PC_CONF_BACKUP/b")|$(cat "$R/etc/sysctl.d/95-keep.conf")" '|keep'
+is 'nested write or restore from outside the backup dir refused' "$(PC_NESTED=1 refused pc write /etc/sysctl.d/94-x.conf "$WORK/evil")$(PC_NESTED=1 refused pc restore /etc/sysctl.d/95-keep.conf "$WORK/gone")|$([ -e "$R/etc/sysctl.d/94-x.conf" ] && echo file)|$(cat "$R/etc/sysctl.d/95-keep.conf")" '||keep'
+is 'state of a denied path refused' "$(refused pc state /etc/sudoers.d/owner)" ''
+is 'refused internal verbs ran no sudo, ledgered nothing' "$(calls | wc -l)|$(grep -c 'sshd_config\|sudoers\|9[45]-' "$PC_LEDGER")" '0|0'
+
 is 'real /etc and ledger untouched' "$(real_sum)" "$before"
 exit $bad

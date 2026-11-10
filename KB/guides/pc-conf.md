@@ -1,6 +1,6 @@
 # Write a config file or systemd drop-in with undo (pc conf put)
 
-Ticket: T1040, T1074 · Last verified: 2026-10-21 by bin/tests/pc-conf.test.sh (55 ok) and real applies of /etc/tmpfiles.d/99-t1040-probe.conf (+ undo) and /etc/apparmor.d/local/{who,hostname,locale}
+Ticket: T1040, T1074 · Last verified: 2026-11-10 by bin/tests/pc-conf.test.sh (62 ok) and real applies of /etc/tmpfiles.d/99-t1040-probe.conf (+ undo) and /etc/apparmor.d/local/{who,hostname,locale}
 
 ## When to use
 Any persistent change to a sysctl.d, tmpfiles.d, journald/logind/oomd `.conf.d`, unit drop-in (`/etc/systemd/{system,user}/<unit>.d/`, `~/.config/systemd/user/<unit>.d/`), `/etc/netdata/**`, `/etc/default/grub.d/*.cfg` AppArmor local override `/etc/apparmor.d/local/<profile>` or `/etc/modprobe.d/90-agents-*.conf` file. Never `sudo tee`. Not for runtime-only values (`pc kernel sysctl set`) or unit start/stop (`pc units`).
@@ -30,6 +30,7 @@ pc undo <id> --apply
 - The deny-list checks paths, not contents: a tmpfiles.d line (`w /etc/sudoers.d/x`, `L /etc/ssh/...`) or `ExecStartPre=` in an allowed drop-in still writes or runs anything as root. Read every diff before `--apply`.
 - `get` runs the same path check (`pc conf get /etc/shadow` is refused). An existing file that cannot be read (sudo -n fails) stops `put` with exit 1 before any backup, so `pc undo` can never restore an empty file.
 - `(+A -R)` counts every diff body line after the two headers (blank lines and lines starting with `+`/`-` included).
+- Internal `write`/`restore`/`state` (T1546 D1): all three run `check`; `write`/`restore` also need `PC_NESTED=1` (set by `pc_apply`, so `pc undo` replays work) and a source under `$PC_CONF_BACKUP`, else `refused:` exit 2. Before, `pc conf write /etc/ssh/sshd_config <f>` installed as root with no check, `--apply` or ledger row.
 - The internal `write`/`restore` argv is re-parsed by `pc_opt`: a `--reload` token inside it was eaten as a flag and the reload silently never ran (first test run: 3 FAIL). Internal modes are `reload`/`daemon-reload`, no dashes.
 - `case /$p/` on an absolute path makes `//etc` and refused every path; normalize checks run on `$p/`.
 - `--reload` uses `reload-or-restart`: units without ExecReload (journald) restart.
