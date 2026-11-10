@@ -27,7 +27,7 @@ const ROOMS = ["harness", "org"];
 let C = null, msgs = [], ch = "", err = "", busy = false, timer = 0, O = null, oat = 0, follow = false, W = null;
 let more = false, jump = true, early = false, io = null, watched = null, T = [];
 let listing = true, pushed = false, listY = 0, fresh = 0, shown = "", ready = false;
-let q = "", hits = null, asked = "", serr = "", from = ["", true], spushed = false;
+let q = "", hits = null, asked = "", serr = "", from = ["", true], spushed = false, deg = "", paused = false;
 const phone = matchMedia("(max-width: 899px)");
 const seen = {};
 
@@ -87,7 +87,7 @@ function pull() {
   if (!O || Date.now() - oat > ORG_MS) { oat = Date.now(); getJSON("/api/org").then((j) => { O = j; paint(); }, () => {}); }
   getJSON(src(want) + (after ? "&after=" + after : ""))
     .then((j) => {
-      err = "";
+      err = ""; deg = j.degraded || ""; paused = !!j.paused;
       if (want !== ch) return;
       C = j.channels || []; W = j.wakes || null; T = j.thinking || [];
       seed(C);
@@ -318,7 +318,7 @@ export function render() {
     (dms.length ? `<h3>Direct</h3>${dms.map((c) => chanLink(c, N)).join("")}` : "") + `</nav>`;
   const body = `<section class="pane stream" aria-label="Messages">${head(N)}<ol class="msgs" aria-live="polite">${q ? found(N) : stream(N)}</ol><button type="button" class="btn newer" data-newer${fresh && !q ? "" : " hidden"}>${plural(fresh, "new message")} ↓</button>${ch ? composer(ch, label(ch, N, true)) : ""}</section>`;
   return `<div class="nxs chat ${listing && !ch ? "list" : "conv"}"><section class="band" aria-label="Chat summary"><div class="perch" id="perch" aria-hidden="true"></div><div class="bt"><p class="kin" data-dec>Chat</p>` +
-    `<p class="bsum">${sum}${err ? ` · stale: ${esc(err)}` : ""}</p></div></section><div class="cgrid">${nav}${body}` +
+    `<p class="bsum">${sum}${err ? ` · stale: ${esc(err)}` : ""}${paused ? " · wakes paused" : ""}${deg ? ` · degraded: ${esc(deg)}` : ""}</p></div></section><div class="cgrid">${nav}${body}` +
     `<aside class="pane cside" aria-label="In ${q ? "these results" : "this channel"}"><h2><span data-dec>in ${q ? "these results" : "this channel"}</span></h2>${members(N)}${wakes(N)}</aside></div></div>`;
 }
 

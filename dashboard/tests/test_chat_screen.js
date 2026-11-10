@@ -5,6 +5,7 @@
 // T1545-A: from 900 px the list rows show full names, preview and time, ordered by activity; the stream box >= 430 px at 1366x768; text through chat-text.js's rich when it exists.
 // T1553: the ceo seat shows the name and rank the API gives ("DarkSaddler · CEO" as his direct message's title).
 // T1554: a seat's direct message is titled "Name · Rank" in the list and the header, which also names its area.
+// T1546-F2: the band prints `wakes paused` and `degraded: <why>` while the API sends them, and drops them when it stops.
 // Run: node tests/test_chat_screen.js   (fixture API only: every POST lands in this file's server, nothing reaches the real store)
 "use strict";
 const assert = require("assert");
@@ -33,7 +34,7 @@ const T1 = T0 + 60000, STORE2 = {
   "dm-discord--orchestrator": [row(T1 + 2000, "dm-discord--orchestrator", "discord", "agents talking")],
   "dm-owner--spidey": Array.from({ length: 20 }, (_, i) => row(T1 + 5000 + i, "dm-owner--spidey", i % 2 ? "owner" : "spidey", "line " + i + " of a long conversation with `code` & <b>no markup</b>")),
 };
-let org = ORG, store = STORE, withLast = false;
+let org = ORG, store = STORE, withLast = false, extra = {};
 let unread = { harness: 0, org: 2 }, posts = [], seen = [], answer = null, thinking = [];
 
 const srv = serveStatic((u, res) => {
@@ -43,7 +44,7 @@ const srv = serveStatic((u, res) => {
   if (u === "/api/chat") {
     const ch = q.get("ch") || "", after = +(q.get("after") || 0), all = Object.values(store).flat().sort((a, b) => a.id - b.id);
     const last = (c) => (withLast ? { last: store[c][store[c].length - 1] } : {});
-    return { messages: (ch ? store[ch] || [] : withLast ? all : []).filter((m) => m.id > after), channels: Object.keys(store).map((c) => ({ ch: c, unread: unread[c] || 0, ...last(c) })), wakes: { today: { mooblox: 13, orchestrator: 5 } }, thinking };
+    return { messages: (ch ? store[ch] || [] : withLast ? all : []).filter((m) => m.id > after), channels: Object.keys(store).map((c) => ({ ch: c, unread: unread[c] || 0, ...last(c) })), wakes: { today: { mooblox: 13, orchestrator: 5 } }, thinking, ...extra };
   }
 });
 /* The two POSTs: answered from the body once it is read, so the status can be the fixture's (422 for held). */
@@ -194,7 +195,17 @@ srv.on("request", (req, res) => {
       assert.deepStrictEqual(logs, [], `${w}: no console error from the rich seam`);
       await c2.close();
     }
+    extra = { paused: true, degraded: "ValueError: match must be ~ or ~/<path>" };
+    const c3 = await b.newContext({ viewport: { width: 400, height: 850 }, hasTouch: true, isMobile: true }), r = await c3.newPage();
+    r.on("pageerror", (e) => errs.push(String(e)));
+    await r.goto(base + "/#chat", { waitUntil: "load" });
+    await r.waitForFunction(() => /wakes paused/.test((document.querySelector(".chat .bsum") || {}).textContent || ""), null, { timeout: 8000 }).catch(() => assert.fail("F2: a paused: true answer shows `wakes paused` in the band"));
+    assert.ok((await r.textContent(".chat .bsum")).includes("degraded: ValueError: match must be ~ or ~/<path>"), "F2: degraded prints in the band, escaped");
+    assert.strictEqual(await r.$$eval(".chat .bsum path", (l) => l.length), 0, "F2: the degraded text is not markup");
+    extra = {};
+    await r.waitForFunction(() => !/paused|degraded/.test(document.querySelector(".chat .bsum").textContent), null, { timeout: 8000 }).catch(() => assert.fail("F2: the band drops both once the API stops sending them"));
+    await c3.close();
     assert.deepStrictEqual(errs, [], "no page errors");
-    console.log("ok · cold #chat?ch= · 8 channels, no vass room · unread + /seen · composer sent/woke/held · fixed at 400 · swipe-proof · wakes today as numbers · thinking row + channel marker · Familiars in rows, channel box and direct list; sender talks ~2 s, owner silent · T1545-A: 0 names cut at 1366/1920, preview + time per row, by activity, box >= 430 at 1366x768, rich seam absent/present");
+    console.log("ok · cold #chat?ch= · 8 channels, no vass room · unread + /seen · composer sent/woke/held · fixed at 400 · swipe-proof · wakes today as numbers · thinking row + channel marker · Familiars in rows, channel box and direct list; sender talks ~2 s, owner silent · T1545-A: 0 names cut at 1366/1920, preview + time per row, by activity, box >= 430 at 1366x768, rich seam absent/present · F2: band shows wakes paused + degraded, drops them");
   } finally { await b.close(); srv.close(); }
 })().catch((e) => { console.error(e); process.exit(1); });
