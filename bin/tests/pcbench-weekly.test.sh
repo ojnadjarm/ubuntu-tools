@@ -21,11 +21,16 @@ out=$(systemd-analyze --user verify "$UNITS/pcbench-weekly.service" \
         "$UNITS/pcbench-weekly.timer" 2>&1 | grep -v spice-vdagent)
 [ -z "$out" ] && ok || no "$out"
 
-t "fires Sunday before maintenance (04:00)"
+t "fires Sunday clear of the nightly suite (T1546-K4: 06:47)"
 cal=$(sed -n 's/^OnCalendar=//p' "$UNITS/pcbench-weekly.timer")
+ci=$(sed -n 's/^OnCalendar=\*-\*-\* //p' "$UNITS/fleet-ci-daily.timer")
+m() { local t=${1##* }; echo $(( 10#${t%%:*} * 60 + 10#$(cut -d: -f2 <<<"$t") )); }
 case "$cal" in
-  Sun*0[0-3]:*) systemd-analyze calendar "$cal" >/dev/null 2>&1 && ok || no "bad calendar: $cal";;
-  *) no "OnCalendar=$cal is not a Sunday slot before 04:00";;
+  Sun*) d=$(( $(m "$cal") - $(m "$ci") )); d=${d#-}
+        if ! systemd-analyze calendar "$cal" >/dev/null 2>&1; then no "bad calendar: $cal"
+        elif [ "$d" -lt 60 ]; then no "OnCalendar=$cal is within 60 min of fleet-ci-daily $ci"
+        else ok; fi;;
+  *) no "OnCalendar=$cal is not a Sunday slot";;
 esac
 
 # --- 2. the gate, against fixture JSON only --------------------------------
