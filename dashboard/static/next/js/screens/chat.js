@@ -160,7 +160,7 @@ function paint() {
   fill(q);
   fit();
   const box = grid.querySelector(".chat .msgs");
-  if (box && ((jump && msgs.length) || follow || end)) { box.scrollTop = box.scrollHeight; follow = false; if (msgs.length) jump = false; }
+  if (box && ((jump && msgs.length) || follow || end)) { box.scrollTop = box.scrollHeight; follow = false; if (msgs.length && box.scrollHeight > box.clientHeight) jump = false; }
   else if (box) box.scrollTop = top;
   watch(grid);
 }
