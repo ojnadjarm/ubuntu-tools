@@ -42,16 +42,17 @@ pc_opt "$@"; ARGS=(${PC_ARGS[@]+"${PC_ARGS[@]}"})
 
 refuse() { printf 'refused: %s\n' "$1" >&2; exit 2; }
 
+GUARDED=(tailscaled ssh sshd 'ssh[-@]*' 'sshd[-@]*' ufw 'dark-eye*' 'docker*' containerd 'sentinel*' 'agent@*'
+  "$ORCHESTRATOR_UNIT_BASE" claude-orchestrator)
+
 # unit_why <unit> — the deny rule for a unit name (any type suffix, any @instance), empty when allowed.
 unit_why() {
-  local u=${1##*/} b p why
+  local u=${1##*/} b p g why
   case $1 in -*|*['*?[']*|*[[:space:]]*) printf 'unit name with a glob, whitespace or leading dash (%s)' "$1"; return;; esac
   why=$(pc_unit_why "$u" stop); [ -n "$why" ] && { printf '%s (%s)' "$why" "$u"; return; }
   b=$u; case $b in *.service|*.socket|*.timer|*.target|*.path|*.mount|*.slice|*.scope) b=${b%.*};; esac
-  case $b in
-    ssh[-@]*|sshd[-@]*) printf 'a second access path (%s)' "$b"; return;;
-    dark-eye*|docker*|claude-orchestrator) printf 'fleet unit %s' "$b"; return;;
-  esac
+  # shellcheck disable=SC2053
+  for g in "${GUARDED[@]}"; do [[ $b == $g ]] && { printf 'guarded unit %s (%s)' "$b" "$g"; return; }; done
   p=$(protected_match unit "$u" || protected_match unit "$b.service") && printf 'protected project %s (%s)' "$p" "$b"
 }
 
@@ -73,13 +74,9 @@ dropin_why() {
   case $d in
     *-.service|*-.socket|*-.timer|*-.target|*-.path|*-.mount|*-.slice|*-.scope)
       x=${d%.*}
-      for g in tailscaled ssh sshd 'ssh-*' 'sshd-*' 'ssh@*' 'sshd@*' ufw 'dark-eye*' 'docker*' containerd \
-        'sentinel*' 'agent@*' "$ORCHESTRATOR_UNIT_BASE" claude-orchestrator; do
-        [ -n "$g" ] || continue
-        # shellcheck disable=SC2053
-        if [[ ${g%\*} == "$x"* ]] || { [[ $g == *\* ]] && [[ $x == $g ]]; }; then
-          printf 'prefix drop-in %s.d covers %s' "$d" "$g"; return
-        fi
+      [ -n "$(unit_why "$x")" ] && { printf 'prefix drop-in %s.d covers %s*' "$d" "$x"; return; }
+      for g in "${GUARDED[@]}"; do
+        [[ ${g%%[[*]*} == "$x"* ]] && { printf 'prefix drop-in %s.d covers %s' "$d" "$g"; return; }
       done;;
   esac
   unit_why "$d"
@@ -183,11 +180,13 @@ token() {
   printf 'sha:%s' "${h:0:12}"
 }
 
-# install_to <path> <src> — write src's bytes to path, keeping an existing file's mode (new files 0644).
+# install_to <path> <src> [meta] — write src's bytes to path, keeping an existing file's owner, group and mode (else meta's u:g:mode, else 0644).
 install_to() {
-  local f; f=$(fs "$1"); local m=0644
-  [ -e "$f" ] && m=$(stat -c %a "$f")
-  as "$1" install -D -m "$m" -- "$2" "$f"
+  local f u='' g='' m=0644 o=(); f=$(fs "$1")
+  if [ -e "$f" ]; then IFS=: read -r u g m < <(stat -c %u:%g:%a "$f")
+  elif [ -s "${3:-}" ]; then IFS=: read -r u g m <"$3"; fi
+  [ -n "$u" ] && o=(-o "$u" -g "$g")
+  as "$1" install -D "${o[@]}" -m "$m" -- "$2" "$f"
 }
 
 # aa_check <profile> <file> — exit 1 unless the profile parses (no kernel load) with <file> as its local include.
@@ -231,7 +230,7 @@ case "${ARGS[0]:-}" in
   restore)  # restore <path> <backupdir> [mode unit user]
     internal restore "${ARGS[1]:-}" "${ARGS[2]:-}"
     if [ -e "${ARGS[2]}/absent" ]; then as "${ARGS[1]}" rm -f -- "$(fs "${ARGS[1]}")" || exit 1
-    else install_to "${ARGS[1]}" "${ARGS[2]}/old" || exit 1; fi
+    else install_to "${ARGS[1]}" "${ARGS[2]}/old" "${ARGS[2]}/meta" || exit 1; fi
     etc_commit "${ARGS[1]}"; reload "${ARGS[1]}" "${ARGS[@]:3}";;
   get)
     p=${ARGS[1]:-}; [ -n "$p" ] || { echo "pc conf get: need a path" >&2; exit 2; }
@@ -287,7 +286,7 @@ case "${ARGS[0]:-}" in
     n=${p#/}; printf -v stamp '%(%Y%m%d-%H%M%S)T' -1
     mkdir -p "$PC_CONF_BACKUP" && bk=$(mktemp -d "$PC_CONF_BACKUP/$stamp-${n//\//_}.XXXXXX") || exit 1
     cp -- "$new" "$bk/new"
-    if [ "$before" = absent ]; then : >"$bk/absent"; else cp -- "$old" "$bk/old"; fi
+    if [ "$before" = absent ]; then : >"$bk/absent"; else cp -- "$old" "$bk/old"; stat -c %u:%g:%a "$(fs "$p")" >"$bk/meta"; fi
     env=$(printf 'PC_CONF_ROOT=%q PC_CONF_BACKUP=%q' "$PC_CONF_ROOT" "$PC_CONF_BACKUP")
     tail=$(printf ' %q' "$mode" "$unit" "$user")
     PC_READ_CMD="$env $(printf '%q state %q' "$SELF" "$p")" \

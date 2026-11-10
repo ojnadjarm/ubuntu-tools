@@ -65,6 +65,19 @@ is 'undo restores byte-identical' "$(md5sum <"$R$J")" "$orig"
 ev 'undo reloads again' 'calls | grep -qx "systemctl reload-or-restart systemd-journald"'
 is 'same content again is a no-op' "$(pc put $J --from <(cat "$R$J") --apply | cut -d' ' -f1)" 'unchanged:'
 
+# owner and group: put, undo and an undo after the file was deleted keep a secondary group (T1546 D4)
+G=$(id -G | tr ' ' '\n' | grep -vx "$(id -g)" | head -1)
+D=/etc/netdata/go.d/docker.conf; mkdir -p "$R${D%/*}"; echo a >"$R$D"; chgrp "$G" "$R$D"; chmod 640 "$R$D"
+want="$(id -u):$G 640"; meta() { stat -c '%u:%g %a' "$R$D"; }
+out=$(pc put $D --line b --apply); id=$(sed -n 's/^rollback: pc undo //p' <<<"$out")
+is 'put: owner, group kept' "$(meta)" "$want"
+"$BIN/pc-undo" "$id" --apply >/dev/null
+is 'undo: owner, group kept' "$(meta)|$(cat "$R$D")" "$want|a"
+out=$(pc put $D --line c --apply); id=$(sed -n 's/^rollback: pc undo //p' <<<"$out"); rm -f "$R$D"
+"$BIN/pc-undo" "$id" --apply --force >/dev/null 2>&1
+is 'undo of a deleted file: owner, group kept from the backup meta' "$(meta 2>&1)|$(cat "$R$D" 2>&1)" "$want|a"
+calls >/dev/null
+
 # user drop-in: no sudo, systemctl --user daemon-reload
 U="$HOME/.config/systemd/user/fleet.slice.d/50-test.conf"
 pc put "$U" --line '[Slice]' --line 'CPUWeight=50' --daemon-reload --apply >/dev/null
