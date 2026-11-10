@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+"""memory — load the core card plus domain cards, or drop a note in the inbox; the store is $MEMORY_HOME (T1599)."""
+import argparse
+import json
+import os
+import sys
+import time
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
+import memory_route  # noqa: E402
+import memory_store  # noqa: E402
+
+
+def die(msg):
+    print(f"memory: {msg}", file=sys.stderr)
+    sys.exit(2)
+
+
+def unknown(store, domains):
+    bad = [d for d in domains if d not in store.domains()]
+    if bad:
+        die(f"unknown domain {', '.join(bad)} (not in domains.map)")
+
+
+def load(store, seat, args):
+    """Print the core card, then each domain's card, ids stripped; a PRIVATE page only for its seats."""
+    domains = args.domains or memory_route.domains_for(os.getcwd(), seat, os.environ, store)
+    if args.domains:
+        unknown(store, domains)
+    out = []
+    for name in ["core"] + domains:
+        page = store.card(name)
+        if not os.path.isfile(store.path(page)):
+            continue
+        seats = store.private_seats(page)
+        if seats is not None and seat not in seats:
+            print(f"memory: skipped {page} (private to {', '.join(sorted(seats))})", file=sys.stderr)
+            continue
+        out.append(f"# memory: {name}\n" + memory_store.strip_ids(store.text(page)).rstrip("\n"))
+    if out:
+        print("\n\n".join(out))
+
+
+def note(store, seat, args):
+    """Write one inbox note; the source is stamped here from the seat, never by the writer."""
+    if args.domain:
+        unknown(store, [args.domain])
+    fields = [("source", memory_route.source_for(seat, args.quote is not None, store)), ("seat", seat or "-"),
+              ("domain", args.domain or "-"), ("date", time.strftime("%Y-%m-%dT%H:%M:%S%z")),
+              ("session", os.environ.get("CLAUDE_CODE_SESSION_ID") or "-"), ("text", " ".join(args.text.split()))]
+    if args.quote is not None:
+        fields.append(("quote", json.dumps(args.quote, ensure_ascii=False)))
+    try:
+        print(os.path.relpath(store.add_note(fields), store.root))
+    except ValueError as e:
+        die(str(e))
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="memory", description=__doc__.split("— ", 1)[1])
+    sub = ap.add_subparsers(dest="verb", required=True)
+    p = sub.add_parser("load", help="print core + domain cards (no domain: routed by folder, seat, MEMORY_DOMAINS)")
+    p.add_argument("domains", nargs="*")
+    p = sub.add_parser("note", help="drop one lesson (at most 1,024 B) in the inbox")
+    p.add_argument("--domain")
+    p.add_argument("text")
+    p.add_argument("--quote", help="the exact words it rests on")
+    args = ap.parse_args()
+    store = memory_store.Store(memory_store.home())
+    {"load": load, "note": note}[args.verb](store, os.environ.get("CHAT_SEAT", ""), args)
+
+
+if __name__ == "__main__":
+    main()
