@@ -19,6 +19,7 @@ export function stage(canvas, { still = false } = {}) {
   ctl.enableDamping = false; ctl.minPolarAngle = 0.12; ctl.maxPolarAngle = 1.46; ctl.zoomToCursor = true; ctl.screenSpacePanning = false; ctl.enabled = !frozen;
   canvas.style.touchAction = "pan-y";
   let raf = 0, timer = 0, moved = true, prev = 0, ticker = null, dragging = false, pristine = true, home = null, W = 1, H = 1;
+  const pts = new Map();
   const S = { scene, cam, still: frozen, stats: { frames: 0, last: 0 } };
 
   function frame(now) {
@@ -53,6 +54,30 @@ export function stage(canvas, { still = false } = {}) {
   S.view = (h) => { home = h; S.reset(); };
   S.reset = () => { if (!home) return; pristine = true; fit(); S.invalidate(); };
   S.zoom = (k) => { pristine = false; cam.position.sub(ctl.target).multiplyScalar(k).add(ctl.target); ctl.update(); moved = true; S.invalidate(); };
+
+  /* Turns by dAz, tilts by dPol (radians) and scales the distance by k, about the orbit target. */
+  function orbit(dAz, dPol, k) {
+    const d = v.copy(cam.position).sub(ctl.target).length(), az = Math.atan2(v.x, v.z) + dAz, po = Math.min(ctl.maxPolarAngle, Math.max(ctl.minPolarAngle, Math.acos(v.y / d) + dPol));
+    cam.position.set(Math.sin(az) * Math.sin(po), Math.cos(po), Math.cos(az) * Math.sin(po)).multiplyScalar(d * k).add(ctl.target);
+    ctl.update();
+  }
+  /* Touch: one finger sideways turns, two fingers turn, tilt and pinch; one finger up or down is the page's scroll (touch-action pan-y cancels it here). */
+  function finger(e) {
+    if (e.pointerType !== "touch") return;
+    const was = pts.get(e.pointerId), k = 2 * Math.PI / H;
+    if (e.type === "pointerdown" || (was && e.type === "pointermove")) pts.set(e.pointerId, [e.clientX, e.clientY]); else pts.delete(e.pointerId);
+    dragging = pts.size > 0;
+    if (!was || e.type !== "pointermove" || pts.size > 2) return;
+    pristine = false;
+    if (pts.size === 1) return orbit((was[0] - e.clientX) * k, 0, 1);
+    const o = [...pts.values()].find((q) => q !== pts.get(e.pointerId));
+    orbit((was[0] - e.clientX) * k / 2, (was[1] - e.clientY) * k / 2, Math.hypot(was[0] - o[0], was[1] - o[1]) / Math.max(1, Math.hypot(e.clientX - o[0], e.clientY - o[1])));
+  }
+  if (!frozen) {
+    ctl.touches = { ONE: null, TWO: null };
+    for (const t of ["pointerdown", "pointermove", "pointerup", "pointercancel"]) canvas.addEventListener(t, finger);
+    canvas.addEventListener("touchstart", (e) => { if (e.targetTouches.length > 1 && e.cancelable) e.preventDefault(); }, { passive: false });
+  }
 
   ctl.addEventListener("change", () => { moved = true; S.invalidate(); });
   ctl.addEventListener("start", () => { dragging = true; pristine = false; });
