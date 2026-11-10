@@ -478,7 +478,7 @@ M=$(mktemp -d); ln -s "$BIN/pclib.sh" "$M/pclib.sh"; [ -e "$BIN/env.sh" ] && ln 
 sed 's/PC_ROOT_TIMEOUT=\$BOUND/PC_ROOT_TIMEOUT=5/' "$U" >"$M/pc-units"; chmod +x "$M/pc-units"
 printf 'inactive\nsuccess\nsimple\nno\n1min 30s\n1min 30s\n' >"$SX/u/sx-slow"
 o=$(PATH="$SX/bin:$PATH" PC_TIMEOUT_BIN="$SX/bin/tmo" "$M/pc-units" start sx-slow --system --apply); rc=$?
-r=$(row "$(sed -n 's/^rollback: pc undo //p' <<<"$o")")
+r=$(row "$(tail -1 "$PC_LEDGER" | jq -r .id)")
 [ "$rc" != 0 ] && [ "$(jq -r .verified <<<"$r")" = false ] && ok 'mutant with the old 5 s sudo bound is red' || nok 'mutant' "rc=$rc $r"
 is 'selftest: the stubs saw only fixture units' "$(grep -cvE '^timeout [0-9]+$| (-- )?sx-(slow|fail|long|cap|user)( |$)' "$SX/argv")" 0
 rm -rf "${SX:?}" "${M:?}"

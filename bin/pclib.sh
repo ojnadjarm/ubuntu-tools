@@ -29,7 +29,8 @@
 #   pc_apply <target> <before> <after> <rollback> <cmd…>   (PC_NESTED=1 in <cmd…>'s env: an inner pc_apply just runs)
 #                                   without APPLY prints "would: <target> <before> → <after>"; with it appends the
 #                                   ledger entry, runs the command, appends {id,verified,observed} and prints
-#                                   "rollback: pc undo <id>" as the last line; `redo` records $PC_REDO or the verb's own argv
+#                                   "rollback: pc undo <id>" as the last line (none when the command failed and
+#                                   the re-read still shows <before>); `redo` records $PC_REDO or the verb's own argv
 # Globals: PC_NOT_OURS PC_SYS PC_PROC PC_BAT PC_FIXTURE PC_LEDGER PC_ROOT_TIMEOUT PC_TIMEOUT_BIN PC_READ_CMD PC_USAGE PC_SUB JSON APPLY FRESH
 #          SECONDS_ PC_ARGS[] PC_EXTRA_FLAGS[] PC_EXTRA[] PC_OPT[]
 
@@ -433,6 +434,7 @@ pc_apply() {
   observed=$(pc_read "$target" 2>/dev/null)
   verified=false; [ "$observed" = "$after" ] && verified=true
   pc_json '{id:$id,verified:$v,observed:$o}' -c --arg id "$id" --argjson v "$verified" --arg o "$observed" >>"$PC_LEDGER"
+  [ "$rc" != 0 ] && [ "$observed" = "$before" ] && { printf 'failed (exit %s): %s unchanged\n' "$rc" "$target" >&2; return $rc; }
   printf 'rollback: pc undo %s\n' "$id"
   return $rc
 }

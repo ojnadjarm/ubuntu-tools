@@ -113,6 +113,16 @@ is 'a dry run keeps the cache' "$out" kept
 out=$(PATH="$STUB:$PATH" run "printf '0\nx\n' >\$CACHE/keep; APPLY=1 PC_CACHE_KEYS='ppd' pc_apply t a b rb true >/dev/null; [ -e \$CACHE/keep ] && echo kept")
 is 'unlisted entries survive' "$out" kept
 
+# D11c (T1574): a failed write that changed nothing prints no rollback line and keeps its non-zero exit;
+# a failed command that did change state (re-read differs from before) keeps it.
+fail='sh -c "echo install: Permission denied >&2; exit 1"'
+out=$(run "APPLY=1 PC_READ_CMD='echo absent' pc_apply /etc/x.conf absent sha:1 rb $fail" 2>&1); rc=$?
+is 'failed write: non-zero exit' "$rc" 1
+case "$out" in *rollback:*) nok 'failed write: no rollback line' "$out";; *) ok 'failed write: no rollback line';; esac
+out=$(run "APPLY=1 PC_READ_CMD='echo failed' pc_apply unit inactive active rb $fail" 2>/dev/null); rc=$?
+is 'failed command that changed state: rollback line, its exit' "$rc ${out%% pc*}" '1 rollback:'
+is 'a good write still ends with its rollback line' "$(run 'APPLY=1 pc_apply t a b rb true' | tail -1 | cut -d' ' -f1-3)" 'rollback: pc undo'
+
 # 11. TSP-011: pc_timeout prefers gnutimeout on PATH and falls back to timeout.
 TBIN="$WORK/tbin"; mkdir -p "$TBIN"
 printf '#!/bin/sh\necho fake-gnutimeout\n' >"$TBIN/gnutimeout"; chmod +x "$TBIN/gnutimeout"
