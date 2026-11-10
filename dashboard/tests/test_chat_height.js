@@ -43,21 +43,20 @@ const settle = async (p) => { let a = await measure(p); for (let i = 0; i < 20; 
       extra = {};
       await p.goto(base + "/#chat?ch=org", { waitUntil: "load" });
       await p.waitForSelector(".chat .compose textarea", { timeout: 15000 });
-      for (const h of H) {
-        await p.setViewportSize({ width: w, height: h });
-        for (const k of ["plain", "wrapped", "chips"]) {
-          if (k === "wrapped") {
-            extra = WRAP;
-            await p.waitForFunction(() => /degraded/.test(document.querySelector(".chat .bsum").textContent), null, { timeout: 8000 });
-            await p.route("**/api/chat?**", (r) => r.abort());
-            await p.waitForFunction(() => /stale/.test(document.querySelector(".chat .bsum").textContent), null, { timeout: 8000 });
-            await p.unroute("**/api/chat?**");
-          }
-          if (k === "chips") {
-            await p.$$eval(".chat .msg [data-reply]", (l) => l[l.length - 1].click());
-            await p.setInputFiles(".chat .compose input[type=file]", [1, 2, 3, 4, 5].map((i) => ({ name: "file-" + i + "-with-a-long-name.txt", mimeType: "text/plain", buffer: Buffer.from("x") })));
-            await p.waitForFunction(() => document.querySelectorAll(".chat .compose .chip").length === 5 && !document.querySelector(".chat .compose .reply").hidden, null, { timeout: 5000 });
-          }
+      for (const k of ["plain", "wrapped", "chips"]) {
+        if (k === "wrapped") {
+          extra = WRAP;
+          await p.waitForFunction(() => /degraded/.test(document.querySelector(".chat .bsum").textContent), null, { timeout: 8000 });
+          await p.route("**/api/chat?**", (r) => r.abort());
+          await p.waitForFunction(() => /stale/.test(document.querySelector(".chat .bsum").textContent), null, { timeout: 8000 });
+        }
+        if (k === "chips") {
+          await p.$$eval(".chat .msg [data-reply]", (l) => l[l.length - 1].click());
+          await p.setInputFiles(".chat .compose input[type=file]", [1, 2, 3, 4, 5].map((i) => ({ name: "file-" + i + "-with-a-long-name.txt", mimeType: "text/plain", buffer: Buffer.from("x") })));
+          await p.waitForFunction(() => document.querySelectorAll(".chat .compose .chip").length === 5 && !document.querySelector(".chat .compose .reply").hidden, null, { timeout: 5000 });
+        }
+        for (const h of H) {
+          await p.setViewportSize({ width: w, height: h });
           const m = await settle(p);
           if (shots && h === 768 && k !== "chips") await p.screenshot({ path: path.join(shots, `chat-${w}-${k}.png`) });
           console.log(`${w}x${h} ${k}: over ${m.over} box ${m.box} low ${m.low}`);
@@ -66,11 +65,12 @@ const settle = async (p) => { let a = await measure(p); for (let i = 0; i < 20; 
           if (w === 1366 && h === 768 && k === "plain") box1366 = m.box;
           if (h === H[0] && k === "plain" && !m.end) bad.push(`${w}x${h}: the opened channel does not show its newest line`);
         }
-        while (await p.$(".chat .compose .chip")) await p.$eval('.chat .compose .chip button[aria-label^="Remove"]', (x) => x.click());
-        await p.$eval(".chat .compose .reply button", (x) => x.click());
-        extra = {};
-        await p.waitForFunction(() => !/degraded|stale/.test(document.querySelector(".chat .bsum").textContent), null, { timeout: 8000 });
       }
+      while (await p.$(".chat .compose .chip")) await p.$eval('.chat .compose .chip button[aria-label^="Remove"]', (x) => x.click());
+      await p.$eval(".chat .compose .reply button", (x) => x.click());
+      await p.unroute("**/api/chat?**");
+      extra = {};
+      await p.waitForFunction(() => !/degraded|stale/.test(document.querySelector(".chat .bsum").textContent), null, { timeout: 8000 });
       await ctx.close();
     }
     assert.deepStrictEqual(bad, [], "the page is as tall as the screen at every width and height");

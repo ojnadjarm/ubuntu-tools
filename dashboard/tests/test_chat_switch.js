@@ -1,9 +1,10 @@
 // Chat switch (T1545-H): a view opened before in this page load paints its kept rows within 60 ms of the click, never the
 // "No messages" line, at its newest row; the read after it asks `after=<last id>` and adds a new row once; a first visit
 // shows "reading…" until the first answer; older pages still load after a cached open; chat-cache.js keeps 10 views, 200 rows each.
-// Run: node tests/test_chat_switch.js   (fixture API only, every /api/chat answer 400 ms late)
+// Run: node tests/test_chat_switch.js   (fixture API only, every /api/chat answer 400 ms late; waits up to 90 s for quiet-gate before the 60 ms budget)
 "use strict";
 const assert = require("assert");
+const { spawnSync } = require("child_process");
 const { chromium, serveStatic } = require("./lib/browser");
 const STATUS = { host: "fixture", sites: [], units: [], timers: [], docker: [], plans: [], drop: { files: [] }, verdict: { ok: true, problems: [], needs: [] } };
 const ORG = { seats: [
@@ -58,6 +59,7 @@ const ids = (p) => p.$$eval(".chat .msgs .msg", (l) => l.map((e) => e.dataset.mi
 const settle = (p) => p.waitForTimeout(DELAY * 2 + 300);
 
 (async () => {
+  spawnSync(process.env.HOME + "/agents/bin/quiet-gate", ["--wait", "90"], { encoding: "utf8" });
   await new Promise((ok) => api.listen(0, "127.0.0.1", ok));
   const base = "http://127.0.0.1:" + api.address().port;
   const b = await chromium.launch({ args: ["--disable-3d-apis", "--mute-audio"] });

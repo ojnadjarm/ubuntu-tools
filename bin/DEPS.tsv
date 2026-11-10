@@ -69,6 +69,7 @@ lspci	pciutils	pc-hw	advisory
 lsusb	usbutils	pc-hw	advisory
 manim	-	motion-video	optional:media
 melt	melt	mv-otio.test.sh	optional:media
+mkfs.vfat	dosfstools	fleet-backup.test.sh	test
 modinfo	kmod	pc-kernel	advisory
 needrestart	needrestart	maintenance-run	advisory
 nethogs	nethogs	pc-net	advisory
@@ -100,6 +101,7 @@ python3:numpy	python3-numpy	ocr_find.py	advisory
 python3:pytest	python3-pytest	run.sh	test
 renderdoccmd	-	godot-smoke.sh	optional:gamedev
 resolvectl	systemd-resolved	pc-net,pc-status	advisory
+restic	restic	fleet-backup,fleet-backup.test.sh	advisory
 rg	ripgrep	os-survey	advisory
 rsync	rsync	ailearning-ci-daily	advisory
 ruff	-	agents	advisory
@@ -125,7 +127,9 @@ tesseract	tesseract-ocr	ocr_find.py	advisory
 time	time	pc-bench	advisory
 tinysparql	tinysparql	pc-search-index	advisory
 tmux	tmux	orchestrator-pulse,pc-status	advisory
+ttyd	ttyd	test_terminal.py	test
 turbostat	linux-tools-common	pc-power	advisory
+udisksctl	udisks2	fleet-backup.test.sh	test
 ufw	ufw	pc-net	advisory
 unzip	unzip	cc0-fetch.sh,mv-assets	optional:media
 upower	upower	pc-status	advisory

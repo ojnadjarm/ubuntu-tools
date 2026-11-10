@@ -244,6 +244,7 @@ Owner and product owners:
 - `po-run <p>` (the `po@<p>` unit body), `po-status [<p>]`, `po-push <p> "<msg>"`, `po-picks` (ntfy button taps → PO requests).
 - `invoice` — the owner's invoices in `~/invoices` (skill /invoice); `finance-month` — monthly bank import and analysis page.
 - `discord-bot`, `discord-liaison`, `discord-hire` — the Discord forum bot, the liaison's tools, hiring a project thread.
+- `liaison-build-clean scan|apply` — a manifest of rebuildable build output in finished liaison jobs, then deletes only its rows.
 
 Runner, orchestrator, CI:
 - `agent-exec` — one agent turn through `adapters/$HARNESS_AGENT/run`; `agent-disable <name>` stops an agent's timer.

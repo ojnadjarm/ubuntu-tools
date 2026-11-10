@@ -129,7 +129,7 @@ restored=$(grep -c 'systemctl --user start ' "$CALLS")
 for cli in agent-now agent-run agent-enable agent-disable; do
   : >"$CALLS"
   msg="$(run "$cli" -h 2>&1)"; rc=$?
-  [ "$rc" = 2 ] || fail "$cli -h exited $rc, want 2"
+  [ "$rc" = 0 ] || fail "$cli -h exited $rc, want 0"
   case "$msg" in usage:*) ;; *) fail "$cli -h printed no usage: $msg" ;; esac
   [ -s "$CALLS" ] && fail "$cli -h reached $(head -1 "$CALLS")"
 
