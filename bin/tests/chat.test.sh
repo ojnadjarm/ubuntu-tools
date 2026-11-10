@@ -727,6 +727,7 @@ t_thinking() {
   rm -rf "$ST" "$WORK/systemd-run.log" "$WORK/running" "$WORK/go"; mkdir -p "$P/inbox" "$WORK/think"; : >"$P/BRIEF.md"
   think() { python3 -c "import sys; sys.path.insert(0, '$BIN/../lib'); import chat_thinking
 print(' '.join(f\"{t['seat']}:{t['ch']}:{t['state']}\" for t in chat_thinking.now()) or 'none')"; }
+  woke() { python3 -c "import json; print('$2' in json.load(open('$ST/woke/$1.json')))"; }
   printf '#!/bin/sh\ntouch "$WORK/running"\nwhile [ ! -e "$WORK/go" ]; do sleep 0.1; done\n' >"$WORK/think/agent-run"
   chmod +x "$WORK/think/agent-run"
   start() { rm -f "$WORK/running" "$WORK/go"; PATH="$WORK/think:$PATH" "$BIN/po-run" fx >/dev/null 2>&1 & run=$!
@@ -741,11 +742,13 @@ print(' '.join(f\"{t['seat']}:{t['ch']}:{t['state']}\" for t in chat_thinking.no
   is 'thinking: po-run runs the request: thinking' "$(think)" 'fx:dm-fx--gx:thinking'
   touch "$WORK/go"; wait "$run"
   is 'thinking: the run exited: gone' "$(think)" none
+  is 'thinking: the wake of a finished run is dropped from disk' "$(woke fx dm-fx--gx)" False
 
   CHAT_SEAT=gx chat post fx '@fx and again' >/dev/null; $flush; start
   is 'thinking: second wake, run alive: thinking in that channel' "$(think)" 'fx:fx:thinking'
   CHAT_SEAT=fx chat post fx 'here it is' >/dev/null
   is 'thinking: its reply in the channel clears it while the run lives' "$(think)" none
+  is 'thinking: a replied wake is dropped from disk' "$(woke fx fx)" False
   touch "$WORK/go"; wait "$run"
   "$BIN/po-ask" fx --from orchestrator 'unrelated' >/dev/null
   is 'thinking: a later run for another request is not this wake' "$(start; think; touch "$WORK/go"; wait "$run")" none
@@ -764,6 +767,28 @@ chat_wake.woke('orchestrator', [{'id': 5, 'ch': 'harness'}]); print(int(time.tim
   is 'thinking: orchestrator idle again: gone' "$(think)" none
   status busy $((at + 9500)); kill "$spid"; wait "$spid" 2>/dev/null
   is 'thinking: orchestrator session gone: gone' "$(think)" none
+
+  # T1545-I: a warm poll starts no process; `protected` runs again only when its config changes; /proc/locks is read
+  # only for a request in current/.
+  sleep 60 & spid=$!
+  at=$(python3 -c "import os, sys, time; sys.path.insert(0, '$BIN/../lib'); import chat_wake
+chat_wake.woke('orchestrator', [{'id': 5, 'ch': 'harness'}])
+chat_wake.woke('fx', [{'id': 1, 'ch': 'dm-fx--orchestrator'}], os.path.basename(sys.argv[1])); print(int(time.time() * 1000))" \
+    "$("$BIN/po-ask" fx --from orchestrator 'queued')")
+  status busy $((at + 100))
+  strace -f -qq -o "$WORK/warm.trace" -e trace=execve,openat,clone,clone3,fork,vfork python3 -c "
+import os, sys; sys.path.insert(0, '$BIN/../lib'); import chat_thinking
+first = chat_thinking.now(); open('$WORK/mark-a', 'w').close()
+same = all(chat_thinking.now() == first for _ in range(50)); open('$WORK/mark-b', 'w').close()
+st = os.stat('$HARNESS_CONFIG'); os.utime('$HARNESS_CONFIG', ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+print(same and chat_thinking.now() == first, ' '.join(f\"{t['seat']}:{t['ch']}:{t['state']}\" for t in first))" >"$WORK/warm.out"
+  kill "$spid"; wait "$spid" 2>/dev/null
+  is 'thinking: 50 warm calls give the same answer' "$(cat "$WORK/warm.out")" \
+     'True orchestrator:harness:thinking fx:dm-fx--orchestrator:starting'
+  is 'thinking: 50 warm calls start 0 processes' "$(sed -n '/mark-a/,/mark-b/p' "$WORK/warm.trace" | grep -cE '(execve|clone3?|v?fork)\(')" 0
+  is 'thinking: protected runs once cold, once more after its config changed' \
+     "$(grep -c 'execve("[^"]*/bin/protected"' "$WORK/warm.trace")" 2
+  is 'thinking: no /proc/locks read while no request is in current/' "$(grep -c '/proc/locks' "$WORK/warm.trace")" 0
 }
 
 t_search() {

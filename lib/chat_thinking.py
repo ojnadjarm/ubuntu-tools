@@ -3,6 +3,7 @@
 PoInbox: starting while the wake sits in the 20 s batch or the inbox; thinking while its request is in current/ and
 po-run holds the PO's lock (/proc/locks). Channel: thinking while the seat's live session is busy; starting while it has
 been idle since before the line. Gone when the run ends or the seat posts in that channel after the wake."""
+import functools
 import os
 
 import chat_store
@@ -28,13 +29,13 @@ def _key(path):
 
 
 def _po(seat, rec, locks):
-    """starting|thinking|None of a PoInbox wake."""
+    """starting|thinking|None of a PoInbox wake; locks() is called only for a request in current/."""
     d = os.path.join(chat_wake._home(), f"po-{seat}")
     if not rec["req"]:
         return "starting" if rec["id"] in chat_wake.pending(seat) else None
     if os.path.exists(os.path.join(d, "inbox", rec["req"])):
         return "starting"
-    if os.path.exists(os.path.join(d, "current", rec["req"])) and _key(os.path.join(d, ".po-run.lock")) in locks:
+    if os.path.exists(os.path.join(d, "current", rec["req"])) and _key(os.path.join(d, ".po-run.lock")) in locks():
         return "thinking"
     return None
 
@@ -55,18 +56,23 @@ def _replied(seat, ch, mid):
 
 
 def now(seats=None):
-    """[{seat, ch, state, since}] of every seat woken and still starting or thinking, since = wake time in s."""
+    """[{seat, ch, state, since}] of every seat woken and still starting or thinking, since = wake time in s; a wake
+    that is gone or replied to is dropped from disk so later polls skip it."""
     seats = org.seats() if seats is None else seats
-    locks, out = None, []
+    locks, out = functools.cache(_locks), []
     for s in seats:
         if s.get("wake") not in ("po-inbox", "channel"):
             continue
+        gone = {}
         for ch, rec in sorted(chat_wake.woken(s["id"]).items()):
             if s["wake"] == "po-inbox":
-                locks = _locks() if locks is None else locks
                 state = _po(s["id"], rec, locks)
             else:
                 state = _channel(s["id"], rec, seats)
             if state and not _replied(s["id"], ch, rec["id"]):
                 out.append({"seat": s["id"], "ch": ch, "state": state, "since": rec["at"] // 1000})
+            else:
+                gone[ch] = rec
+        if gone:
+            chat_wake.drop(s["id"], gone)
     return out

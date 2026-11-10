@@ -24,6 +24,32 @@ TIMEOUT = 5
 WINDOW = 20
 STALE_MS = (WINDOW + 40) * 1000
 BIN = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "bin")
+PROTECTED_ENV = ("PROTECTED_", "WORK_REPO_ROOTS", "HARNESS_CONFIG", "HARNESS_ENV_LOADED", "HOME")
+_protected = {}
+
+
+def _protected_key():
+    """The variables and file stamps `protected` reads (its config files and its own scripts)."""
+    home = os.path.expanduser("~")
+    files = [os.environ.get("HARNESS_CONFIG") or "", os.path.join(home, ".config", "pc-harness", "config.env"),
+             os.path.join(home, "agents", "config.env")]
+    files += [os.path.join(BIN, f) for f in ("protected", "pclib.sh", "env.sh")]
+    stamps = []
+    for f in files:
+        try:
+            st = os.stat(f)
+            stamps.append((st.st_ino, st.st_size, st.st_mtime_ns))
+        except OSError:
+            stamps.append(None)
+    return tuple(sorted(kv for kv in os.environ.items() if kv[0].startswith(PROTECTED_ENV))), tuple(stamps)
+
+
+def protected_paths():
+    """protectedlib.eres("path"), run again only when a file or variable `protected` reads has changed."""
+    key = _protected_key()
+    if _protected.get("key") != key:
+        _protected.update(eres=protectedlib.eres("path"), key=key)
+    return _protected["eres"]
 
 
 def render(msgs, seat=None, seats=None):
@@ -70,7 +96,7 @@ class Channel(Adapter):
             return None
         folder = os.path.realpath(os.path.expanduser(s["match"]))
         try:
-            protected = protectedlib.eres("path")
+            protected = protected_paths()
         except Exception:
             protected = None
         rows = []
@@ -170,6 +196,21 @@ def woke(seat, msgs, req=None):
         tmp = f"{path}.{os.getpid()}.tmp"
         with open(tmp, "w") as f:
             json.dump(rows, f)
+        os.replace(tmp, path)
+
+
+def drop(seat, recs):
+    """Remove the seat's wakes {ch: rec} that are still on disk unchanged (a newer wake in that channel stays)."""
+    path = _woken_path(seat)
+    with open(path + ".lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        rows = woken(seat)
+        keep = {ch: r for ch, r in rows.items() if recs.get(ch) != r}
+        if len(keep) == len(rows):
+            return
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w") as f:
+            json.dump(keep, f)
         os.replace(tmp, path)
 
 

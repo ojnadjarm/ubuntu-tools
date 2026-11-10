@@ -271,7 +271,7 @@ class ChatApi(unittest.TestCase):
         self.assertEqual(self.req("/api/chat")[1]["wakes"], {"today": {"fx": 3}})
 
     def test_thinking(self):
-        """A woken PO whose request waits in its inbox is starting in that channel; filed to done/, nobody is thinking."""
+        """A woken PO whose request waits in its inbox is starting in that channel; filed to done/, nobody is thinking and the wake is dropped."""
         with open(os.environ["ORG_FILE"], "w") as f:
             json.dump({"seats": ORG["seats"] + [{"id": "px", "name": "PX", "role": "po", "parent": "owner", "wake": "po-inbox", "match": "~/px"}]}, f)
         po = os.path.join(self.tmp.name, "po-px")
@@ -283,6 +283,7 @@ class ChatApi(unittest.TestCase):
         self.assertEqual([(t["seat"], t["ch"], t["state"]) for t in got], [("px", "dm-owner--px", "starting")])
         os.rename(os.path.join(po, "inbox", "r1.md"), os.path.join(po, "done", "r1.md"))
         self.assertEqual(self.req("/api/chat")[1]["thinking"], [])
+        self.assertEqual(svc.chat_thinking.chat_wake.woken("px"), {})
 
     def test_held_is_422_and_not_stored(self):
         for text, rule in (("token=abcdefghijklmnop1234", "secret"), ("the ACME ticket", "deny word")):
