@@ -6,6 +6,7 @@ import os
 import re
 import secrets
 import shutil
+import time
 
 import chat_store
 
@@ -131,6 +132,24 @@ def drop(fid):
             os.remove(p)
         except FileNotFoundError:
             pass
+
+
+def orphans(days=2, now=None):
+    """Ids of stored files older than `days` that no message carries (attached in the composer, never posted)."""
+    try:
+        names = os.listdir(_folder())
+    except OSError:
+        return []
+    posted = {f.get("id") for paths in chat_store._files().values() for p in paths for r in chat_store._rows(p)
+              for f in r.get("files") or ()}
+    cut = (time.time() if now is None else now) - days * 86400
+    return sorted(n[:-5] for n in names if n.endswith(".json") and FID.match(n[:-5]) and n[:-5] not in posted
+                  and os.path.getmtime(os.path.join(_folder(), n)) < cut)
+
+
+def size(fid):
+    """Bytes on disk of a stored file with its thumbnail and metadata."""
+    return sum(os.path.getsize(p) for p in (path(fid), path(fid, thumb=True), path(fid) + ".json") if os.path.exists(p))
 
 
 def seat_dir(seat):

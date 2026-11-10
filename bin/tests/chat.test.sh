@@ -1,18 +1,14 @@
 #!/usr/bin/env bash
-# T1515 bin/chat: one section per ticket. Run: bash chat.test.sh [post] [read] [wake-ceo] [wake-po] [ask] [answer] [notify] [pause] [vass] [files] [history] [manager] [thinking]   (no args: every section)
+# T1515 bin/chat: one section per ticket. Run: bash chat.test.sh [post] [read] [wake-ceo] [wake-po] [ask] [answer] [notify] [pause] [vass] [files] [prune] [history] [manager] [thinking]   (no args: every section)
 # Fixture-only (FLEET §5.6): bwrap --unshare-net, HARNESS_HOME and HARNESS_CONFIG in a temp dir, a fixture org;
-# the selftest proves no route out and that the real chat store is untouched.
+# the real harness tree is read-only inside it, so the real chat store and PO inboxes cannot change; the selftest proves
+# both (immune to live po-runs taking their own inbox files meanwhile).
 set -uo pipefail
 SELF=$(readlink -f "$0"); BIN=$(cd "$(dirname "$SELF")/.." && pwd)
 if [ -z "${CHAT_SANDBOXED:-}" ]; then
-  exec bwrap --dev-bind / / --unshare-net --setenv CHAT_SANDBOXED 1 -- bash "$SELF" "$@"
+  exec bwrap --dev-bind / / --ro-bind "$BIN/.." "$BIN/.." --unshare-net --setenv CHAT_SANDBOXED 1 -- bash "$SELF" "$@"
 fi
 . "$BIN/tests/lib/assert.sh"
-REAL="$BIN/../state/chat"
-real_sum() { find "$REAL" -type f -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum; }
-real_before=$(real_sum)
-real_po() { find "$BIN"/../po-*/inbox "$BIN"/../po-*/.inbox-tmp -type f 2>/dev/null | sort | md5sum; }
-real_po_before=$(real_po)
 
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 unset PROTECTED_PROJECTS WORK_REPO_ROOTS PC_NOT_OURS HARNESS_ENV_LOADED CHAT_DENY_WORDS CHAT_SEAT ORG_FILE
@@ -41,6 +37,11 @@ chmod +x "$WORK/stubs/systemd-run" "$WORK/stubs/plan-usage"
 export PATH="$WORK/stubs:$PATH" WORK
 
 case "$HARNESS_HOME" in "$WORK"/*) ok 'selftest: store home is the fixture';; *) nok selftest "$HARNESS_HOME"; exit 1;; esac
+for d in "$BIN/../state/chat" "$BIN"/../po-*/inbox; do
+  [ -d "$d" ] || continue
+  if (: >"$d/.p30-probe") 2>/dev/null; then rm -f "$d/.p30-probe"; nok 'selftest: real store and PO inboxes read-only' "$d writable"; exit 1; fi
+done
+ok 'selftest: real store and PO inboxes read-only'
 python3 -c 'import socket; socket.create_connection(("1.1.1.1", 53), 1)' 2>/dev/null \
   && { nok 'selftest: no network' 'a route out exists'; exit 1; } || ok 'selftest: no network'
 is 'selftest: systemd-run is the fake' "$(command -v systemd-run)" "$WORK/stubs/systemd-run"
@@ -553,6 +554,26 @@ print(" ".join(f["name"] + ":" + f["mime"] + ":" + str(f["size"]) for f in json.
   is 'files: held or refused posts left no stored file behind' "$(ls "$ST/files" | grep -vc '\.json$\|\.thumb\.webp$')" 4
 }
 
+t_prune() {
+  # P30: uploads never posted (composer attach, then no send) are dropped by age; posted ones stay.
+  local out kept old new
+  rm -rf "$ST"; mkdir -p "$WORK/pr"
+  printf 'posted\n' >"$WORK/pr/a.txt"
+  CHAT_SEAT=fx chat post harness 'with a file' --file "$WORK/pr/a.txt" >/dev/null
+  kept=$(ls "$ST/files" | sed -n 's/\.json$//p')
+  mk() { python3 -c "import sys; sys.path.insert(0, '$BIN/../lib'); import chat_files; print(chat_files.save(b'$1', '$1.txt')['id'])"; }
+  old=$(mk stale); new=$(mk fresh)
+  touch -d '3 days ago' "$ST/files/$kept" "$ST/files/$kept.json" "$ST/files/$old" "$ST/files/$old.json"
+  out=$(chat prune)
+  is 'prune: dry run names one stale upload, deletes nothing' "$out $(ls "$ST/files" | wc -l)" \
+     "chat: would drop 1 upload never posted ($(cat "$ST/files/$old" "$ST/files/$old.json" | wc -c) bytes) 6"
+  out=$(chat prune --apply)
+  is 'prune: --apply drops the stale orphan and its metadata' "${out%% (*} $(ls "$ST/files" | grep -c "^$old")" 'chat: dropped 1 upload never posted 0'
+  ev 'prune: a posted file and a fresh upload stay' '[ -e "$ST/files/$kept" ] && [ -e "$ST/files/$new.json" ]'
+  is 'prune: --days 0 takes the fresh one too' "$(chat prune --days 0 --apply | cut -d' ' -f2-3) $(ls "$ST/files" | sed -n 's/\.json$//p')" "dropped 1 $kept"
+  rm -rf "$ST"; is 'prune: no store: nothing to drop' "$(chat prune --apply)" 'chat: dropped 0 uploads never posted (0 bytes)'
+}
+
 t_history() {
   # P33: a channel opens on its newest 50 and pages older ones with `before`, across month files; `recent` merges every
   # channel the seat sees, newest last.
@@ -745,16 +766,14 @@ chat_wake.woke('orchestrator', [{'id': 5, 'ch': 'harness'}]); print(int(time.tim
   is 'thinking: orchestrator session gone: gone' "$(think)" none
 }
 
-[ $# -gt 0 ] || set -- post read wake-ceo wake-po ask answer notify pause vass files history manager thinking
+[ $# -gt 0 ] || set -- post read wake-ceo wake-po ask answer notify pause vass files prune history manager thinking
 for s in "$@"; do
   case "$s" in
-    post|read|wake-ceo|wake-po|ask|answer|notify|pause|vass|files|history|manager|thinking) "t_$s" ;;
+    post|read|wake-ceo|wake-po|ask|answer|notify|pause|vass|files|prune|history|manager|thinking) "t_$s" ;;
     *) nok "section $s" 'unknown section'; exit 2 ;;
   esac
 done
 
 CHAT_SEAT=fx chat --help | grep -q '^usage: chat' && ok 'help: usage line' || nok help 'no usage line'
 CHAT_SEAT=fx chat --bogus >/dev/null 2>&1; is 'unknown flag: rc 2' "$?" 2
-is 'selftest: real store untouched' "$(real_sum)" "$real_before"
-is 'selftest: real PO inboxes untouched' "$(real_po)" "$real_po_before"
 exit $bad

@@ -124,7 +124,7 @@ srv.on("request", (req, res) => {
     await p.waitForFunction(() => document.querySelector(".chat .stream header h2").textContent === "# org");
 
     assert.strictEqual(await p.$$eval('.chat .chans a[data-ch^="dm-"] .fam svg.cr', (l) => l.length), 4, "each direct message shows its seat's Familiar");
-    assert.strictEqual(await p.$$eval(".chat .msg:not(.him) .av .fam svg.cr.sleep", (l) => l.length) > 0, true, "asleep senders rest in the stream");
+    await p.waitForSelector(".chat .msg:not(.him) .av .fam svg.cr.sleep", { timeout: 5000 }).catch(() => assert.fail("asleep senders rest in the stream"));
     assert.strictEqual(await p.$$eval(".chat .cr.talking", (l) => l.length), 0, "his own messages made nobody talk");
     STORE.org.push(row(T0 + 20000, "org", "discord", "three"));
     await p.waitForSelector(".chat .msgs .msg:last-child .cr.talking", { timeout: 6000 });

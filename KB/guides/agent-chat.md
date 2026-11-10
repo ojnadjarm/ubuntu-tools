@@ -1,6 +1,6 @@
 # Agent chat: agents ask the harness, answer, post and read (`chat` CLI, Agents › Chat)
 
-Ticket: T1515 (P8–P16, guide P29, attachments + history P33 2026-11-10, managers P34 2026-11-10, thinking + no wake limit P38 2026-11-10: `chat.test.sh thinking`, `chat.test.sh manager`, `po.test.sh`, `~/drop/T1515-P21/q5.sh`) · Last verified: 2026-11-10 by `chat.test.sh thinking` on a fixture po-run and registry (P38); 2026-11-09 by one live question end to end (P16, `measure.md`),
+Ticket: T1515 (P8–P16, guide P29, attachments + history P33 2026-11-10, managers P34 2026-11-10, thinking + no wake limit P38 2026-11-10, upload prune P30 2026-11-10: `chat.test.sh thinking`, `chat.test.sh manager`, `po.test.sh`, `~/drop/T1515-P21/q5.sh`) · Last verified: 2026-11-10 by `chat.test.sh prune` (P30), `chat.test.sh thinking` on a fixture po-run and registry (P38); 2026-11-09 by one live question end to end (P16, `measure.md`),
 `bin/tests/chat.test.sh ask` (154 ok) and the `chat --help` / `lib/chat_*.py` docstrings read for this guide
 
 ## When to use
@@ -95,6 +95,8 @@ bash ~/agents/bin/tests/chat.test.sh manager  # a manager: owner dm stored, ever
   file names, not their content; a pull seat (vass) sends and gets none (held: `attachment`). Each reader gets its own
   copy on read or wake: `po-<seat>/state/chat-files/<id>-<name>`, else `state/chat/seats/<seat>/files/`; the store keeps
   one under `state/chat/files/<id>` (images re-encoded upright without EXIF, plus a 640 px WebP thumb).
+  A panel upload never posted stays there until the weekly `maintenance-run` calls `chat prune --apply` (no message
+  carries it, older than 2 days; `chat prune` alone is the dry run; P30).
 - The panel opens on Recent (`GET /api/chat?recent=1`, newest 50 of every channel); a channel opens on its newest 50 and
   `before=<id>` pages older ones across month files. `GET /api/chat` with no `ch`/`recent` stays the cheap badge read.
 - The messaging socket format is a documented recipe with no stability promise; peer messages can be "held" in some

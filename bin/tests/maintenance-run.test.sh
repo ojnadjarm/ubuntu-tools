@@ -9,7 +9,7 @@ has() { grep -q -- "$3" <<<"$2" && ok "$1" || nok "$1" "missing '$3' in: $2"; }
 
 # Stubs: every binary that could reach the real machine logs its call (CALLS, reset per case; AUDIT, never reset) and does nothing.
 mkdir -p "$WORK/stub"; CALLS="$WORK/calls.log"; AUDIT="$WORK/audit.log"; : >"$CALLS"; : >"$AUDIT"
-for n in shutdown sudo notify-owner pc systemctl docker apt-get dpkg needrestart uv pgrep du sleep; do
+for n in shutdown sudo notify-owner pc systemctl docker apt-get dpkg needrestart uv pgrep du sleep chat; do
   printf '#!/bin/sh\necho "%s $*" >>"%s"\necho "%s $*" >>"%s"\n' "$n" "$CALLS" "$n" "$AUDIT" >"$WORK/stub/$n"; chmod +x "$WORK/stub/$n"
 done
 printf 'case "$*" in -s*) printf "Inst fixture-a [1] (2 x)\\nInst fixture-b [1] (2 x)\\n" ;; esac\n' >>"$WORK/stub/apt-get"
@@ -187,6 +187,18 @@ has 'pc tmp failure logs its rc' "$(HOME="$FH" HARNESS_CONFIG="$WORK/config.env"
 pcstub 'ledger 42: deleted 3 paths, 1 MB' 0
 has 'pc tmp success logs the ledger line' "$(HOME="$FH" HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" 2>&1)" 'tmp: ledger 42: deleted 3 paths'
 pcstub 'OK fixture' 0
+
+# T1515-P30: uploads never posted are pruned through `chat prune --apply`, its line in the summary; a failure logs its rc.
+printf '#!/bin/sh\necho "chat $*" >>"%s"\ncase "$*" in "prune --apply") echo "chat: dropped 2 uploads never posted (10 bytes)" ;; esac\n' "$CALLS" >"$WORK/stub/chat"
+: >"$CALLS"
+HOME="$FH" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" >/dev/null 2>&1
+has 'chat prune runs with --apply' "$(cat "$CALLS")" 'chat prune --apply'
+has 'chat prune line in the summary' "$(cat "$FH/agents/maintenance/state/last-summary.txt")" 'chat: dropped 2 uploads never posted (10 bytes)'
+has 'dry run only prints the chat prune' "$(run_mr 0)" 'would run: chat prune --apply'
+cp "$WORK/stub/chat" "$WORK/chat.ok"; printf '#!/bin/sh\nexit 5\n' >"$WORK/stub/chat"
+HOME="$FH" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" >/dev/null 2>&1
+has 'chat prune failure logs its rc' "$(cat "$FH/agents/maintenance/state/last-summary.txt")" 'chat prune failed rc 5'
+mv "$WORK/chat.ok" "$WORK/stub/chat"
 
 # 4e. T1095: after the image prune, the build cache is pruned with the age filter and its size reported; volumes never.
 printf '#!/bin/sh\necho "sudo $*" >>"%s"\nexit 0\n' "$CALLS" >"$WORK/stub/sudo"

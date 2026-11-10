@@ -284,6 +284,17 @@ def switch(a):
     return 0
 
 
+def prune(a):
+    """Drop (with --apply) or list the stored uploads that no message carries, older than --days."""
+    ids = chat_files.orphans(a.days)
+    n = sum(chat_files.size(f) for f in ids)
+    if a.apply:
+        for f in ids:
+            chat_files.drop(f)
+    print(f"chat: {'dropped' if a.apply else 'would drop'} {len(ids)} upload{'s' * (len(ids) != 1)} never posted ({n} bytes)")
+    return 0
+
+
 def main():
     p = argparse.ArgumentParser(prog="chat", description=__doc__.split("—", 1)[1].strip())
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -306,10 +317,15 @@ def main():
     for cmd, what in (("pause", "stop every wake: messages are still stored"), ("resume", "wake seats again")):
         s = sub.add_parser(cmd, help=f"{what}; no seat needed, a dry run without --apply")
         s.add_argument("--apply", action="store_true", help="make the change and read it back")
+    s = sub.add_parser("prune", help="drop uploads never posted, older than --days; no seat needed, a dry run without --apply")
+    s.add_argument("--days", type=float, default=2, help="minimum age in days (default 2)")
+    s.add_argument("--apply", action="store_true", help="delete them")
     a = p.parse_args()
     try:
         if a.cmd in ("pause", "resume"):
             return switch(a)
+        if a.cmd == "prune":
+            return prune(a)
         seats = org.seats()
         return {"post": post, "read": read, "ask": ask, "answer": answer}[a.cmd](a, seat_of(seats), seats)
     except ValueError as e:

@@ -100,11 +100,11 @@ function chrome() {
   const vd = document.getElementById("vd"), txt = !D ? "…" : FAILED ? "stale · retrying" : v.text;
   vd.className = "vd" + (!D ? "" : FAILED || v.bad ? " bad" : "");
   if (vd.textContent !== txt && !vd.dataset.decoding) { vd.textContent = txt; if (D) decode(vd); }
-  const brand = (D && D.brand) || "DarkSaddler", sp = brand.indexOf(" "), bel = document.getElementById("brand"), host = document.getElementById("host");
+  const brand = D ? D.brand || String(D.host || "").toUpperCase() : "", sp = brand.indexOf(" "), bel = document.getElementById("brand"), host = document.getElementById("host");
   const bh = sp < 0 ? esc(brand) : `<span>${esc(brand.slice(0, sp))}</span> <span>${esc(brand.slice(sp + 1))}</span>`;
   if (bel.innerHTML !== bh) bel.innerHTML = bh;
   if (D && D.host) host.textContent = D.host + " · live";
-  document.title = s.name + " · " + brand;
+  document.title = brand ? s.name + " · " + brand : s.name;
   clock();
 }
 function clock() { const d = new Date(); document.getElementById("clk").textContent = p2(d.getHours()) + ":" + p2(d.getMinutes()); }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Weekly maintenance: /tmp sweep (pc tmp), apt full-upgrade, autoremove, needrestart, docker image + build-cache prune, uv cache prune, reboot gate.
+# Weekly maintenance: /tmp sweep (pc tmp), chat uploads never posted, apt full-upgrade, autoremove, needrestart, docker image + build-cache prune, uv cache prune, reboot gate.
 # Exit 0 ok · 3 reboot required but refused (deferred) · 4 reboot scheduled · 1 error.
 set -uo pipefail
 export LC_ALL=C DEBIAN_FRONTEND=noninteractive
@@ -46,6 +46,11 @@ if [ "$dry" = 1 ]; then out "would run: pc tmp --apply"
 else
   tmp=$(pc tmp --apply 2>&1); trc=$?; ledger=$(grep '^ledger ' <<<"$tmp")
   if [ "$trc" = 0 ] && [ -n "$ledger" ]; then out "tmp: $ledger"; else out "maintenance-run: pc tmp failed rc $trc"; fi
+fi
+
+# --- chat uploads attached but never posted (T1515-P30) -----------------------
+if [ "$dry" = 1 ]; then out "would run: chat prune --apply"
+else out "$(chat prune --apply 2>&1 || echo "maintenance-run: chat prune failed rc $?")"
 fi
 
 # --- packages ---------------------------------------------------------------

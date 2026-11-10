@@ -1,4 +1,4 @@
-"""One mulberry32 for /next: shapes.js exports rng, life.js and avatar.js import it."""
+"""One mulberry32 for /next: shapes.js exports rng, life.js and familiars/genome.js import it."""
 import json, os, re, subprocess, unittest
 
 JS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static", "next", "js")
@@ -24,7 +24,7 @@ class SharedRng(unittest.TestCase):
         self.assertEqual(hits, {"shapes.js": 1})
 
     def test_importers(self):
-        for f in ("gl/life.js", "avatar.js"):
+        for f in ("gl/life.js", "familiars/genome.js"):
             src = open(os.path.join(JS, f)).read()
             self.assertRegex(src, re.compile(r'^import \{[^}]*\brng\b[^}]*\} from "\.{1,2}/shapes\.js";', re.M), f)
 
