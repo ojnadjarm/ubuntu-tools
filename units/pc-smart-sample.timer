@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily pc smart sample at 03:40 (SMART counters into ~/agents/log/smart.tsv)
+
+[Timer]
+OnCalendar=*-*-* 03:40
+Persistent=true
+
+[Install]
+WantedBy=timers.target

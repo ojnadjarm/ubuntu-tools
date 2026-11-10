@@ -1,0 +1,22 @@
+[Unit]
+StartLimitIntervalSec=0
+Description=drop file server (caddy in a bubblewrap sandbox, forced download)
+After=network-online.target tailscaled.service
+
+[Service]
+Type=simple
+Environment=HOME=/tmp XDG_CONFIG_HOME=/tmp XDG_DATA_HOME=/tmp
+ExecStart=/usr/bin/bwrap \
+  --ro-bind /usr /usr \
+  --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib64 /lib64 --symlink usr/sbin /sbin \
+  --ro-bind %h/drop /srv/drop \
+  --ro-bind %h/.config/drop/Caddyfile /srv/Caddyfile \
+  --proc /proc --dev /dev --tmpfs /tmp \
+  --unshare-all --share-net --die-with-parent --new-session \
+  /usr/bin/caddy run --config /srv/Caddyfile --adapter caddyfile
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

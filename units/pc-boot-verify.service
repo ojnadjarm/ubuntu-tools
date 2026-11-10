@@ -1,0 +1,8 @@
+[Unit]
+Description=Post-boot check: ledger drift and due FOLLOWUPS lines (T1164)
+
+[Service]
+Type=oneshot
+Nice=19
+Environment=PATH=%h/agents/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+ExecStart=/bin/bash -c 'd=%h/agent-work/evidence/boot; mkdir -p "$$d"; exec >>"$$d/$$(date +%%F).txt" 2>&1; echo "== $$(date -Is) boot $$(uptime -s)"; pc undo drift; rc=$$?; for f in research/2026-10-19/T566/FOLLOWUPS.md research/2026-10-21/T1142/FOLLOWUPS.md; do echo "## followups --run $$f"; followups --run %h/agent-work/$$f; done; echo "drift rc=$$rc"; exit $$rc'

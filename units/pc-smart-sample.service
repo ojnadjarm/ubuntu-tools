@@ -1,0 +1,8 @@
+[Unit]
+Description=pc smart sample: one row per day of NVMe written TB, wear and unsafe shutdowns into ~/agents/log/smart.tsv
+
+[Service]
+Type=oneshot
+Nice=19
+Environment=PATH=%h/agents/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/agents/bin/pc-io smart --record

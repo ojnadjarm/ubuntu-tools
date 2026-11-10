@@ -201,7 +201,7 @@ agents-start                            # the agent@<name>.timer roster from KB/
 sudo tailscale up --ssh                 # owner: log in, then in the admin console remove the old node and give this one the old Tailscale name (`KB/machine.md` "Identity")
 ```
 - User units that live only in `~/.config/systemd/user` (no copy in `~/agents/units`; they arrive with step 7):
-  `drop.service`, `finance-web.service`,
+  `finance-web.service`,
   `finance-web.socket`, `moodle45-cron.service`, `moodle45-cron.timer`, `moodle52-cron.timer` (every minute, runs `moodle-cron@moodle52-app-1.service`),
   `pc-lid.service`, `sites.service`, `vass-middleware.service`, `vass-frontend.service`, `vass-frontend-proxy.service` (T264; enable all three, the sentinel watches them, T269). Symlinks into the Eye repo: `dark-eye.service`, `dark-eye-failed.service`.
   By hand: `tmux-spawn-.scope.d` (prefix drop-in `oom.conf`, `OOMPolicy=continue`: one OOM kill no longer stops the whole tmux scope; `KB/guides/runaway-guard.md`).
@@ -213,6 +213,9 @@ sudo tailscale up --ssh                 # owner: log in, then in the admin conso
   - `gamedev-perf.service`, `gamedev-perf.timer`: Godot slice perf row, fails on an fps regression · 05:15 · T520
   - `ailearning-ci-weekly.service`, `ailearning-ci-weekly.timer`: `ailearning-ci-daily --full` declutter on a throwaway copy · Sun 05:30
   - `improve-meter.service`, `improve-meter.timer`: daily self-improvement metrics row · 06:45
+  - `pc-smart-sample.service`, `pc-smart-sample.timer`: `pc-io smart --record` row into `log/smart.tsv` · 03:40
+  - `pc-boot-verify.service`, `pc-boot-verify.timer`: `pc undo drift` + due FOLLOWUPS 15 min after boot · T1164
+  - `drop.service` (enabled by step 4, `[Install]`): caddy in bwrap serving `~/drop`; needs `~/.config/drop/Caddyfile` · T1546-K5
   - `pulse-5h-reset.service`, `pulse-5h-reset.timer`: orchestrator pulse after each 5-hour plan reset · every 10 min (`*:02/10`)
   - `discord-bot.service`: Discord forum bot + job runner (`~/agents/discord-bot/bin/serve`), enabled (WantedBy default.target) · T348
   - `moodle-cron@.service`: template, one `moodle-cron <container>` run; started by `moodle52-cron.timer`, never enabled itself

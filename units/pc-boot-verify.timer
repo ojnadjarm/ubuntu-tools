@@ -1,0 +1,8 @@
+[Unit]
+Description=Run pc-boot-verify 15 min after boot (T1164)
+
+[Timer]
+OnStartupSec=15min
+
+[Install]
+WantedBy=timers.target
