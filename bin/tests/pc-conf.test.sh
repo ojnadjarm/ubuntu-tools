@@ -103,6 +103,17 @@ for u in tailscaled ssh.service docker sentinel-runaway agent@x claude-orchestra
   { [ $rc = 2 ] && grep -q '^refused: ' <<<"$o"; } || { nok "deny reload $u" "rc=$rc $o"; n=1; }
 done
 [ $n = 0 ] && ok 'every guarded reload unit refused'
+for u in 'ssh*' 'tailscale?' 'dock*' 'agen*' 'dark-ey*' 'a b' user@1000 NetworkManager gdm; do
+  o=$(pc put /etc/sysctl.d/99-x.conf --line a --reload "$u" 2>&1); rc=$?
+  { [ $rc = 2 ] && grep -q '^refused: ' <<<"$o"; } || { nok "deny reload $u" "rc=$rc $o"; n=1; }
+done
+UD="$HOME/.config/systemd/user"
+for a in "$UD/demoapp-web.service" "$UD/x.service.d/x.conf --reload demoapp-web"; do
+  # shellcheck disable=SC2086
+  o=$(PROTECTED_PROJECTS=demo PROTECTED_DEMO_UNITS='demoapp*' pc put $a --line a 2>&1); rc=$?
+  { [ $rc = 2 ] && grep -q '^refused: ' <<<"$o"; } || { nok "deny protected $a" "rc=$rc $o"; n=1; }
+done
+[ $n = 0 ] && ok '9 glob, session and network reload names and 2 protected units refused'
 ln -s /etc/hostname "$R/etc/sysctl.d/98-link.conf"
 o=$(pc put /etc/sysctl.d/98-link.conf --line a --apply 2>&1); is 'symlink target refused' "$?|${o%%:*}" '2|refused'
 ok_paths=(/etc/systemd/system/foo-.service.d/x.conf /etc/systemd/system/user@.service.d/x.conf /etc/systemd/oomd.conf.d/x.conf /etc/tmpfiles.d/x.conf /etc/netdata/go.d/logind.conf /etc/default/grub.d/x.cfg "$HOME/.config/systemd/user/pc-x.timer" /var/lib/fwupd/remotes.d/lvfs.conf /etc/modprobe.d/90-agents-x.conf)

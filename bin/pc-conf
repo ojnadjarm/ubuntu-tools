@@ -29,8 +29,10 @@ has no globs; no reload, restart with `pc units restart avahi-daemon --system --
 `apparmor_parser -r -- /etc/apparmor.d/<profile>`, after `apparmor_parser -Q` proves the profile parses with
 the new content; a parse error exits 1 with nothing written; ssh*, tailscaled, docker*, bwrap* profiles refused).
 Refused (exit 2, "refused: <rule>"): ufw, ssh/sshd, sudoers, ~/.claude, drop-ins or reloads of
-tailscaled, ssh*, sshd*, dark-eye*, docker*, containerd, sentinel*, agent@*, the orchestrator unit
-(also via top-level <type>.d and prefix <x>-.<type>.d drop-ins),
+tailscaled, ssh*, sshd*, dark-eye*, docker*, containerd, sentinel*, agent@*, the orchestrator unit,
+protected-project units (also via top-level <type>.d and prefix <x>-.<type>.d drop-ins), unit names
+with a glob, whitespace or leading dash, reloads of user@*, user-*, NetworkManager*, wpa_supplicant*, gdm*,
+display-manager, dbus*, systemd-logind,
 symlinks, and anything outside the roots. PC_CONF_ROOT prefixes every filesystem path (tests).' "$@"
 
 PC_SUB='pc conf'; PC_EXTRA_FLAGS=(--from: --line: --reload: --daemon-reload --user)
@@ -42,11 +44,24 @@ refuse() { printf 'refused: %s\n' "$1" >&2; exit 2; }
 
 # unit_why <unit> — the deny rule for a unit name (any type suffix, any @instance), empty when allowed.
 unit_why() {
-  local b=${1##*/}
+  local u=${1##*/} b p why
+  case $1 in -*|*['*?[']*|*[[:space:]]*) printf 'unit name with a glob, whitespace or leading dash (%s)' "$1"; return;; esac
+  why=$(pc_unit_why "$u" stop); [ -n "$why" ] && { printf '%s (%s)' "$why" "$u"; return; }
+  b=$u; case $b in *.service|*.socket|*.timer|*.target|*.path|*.mount|*.slice|*.scope) b=${b%.*};; esac
+  case $b in
+    ssh[-@]*|sshd[-@]*) printf 'a second access path (%s)' "$b"; return;;
+    dark-eye*|docker*|claude-orchestrator) printf 'fleet unit %s' "$b"; return;;
+  esac
+  p=$(protected_match unit "$u" || protected_match unit "$b.service") && printf 'protected project %s (%s)' "$p" "$b"
+}
+
+# reload_why <unit> — unit_why plus the session and network units a restart would cut.
+reload_why() {
+  local b=${1##*/} why
+  why=$(unit_why "$1"); [ -n "$why" ] && { printf '%s' "$why"; return; }
   case $b in *.service|*.socket|*.timer|*.target|*.path|*.mount|*.slice|*.scope) b=${b%.*};; esac
   case $b in
-    tailscaled|ssh|sshd|ssh[-@]*|sshd[-@]*|ufw) printf 'a second access path (%s)' "$b";;
-    dark-eye*|docker*|containerd|sentinel*|agent@*|"$ORCHESTRATOR_UNIT_BASE"|claude-orchestrator) printf 'fleet unit %s' "$b";;
+    user@*|user-*|NetworkManager*|wpa_supplicant*|gdm*|display-manager|dbus*|systemd-logind) printf 'session or network unit %s' "$b";;
   esac
 }
 
@@ -230,7 +245,7 @@ case "${ARGS[0]:-}" in
     mode=; unit=; user=${PC_OPT[--user]-0}
     [ -n "${PC_OPT[--reload]-}" ] && { mode=reload; unit=${PC_OPT[--reload]}; }
     [ -n "${PC_OPT[--daemon-reload]-}" ] && { [ -z "$mode" ] || { echo "pc conf: --reload or --daemon-reload, not both" >&2; exit 2; }; mode=daemon-reload; }
-    [ -n "$unit" ] && { why=$(unit_why "$unit"); [ -n "$why" ] && refuse "$why"; }
+    [ -n "$unit" ] && { why=$(reload_why "$unit"); [ -n "$why" ] && refuse "$why"; }
     case $p in /etc/apparmor.d/local/*)
       [ -z "$mode" ] || { echo "pc conf: apparmor overrides always reparse their profile; no --reload/--daemon-reload" >&2; exit 2; }
       mode=apparmor; unit=${p##*/};;
