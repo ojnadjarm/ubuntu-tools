@@ -38,6 +38,7 @@ def asset(full, ctype, brand=False):
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     wbufsize = 1 << 16
+    timeout = 30
 
     def setup(self):
         self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -138,14 +139,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send(code, json.dumps(obj).encode(), "application/json")
 
     def body_json(self, limit, empty):
-        """The request body as JSON, read up to limit bytes; empty when it is not application/json, missing or does not parse."""
+        """The request body as JSON, read up to limit bytes; empty when it is not application/json, missing, does not parse or is not empty's type."""
         if self.headers.get_content_type() != "application/json":
             return empty
         try:
             raw = self.rfile.read(max(0, min(int(self.headers.get("Content-Length") or 0), limit)))
-            return json.loads(raw) if raw else empty
+            body = json.loads(raw) if raw else empty
         except ValueError:
             return empty
+        return body if type(body) is type(empty) else empty
 
     def static(self, path):
         """Serve a published plan page or a shared asset, confined to the dashboard dir."""

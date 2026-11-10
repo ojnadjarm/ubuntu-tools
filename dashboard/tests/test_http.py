@@ -1,5 +1,6 @@
 """Transport: gzip, ETag/304, Range and the keep-alive stall, on a throwaway server and drop fixture."""
-import gzip, http.client, json, os, re, socket, subprocess, sys, tempfile, threading, time, unittest
+import email.message, gzip, http.client, io, json, os, re, socket, subprocess, sys, tempfile, threading, time, unittest
+from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import server
 from dash.http import STATIC_CACHE
@@ -201,6 +202,39 @@ class Http(unittest.TestCase):
                 conn.endheaders()
                 self.assertEqual(conn.getresponse().status, 400, (path, length))
                 conn.close()
+
+    def test_non_object_body_is_a_400_not_a_dropped_connection(self):
+        tmp = tempfile.TemporaryDirectory()
+        own = {"Content-Type": "application/json", "Tailscale-User-Login": "owner@example.com"}
+        with tmp, mock.patch.dict(os.environ, HARNESS_HOME=tmp.name, CHAT_OWNER_LOGIN="owner@example.com"):
+            for path, body in (("/api/chat/seen", b"[]"), ("/api/chat/seen", b'"x"'), ("/api/chat/post", b"[]"), ("/api/chat/post", b"7")):
+                conn = http.client.HTTPConnection("127.0.0.1", self.srv.server_address[1], timeout=3)
+                conn.request("POST", path, body, own)
+                r = conn.getresponse()
+                self.assertIn(r.status, (400, 422), (path, body))
+                self.assertIn("error" if r.status == 400 else "held", json.loads(r.read()), (path, body))
+                conn.close()
+
+    def test_non_object_body_returns_empty_of_the_callers_type(self):
+        from dash.http import Handler
+        for raw, empty, want in ((b"[]", {}, {}), (b'"x"', {}, {}), (b"null", {}, {}), (b'{"a": 1}', [], []),
+                                 (b'{"a": 1}', {}, {"a": 1}), (b'["k"]', [], ["k"])):
+            h = Handler.__new__(Handler)
+            h.headers = email.message.Message()
+            h.headers["Content-Type"], h.headers["Content-Length"] = "application/json", str(len(raw))
+            h.rfile = io.BytesIO(raw)
+            self.assertEqual(h.body_json(4096, empty), want, raw)
+
+    def test_idle_connection_is_closed_after_the_timeout(self):
+        from dash.http import Handler
+        self.assertEqual(Handler.timeout, 30)
+        with mock.patch.object(Handler, "timeout", 0.3):
+            s = socket.create_connection(self.srv.server_address, timeout=5)
+            s.sendall(b"GET /api/ls HT")
+            t = time.perf_counter()
+            self.assertEqual(s.recv(1024), b"")
+            s.close()
+        self.assertLess(time.perf_counter() - t, 3)
 
     def test_brand_in_page_titles(self):
         from dash import http as dh
