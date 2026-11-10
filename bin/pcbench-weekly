@@ -6,7 +6,7 @@ set -uo pipefail
 export LC_ALL=C
 . "$HOME/agents/bin/env.sh"
 
-BENCH="$HOME/agents/bench"
+BENCH="${PCBENCH_WEEKLY_BENCH:-$HOME/agents/bench}"
 STATE="${PCBENCH_WEEKLY_STATE:-$BENCH/state}"
 STREAK="$STATE/weekly-skips"
 LOG="${PCBENCH_WEEKLY_LOG:-$HOME/agents/log/pcbench-weekly.log}"
@@ -27,7 +27,7 @@ bench/BASELINE-PCBENCH.md and bench/LAST.json.
   --force    run even if the gate says the owner is present (never used by the timer)
 
 Env: PCBENCH_WEEKLY_N, PCBENCH_WEEKLY_MODEL, PCBENCH_AWAY_IDLE_S,
-     PCBENCH_WEEKLY_STATE, PCBENCH_WEEKLY_LOG.
+     PCBENCH_WEEKLY_STATE, PCBENCH_WEEKLY_LOG, PCBENCH_WEEKLY_BENCH.
 Log: ~/agents/log/pcbench-weekly.log · skip streak: bench/state/weekly-skips
 USAGE
     exit 0;;
@@ -69,6 +69,8 @@ if [ "$rc" != 0 ]; then
   [ "$rc" = 124 ] && say "FAIL: arm build timed out" || say "FAIL: pcbench arm build failed"
   exit 1
 fi
+# The run uses the arms just built: a commit landing after the build must not make it refuse them.
+cmd+=(--allow-stale-arm)
 
 pc idle --seconds 60 --tsv >>"$BENCH/BASELINE-IDLE.tsv" 2>>"$LOG" || say "idle sample failed"
 say "start: ${cmd[*]}"

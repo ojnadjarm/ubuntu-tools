@@ -98,6 +98,32 @@ w=$(sed -n 's/.*would run: //p' "$W/o2")
   case "$w" in *"--arm both"*"-n 3"*"--model opus"*"--require-away"*) [[ $w != *--tier* ]];; *) false;; esac
 } && ok || no "rc=$rc cmd='$w'"
 
+t "a tree changed between arm build and run does not fail it"
+S="$W/race"; mkdir -p "$S/bin" "$S/bench" "$S/tree"; echo 1 >"$S/tree/v"
+cat >"$S/bin/pcbench" <<STUB
+#!/usr/bin/env bash
+# fixture pcbench: arm build snapshots \$S/tree, run refuses a stale arm like the real one (exit 3)
+case "\$1" in
+  away) exec "$BIN/pcbench" "\$@";;
+  arm) cp "$S/tree/v" "$S/built";;
+  run) [[ " \$* " == *" --allow-stale-arm "* ]] || cmp -s "$S/tree/v" "$S/built" ||
+         { echo "refusing to run: arm stale" >&2; exit 3; }
+       mkdir -p "$S/run"; echo '{}' >"$S/run/rows.jsonl"; echo "$S/run";;
+  report) :;;
+esac
+STUB
+cat >"$S/bin/pc" <<STUB
+#!/usr/bin/env bash
+# fixture pc: an agent commit lands while idle is sampled, between build and run
+[ "\$1" = idle ] && { echo 2 >"$S/tree/v"; exit 0; }
+exec "$FIX/pc" "\$@"
+STUB
+chmod +x "$S/bin/pcbench" "$S/bin/pc"
+PATH="$S/bin:$FIX:$BIN:$PATH" PCFAKE_STATUS="$FIX/away.json" PCBENCH_WEEKLY_BENCH="$S/bench" \
+  PCBENCH_WEEKLY_STATE="$S/state" bash "$RUNNER" >"$W/o5" 2>&1; rc=$?
+{ [ "$rc" = 0 ] && [ "$(cat "$S/tree/v")" = 2 ] && grep -q "run: $S/run" "$W/o5" &&
+  "$BIN/pcbench" run --help 2>&1 | grep -q -- --allow-stale-arm; } && ok || no "rc=$rc $(cat "$W/o5")"
+
 t "the idle row is sampled after the gate, never on a dry run"
 IDLE="$BIN/../bench/BASELINE-IDLE.tsv"
 if [ ! -f "$IDLE" ]; then echo "SKIP owner data absent: $IDLE"; else
