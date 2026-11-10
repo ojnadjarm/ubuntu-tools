@@ -22,9 +22,12 @@ cat >"$BIN/systemctl" <<'EOF'
 echo "systemctl $*" >>"$CALLS"
 case "$*" in
   *list-units*agent@*.service*) echo "agent@alpha.service loaded active running agent alpha" ;;
+  *list-units*discord-liaison-relay@*.path*) echo "discord-liaison-relay@p1.path loaded active waiting relay" ;;
+  *list-units*discord-liaison-job-*.service*) echo "discord-liaison-job-j1.service loaded active running job" ;;
   *list-units*) : ;;
   *is-active*agent@alpha.service*) echo active ;;
   *is-active*ailearning-ci-weekly.*) echo active ;;
+  *is-active*discord-liaison*|*is-active*tier-nightly.*|*is-active*gamedev-perf.*|*is-active*pulse-5h-reset.*) echo active ;;
   *is-active*) echo inactive ;;
 esac
 exit 0
@@ -70,6 +73,14 @@ grep -q '^notify-owner ' "$CALLS" || fail "no push recorded (shim not reached)"
 for u in ailearning-ci-weekly.service ailearning-ci-weekly.timer; do
   grep -q "systemctl .*stop $u" "$CALLS" || fail "rostered $u not stopped"
 done
+n=0
+for u in discord-liaison-check.service discord-liaison-check.timer discord-liaison-wake.service \
+         discord-liaison-wake.path discord-liaison-relay.service discord-liaison-relay@p1.path \
+         discord-liaison-job-j1.service tier-nightly.service tier-nightly.timer gamedev-perf.service \
+         gamedev-perf.timer pulse-5h-reset.service pulse-5h-reset.timer; do
+  grep -q "systemctl .*stop $u\$" "$CALLS" || fail "$u not stopped"
+  n=$((n + 1))
+done
 
 # --- stale state/pid (written before its pid's process started, e.g. pre-reboot) is spared --
 sleep 300 & bystander=$!
@@ -98,5 +109,5 @@ for cli in agent-now agent-run agent-enable agent-disable; do
   [ -e "$WORK/agents/no-such-agent" ] && fail "$cli created ~/agents/no-such-agent"
 done
 
-echo "agents-stop: state/pid runs killed 1 of 1; -h and unknown-name rejected by 4 agent-* CLIs"
+echo "agents-stop: state/pid runs killed 1 of 1; liaison/nightly units stopped $n of 13; -h and unknown-name rejected by 4 agent-* CLIs"
 exit 0

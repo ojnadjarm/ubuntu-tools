@@ -20,10 +20,10 @@ stop_if_running() {
   stopped="$stopped ${1%.*}"
 }
 
-for u in $(units 'agent@*.service') $(units 'po@*.service') po-picks.service sentinel-check.service moodle-keep-weekly.service pcbench-weekly.service ailearning-ci-daily.service ailearning-ci-weekly.service fleet-ci-daily.service orchestrator-pulse.service improve-meter.service discord-bot.service; do
+for u in $(units 'agent@*.service') $(units 'po@*.service') po-picks.service sentinel-check.service moodle-keep-weekly.service pcbench-weekly.service ailearning-ci-daily.service ailearning-ci-weekly.service fleet-ci-daily.service orchestrator-pulse.service improve-meter.service discord-bot.service $(units 'discord-liaison-job-*.service') discord-liaison-check.service discord-liaison-wake.service discord-liaison-relay.service tier-nightly.service gamedev-perf.service pulse-5h-reset.service; do
   stop_if_running "$u"
 done
-for u in $(units 'agent@*.timer') $(units 'po@*.path') sentinel-check.timer moodle-keep-weekly.timer pcbench-weekly.timer ailearning-ci-daily.timer ailearning-ci-weekly.timer fleet-ci-daily.timer orchestrator-pulse.timer improve-meter.timer; do
+for u in $(units 'agent@*.timer') $(units 'po@*.path') sentinel-check.timer moodle-keep-weekly.timer pcbench-weekly.timer ailearning-ci-daily.timer ailearning-ci-weekly.timer fleet-ci-daily.timer orchestrator-pulse.timer improve-meter.timer $(units 'discord-liaison-relay@*.path') discord-liaison-check.timer discord-liaison-wake.path tier-nightly.timer gamedev-perf.timer pulse-5h-reset.timer; do
   stop_if_running "$u"
 done
 
