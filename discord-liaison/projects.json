@@ -34,7 +34,7 @@
   {
    "id": "mosaico",
    "name": "Mosaico (ImgCrypt)",
-   "about": "ImgCrypt (first called Mosaico): a planned Windows desktop app to find, sort and move large photo and video collections between PC, USB drive and phone, all local and private. Plan stage, no code yet.",
+   "about": "ImgCrypt (first called Mosaico): a planned Windows desktop app to find, sort and move large photo and video collections between PC, USB drive and phone, all local and private. Version 0.1 is on main.",
    "repo": "RunarStudio/ImgCrypt",
    "clone": "~/projects/collab/ImgCrypt",
    "match": {"tags": ["mosaico", "imgcrypt"], "title": ["mosaico", "imgcrypt"]},
