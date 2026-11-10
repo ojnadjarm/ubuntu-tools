@@ -1,7 +1,6 @@
-"""Chat router (T1515): pure; a message + org seats + today's counters give the list of wakes, no I/O."""
+"""Chat router (T1515): pure; a message + org seats give the list of wakes, no I/O; no daily limit per seat (P38)."""
 import re
 
-CAP = 12
 HOP_LIMIT = 4
 PLAN_STOP = 95
 MENTION = re.compile(r"(?<![\w@.-])@([a-z0-9][a-z0-9-]*)")
@@ -42,8 +41,8 @@ def _targets(msg, seats):
     return uniq
 
 
-def wakes(msg, org, counters, paused=False, plan=0, cap=CAP):
-    """[{seat, reason, queue, count}]: deliver now when queue is None (else paused|hop|plan|cap); count = add 1 to counters."""
+def wakes(msg, org, paused=False, plan=0):
+    """[{seat, reason, queue, count}]: deliver now when queue is None (else paused|hop|plan); count = add 1 to counters."""
     seats = {s["id"]: s for s in org}
     owner = msg["from"] == "owner"
     out = []
@@ -56,8 +55,6 @@ def wakes(msg, org, counters, paused=False, plan=0, cap=CAP):
             queue = "hop"
         elif plan >= PLAN_STOP:
             queue = "plan"
-        elif counters.get(seat, 0) >= cap:
-            queue = "cap"
         else:
             queue = None
         out.append({"seat": seat, "reason": reason, "queue": queue, "count": queue is None and not owner})

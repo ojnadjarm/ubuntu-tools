@@ -32,9 +32,9 @@ orchestrator relays with `po-ask`. Not for fleet tooling, work repos (Vass) or r
 - Managers report up, not out: po-run gives them no `CHAT_SEAT` (Q5) and files each new `ESCALATE:` line of their
   REPORT.md to the parent (`po-ask discord --from manager`, counted in `state/escalated`). po-discord holds no project
   context: it maps/forwards (`po-ask <id> --from router`) and writes its own `ESCALATE:` for the orchestrator.
-- Cap (Q4): `po-ask --from router|manager` takes one of the target seat's 12 wakes a day from chat's counters
-  (`lib/po_cap.py`, exit 4 at the cap); chat mentions of a manager hit the same counter via `chat_route`. Liaison handoffs
-  (Discord members) are not capped.
+- Wakes (Q4, no limit since P38): `po-ask --from router|manager` counts one of the target seat's wakes today in chat's
+  counters (`lib/po_count.py`, shown in Agents › Chat "Wakes today"); chat mentions of a manager count there too.
+  Liaison handoffs (Discord members) are not counted.
 - Context map (who reads what): `~/agent-work/research/2026-11-09/T1515/P31-architecture.md`. A manager reads its BRIEF,
   inbox, state and ledger only; `test_managers.py` proves a request for project A never reaches manager B.
 - `deploy-lock <env> --version '<cmd>' -- <cmd>`: one deployer per live env, second one waits and gets `DEPLOY_LIVE_BEFORE`.

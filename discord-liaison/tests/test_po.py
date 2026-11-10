@@ -115,7 +115,7 @@ class TestRealRegistry(unittest.TestCase):
                 if q is not p:
                     self.assertNotIn(q['clone'], brief, f'po-{p["id"]} names {q["id"]}')
 
-    def test_chat_wake_cap_applies_to_every_manager(self):
+    def test_chat_mention_wakes_every_manager_without_a_daily_limit(self):
         import sys
         agents = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         sys.path.insert(0, os.path.join(agents, 'lib'))
@@ -124,7 +124,5 @@ class TestRealRegistry(unittest.TestCase):
         seats = org.seats(os.path.join(agents, 'org.json'))
         for s in (s for s in seats if s['role'] == 'manager'):
             msg = {'ch': 'org', 'from': 'orchestrator', 'to': [], 'text': f'@{s["id"]} hola', 'hop': 0}
-            [w] = chat_route.wakes(msg, seats, {s['id']: chat_route.CAP})
-            self.assertEqual((w['seat'], w['queue']), (s['id'], 'cap'))
-            [w] = chat_route.wakes(msg, seats, {s['id']: chat_route.CAP - 1})
-            self.assertIsNone(w['queue'])
+            [w] = chat_route.wakes(msg, seats)
+            self.assertEqual((w['seat'], w['queue']), (s['id'], None))

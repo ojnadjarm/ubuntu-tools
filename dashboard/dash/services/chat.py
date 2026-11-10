@@ -8,8 +8,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import chat_dispatch  # noqa: E402
 import chat_files  # noqa: E402
 import chat_guard  # noqa: E402
-import chat_route  # noqa: E402
 import chat_store  # noqa: E402
+import chat_thinking  # noqa: E402
 
 OWNER = "owner"
 BODY_LIMIT = 16384
@@ -55,7 +55,7 @@ def read_route(h, path):
     except ValueError as e:
         return h.json({"error": str(e)}, 400)
     h.json({"messages": messages, "more": more, "channels": chat_store.channels(OWNER),
-            "wakes": {"cap": chat_route.CAP, "today": chat_dispatch.today()}})
+            "wakes": {"today": chat_dispatch.today()}, "thinking": chat_thinking.now()})
 
 
 def attached(ids):

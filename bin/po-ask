@@ -2,7 +2,7 @@
 # usage: po-ask <p> [--from owner|orchestrator|liaison|pick|chat|router|manager] [--channel <ch>] [--thread <id>] [--image <file>]… [--intent|--copy] "<text>"|-
 # Queue one request for the product-owner agent po-<p>: writes po-<p>/inbox/<utc>-<from>-<rand>.md (front matter + the
 # verbatim text; `-` reads stdin) and prints its path. The po@<p>.path unit wakes the PO. Exit 2: unknown PO or bad usage.
-# --from router|manager (agent to agent, T1515 P31) takes one of seat <p>'s 12 wakes a day; exit 4 at the cap, nothing filed.
+# --from router|manager (agent to agent, T1515 P31) counts one of seat <p>'s wakes today in chat's counters (no limit, P38).
 # --image (repeatable, T1515 P32): a PNG/JPEG/GIF/WebP copied into po-<p>/state/images/, listed as `images:` in the front matter.
 help() { awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; }
 case "${1:-}" in -h|--help) help; exit 0 ;; '') help >&2; exit 2 ;; esac
@@ -32,10 +32,7 @@ for i in "${images[@]}"; do
   case "$magic" in 89504e470d0a1a0a*|ffd8ff*|474946383?61*|52494646????????57454250) ;;
     *) echo "po-ask: --image takes a PNG/JPEG/GIF/WebP file: $i" >&2; exit 2 ;; esac
 done
-case "$from" in router|manager)
-  python3 "$(dirname "$(readlink -f "$0")")/../lib/po_cap.py" take "$p" ||
-    { echo "po-ask: po-$p had its 12 agent wakes today; nothing filed" >&2; exit 4; } ;;
-esac
+case "$from" in router|manager) python3 "$(dirname "$(readlink -f "$0")")/../lib/po_count.py" add "$p" ;; esac
 
 # Written beside the inbox, then renamed in: the path unit never sees a half-written file.
 mkdir -p "$dir/.inbox-tmp"

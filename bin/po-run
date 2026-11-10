@@ -5,7 +5,7 @@
 # Each run gets PO_BUDGET=stop when `plan-usage --check 95` exits 1 (the PO then spawns no worker), else ok;
 # CHAT_SEAT=<p> lets the run post with `chat` (a manager only in its direct message with the owner, T1515 P34). For a
 # manager (PARENT=<seat> in agent.env, T1515 P31) each new REPORT.md `ESCALATE:` line goes to its parent with
-# `po-ask <seat> --from manager` (once; at the cap it waits).
+# `po-ask <seat> --from manager` (once).
 help() { awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; }
 case "${1:-}" in -h|--help) help; exit 0 ;; '') help >&2; exit 2 ;; esac
 { # one block: bash parses it whole before running, so an edit of this file cannot break a running po-run

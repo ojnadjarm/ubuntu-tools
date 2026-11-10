@@ -125,7 +125,7 @@ class ChatApi(unittest.TestCase):
     def test_no_channel_lists_channels_only(self):
         self.req("/api/chat/post", {"ch": "harness", "text": "x"})
         self.assertEqual(self.req("/api/chat")[1], {"messages": [], "more": False, "channels": [{"ch": "harness", "unread": 0}],
-                                                    "wakes": {"cap": 12, "today": {}}})
+                                                    "wakes": {"today": {}}, "thinking": []})
 
     def test_recent(self):
         """recent=1: the newest 50 of every channel, newest last, with more: true while older ones exist."""
@@ -246,7 +246,21 @@ class ChatApi(unittest.TestCase):
         os.makedirs(day)
         with open(os.path.join(day, time.strftime("%Y-%m-%d") + ".json"), "w") as f:
             json.dump({"fx": 3}, f)
-        self.assertEqual(self.req("/api/chat")[1]["wakes"], {"cap": 12, "today": {"fx": 3}})
+        self.assertEqual(self.req("/api/chat")[1]["wakes"], {"today": {"fx": 3}})
+
+    def test_thinking(self):
+        """A woken PO whose request waits in its inbox is starting in that channel; filed to done/, nobody is thinking."""
+        with open(os.environ["ORG_FILE"], "w") as f:
+            json.dump({"seats": ORG["seats"] + [{"id": "px", "name": "PX", "role": "po", "parent": "owner", "wake": "po-inbox", "match": "~/px"}]}, f)
+        po = os.path.join(self.tmp.name, "po-px")
+        for d in ("inbox", "done"):
+            os.makedirs(os.path.join(po, d))
+        open(os.path.join(po, "inbox", "r1.md"), "w").close()
+        svc.chat_thinking.chat_wake.woke("px", [{"ch": "dm-owner--px", "id": 7}], "r1.md")
+        got = self.req("/api/chat")[1]["thinking"]
+        self.assertEqual([(t["seat"], t["ch"], t["state"]) for t in got], [("px", "dm-owner--px", "starting")])
+        os.rename(os.path.join(po, "inbox", "r1.md"), os.path.join(po, "done", "r1.md"))
+        self.assertEqual(self.req("/api/chat")[1]["thinking"], [])
 
     def test_held_is_422_and_not_stored(self):
         for text, rule in (("token=abcdefghijklmnop1234", "secret"), ("the ACME ticket", "deny word")):

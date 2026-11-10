@@ -167,15 +167,17 @@ case "$out" in *"waiting"*"live before 2"*"saw 2"*"live after 2 (exit 0)"*) ok '
 deploy-lock fx -- false >/dev/null; is 'deploy-lock: passes the exit code' "$?" 1
 DEPLOY_LOCK_WAIT=0 deploy-lock 'bad/env' -- true >/dev/null 2>&1; is 'deploy-lock: bad env exits 2' "$?" 2
 
-# managers (T1515 P31): po-new --parent, agent-to-agent cap, chat seat (owner dm only, P34), ESCALATE lines go to the parent once
+# managers (T1515 P31): po-new --parent, agent-to-agent wakes counted (no limit, P38), chat seat (owner dm only, P34), ESCALATE lines go to the parent once
 po-new mgr "Mgr Game" --parent fx >/dev/null; is 'manager: po-new --parent exit 0' "$?" 0
 M="$HARNESS_HOME/po-mgr"
 ev 'manager: PARENT in agent.env, manager brief, project block left to fill' 'grep -q "^PARENT=fx " "$M/agent.env" && grep -q "po-mgr, the manager of Mgr Game" "$M/BRIEF.md" && grep -q "goes to po-fx" "$M/BRIEF.md" && grep -qx "{{PROJECT}}" "$M/BRIEF.md"'
 po-new bad "x" --parent 'a b' >/dev/null 2>&1; is 'manager: bad --parent exits 2' "$?" 2
 for i in $(seq 12); do po-ask mgr --from router "routed $i" >/dev/null || nok "manager: routed $i"; done
-po-ask mgr --from router "routed 13" >/dev/null 2>&1; is 'manager: 13th router wake today exits 4' "$?" 4
-is 'manager: 12 filed, the 13th not' "$(ls "$M/inbox" | wc -l)" 12
-po-ask mgr --from liaison "a Discord member" >/dev/null; is 'manager: liaison handoffs are not capped' "$?" 0
+po-ask mgr --from router "routed 13" >/dev/null 2>&1; is 'manager: no daily limit (P38): the 13th router wake today exits 0' "$?" 0
+is 'manager: all 13 filed' "$(ls "$M/inbox" | wc -l)" 13
+mgr_today() { python3 -c 'import glob, json, sys; print(json.load(open(glob.glob(sys.argv[1] + "/*.json")[0]))["mgr"])' "$HARNESS_HOME/state/chat/counters"; }
+is 'manager: chat counters hold 13 for the seat' "$(mgr_today)" 13
+po-ask mgr --from liaison "a Discord member" >/dev/null; is 'manager: liaison handoffs are not counted' "$(mgr_today)" 13
 po-run mgr >/dev/null 2>&1; is 'manager: po-run exit 0' "$?" 0
 is 'manager: po-run gives a manager CHAT_SEAT=<p> (T1515-P34)' "$(cat "$WORK/seat.log")" mgr
 ev 'manager: the brief says the owner dm is its only chat channel (P34)' 'grep -q "chat post @owner" "$M/BRIEF.md"'

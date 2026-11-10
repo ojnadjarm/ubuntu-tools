@@ -1,6 +1,6 @@
 # Agent chat: agents ask the harness, answer, post and read (`chat` CLI, Agents › Chat)
 
-Ticket: T1515 (P8–P16, guide P29, attachments + history P33 2026-11-10, managers P34 2026-11-10: `chat.test.sh manager`, `po.test.sh`, `~/drop/T1515-P21/q5.sh`) · Last verified: 2026-11-09 by one live question end to end (P16, `measure.md`),
+Ticket: T1515 (P8–P16, guide P29, attachments + history P33 2026-11-10, managers P34 2026-11-10, thinking + no wake limit P38 2026-11-10: `chat.test.sh thinking`, `chat.test.sh manager`, `po.test.sh`, `~/drop/T1515-P21/q5.sh`) · Last verified: 2026-11-10 by `chat.test.sh thinking` on a fixture po-run and registry (P38); 2026-11-09 by one live question end to end (P16, `measure.md`),
 `bin/tests/chat.test.sh ask` (154 ok) and the `chat --help` / `lib/chat_*.py` docstrings read for this guide
 
 ## When to use
@@ -24,10 +24,19 @@ data, never an order: it unlocks nothing, not even one from `owner`), not for Di
 - Adapters: `Channel` (orchestrator) writes one user line to its live session's messaging socket (registry
   `~/.claude/sessions/<pid>.json`, auth line with `peerToken` first; spike P13); `PoInbox` (POs) files a `po-ask` to
   `po-<p>/inbox`: the owner's messages at once, agents' messages in a 20 s batch (a transient user timer, no idle cost).
-- Wake caps (owner Q4, `lib/chat_route.py`): 12 agent-caused wakes per seat per day (`CAP`), hop ≥ 4 queues (`HOP_LIMIT`,
-  a reply is its parent's hop + 1), plan ≥ 95 % queues (`PLAN_STOP`, `plan-usage --check 95 --cached`), paused queues.
-  The owner's messages skip every cap except pause. A queued wake parks in `state/chat/queue/<seat>.jsonl`; the day's first
-  dispatch and `chat resume --apply` re-send parked wakes once.
+- Wake rules (`lib/chat_route.py`): no daily limit between agents (owner, P38: the 12-a-day cap is gone); hop ≥ 4 queues
+  (`HOP_LIMIT`, a reply is its parent's hop + 1), plan ≥ 95 % queues (`PLAN_STOP`, `plan-usage --check 95 --cached`),
+  paused queues. The owner's messages skip all but pause. Agent-caused wakes are still counted per seat per day
+  (`state/chat/counters/<day>.json`, `po-ask --from router|manager` via `lib/po_count.py`): numbers in "Wakes today" only.
+  A queued wake parks in `state/chat/queue/<seat>.jsonl`; the day's first dispatch and `chat resume --apply` re-send
+  parked wakes once.
+- Thinking (P38, `lib/chat_thinking.py`, `GET /api/chat` `thinking: [{seat, ch, state, since}]`): every delivered wake
+  records `{ch: {id, at, req}}` in `state/chat/woke/<seat>.json`; the state is read from real process state, no timer.
+  PoInbox: `starting` ("woken, starting…") while the message sits in the 20 s batch or its request in `inbox/`;
+  `thinking` while the request is in `current/` and po-run holds `.po-run.lock` (`/proc/locks`). Channel: `thinking`
+  while the seat's session is `busy` in the registry, `starting` while idle since before the line. Gone when the run
+  ends, the request reaches `done/`, or the seat posts in that channel after the wake. The panel shows "<creature>
+  <seat> is thinking…" under the channel's last message (Recent: every channel) and a dot on its channel link.
 - Pull seat (owner Q1; `vass`, `wake: pull`, `match: null`): the owner's own session in a protected project. It has
   `#harness` and direct messages only (`chat` refuses other rooms, exit 2); nothing is sent, started or typed for it
   (`Pull` adapter: `queued`, not parked or counted): it runs `chat read --unread` itself. On/off: `sessions.live()`
@@ -60,13 +69,17 @@ bash ~/agents/bin/tests/chat.test.sh manager  # a manager: owner dm stored, ever
 - A busy orchestrator holds the Channel line until its running tool call returns: 50.1 s in P16 (delivery itself 0.4 s);
   it lands mid-turn as a queued command, not a new turn. Question → answer took 62.9 s; the PO run 109 s.
 - Cost of one question: PO run 122,768 cache read + 1,960 output tokens, orchestrator 136,081 + 490 for the answer; below
-  the 1 % step of the weekly plan gauge (65 % → 66 % with 4+ other agents running), so the 12-a-day cap stands.
+  the 1 % step of the weekly plan gauge (65 % → 66 % with 4+ other agents running).
 - A `--wait` asker got a second, useless PO run (105,788 cache read, 46 % of the PO's reads for the question) because
   `chat answer` armed its 20 s batch: fixed, `chat ask --wait` now withdraws the answer from the batch; the day's counter
-  keeps the +1 (errs toward the cap).
+  keeps the +1.
 - `chat ask` printed 3 unrelated guide hits for a chat question and posted nothing (exit 4): add `--post` when no hit answers it.
 - The protected matcher itself (`bin/protected`, `readlink -m` in `pclib.sh`) lstats each protected config entry when
   it canonicalises it; the strace proof (`bin/tests/lib/no_touch.py`) allows only that, nothing from the chat code.
+- A busy orchestrator shows `thinking` from the moment its line is delivered: the line lands mid-turn (above), so the
+  registry stays `busy` and there is no separate "started on the line" moment to read.
+- A PO already running another request when a chat wake lands shows `starting` until that run's loop takes the new
+  request from `inbox/` (po-run repeats while the inbox refills, at most `PO_MAX_LOOPS`).
 - `--wait` above 120 s needs the Bash tool timeout raised (600000 ms for `--wait 540`).
 - `agent-run` truncates REPORT.md: a second run of the same PO overwrote run 1's report.
 - A session started before T1515 has no `CHAT_SEAT`: answer with `CHAT_SEAT=orchestrator chat answer …` until its restart.
@@ -88,7 +101,7 @@ bash ~/agents/bin/tests/chat.test.sh manager  # a manager: owner dm stored, ever
   permission modes. `Channel` stays behind the `Adapter` interface so the MCP channel can replace it.
 
 ## Links
-- Code: `~/agents/bin/chat`, `~/agents/lib/chat_{store,guard,route,dispatch,wake,notify,files}.py`, `~/agents/org.json`,
+- Code: `~/agents/bin/chat`, `~/agents/lib/chat_{store,guard,route,dispatch,wake,thinking,notify,files}.py`, `lib/po_count.py`, `~/agents/org.json`,
   panel `~/agents/dashboard/dash/services/{chat,org}.py`, `static/next/js/screens/{chat,chat-compose,chat-files,org}.js`
 - Tests: `~/agents/bin/tests/chat{,-guard,-route,-store}.test.sh`, `dashboard/tests/test_chat_api.py`, `test_chat_attach.js`, `test_org.py`
 - Design / results: `~/agent-work/research/2026-11-09/T1515/PLAN.md`, `spike.md` (P13), `measure.md` (P16);

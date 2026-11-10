@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# T1515 bin/chat: one section per ticket. Run: bash chat.test.sh [post] [read] [wake-ceo] [wake-po] [ask] [answer] [notify] [pause] [vass] [files] [history] [manager]   (no args: every section)
+# T1515 bin/chat: one section per ticket. Run: bash chat.test.sh [post] [read] [wake-ceo] [wake-po] [ask] [answer] [notify] [pause] [vass] [files] [history] [manager] [thinking]   (no args: every section)
 # Fixture-only (FLEET §5.6): bwrap --unshare-net, HARNESS_HOME and HARNESS_CONFIG in a temp dir, a fixture org;
 # the selftest proves no route out and that the real chat store is untouched.
 set -uo pipefail
@@ -167,7 +167,7 @@ import chat_route, chat_wake, org
 seats = org.seats(); by = {s["id"]: s for s in seats}
 msg = {"id": 1, "ch": "harness", "from": sys.argv[1], "to": [], "kind": "msg", "text": sys.argv[2], "hop": 0}
 print(" ".join(f'{w["seat"]} {chat_wake.ADAPTERS[by[w["seat"]]["wake"]]().deliver(w["seat"], [msg])}'
-               for w in chat_route.wakes(msg, seats, {}) if w["queue"] is None))
+               for w in chat_route.wakes(msg, seats) if w["queue"] is None))
 PY
   }
   direct() { python3 -c "import sys; sys.path.insert(0, '$BIN/../lib'); import chat_wake
@@ -266,15 +266,17 @@ PY
   is 'wake-po: seat without a PO folder refused, no timer' "$(outcomes gx) $(timers)" 'refused 3'
   for i in $(seq "$((12 - $(today)))"); do CHAT_SEAT=gx chat post @fx "wake $i" >/dev/null; $flush; done
   is 'wake-po: 12 agent wakes from real posts: 12 timers, 13 requests' "$(today) $(timers) $(inbox)" '12 12 13'
-  CHAT_SEAT=gx chat post @fx 'thirteenth' >/dev/null
+  CHAT_SEAT=gx chat post @fx 'thirteenth' >/dev/null; $flush
+  is 'wake-po: no daily limit (P38): the 13th agent wake today is delivered and filed' \
+     "$(outcomes fx | awk '{print $NF}') $(today) $(timers) $(inbox)" 'delivered 13 13 14'
   echo 1 >"$WORK/plan.rc"; CHAT_SEAT=gx chat post @fx 'plan full' >/dev/null; rm "$WORK/plan.rc"
   touch "$ST/PAUSED"; CHAT_SEAT=gx chat post @fx 'paused' >/dev/null; rm "$ST/PAUSED"
-  is 'wake-po: cap, plan 95 %, pause: queued by the router, no timer, nothing filed' \
-     "$(outcomes fx | awk '{print $(NF-2), $(NF-1), $NF}') $(timers) $(inbox)" 'cap plan paused 12 13'
+  is 'wake-po: plan 95 %, pause: queued by the router, no timer, nothing filed' \
+     "$(outcomes fx | awk '{print $(NF-1), $NF}') $(timers) $(inbox)" 'plan paused 13 14'
   echo 1 >"$WORK/plan.rc"; owner 'owner at full plan' >/dev/null; rm "$WORK/plan.rc"
-  is 'wake-po: the owner still goes at full plan' "$(inbox)" 14
+  is 'wake-po: the owner still goes at full plan' "$(inbox)" 15
   parked() { python3 -c "import json; print(' '.join(r['why'] for r in map(json.loads, open('$ST/queue/$1.jsonl'))))"; }
-  is 'wake-po: undelivered wakes parked per seat' "$(parked fx) / $(parked gx)" 'cap plan paused / refused'
+  is 'wake-po: undelivered wakes parked per seat' "$(parked fx) / $(parked gx)" 'plan paused / refused'
 }
 
 t_ask() {
@@ -454,15 +456,15 @@ print([(r['wake'], r['outcome']) for r in map(json.loads, open('$ST/audit.jsonl'
   is 'pause: audit has one line per applied switch' "$(grep -c '"pause"' "$ST/audit.jsonl")" 3
 
   day="$ST/counters/$(date +%F).json"
-  python3 -c "import json; json.dump({'fx': 12}, open('$day', 'w'))"
-  id=$(CHAT_SEAT=gx chat post @fx 'over the cap')
-  is 'cap: parked' "$(wakes "$id") $(queued)" "[('fx', 'cap')] 1"
+  echo 1 >"$WORK/plan.rc"
+  id=$(CHAT_SEAT=gx chat post @fx 'plan full')
+  is 'plan 95 %: parked' "$(wakes "$id") $(queued)" "[('fx', 'plan')] 1"
   chat pause --apply >/dev/null
-  is 'resume while still capped: parked again, nothing lost' "$(chat resume --apply | tail -1) $(queued)" \
-     'chat: 1 held wake re-sent: fx cap 1'
-  rm "$day"
+  is 'resume while the plan is still full: parked again, nothing lost' "$(chat resume --apply | tail -1) $(queued)" \
+     'chat: 1 held wake re-sent: fx plan 1'
+  rm "$day" "$WORK/plan.rc"
   CHAT_SEAT=fx chat post harness 'first post of a new day' >/dev/null
-  is "new day: the first post re-sends the parked wake (counter reset)" "$(wakes "$id" | grep -o "'fx', '[a-z]*')]$") $(queued)" \
+  is "new day: the first post re-sends the parked wake" "$(wakes "$id" | grep -o "'fx', '[a-z]*')]$") $(queued)" \
      "'fx', 'queued')] 0"
   CHAT_SEAT=fx chat post harness 'second post' >/dev/null
   is 'new day: only the first post drains' "$(grep -c "\"id\": $id" "$ST/audit.jsonl")" 4
@@ -697,10 +699,56 @@ import chat_wake; print(chat_wake.render([{'id': 7, 'ch': sys.argv[1], 'from': s
   unset ORG_FILE
 }
 
-[ $# -gt 0 ] || set -- post read wake-ceo wake-po ask answer notify pause vass files history manager
+t_thinking() {
+  # P38: who is thinking, from real state: woken, starting until a run takes the request; thinking while po-run runs it
+  # (its lock held) or the orchestrator's session is busy; gone when the run ends or the seat replies in that channel.
+  local P="$HARNESS_HOME/po-fx" REG="$HOME/.claude/sessions" flush run spid at
+  rm -rf "$ST" "$WORK/systemd-run.log" "$WORK/running" "$WORK/go"; mkdir -p "$P/inbox" "$WORK/think"; : >"$P/BRIEF.md"
+  think() { python3 -c "import sys; sys.path.insert(0, '$BIN/../lib'); import chat_thinking
+print(' '.join(f\"{t['seat']}:{t['ch']}:{t['state']}\" for t in chat_thinking.now()) or 'none')"; }
+  printf '#!/bin/sh\ntouch "$WORK/running"\nwhile [ ! -e "$WORK/go" ]; do sleep 0.1; done\n' >"$WORK/think/agent-run"
+  chmod +x "$WORK/think/agent-run"
+  start() { rm -f "$WORK/running" "$WORK/go"; PATH="$WORK/think:$PATH" "$BIN/po-run" fx >/dev/null 2>&1 & run=$!
+    wait-for --label p38-run --every 0.1 --job "$run" --until "test -e '$WORK/running'" >/dev/null || nok 'thinking: fixture run' 'never started'; }
+
+  is 'thinking: nobody woken, nobody thinking' "$(think)" none
+  CHAT_SEAT=gx chat post @fx 'are you there?' >/dev/null
+  is 'thinking: an armed batch: woken, starting' "$(think)" 'fx:dm-fx--gx:starting'
+  flush=$(sed -n 's/.* --setenv=HARNESS_HOME=[^ ]* //p' "$WORK/systemd-run.log" | tail -1); $flush
+  is 'thinking: filed in the inbox, not started: starting' "$(think)" 'fx:dm-fx--gx:starting'
+  start
+  is 'thinking: po-run runs the request: thinking' "$(think)" 'fx:dm-fx--gx:thinking'
+  touch "$WORK/go"; wait "$run"
+  is 'thinking: the run exited: gone' "$(think)" none
+
+  CHAT_SEAT=gx chat post fx '@fx and again' >/dev/null; $flush; start
+  is 'thinking: second wake, run alive: thinking in that channel' "$(think)" 'fx:fx:thinking'
+  CHAT_SEAT=fx chat post fx 'here it is' >/dev/null
+  is 'thinking: its reply in the channel clears it while the run lives' "$(think)" none
+  touch "$WORK/go"; wait "$run"
+  "$BIN/po-ask" fx --from orchestrator 'unrelated' >/dev/null
+  is 'thinking: a later run for another request is not this wake' "$(start; think; touch "$WORK/go"; wait "$run")" none
+
+  export ORCHESTRATOR_TMUX_SESSION=orch-fx; unset CLAUDE_SESSIONS_DIR; rm -rf "$REG"; mkdir -p "$REG"
+  sleep 60 & spid=$!
+  at=$(python3 -c "import sys, time; sys.path.insert(0, '$BIN/../lib'); import chat_wake
+chat_wake.woke('orchestrator', [{'id': 5, 'ch': 'harness'}]); print(int(time.time() * 1000))")
+  status() { printf '{"pid": %s, "procStart": "%s", "cwd": "%s", "tmux": "orch-fx:@0.%%0", "status": "%s", "statusUpdatedAt": %s}' \
+    "$spid" "$(cut -d')' -f2 "/proc/$spid/stat" | awk '{print $20}')" "$HOME" "$1" "$2" >"$REG/$spid.json"; }
+  status idle $((at - 5000))
+  is 'thinking: orchestrator idle since before the line: starting' "$(think)" 'orchestrator:harness:starting'
+  status busy $((at + 100))
+  is 'thinking: orchestrator busy after the line: thinking' "$(think)" 'orchestrator:harness:thinking'
+  status idle $((at + 9000))
+  is 'thinking: orchestrator idle again: gone' "$(think)" none
+  status busy $((at + 9500)); kill "$spid"; wait "$spid" 2>/dev/null
+  is 'thinking: orchestrator session gone: gone' "$(think)" none
+}
+
+[ $# -gt 0 ] || set -- post read wake-ceo wake-po ask answer notify pause vass files history manager thinking
 for s in "$@"; do
   case "$s" in
-    post|read|wake-ceo|wake-po|ask|answer|notify|pause|vass|files|history|manager) "t_$s" ;;
+    post|read|wake-ceo|wake-po|ask|answer|notify|pause|vass|files|history|manager|thinking) "t_$s" ;;
     *) nok "section $s" 'unknown section'; exit 2 ;;
   esac
 done

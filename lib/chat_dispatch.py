@@ -74,7 +74,7 @@ def park(seat, msg, why):
 
 
 def new_day():
-    """True for the one call that creates today's counters file: the daily cap has just reset."""
+    """True for the one call that creates today's counters file: a new day has started."""
     folder = os.path.join(chat_store.root(), "counters")
     os.makedirs(folder, exist_ok=True)
     try:
@@ -116,8 +116,7 @@ def dispatch(msg, seats=None, only=None):
         drain(seats)
     by_id = {s["id"]: s for s in seats}
     plan = 0 if msg["from"] == "owner" else plan_pct()
-    with counters() as today:
-        due = chat_route.wakes(msg, seats, dict(today), paused=paused(), plan=plan)
+    due = chat_route.wakes(msg, seats, paused=paused(), plan=plan)
     out = []
     for w in due:
         if only and w["seat"] != only:

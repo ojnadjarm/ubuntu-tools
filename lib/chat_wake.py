@@ -63,8 +63,8 @@ class Channel(Adapter):
         self.directory = directory or sessions.registry_dir()
         self.tmux = tmux or os.environ.get("ORCHESTRATOR_TMUX_SESSION", "claude")
 
-    def target(self, seat):
-        """(socket path, peerToken) of the one live session in the seat's folder and tmux session, else None."""
+    def session(self, seat):
+        """The registry row of the one live session in the seat's folder and tmux session, else None."""
         s = self.seats.get(seat)
         if not s or s["role"] != "ceo" or not s["match"]:
             return None
@@ -84,9 +84,13 @@ class Channel(Adapter):
                     rows.append(reg)
             except (OSError, ValueError, KeyError, TypeError):
                 continue
-        if len(rows) != 1:
+        return rows[0] if len(rows) == 1 else None
+
+    def target(self, seat):
+        """(socket path, peerToken) of the seat's live session, else None."""
+        reg = self.session(seat)
+        if reg is None:
             return None
-        reg = rows[0]
         token = None
         for k in glob.glob(os.path.join(self.directory, f"{int(reg['pid'])}.*.key")):
             try:
@@ -118,6 +122,7 @@ class Channel(Adapter):
                 s.sendall(data.encode())
         except OSError:
             return REFUSED
+        woke(seat, msgs)
         return DELIVERED
 
 
@@ -146,6 +151,44 @@ def _batch(seat):
         with open(tmp, "w") as f:
             json.dump(state, f)
         os.replace(tmp, path)
+
+
+def _woken_path(seat):
+    return os.path.join(chat_store.root(), "woke", f"{seat}.json")
+
+
+def woke(seat, msgs, req=None):
+    """Record each message's channel as woken for the seat: {ch: {id, at, req}}, req = its inbox request file name."""
+    path = _woken_path(seat)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        rows = woken(seat)
+        at = int(time.time() * 1000)
+        for m in msgs:
+            rows[m["ch"]] = {"id": m["id"], "at": at, "req": req}
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w") as f:
+            json.dump(rows, f)
+        os.replace(tmp, path)
+
+
+def woken(seat):
+    """The seat's last wake per channel, {ch: {id, at, req}} (read without the lock: the file is replaced whole)."""
+    try:
+        with open(_woken_path(seat)) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def pending(seat):
+    """Ids in the seat's batch that no timer has filed yet (read without the lock: the file is replaced whole)."""
+    try:
+        with open(os.path.join(_dir(), f"{seat}.json")) as f:
+            return {m["id"] for m in json.load(f)["msgs"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        return set()
 
 
 def _arm(seat):
@@ -183,8 +226,11 @@ def flush(seat):
         return True
     cmd = [os.path.join(BIN, "po-ask"), seat, "--from", "chat", "--channel", "chat",
            "--thread", str(rows[-1]["id"]), "-"]
-    done = subprocess.run(cmd, input=render(rows, seat), text=True, stdout=subprocess.DEVNULL).returncode == 0
-    if not done:
+    run = subprocess.run(cmd, input=render(rows, seat), text=True, stdout=subprocess.PIPE)
+    done = run.returncode == 0
+    if done:
+        woke(seat, rows, os.path.basename(run.stdout.strip()))
+    else:
         with _batch(seat) as state:
             state["msgs"] = pending + state["msgs"]
     return done
@@ -207,6 +253,8 @@ class PoInbox(Adapter):
             armed = now - state["armed"] < STALE_MS
             if not armed and not owner:
                 state["armed"] = now
+        if not owner:
+            woke(seat, msgs)
         if owner or (not armed and not _arm(seat)):
             return DELIVERED if flush(seat) else REFUSED
         return QUEUED if armed else DELIVERED
