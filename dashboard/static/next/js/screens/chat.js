@@ -15,6 +15,7 @@ import { store } from "../store.js";
 import { note, seed, lastIn, byActivity, peek, when } from "./chat-list.js";
 import { box, bindSearch, mark, words, fill, focusBox } from "./chat-search.js";
 import { actions, grouped, opened, bindActions } from "./chat-actions.js";
+import { keep, take } from "./chat-cache.js";
 
 export const own = true;
 const POLL_MS = 3000, ORG_MS = 20000, QUOTE = 44;
@@ -25,7 +26,7 @@ const TAG = { ask: `<span class="ctag">question</span>`, answer: `<span class="c
 const ROOMS = ["harness", "org"];
 let C = null, msgs = [], ch = "", err = "", busy = false, timer = 0, O = null, oat = 0, follow = false, W = null;
 let more = false, jump = true, early = false, io = null, watched = null, T = [];
-let listing = true, pushed = false, listY = 0, fresh = 0, shown = "";
+let listing = true, pushed = false, listY = 0, fresh = 0, shown = "", ready = false;
 let q = "", hits = null, asked = "", serr = "", from = ["", true], spushed = false;
 const phone = matchMedia("(max-width: 899px)");
 const seen = {};
@@ -36,10 +37,10 @@ if (!document.querySelector('link[href="/static/css/chat.css"]')) {
   document.head.appendChild(l);
 }
 
-/* Opens channel c ("" = Recent); the phone list shows when list is true. */
+/* Opens channel c ("" = Recent) with the rows kept from its last read, if any; the phone list shows when list is true. */
 function open(c, list) {
   listing = list;
-  if (c !== ch) { ch = c; msgs = []; jump = true; more = false; fresh = 0; forget(); }
+  if (c !== ch) { const k = take(c); ch = c; msgs = k ? k.msgs : []; more = k ? k.more : false; ready = !!k; jump = true; fresh = 0; forget(); }
 }
 /* The hash carries the open view: #chat?ch=<id>, #chat?recent=1 (Recent), #chat?q=<words> (search), #chat (the phone list; Recent from 900 px). */
 export function read(s) {
@@ -78,7 +79,7 @@ function leave() {
   open(from[0], from[1]); history.replaceState(null, "", hash()); show();
 }
 
-/* One read of the open view (only what is newer than the last message), then the next one in POLL_MS while Chat is on screen. */
+/* One read of the open view (only what is newer than the last message), kept for its next open, then the next one in POLL_MS while Chat is on screen. */
 function pull() {
   if (busy) return;
   clearTimeout(timer); timer = 0; busy = true;
@@ -96,6 +97,7 @@ function pull() {
       note(got);
       if (after) heard(got);
       if (!after) more = !!j.more;
+      ready = true; keep(want, { msgs, more });
       markRead();
     }, (e) => { err = e.message || "unreadable"; })
     .finally(() => {
@@ -256,7 +258,7 @@ function found(N) {
 function stream(N) {
   const out = rows(msgs, N, rich);
   return ((more ? `<li class="older"><button type="button" class="btn" data-older>Older messages</button></li>` : "") + out ||
-    `<li class="csys">No messages ${ch ? "in this channel" : "anywhere"} yet.</li>`) + thinking(N);
+    `<li class="csys">${ready ? `No messages ${ch ? "in this channel" : "anywhere"} yet.` : "reading…"}</li>`) + thinking(N);
 }
 
 function chanLink(c, N) {
@@ -316,10 +318,11 @@ export function render() {
     `<aside class="pane cside" aria-label="In ${q ? "these results" : "this channel"}"><h2><span data-dec>in ${q ? "these results" : "this channel"}</span></h2>${members(N)}${wakes(N)}</aside></div></div>`;
 }
 
-/* Paints the view the state names and reads it at once; back on the phone list, at the scroll he left it. */
+/* Paints the view the state names, in place when Chat is on screen (a newly opened one at its newest line), and reads it at once; back on the phone list, at the scroll he left it. */
 function show() {
   clearTimeout(timer); timer = 0;
-  go("chat", true);
+  if (cur === "chat" && document.querySelector("#grid > .nxs.chat")) { paint(); if (location.hash !== hash()) history.replaceState(null, "", hash()); }
+  else go("chat", true);
   fill(q);
   if (listing && phone.matches) scrollTo(0, listY);
   pull();
