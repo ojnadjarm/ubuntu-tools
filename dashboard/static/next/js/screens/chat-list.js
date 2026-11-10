@@ -8,6 +8,11 @@ export function note(rows) {
   for (const m of rows || []) if (m.ch && (!last[m.ch] || m.id > last[m.ch].id)) last[m.ch] = m;
 }
 
+/* Remembers each channel's last message from the channel list ({ch, last}), so channels outside Recent have a preview. */
+export function seed(channels) {
+  note((channels || []).filter((c) => c.last).map((c) => ({ ...c.last, ch: c.ch })));
+}
+
 /* The newest message known in channel c; "" is every channel. */
 export function lastIn(c) {
   if (c) return last[c] || null;
@@ -18,9 +23,9 @@ export function lastIn(c) {
 export const byActivity = (list) => list.map((c, i) => [c, lastIn(c.ch), i])
   .sort((a, b) => (b[1] ? b[1].id : -1) - (a[1] ? a[1].id : -1) || a[2] - b[2]).map((x) => x[0]);
 
-/* One line of message m: who said it (unless dm), then its text or "attachment". */
+/* One line of message m (files: a list or a count): who said it (unless dm), then its text or "attachment". */
 export function peek(m, who, dm) {
-  const body = m.text || (m.files && m.files.length ? "attachment" : "");
+  const body = m.text || ((Array.isArray(m.files) ? m.files.length : m.files) ? "attachment" : "");
   return (m.kind === "system" ? "" : m.from === "owner" ? "You: " : dm ? "" : who(m.from) + ": ") + body.replace(/\s+/g, " ");
 }
 

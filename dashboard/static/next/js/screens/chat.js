@@ -12,7 +12,7 @@ import { seatState, dmOf } from "./org.js";
 import { composer, bind, forget } from "./chat-compose.js";
 import { attachments } from "./chat-files.js";
 import { store } from "../store.js";
-import { note, lastIn, byActivity, peek, when } from "./chat-list.js";
+import { note, seed, lastIn, byActivity, peek, when } from "./chat-list.js";
 
 export const own = true;
 const POLL_MS = 3000, ORG_MS = 20000, QUOTE = 44;
@@ -60,6 +60,7 @@ function pull() {
       err = "";
       if (want !== ch) return;
       C = j.channels || []; W = j.wakes || null; T = j.thinking || [];
+      seed(C);
       const got = j.messages || [], box = document.querySelector("#grid .chat .msgs");
       if (after && got.length && box && !atEnd(box)) fresh += got.length;
       msgs = after ? msgs.concat(got) : got;

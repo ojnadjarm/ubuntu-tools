@@ -16,10 +16,13 @@ const T0 = Date.now() - 3600e3;
 const row = (id, ch, from, text) => ({ id, ts: new Date(id).toISOString(), ch, from, to: [], kind: "msg", text, re: null, hop: 0 });
 const STORE = {
   harness: [row(T0, "harness", "mooblox", "how do I drop a link?")],
-  org: Array.from({ length: 40 }, (_, i) => row(T0 + 1000 + i, "org", i % 2 ? "discord" : "orchestrator", "line " + i + " of a long thread")),
+  org: Array.from({ length: 60 }, (_, i) => row(T0 + 1000 + i, "org", i % 2 ? "discord" : "orchestrator", "line " + i + " of a long thread")),
+  attic: [row(T0 - 40 * 864e5, "attic", "mooblox", "a note from last month")],
   "dm-discord--owner": [row(T0 + 5000, "dm-discord--owner", "owner", "ship the relay\nplease, today")],
 };
 let thinking = [];
+/* What chat_store.channels() gives per channel: its newest message, text clipped, attachments counted. */
+const lastOf = (rows) => { const m = rows[rows.length - 1]; return { id: m.id, from: m.from, ts: m.ts, kind: m.kind, text: m.text.slice(0, 80), files: 0 }; };
 const next = () => STORE.org[STORE.org.length - 1].id + 1000;
 const srv = serveStatic((u, res) => {
   const q = new URL(res.req.url, "http://x").searchParams;
@@ -28,7 +31,7 @@ const srv = serveStatic((u, res) => {
   if (u === "/api/chat") {
     const ch = q.get("ch") || "", after = +(q.get("after") || 0);
     const rows = ch ? STORE[ch] || [] : Object.values(STORE).flat().sort((a, b) => a.id - b.id).slice(-50);
-    return { messages: rows.filter((m) => m.id > after), channels: Object.keys(STORE).map((c) => ({ ch: c, unread: c === "harness" ? 1 : 0 })), wakes: { today: {} }, thinking };
+    return { messages: rows.filter((m) => m.id > after), channels: Object.keys(STORE).map((c) => ({ ch: c, unread: c === "harness" ? 1 : 0, last: lastOf(STORE[c]) })), wakes: { today: {} }, thinking };
   }
 });
 const posted = [];
@@ -69,16 +72,18 @@ async function keepsPlace(p, label) {
 
     await p.goto(base + "/#chat", { waitUntil: "load" });
     await p.waitForSelector(".chat.list .chans a .tm", { timeout: 15000 });
-    await p.waitForFunction(() => document.querySelectorAll(".chat .chans .tm").length >= 4, null, { timeout: 8000 });
+    await p.waitForFunction(() => document.querySelectorAll(".chat .chans .tm").length >= 5, null, { timeout: 8000 });
     assert.ok(await p.$eval(".chat .stream", (e) => getComputedStyle(e).display === "none"), "the list view shows no stream");
     const rows = await p.$$eval(".chat .chans a", (as) => as.map((a) => { const r = a.getBoundingClientRect(); return { ch: a.dataset.ch, x: Math.round(r.left), w: Math.round(r.width), h: r.height }; }));
-    assert.deepStrictEqual(rows.slice(0, 3).map((r) => r.ch), ["", "org", "harness"], "Recent first, then rooms by last activity");
+    assert.deepStrictEqual(rows.slice(0, 4).map((r) => r.ch), ["", "org", "harness", "attic"], "Recent first, then rooms by last activity, channels outside Recent's 50 too");
     assert.strictEqual(rows.find((r) => r.ch.startsWith("dm-")).ch, "dm-discord--owner", "direct messages by last activity");
     assert.ok(rows.every((r) => r.h >= 44 && r.x === rows[0].x && r.w === rows[0].w), "full-width vertical rows, tap targets >= 44 px");
     const dm = await p.$eval('.chat .chans [data-ch="dm-discord--owner"]', (a) => ({ fam: !!a.querySelector(".fam svg.cr"), pv: a.querySelector(".pv").textContent, pvW: a.querySelector(".pv").scrollHeight <= a.querySelector(".pv").clientHeight + 1, dots: a.querySelectorAll(".think .dots i").length, tm: a.querySelector(".tm").textContent }));
     assert.deepStrictEqual([dm.fam, dm.pv, dm.pvW, dm.dots, /^\d\d:\d\d$/.test(dm.tm)], [true, "You: ship the relay please, today", true, 3, true], "a row: Familiar, one-line preview, time, thinking dots");
     assert.strictEqual(await p.textContent('.chat .chans [data-ch="harness"] .unread'), "1", "unread badge on its row");
     assert.match(await p.textContent('.chat .chans [data-ch="harness"] .pv'), /^Mooblox: how do I drop a link\?$/, "room preview names the sender");
+    const attic = await p.$eval('.chat .chans [data-ch="attic"]', (a) => [a.querySelector(".pv").textContent, a.querySelector(".tm").textContent]);
+    assert.deepStrictEqual(attic, ["Mooblox: a note from last month", new Date(T0 - 40 * 864e5).toLocaleDateString("en-GB", { day: "numeric", month: "short" })], "a channel older than Recent's 50: preview and day from its last message");
     assert.strictEqual(await p.evaluate(() => document.documentElement.scrollWidth), 400, "no sideways scroll");
 
     await p.evaluate(() => scrollTo(0, 260));

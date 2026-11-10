@@ -109,6 +109,33 @@ s.mark("fx", "harness", a)
 check("mark never moves back", json.load(open(os.path.join(s.root(), "cursors", "fx.json"))) == {"harness": c})
 raises("mark: bad seat", lambda: s.mark("../x", "harness", c), "seat")
 check("channels: a two-month channel listed once", [x["ch"] for x in s.channels("ceo")].count("harness") == 1)
+
+# Last message per channel (P41): from the newest month file's tail, even when older than every other channel's 50 newest.
+os.environ["HARNESS_HOME"] = f"{work}/h3"
+real_now = s._now_ms
+s._now_ms = lambda: 1700000000000
+s.post({"ch": "attic", "from": "gx", "text": "old " + "x" * 200, "files": [{"id": "a", "name": "a.png", "size": 1, "mime": "image/png"}]})
+s._now_ms = real_now
+for i in range(60):
+    s.post({"ch": "busy", "from": "fx", "text": f"b{i}"})
+open(os.path.join(s.root(), "busy.2000-01.jsonl"), "w").write('{"id": 1, "ts": "2000-01-01T00:00:00.000Z", "from": "fx", "text": "ancient"}\n')
+with open(next(p for p in s._files()["busy"] if "2000-01" not in p), "a") as f:
+    f.write("{torn line\n")
+last = {c["ch"]: c["last"] for c in s.channels("owner")}
+check("channels: last of an old channel", last["attic"] and (last["attic"]["id"], last["attic"]["from"], last["attic"]["ts"][:10], last["attic"]["files"]) ==
+      (1700000000000, "gx", "2023-11-14", 1), last.get("attic"))
+check("channels: last text clipped to 80 characters", len(last["attic"]["text"]) <= 81 and last["attic"]["text"].startswith("old x"), last["attic"]["text"])
+check("channels: last of a busy channel, a torn tail line skipped", last["busy"]["text"] == "b59" and last["busy"]["files"] == 0, last["busy"])
+for i in range(10):
+    for j in range(2000):
+        s._append(os.path.join(s.root(), f"load{i}.2026-11.jsonl"), {"id": j, "ts": "x", "from": "fx", "text": "y" * 200})
+import time
+t = time.perf_counter()
+for c in s.visible("owner"):
+    s._last(s._files()[c])
+ms = (time.perf_counter() - t) * 1000
+print(f"info last of {len(s.visible('owner'))} channels: {ms:.1f} ms")
+check("channels: last of 12 channels of 2000 rows under 20 ms", ms < 20, ms)
 sys.exit(bad)
 PY
 [ $? = 0 ] || bad=1

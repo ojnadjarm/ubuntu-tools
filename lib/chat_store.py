@@ -12,6 +12,7 @@ KEYS = ("ch", "from", "to", "kind", "text", "re", "hop")
 MAX_TEXT = 2000
 MAX_FILES = 5
 FILE_KEYS = {"id", "name", "size", "mime"}
+LAST_TEXT = 80
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 FILE = re.compile(r"^([a-z0-9][a-z0-9-]*)\.(\d{4}-\d{2})\.jsonl$")
 
@@ -150,6 +151,35 @@ def _rows(path):
                 continue
 
 
+def _tail(path, block=8192):
+    """The last valid row of a month file, read backwards from its end in growing blocks; None when it has none."""
+    with open(path, "rb") as f:
+        end = f.seek(0, os.SEEK_END)
+        while True:
+            start = max(0, end - block)
+            f.seek(start)
+            lines = f.read(end - start).split(b"\n")[1 if start else 0:]
+            for line in reversed(lines):
+                try:
+                    return json.loads(line)
+                except ValueError:
+                    continue
+            if not start:
+                return None
+            block *= 4
+
+
+def _last(paths):
+    """{id, from, ts, kind, text clipped to LAST_TEXT, files: count} of a channel's newest message; None when empty."""
+    for p in reversed(paths):
+        r = _tail(p)
+        if r:
+            text = r.get("text", "")
+            return {"id": r["id"], "from": r["from"], "ts": r["ts"], "kind": r.get("kind", "msg"),
+                    "text": text[:LAST_TEXT] + ("…" if len(text) > LAST_TEXT else ""), "files": len(r.get("files") or [])}
+    return None
+
+
 def read(ch, after=None, limit=200, before=None):
     """Messages of a channel, oldest first: the newest `limit` (older than `before` when given), or with `after` the
     first `limit` newer than it."""
@@ -197,7 +227,8 @@ def _cursors(seat):
 
 
 def channels(seat):
-    """[{ch, unread}] the seat can see (direct messages only its own; the owner sees all); unread skips its own."""
+    """[{ch, unread, last}] the seat can see (direct messages only its own; the owner sees all); unread skips its own,
+    last is the newest message in brief (see _last)."""
     cur = _read_json(_cursors(seat), {})
     out = []
     files = _files()
@@ -205,7 +236,7 @@ def channels(seat):
         paths = files[ch]
         seen = cur.get(ch, 0)
         unread = sum(1 for p in paths for r in _rows(p) if r["id"] > seen and r["from"] != seat)
-        out.append({"ch": ch, "unread": unread})
+        out.append({"ch": ch, "unread": unread, "last": _last(paths)})
     return out
 
 

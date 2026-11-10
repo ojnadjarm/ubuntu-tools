@@ -29,6 +29,11 @@ def dispatch(method, path, ip, headers=None):
     return sent[-1]
 
 
+def bare(channels):
+    """The channels without their last message."""
+    return [{k: c[k] for k in ("ch", "unread")} for c in channels]
+
+
 class ChatApi(unittest.TestCase):
     """A real server on loopback over a temp HARNESS_HOME; the owner login is set, the tailscale front is simulated by headers."""
 
@@ -111,7 +116,7 @@ class ChatApi(unittest.TestCase):
         code, body, _ = self.req("/api/chat?ch=harness")
         self.assertEqual(code, 200)
         self.assertEqual([(m["from"], m["text"]) for m in body["messages"]], [("owner", "first"), ("owner", "second")])
-        self.assertEqual(body["channels"], [{"ch": "harness", "unread": 0}])
+        self.assertEqual(bare(body["channels"]), [{"ch": "harness", "unread": 0}])
         self.assertEqual([m["id"] for m in self.req("/api/chat?ch=harness&after=%d" % first)[1]["messages"]], [second])
 
     def test_etag_304_until_something_new(self):
@@ -124,8 +129,9 @@ class ChatApi(unittest.TestCase):
 
     def test_no_channel_lists_channels_only(self):
         self.req("/api/chat/post", {"ch": "harness", "text": "x"})
-        self.assertEqual(self.req("/api/chat")[1], {"messages": [], "more": False, "channels": [{"ch": "harness", "unread": 0}],
-                                                    "wakes": {"today": {}}, "thinking": []})
+        body = self.req("/api/chat")[1]
+        self.assertEqual({**body, "channels": bare(body["channels"])}, {"messages": [], "more": False, "channels": [{"ch": "harness", "unread": 0}],
+                                                                        "wakes": {"today": {}}, "thinking": []})
 
     def test_recent(self):
         """recent=1: the newest 50 of every channel, newest last, with more: true while older ones exist."""
@@ -138,6 +144,22 @@ class ChatApi(unittest.TestCase):
         older = self.req("/api/chat?recent=1&before=%d" % body["messages"][0]["id"])[1]
         self.assertEqual(([m["id"] for m in older["messages"]], older["more"]), ([a] + ids[:6], False))
         self.assertEqual([m["id"] for m in self.req("/api/chat?recent=1&after=%d" % ids[-1])[1]["messages"]], [b])
+
+    def test_channels_carry_their_last_message(self):
+        """A channel whose only message is older than the 50 newest of Recent still has its last: id, from, ts, text, files."""
+        real_now = svc.chat_store._now_ms
+        svc.chat_store._now_ms = lambda: 1700000000000
+        try:
+            old = svc.chat_store.post({"ch": "attic", "from": "fx", "text": "from last year"})
+        finally:
+            svc.chat_store._now_ms = real_now
+        for i in range(55):
+            svc.chat_store.post({"ch": "harness", "from": "fx", "text": "h%d" % i})
+        body = self.req("/api/chat?recent=1")[1]
+        self.assertNotIn(old, [m["id"] for m in body["messages"]])
+        last = {c["ch"]: c["last"] for c in body["channels"]}
+        self.assertEqual(last["attic"], {"id": old, "from": "fx", "ts": "2023-11-14T22:13:20.000Z", "kind": "msg", "text": "from last year", "files": 0})
+        self.assertEqual((last["harness"]["text"], last["harness"]["from"]), ("h54", "fx"))
 
     def test_channel_opens_on_newest_50_then_older(self):
         ids = [svc.chat_store.post({"ch": "harness", "from": "fx", "text": "h%d" % i}) for i in range(60)]
@@ -284,9 +306,9 @@ class ChatApi(unittest.TestCase):
 
     def test_seen_moves_the_owner_cursor(self):
         mid = svc.chat_store.post({"ch": "harness", "from": "ceo", "text": "from the orchestrator"})
-        self.assertEqual(self.req("/api/chat")[1]["channels"], [{"ch": "harness", "unread": 1}])
+        self.assertEqual(bare(self.req("/api/chat")[1]["channels"]), [{"ch": "harness", "unread": 1}])
         self.assertEqual(self.req("/api/chat/seen", {"ch": "harness", "id": mid})[:2], (200, {"ok": True}))
-        self.assertEqual(self.req("/api/chat")[1]["channels"], [{"ch": "harness", "unread": 0}])
+        self.assertEqual(bare(self.req("/api/chat")[1]["channels"]), [{"ch": "harness", "unread": 0}])
 
     def test_owner_gate_over_loopback(self):
         for login in (None, "someone@example.com"):
