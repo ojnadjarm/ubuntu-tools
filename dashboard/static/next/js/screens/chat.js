@@ -158,14 +158,24 @@ function paint() {
   if (end) fresh = 0;
   if (grid.querySelector(":scope > .nxs.chat")) sync(grid, render(), 1); else go("chat", true);
   fill(q);
+  fit();
   const box = grid.querySelector(".chat .msgs");
   if (box && ((jump && msgs.length) || follow || end)) { box.scrollTop = box.scrollHeight; follow = false; if (msgs.length) jump = false; }
   else if (box) box.scrollTop = top;
   watch(grid);
 }
 
+/* From 900 px: --chat-out = the page's height above and below the chat, measured, so the chat fills the screen exactly. */
+function fit() {
+  const c = cur === "chat" && !phone.matches && document.querySelector("#grid > .nxs.chat"), board = document.getElementById("board");
+  if (!c || !board) return;
+  const r = c.getBoundingClientRect(), below = board.getBoundingClientRect().bottom - r.bottom + parseFloat(getComputedStyle(document.body).paddingBottom);
+  c.parentElement.style.setProperty("--chat-out", Math.ceil(r.top + scrollY + below) + "px");
+}
+
 onTalk(() => paint());
 phone.addEventListener("change", () => paint());
+addEventListener("resize", fit);
 /* Scrolled down to the newest line by hand: the pill goes. */
 document.addEventListener("scroll", (e) => { if (fresh && e.target.matches && e.target.matches("#grid .chat .msgs") && atEnd(e.target)) { fresh = 0; paint(); } }, true);
 /* Browser back and forward between the phone list and a conversation. */
