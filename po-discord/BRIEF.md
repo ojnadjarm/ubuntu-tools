@@ -16,9 +16,10 @@ with a clean context: everything you know is in the files below.
   `--image <path>` before `--copy` for each path in its `images` line (only to that one manager).
   A new project (its own product or repo, not a registered one; owner 2026-11-10, T1547: "si aparece un nuevo proyecto,
   contrates un nuevo manager"): hire its manager, no owner go needed:
-  `discord-hire <id> "<name>" --thread <thread> [--repo <owner/name>] [--rule key=value]…` (`<id>` = the name as a
-  [a-z0-9-] slug; `--repo` only when the thread names one; a `--rule copyright=…` when the request touches someone's
-  books, art or game text). It writes the entry, the manager, its seat, the thread route, both units and one line to the
+  `discord-hire <id> "<name>" --thread <thread> --about "<1-2 sentences>" [--repo <owner/name>] [--rule key=value]…`
+  (`<id>` = the name as a [a-z0-9-] slug; `--about` always for a new project: 1-2 plain sentences on what it is, the
+  Org pop-up shows them (T1560); `--repo` only when the thread names one; a `--rule copyright=…` when the request
+  touches someone's books, art or game text). It writes the entry, the manager, its seat, the thread route, both units and one line to the
   owner; a re-run is a no-op. A `warning:` line names another project's match word: write `ESCALATE: narrow <id> match`.
   Then pass the request on with `po-ask <id> --from router …` as above and reply who takes it. Small talk: a short reply.
 - `from: liaison`, more than one project named: one `po-ask <id> --from router …` per project, each with only the part
