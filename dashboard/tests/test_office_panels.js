@@ -37,7 +37,7 @@ const boards = (p) => p.$$eval(".office .opanels [data-panel]", (l) => l.map((d)
   const b = await chromium.launch({ args: ["--disable-3d-apis", "--mute-audio"] });
   try {
     const { p, errs } = await open(b, base, 1366, 768);
-    assert.deepStrictEqual((await boards(p)).map((x) => [x.id, x.open]), [["next", true], ["sessions", true], ["claims", true]], "boards Next runs, Sessions, Claims, open on a desktop");
+    assert.deepStrictEqual((await boards(p)).map((x) => [x.id, x.open]), [["next", true], ["running", true], ["recent", false], ["sessions", true], ["claims", true]], "boards Next runs, Running now, Recent 24 h (shut), Sessions, Claims, open on a desktop");
 
     const rows = await p.$$eval(".office [data-panel=next] li", (l) => l.map((li) => ({ name: li.querySelector("[data-who] b").textContent, who: li.querySelector("[data-who]").dataset.who,
       when: li.querySelector(".in").textContent, bar: li.querySelector("progress") && +li.querySelector("progress").value, bad: li.classList.contains("bad") })));
@@ -72,7 +72,7 @@ const boards = (p) => p.$$eval(".office .opanels [data-panel]", (l) => l.map((d)
       return { imgs: t.querySelectorAll("img").length, text: t.querySelector("[data-panel=claims] b").textContent, empty: [...empty.querySelectorAll("[data-panel] ul li, [data-panel] ol li, [data-panel] tbody td")].map((e) => e.textContent) };
     });
     assert.deepStrictEqual([odd.imgs, odd.text], [0, "<img src=x onerror=window.__pwn=1>"], "text is escaped, never markup");
-    assert.deepStrictEqual(odd.empty, ["no run scheduled", "no live session", "empty · nobody holds a file"], "the empty lines");
+    assert.deepStrictEqual(odd.empty, ["no run scheduled", "nobody is working", "nothing ended in the last 24 h", "no live session", "empty · nobody holds a file"], "the empty lines");
 
     const band = await p.$eval(".office .band .bsum", (e) => e.textContent);
     assert.ok(/^\d+ Claude sessions? on this laptop, \d+ working · \d+ of \d+ staff on · next up .+ in .+$/.test(band), "O1, R1: the band line: " + band);
@@ -98,7 +98,7 @@ const boards = (p) => p.$$eval(".office .opanels [data-panel]", (l) => l.map((d)
       }
       if (w <= 700) {
         assert.ok(m.band <= 120, `${w}: band ${m.band} px > 120`);
-        assert.deepStrictEqual(B.map((x) => x.open), [false, true, false], `${w}: Next runs and Claims are folded on the phone, Sessions open`);
+        assert.deepStrictEqual(B.map((x) => x.open), [false, true, false, true, false], `${w}: Next runs, Recent and Claims are folded on the phone, Running now and Sessions open`);
         const tall = await p.$$eval(".office .opanels [data-panel] > summary", (l) => l.map((s) => s.getBoundingClientRect().height));
         assert.ok(tall.every((t) => t >= 44), `${w}: a 44 px tap target per fold: ${tall}`);
         await p.tap(".office [data-panel=claims] > summary");
@@ -107,8 +107,8 @@ const boards = (p) => p.$$eval(".office .opanels [data-panel]", (l) => l.map((d)
         for (let i = 0; i < 80 && reads === was; i++) await p.waitForTimeout(100);
         assert.ok(reads > was, `${w}: a new read came`);
         await p.waitForTimeout(300);
-        assert.deepStrictEqual((await boards(p)).map((x) => x.open), [false, true, true], `${w}: Claims stays open through the next read, Next runs stays folded`);
-      } else assert.ok(B.every((x) => x.open), `${w}: the boards are open`);
+        assert.deepStrictEqual((await boards(p)).map((x) => x.open), [false, true, false, true, true], `${w}: Claims stays open through the next read, Next runs and Recent stay folded`);
+      } else assert.deepStrictEqual(B.map((x) => x.open), [true, true, false, true, true], `${w}: the boards are open, Recent shut`);
       assert.deepStrictEqual(errs, [], `${w}: no page error`);
       await p.context().close();
     }

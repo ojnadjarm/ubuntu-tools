@@ -82,14 +82,17 @@ export function stage(canvas, { still = false } = {}) {
   ctl.addEventListener("change", () => { moved = true; S.invalidate(); });
   ctl.addEventListener("start", () => { dragging = true; pristine = false; });
   ctl.addEventListener("end", () => { dragging = false; });
-  new ResizeObserver(() => {
+  /* Takes the canvas's CSS size; measured once at once, so the observer's first call cannot re-fit after the first frame. */
+  function size() {
     if (!canvas.clientWidth || !canvas.clientHeight || (canvas.clientWidth === W && canvas.clientHeight === H)) return;
     W = canvas.clientWidth; H = canvas.clientHeight;
     if (r) { r.setPixelRatio(frozen ? 1 : Math.min(devicePixelRatio, 2)); r.setSize(W, H, false); }
     cam.aspect = W / H; cam.updateProjectionMatrix(); moved = true;
     if (home && pristine) fit();
     if (home) S.invalidate();
-  }).observe(canvas);
+  }
+  size();
+  new ResizeObserver(size).observe(canvas);
   document.addEventListener("visibilitychange", () => S.invalidate());
   return S;
 }

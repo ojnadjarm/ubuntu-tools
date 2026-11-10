@@ -8,6 +8,8 @@ import { sync } from "../ui/sync.js";
 import { dust } from "../shapes.js";
 import { fitEye } from "../gl/cam.js";
 import { plural } from "../summary.js";
+import { store } from "../store.js";
+import { verdict } from "../verdict.js";
 import { build, diff } from "../office/model.js";
 import { plan as planOf } from "../office/layout.js";
 import { until } from "../office/time.js";
@@ -23,7 +25,7 @@ const NOTE = "Still picture: this browser has no graphics acceleration. The list
 const grid = document.getElementById("grid"), canvas = document.createElement("canvas"), tags = document.createElement("div");
 canvas.setAttribute("aria-hidden", "true");
 tags.className = "otags"; tags.setAttribute("aria-hidden", "true");
-let M = null, plan = null, applied = null, R = null, L = null, starting = false, at = 0, busy = false, err = "", down = null;
+let P = null, M = null, plan = null, applied = null, R = null, L = null, starting = false, at = 0, busy = false, err = "", down = null;
 
 for (const href of ["/static/css/org.css", "/static/css/office.css"]) if (!document.querySelector(`link[href="${href}"]`)) {
   const l = document.createElement("link");
@@ -37,8 +39,16 @@ const root = () => grid.querySelector(":scope > .nxs.office");
 function pull(max) {
   if (busy || document.hidden || (at && Date.now() - at < max)) return;
   busy = true;
-  getJSON("/api/office").then((j) => { M = build(j); plan = planOf(M); err = M.error; }, (e) => { err = e.message || "unreadable"; })
+  getJSON("/api/office").then((j) => { P = j; M = build(P, { needs: verdict(store.D).bad }); plan = planOf(M); err = M.error; }, (e) => { err = e.message || "unreadable"; })
     .finally(() => { busy = false; at = Date.now(); paint(); });
+}
+
+/* Rebuilds the model from the last read when the store's needs-you verdict no longer matches the CEO's lamp. */
+function relamp() {
+  const needs = verdict(store.D).bad;
+  if (!P || !M || !M.ceo || (M.ceo.live.lamp === "needs") === needs) return;
+  M = build(P, { needs }); plan = planOf(M);
+  paint();
 }
 
 /* The band's text: sessions, staff on, the next run, a stale note. */
@@ -112,8 +122,9 @@ export function render() {
     `<div class="olist">${list(M)}</div><div class="opanels">${panels(M)}</div></div>`;
 }
 
-/* The dashboard's tick: a fresh read every 20 s, every 5 s while someone works. */
+/* The dashboard's tick: the lamp follows the store at once, a fresh read every 20 s, every 5 s while someone works. */
 export function tick() {
+  relamp();
   pull(M && (M.line.working || M.panels.running.length) ? FAST_MS : STALE_MS);
 }
 
