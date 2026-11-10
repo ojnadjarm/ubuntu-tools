@@ -9,6 +9,7 @@ usage='usage: protected [list]                    project, kind and entries, one
        protected entries <kind> [project]  the kind'"'"'s entries (repo|path absolute)
        protected ere <kind> [project]      one ERE for bulk matching (text: lowercase, match lowercased values)
        protected eres <kind>               project<TAB>ERE per project with entries of that kind
+       protected words <repo|path>         the entries expanded lexically (~, $HOME), no stat: for walkers
 
 Kinds: repo (git: no agent commit/push/merge/rebase), path (cleanups never reap), container (pc docker never
 stops/starts/restarts/recreates), unit (labelled protected, never a fleet failure), text (words in free text).
@@ -34,5 +35,11 @@ case ${1:-list} in
     for n in $(protected_projects); do
       [ -z "$(protected_entries "$2" "$n")" ] || printf '%s\t%s\n' "$n" "$(protected_ere "$2" "$n")"
     done ;;
+  words)
+    case ${2:-} in repo|path) ;; *) echo "protected: words takes repo or path" >&2; exit 2 ;; esac
+    for n in $(protected_projects); do
+      while IFS= read -r w; do [ -n "$w" ] && { w=${w/#\~/$HOME}; w=${w//\$HOME/$HOME}; printf '%s\n' "${w%/}"; }; done \
+        < <(_protected_words "$2" "$n")
+    done; exit 0 ;;
   *) echo "protected: unknown verb $1" >&2; echo "$usage" >&2; exit 2 ;;
 esac

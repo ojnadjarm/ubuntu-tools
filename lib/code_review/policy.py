@@ -2,7 +2,7 @@
 import glob
 import os
 
-from .common import AW_REL, HOME, SKILLS, rel, absp
+from .common import AW_REL, BK_REL, HOME, SKILLS, TS_REL, rel, absp
 
 REVIEW_ONLY_ROOTS = ['the-dark-eye', 'moodle-harness', 'moodle-envs', 'projects']
 # The swarm's own containment and evidence: never edited by a lane (the sandbox mounts them read-only too).
@@ -17,7 +17,8 @@ CONTAINMENT = ['agents/bin/code-review', 'agents/lib/code_review', 'agents/bin/c
 OWNER_GO = ['agents/units', 'agents/hooks', 'agents/install.sh', 'agents/uninstall.sh', 'agents/git-guard',
             'agents/bin/work-repo-guard', 'agents/bin/protected', 'agents/bin/protectedlib.py', 'agents/toolsmith/BRIEF.md']
 WRITTEN_BY_CLI = ('agents/code-review/state', 'agents/log', 'agents/FILE-CLAIMS.md')  # forbidden to lanes, written by the CLI/hooks
-FORBIDDEN = ['agents/backups', 'agents/secrets', 'agents/asr-corpus', f'{AW_REL}/research', f'{AW_REL}/owner', 'agents/AGENTS.md',
+FORBIDDEN = [BK_REL, 'agents/backups',  # agents/backups: fallback guard while DB dumps remain
+             'agents/secrets', 'agents/asr-corpus', f'{AW_REL}/research', f'{AW_REL}/owner', 'agents/AGENTS.md',
              'agents/ORCHESTRATOR.md', 'agents/FLEET.md', '.claude/CLAUDE.md', '.claude/settings.json', 'CLAUDE.md'] + CONTAINMENT
 
 
@@ -55,14 +56,14 @@ def policy(path):
     if under('.claude/skills'):
         parts = r.split('/')
         return skill_policy(parts[2]) if len(parts) > 2 else 'review-only'
-    if under('agents'):
+    if under('agents') or under(TS_REL):
         return 'edit'
     return 'review-only'
 
 
 def policy_rules():
     """Longest-prefix rules for swarm.js: [[absolute prefix, policy], ...]."""
-    rules = [[os.path.join(HOME, 'agents'), 'edit']]
+    rules = [[os.path.join(HOME, 'agents'), 'edit'], [os.path.join(HOME, TS_REL), 'edit']]
     rules += [[os.path.join(HOME, f), 'forbidden'] for f in FORBIDDEN]
     rules += [[os.path.join(HOME, f), 'review-only'] for f in REVIEW_ONLY_ROOTS + OWNER_GO]
     if os.path.isdir(SKILLS):

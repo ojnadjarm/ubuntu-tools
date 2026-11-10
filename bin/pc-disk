@@ -3,6 +3,8 @@
 import hashlib, json, os, re, shlex, shutil, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import protectedlib  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
+import agent_work  # noqa: E402
 
 USAGE = """usage: pc disk dupes|reclaim <root> [--apply] [--json]
 
@@ -12,7 +14,7 @@ reclaim  ACTION PATH MB REASON, dry run unless --apply:
   delete    .venv|venv (with pyvenv.cfg)|node_modules|.godot of a ticket with a done line in
             $PC_DISK_HISTORY (default ~/agent-work/history.md), tree idle > 7 d; venvs leave <tree>.freeze.txt
   compress  zstd -1 --rm on .json/.jsonl/.log/.txt files >= $PC_DISK_ZSTD_MB (default 200) MB idle > 14 d
-  skip      refused: owner data (~/agent-work/owner, ~/agents/backups, ~/Documents, $PC_DISK_PROTECT
+  skip      refused: owner data (~/agent-work/owner, $FLEET_BACKUPS_DIR, ~/Documents, $PC_DISK_PROTECT
             colon list) at any root, games/*/build (rewritten nightly), other build/ dirs (not scanned),
             protected projects (`protected entries path|text`), char3d names, paths or tickets on $PC_DISK_CLAIMS (default ~/agents/FILE-CLAIMS.md),
             no done line, too young; a root inside owner data or a protected project exits 2
@@ -32,7 +34,8 @@ ZSTD_EXT = (".json", ".jsonl", ".log", ".txt")
 BUILD_RE = re.compile(r"(^|/)games/[^/]+/build$")
 TICKET_RE = re.compile(r"^(T\d+)")
 PROTECT = {os.path.realpath(os.path.expanduser(x)) for x in
-           ["~/agent-work/owner", "~/agents/backups", "~/Documents"] + os.environ.get("PC_DISK_PROTECT", "").split(":") if x}
+           ["~/agent-work/owner", agent_work.backups_dir(), "~/Documents"] + os.environ.get("PC_DISK_PROTECT", "").split(":") if x}
+PROTECT.add(os.path.realpath(os.path.expanduser("~/agents/backups")))  # fallback: the old folder still holds DB dumps
 NOW = time.time()
 PROJ_PATH = PROJ_TEXT = ()
 

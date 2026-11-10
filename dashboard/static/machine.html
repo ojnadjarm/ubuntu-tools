@@ -126,7 +126,7 @@
 
 <div class="thing"><h3><span class="n"><em>06</em>moodle-keeper, the 04:30 backup</span><code>agent@moodle-keeper.timer</code><span class="v">keep</span></h3>
 <div class="body">
-<p>Every night it brings both envs up, waits for HTTP, dumps each database to <code>~/agents/backups/moodle/&lt;env&gt;/YYYY-MM-DD.sql.gz</code>, restores the dump into a scratch database to prove it is real, prunes dangling docker images and rotates the logs. Last run this morning: 5.2 dumped at 1.8 MB and demo at 4.4 MB, both restored, 37 seconds. It is a bash script; Claude only wakes if the script fails.</p>
+<p>Every night it brings both envs up, waits for HTTP, dumps each database to <code>~/agent-work/backups/moodle/&lt;env&gt;/YYYY-MM-DD.sql.gz</code>, restores the dump into a scratch database to prove it is real, prunes dangling docker images and rotates the logs. Last run this morning: 5.2 dumped at 1.8 MB and demo at 4.4 MB, both restored, 37 seconds. It is a bash script; Claude only wakes if the script fails.</p>
 <p><b>These dumps are the only backup of your databases.</b> There is no off-machine backup (the restic ticket was skipped by your decision). If the disk dies, the dumps die with it.</p>
 </div>
 <div class="facts"><span class="k">needs</span><span>docker, both envs, the agent runner</span>
@@ -353,7 +353,7 @@
 <p>Your Moodle coding rules, the <code>/moodle-ci</code> runner, the offline copy of the developer docs, and the session hooks that load them when a Moodle project is opened. It is a repo you edit live in <code>~/.claude</code> and sync back. Nothing runs from it on a timer; it shapes every coding agent's behaviour.</p>
 </div></div>
 
-<div class="thing"><h3><span class="n"><em>37</em>Backups on disk</span><code>~/agents/backups</code><span class="v">keep</span></h3>
+<div class="thing"><h3><span class="n"><em>37</em>Backups on disk</span><code>~/agent-work/backups</code><span class="v">keep</span></h3>
 <div class="body">
 <p>The nightly Moodle dumps (07), plus config tarballs from the early days of the harness. 16 MB in total. This folder is on the "never delete" list for agents. There is no copy of it anywhere else.</p>
 </div></div>

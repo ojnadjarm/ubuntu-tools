@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Class gate for the improve queue: derive a proposal's class, validate queue items, import toolsmith TSPs."""
 import argparse, os, re, sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), 'lib'))
+from agent_work import toolsmith_papers  # noqa: E402
 
 HOME = os.path.expanduser('~')
 AGENTS = os.environ.get('AGENTS_HOME', os.path.join(HOME, 'agents'))
@@ -15,7 +17,7 @@ RULES = [  # (class, reason, regex over the lowercased "Proposed change" text)
     ('refused', '§5.3 tailscale down', r'\btailscale\s+(down|logout)\b'),
     ('refused', '§5.3 sshd/ufw/sudoers', r'sshd_config|\bsudoers\b|/etc/ufw|\bufw\s+(allow|deny|disable|delete|reset|reject|limit)\b'),
     ('refused', '§5.4 deletes or moves owner data',
-     r'\b(rm|mv|shred|rsync\s+--delete)\s+(-\S+\s+)*\S*(moodle-envs|agents/backups|documents)'),
+     r'\b(rm|mv|shred|rsync\s+--delete)\s+(-\S+\s+)*\S*(moodle-envs|agents/backups|agent-work/backups|documents)'),  # agents/backups: fallback guard while DB dumps remain
     ('owner-reboot', 'kernel/boot/driver/firmware',
      r'\bgrub|modprobe\.d|module_blacklist|initramfs|\bfwupd|\bfirmware\b|/boot/|linux-image|\bhwe\b'
      r'|kernel\s+(cmdline|command line|parameter|version|upgrade|package)|\bi915\.\w+=|\bxe\b\s+driver|driver swap'
@@ -179,8 +181,8 @@ def main():
     k = sub.add_parser('check', help='validate queue items; rc 1 on any error')
     k.add_argument('files', nargs='*')
     i = sub.add_parser('import', help='import open toolsmith TSPs into the queue')
-    i.add_argument('--from', dest='src', default=os.path.join(AGENTS, 'toolsmith/proposals'))
-    i.add_argument('--backlog', default=os.path.join(AGENTS, 'toolsmith/BACKLOG.md'))
+    i.add_argument('--from', dest='src', default=os.path.join(toolsmith_papers(), 'proposals'))
+    i.add_argument('--backlog', default=os.path.join(toolsmith_papers(), 'BACKLOG.md'))
     i.add_argument('--to', dest='dest', default=os.path.join(AGENTS, 'improve/queue'))
     a = ap.parse_args()
     if a.cmd == 'class':

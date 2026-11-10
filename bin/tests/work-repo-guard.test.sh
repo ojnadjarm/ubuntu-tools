@@ -10,14 +10,15 @@ T=$(mktemp -d /tmp/wrg-XXXXXX); trap 'rm -rf "$T"' EXIT
 stamp="$T/stamp"; touch "$stamp"; sum0=$(sha256sum "$REAL_GCFG" 2>/dev/null)
 MARKERS="CLAUDECODE CLAUDE_CODE_ENTRYPOINT HARNESS_AGENT OPENCODE GEMINI_CLI CODEX_SANDBOX CODEX_THREAD_ID"
 for v in $MARKERS WORK_REPO_ROOTS PROTECTED_PROJECTS GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_CEILING_DIRECTORIES; do unset "$v"; done
-export HOME="$T" GIT_CONFIG_GLOBAL="$T/gitconfig" GIT_CONFIG_NOSYSTEM=1 HARNESS_CONFIG="$T/config.env" HARNESS_HOME="$T/harness"
+export HOME="$T" GIT_CONFIG_GLOBAL="$T/gitconfig" GIT_CONFIG_NOSYSTEM=1 HARNESS_CONFIG="$T/config.env" HARNESS_HOME="$T/harness" AGENT_WORK="$T/agent-work"
+unset FLEET_BACKUPS_DIR
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 fail=0
 check() { if [ "$2" = 0 ]; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
 is() { [ "$1" = "$2" ]; echo $?; }
 
 # Selftest 1: every git config and root of this run is inside the fixture, none is a real one.
-case $GIT_CONFIG_GLOBAL$HARNESS_CONFIG$HARNESS_HOME in *"$REAL_HOME"*) echo "FAIL fixture path under the real HOME"; exit 1 ;; esac
+case $GIT_CONFIG_GLOBAL$HARNESS_CONFIG$HARNESS_HOME$AGENT_WORK in *"$REAL_HOME"*) echo "FAIL fixture path under the real HOME"; exit 1 ;; esac
 printf 'WORK_REPO_ROOTS="~/work ~/work2"\n' > "$HARNESS_CONFIG"
 mkdir -p "$T/work" "$T/work2" "$T/personal" "$HARNESS_HOME"
 for r in $REAL_ROOTS; do r=$(readlink -m "${r/#\~/$REAL_HOME}"); case $r in "$T"*) echo "FAIL real root inside fixture"; exit 1 ;; esac; done
@@ -34,7 +35,7 @@ printf '[user]\n\tname = t\n' > "$GIT_CONFIG_GLOBAL"
 "$BIN/work-repo-guard" install --apply >/dev/null; rc=$?
 "$BIN/work-repo-guard" install --apply >/dev/null
 check "install --apply twice: status ok, one include line per root" "$(is "$rc$(grep -c includeIf "$GIT_CONFIG_GLOBAL")" 02)"
-check "backup of the fixture gitconfig written" "$(is "$(cat "$HARNESS_HOME/backups/gitconfig.T1251.bak")" "$(printf '[user]\n\tname = t')")"
+check "backup of the fixture gitconfig written" "$(is "$(cat "$AGENT_WORK/backups/gitconfig.T1251.bak")" "$(printf '[user]\n\tname = t')")"
 check "hooksPath origin is the guard include" "$(git -C "$T/work/repo" config --show-origin core.hooksPath | grep -q work-repo-guard.gitconfig; echo $?)"
 check "personal repo has no guard hooksPath" "$(git -C "$T/personal/repo" config core.hooksPath >/dev/null; is $? 1)"
 

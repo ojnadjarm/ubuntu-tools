@@ -1,6 +1,6 @@
 # File claims: declare, release and expire rows on the parallel-agent board
 
-Ticket: T378, T415, T946 · Last verified: 2026-10-20 (T946) by `claims --help`, code read and a live `claims diff T946`; test 2026-10-20 bin/tests/claims.test.py (52/52)
+Ticket: T378, T415, T946, T1597 · Last verified: 2026-11-10 (T1597: claims.test.py protected strace case) by `claims --help`, code read and a live `claims diff T946`; test 2026-10-20 bin/tests/claims.test.py (52/52)
 
 ## When to use
 Any agent about to edit files while other agents run: claim first, release when done. Not for owner to-dos (`owner-todo`) or pushes (`pc need`).
@@ -9,7 +9,7 @@ Any agent about to edit files while other agents run: claim first, release when 
 Existing: a hand-edited `~/agents/FILE-CLAIMS.md` plus an unused `FILE-CLAIMS.md.lock`, read by the dashboard (`dashboard/dash/services/agents.py`, lines starting `- `) and required in briefs by `brief-lint`.
 Chosen: one small CLI `bin/claims` over the same file and format, so the dashboard and old rows keep working; every write is a read-modify-write under `flock` on the lock and an atomic rename.
 Stale = unpinned and older than 48 h (`CLAIMS_STALE_H`, floor 24 h). A bare date counts as the end of that day, so a row is never aged older than it can be. `pin` / `do not move` rows never go stale; undatable rows never expire.
-`add` also snapshots each claimed path into `~/agents/state/claims-snap/<T>/` (`CLAIMS_SNAP`): `manifest.tsv` rows `<sha256|absent|dir|skipped>\t<path>` plus copies under `files/`. Dirs copy their files ≤ 1 MB each, ≤ 200 files and ≤ 5 MB per ticket (over a cap: `claims: snapshot skipped <path> (<cap>)` on stderr); paths under `secrets/` or `backups/` are never copied; an unreadable file is `skipped` with its error, never a crash. Relative paths resolve under the board's dir (~/agents), never the cwd; an absent relative path warns on stderr. A later add snapshots only paths the manifest does not hold yet, so the first baseline wins. `done` keeps the snapshot 7 days (verifiers run after done); the next `add` prunes older ones.
+`add` also snapshots each claimed path into `~/agent-work/claims-snap/<T>/` (`CLAIMS_SNAP`): `manifest.tsv` rows `<sha256|absent|dir|skipped>\t<path>` plus copies under `files/`. Dirs copy their files ≤ 1 MB each, ≤ 200 files and ≤ 5 MB per ticket (over a cap: `claims: snapshot skipped <path> (<cap>)` on stderr); paths under `secrets/` or `backups/` are never copied; a path that is, holds or sits under a protected project (`protected words repo|path`, lexical, no stat) is never stat'ed, walked or copied (`skipped`, T1597: strace 0 file syscalls); an unreadable file is `skipped` with its error, never a crash. Relative paths resolve under the board's dir (~/agents), never the cwd; an absent relative path warns on stderr. A later add snapshots only paths the manifest does not hold yet, so the first baseline wins. `done` keeps the snapshot 7 days (verifiers run after done); the next `add` prunes older ones.
 `add` refuses (exit 3, one `overlap: <ticket> <path>` line each on stderr) a path equal to, inside or a parent of a live (non-stale) row of another ticket; `--force` adds anyway. Paths split on commas/spaces, `{a,b}` expands, a glob counts as its directory.
 
 ## Exact commands

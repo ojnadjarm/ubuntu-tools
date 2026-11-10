@@ -14,3 +14,10 @@ def eres(kind):
 def project(pairs, value):
     """The first project of eres() pairs whose ERE matches value, else None."""
     return next((n for n, e in pairs if e.search(value)), None)
+
+
+def lexical_paths():
+    """Protected repo and path entries expanded lexically (never stat'ed); raises when the matcher fails."""
+    exe = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'protected')
+    out = [subprocess.run([exe, 'words', k], capture_output=True, text=True, check=True, timeout=10).stdout for k in ('repo', 'path')]
+    return sorted({p for o in out for p in o.splitlines() if p})

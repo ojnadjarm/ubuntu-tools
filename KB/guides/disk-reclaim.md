@@ -4,7 +4,7 @@ Ticket: T1111 · Last verified: 2026-10-21 by bin/tests/pc-disk.test.sh (39/39, 
 
 ## When to use
 ~/agent-work (or another fleet scratch root) is large and `pc doctor` names it. Not for /tmp (`pc tmp`), not for
-owner data (~/agent-work/owner, ~/agents/backups, ~/Documents, `$PC_DISK_PROTECT`: refused as absolute paths from
+owner data (~/agent-work/owner, ~/agent-work/backups, ~/Documents, `$PC_DISK_PROTECT`: refused as absolute paths from
 any root; a root inside them exits 2), not for game builds (games/*/build is rewritten nightly, refused; other
 build/ dirs are listed as "not scanned").
 

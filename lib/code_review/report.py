@@ -8,7 +8,7 @@ import subprocess
 import time
 
 from .backups import restore
-from .common import AGENTS, BACKUPS, DATE, FIXTURE, ME, STATE, absp, current_run, die, rel, run_dir
+from .common import BACKUPS, DATE, FIXTURE, ME, STATE, TOOLSMITH, TS_REL, absp, current_run, die, rel, run_dir
 
 _core = importlib.util.spec_from_file_location(
     'audit_log', os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', '..', 'hooks', 'audit-log.py'))
@@ -31,8 +31,8 @@ def read_or_none(p):
 
 def toolsmith_tamper(tid, run):
     """Why a toolsmith lane broke append-only ('' if not): the proposal keeps its earlier lines, BACKLOG.md only status words."""
-    old_dir = os.path.join(BACKUPS, run, tid, 'files', 'agents', 'toolsmith')
-    live_dir = os.path.join(AGENTS, 'toolsmith')
+    old_dir = os.path.join(BACKUPS, run, tid, 'files', TS_REL)
+    live_dir = TOOLSMITH
     old, new = (read_or_none(os.path.join(d, 'proposals', tid + '.md')) for d in (old_dir, live_dir))
     if old is None or new is None or not new.startswith(old):
         return 'earlier lines of the proposal changed (or it was not backed up)'

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """claims CLI: add/done/list/check/expire/diff on a fixture board (CLAIMS_FILE) and snapshot dir (CLAIMS_SNAP), never the real ones."""
-import os, subprocess, sys, tempfile, time
+import os, shutil, subprocess, sys, tempfile, time
 from datetime import datetime, timedelta
 
 CLI = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "claims")
@@ -188,7 +188,31 @@ check("a second add in the other form adds no duplicate word", len(row) == 1 and
 run("done", "T916"); run("done", "T917")
 real = open(REAL).read() if os.path.exists(REAL) else ""
 check("no fixture ticket reached the real board", not any("- %s ·" % t in real for t in ("T900", "T901", "T902", "T903", "T904", "T910", "T911", "T912", "T913", "T914", "T915", "H30", "NODATE")))
-check("no fixture snapshot reached the real snapshot dir", not any(os.path.exists(os.path.expanduser("~/agents/state/claims-snap/" + t)) for t in ("T900", "T910", "T911", "T912", "T913", "T914", "T915")))
+check("no fixture snapshot reached the real snapshot dirs", not any(os.path.exists(os.path.join(d, t)) for d in (os.path.expanduser("~/agents/state/claims-snap"), os.path.expanduser("~/agent-work/claims-snap")) for t in ("T900", "T910", "T911", "T912", "T913", "T914", "T915", "T920")))
+
+# T1597: a claimed path that is, holds or sits under a protected project is never snapshotted, walked or opened.
+if shutil.which("strace"):
+    par = os.path.join(tmp, "envs"); prot = os.path.join(par, "secretproj")
+    os.makedirs(os.path.join(prot, "sub")); open(os.path.join(prot, "sub", "x.php"), "w").write("SECRET")
+    open(os.path.join(par, "ok.txt"), "w").write("fine")
+    cfg = os.path.join(tmp, "config.env")
+    open(cfg, "w").write('PROTECTED_PROJECTS=fx\nPROTECTED_FX_PATHS="%s"\n' % prot)
+    penv = {k: v for k, v in ENV.items() if not k.startswith(("PROTECTED_", "WORK_REPO_ROOTS", "HARNESS_ENV_LOADED"))}
+    penv["HARNESS_CONFIG"] = cfg
+    trace = os.path.join(tmp, "trace")
+    r = subprocess.run(["strace", "-f", "-qq", "-o", trace, "-e", "trace=%file", CLI, "add", "T920", par, prot, prot + "/sub/x.php"],
+                       env=penv, capture_output=True, text=True)
+    hits = [l for l in open(trace) if "secretproj" in l and "execve(" not in l]
+    check("protected: claim of parent, folder and file adds the row", r.returncode == 0, r.stderr)
+    check("protected: 0 file syscalls touch the protected folder", not hits, hits[:3])
+    snapped = [p for _, p in [l.split("\t", 1) for l in open(os.path.join(SNAP, "T920", "manifest.tsv")).read().splitlines()]]
+    check("protected: only the parent's own file is copied", os.path.exists(os.path.join(SNAP, "T920", "files", par.lstrip("/"), "ok.txt"))
+          and not os.path.exists(os.path.join(SNAP, "T920", "files", prot.lstrip("/"))), snapped)
+    check("protected: the folder and file are listed as skipped", "claims: snapshot skipped %s (protected project)" % prot in r.stderr, r.stderr)
+    neg = subprocess.run(["strace", "-f", "-qq", "-o", trace + ".neg", "-e", "trace=%file", "python3", "-c",
+                          "import os; [open(os.path.join(r, f)).read() for r, _, fs in os.walk(%r) for f in fs]" % par], capture_output=True)
+    check("protected: negative control (a plain walk) is caught by the same trace check", any("secretproj" in l for l in open(trace + ".neg")))
+    run("done", "T920")
 
 print("PASS claims" if not fail else "FAIL claims")
 sys.exit(fail)

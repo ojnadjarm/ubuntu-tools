@@ -50,7 +50,7 @@ cd ~/agent-work/research/2026-09-23/T57/build            # a stub Eye on :18657 
 ## Links
 - Code: `~/the-dark-eye/body/src/remote-www/sound.js`, wiring in `remote-www/index.html` ("the sound" block), lab `remote-www/lab/sound.html`
 - Tests: `~/the-dark-eye/body/test/remote-sound.test.js`
-- Scripts: `~/agent-work/research/2026-09-23/T57/build/` (`common.js` = muted Playwright launch) · backups `~/agents/backups/T57/`
+- Scripts: `~/agent-work/research/2026-09-23/T57/build/` (`common.js` = muted Playwright launch) · backups `~/agent-work/backups/T57/`
   (the 20 s demo video `~/drop/t57/` is gone from the drop as of 2026-09-24)
 - Brief: `~/agent-work/briefs/T57-sound-design.md` · Skill: `ui-sound-design`
 

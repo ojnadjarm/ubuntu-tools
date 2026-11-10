@@ -7,7 +7,7 @@ import os
 import re
 
 from .claims import claimed_by_others
-from .common import AGENTS, AREAS, AUDIT, BACKUPS, DATE, FIXTURE, HOME, QUEUE, RULES, STATE, SWARM, rel, run_dir, test_exists
+from .common import AREAS, AUDIT, BACKUPS, DATE, FIXTURE, HOME, QUEUE, RULES, STATE, SWARM, TOOLSMITH, rel, run_dir, test_exists
 from .evidence import usage
 from .policy import policy_rules
 from .report import SKIP_VERDICTS
@@ -61,7 +61,7 @@ def open_items():
             continue
         if re.search(r'^status:\s*(proposed|building|built|measuring)', text, re.M):
             titles.append(text.splitlines()[0].lstrip('# ').strip())
-    bl = os.path.join(AGENTS, 'toolsmith', 'BACKLOG.md')
+    bl = os.path.join(TOOLSMITH, 'BACKLOG.md')
     if os.path.isfile(bl):
         for line in open(bl):
             c = [x.strip() for x in line.split('|')]
@@ -74,13 +74,13 @@ def toolsmith_backlog():
     """Open auto-ok toolsmith proposals for the toolsmith lane: status go then proposed, lowest rank first, at most TOOLSMITH_CAP."""
     rows = []
     try:
-        lines = open(os.path.join(AGENTS, 'toolsmith', 'BACKLOG.md')).readlines()
+        lines = open(os.path.join(TOOLSMITH, 'BACKLOG.md')).readlines()
     except OSError:
         return []
     for line in lines:
         c = [x.strip() for x in line.split('|')]
         if len(c) > 6 and c[1].isdigit() and re.fullmatch(r'TSP-\d+', c[2]) and c[4] == 'auto-ok' and c[5] in ('go', 'proposed'):
-            p = os.path.join(AGENTS, 'toolsmith', 'proposals', c[2] + '.md')
+            p = os.path.join(TOOLSMITH, 'proposals', c[2] + '.md')
             if os.path.isfile(p):
                 accept = re.findall(r'^- measured by:\s*(.+)$', open(p, errors='replace').read(), re.M)
                 rows.append({'id': c[2], 'rank': int(c[1]), 'status': c[5], 'title': c[3], 'path': p,
@@ -174,7 +174,7 @@ def cmd_prep(a):
                   'file': v.get('file')} for k, v in seen.items()],
         'claimed': [p for _, p in claimed_by_others('')],
         'open_items': open_items(),
-        'toolsmith_backlog': toolsmith_backlog(),
+        'toolsmith_backlog': toolsmith_backlog(), 'toolsmith_dir': TOOLSMITH,
         'audit': {'coverage_days': usage([])['coverage_days'], 'logs': sorted(glob.glob(AUDIT + '*'))},
         'fix_cap_per_area': int(os.environ.get('CR_FIX_CAP', '8')),
     }

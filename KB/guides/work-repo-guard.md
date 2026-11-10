@@ -25,7 +25,7 @@ Every standard hook name in `git-guard/hooks/` is a symlink to `guard.sh`, which
 ```bash
 work-repo-guard status              # include line per root, hooksPath origin per repo; exit 1 on a gap
 work-repo-guard install             # would: lines only
-work-repo-guard install --apply     # backs up ~/.gitconfig once to ~/agents/backups/gitconfig.T1251.bak
+work-repo-guard install --apply     # backs up ~/.gitconfig once to ~/agent-work/backups/gitconfig.T1251.bak
 work-repo-guard uninstall --apply
 git -C <work-repo> config --show-origin core.hooksPath
 CLAUDECODE=1 git -C <work-repo> hook run pre-commit   # safe proof: exit 1, writes nothing

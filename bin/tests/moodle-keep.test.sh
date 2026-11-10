@@ -7,6 +7,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KEEP="$HERE/../moodle-keep"
 TMP="$(mktemp -d)"
+REAL_AW="$HOME/agent-work"
 trap 'rm -rf "$TMP"' EXIT
 
 ENVS="$TMP/envs"
@@ -71,9 +72,10 @@ EOF
 
 chmod +x "$STUBS"/docker "$STUBS"/curl
 
-# Fake HOME too: BACKUPS/logrotate under moodle-keep are $HOME-relative, and a test must
-# never write into the real ~/agents/backups tree (AGENTS.md §5.6).
+# Fake HOME and AGENT_WORK too: dumps go to $FLEET_BACKUPS_DIR ($AGENT_WORK/backups), logrotate is $HOME-relative,
+# and a test must never write into the real backups tree (AGENTS.md §5.6).
 FAKE_HOME="$TMP/home"
+export AGENT_WORK="$FAKE_HOME/agent-work"; unset FLEET_BACKUPS_DIR
 mkdir -p "$FAKE_HOME/agents/log"
 echo '{"fixture":1}' > "$FAKE_HOME/agents/log/actions.jsonl"
 printf '%s {\n    daily\n    rotate 30\n    missingok\n    notifempty\n    copytruncate\n}\n' \
@@ -85,13 +87,15 @@ rc=$?
 pass=1
 echo "$out" | grep -q '^== v1$' || { echo "FAIL: fixture env 'v1' not found under MOODLE_ENVS_DIR"; pass=0; }
 echo "$out" | grep -q "$HOME/moodle-envs" && { echo "FAIL: real ~/moodle-envs path leaked into output"; pass=0; }
-[ -e "$HOME/agents/backups/moodle/v1" ] && { echo "FAIL: fixture backup leaked into real ~/agents/backups"; pass=0; }
+for real in "$HOME/agents/backups" "$HOME/agent-work/backups"; do
+  [ -e "$real/moodle/v1" ] && { echo "FAIL: fixture backup leaked into real $real"; pass=0; }
+done
 [ "$rc" = 0 ] || { echo "FAIL: rc=$rc"; pass=0; }
 for v in v1 v2; do
-  [ -s "$FAKE_HOME/agents/backups/moodle/$v/$(date +%F).sql.gz" ] || { echo "FAIL: no dump for $v"; pass=0; }
+  [ -s "$FAKE_HOME/agent-work/backups/moodle/$v/$(date +%F).sql.gz" ] || { echo "FAIL: no dump for $v"; pass=0; }
 done
 echo "$out" | grep -A1 '^== svc$' | grep -q 'skipped: not a Moodle env' || { echo "FAIL: svc not skipped"; pass=0; }
-[ -e "$FAKE_HOME/agents/backups/moodle/svc" ] && { echo "FAIL: svc was dumped"; pass=0; }
+[ -e "$FAKE_HOME/agent-work/backups/moodle/svc" ] && { echo "FAIL: svc was dumped"; pass=0; }
 
 # TSP-038: a cron run that says "upgrade pending" is named, with the owner's upgrade command.
 echo KEEP_CRON=1 > "$ENVS/v1/agent.env"
@@ -110,6 +114,9 @@ mkdir -p "$TMP/badlr"; printf '#!/bin/sh\necho "error: fixture" >&2; exit 1\n' >
 out5="$(HOME="$FAKE_HOME" MOODLE_ENVS_DIR="$ENVS" PATH="$TMP/badlr:$AGENT_PATH" bash "$KEEP" 2>&1)"; rc5=$?
 { echo "$out5" | grep -q '^FAIL logrotate' && [ "$rc5" = 1 ]; } || { echo "FAIL: logrotate error not reported (rc=$rc5)"; pass=0; }
 
+for real in "$HOME/agents/backups" "$REAL_AW/backups"; do
+  [ -e "$real/moodle/v1" ] && { echo "FAIL: a fixture run leaked into real $real"; pass=0; }
+done
 if [ "$pass" = 1 ]; then
   echo "PASS moodle-keep honours MOODLE_ENVS_DIR (rc=$rc)"
   exit 0

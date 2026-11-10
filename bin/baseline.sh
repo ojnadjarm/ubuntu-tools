@@ -1,10 +1,12 @@
 #!/bin/bash
 # Timestamped tarball of the agent-relevant user config; keeps the last 20 of its own YYYY-MM-DD_HHMMSS.tar.gz.
-# Env: HARNESS_CONTEXT_DIR (context dir, default ~/.claude), BASELINE_DIR (output dir, default ~/agents/backups).
-case "${1:-}" in -h|--help) awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; exit 0 ;; esac
+# Env: HARNESS_CONTEXT_DIR (context dir, default ~/.claude), BASELINE_DIR (output dir, default $FLEET_BACKUPS_DIR).
+case "${1:-}" in -h|--help) awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; exit 0 ;;
+  "") ;; *) echo "usage: baseline.sh [-h|--help] (takes no arguments)" >&2; exit 2 ;; esac
 set -euo pipefail
 
-BACKUP_DIR="${BASELINE_DIR:-$HOME/agents/backups}"
+. "$(dirname "$(readlink -f "$0")")/env.sh"
+BACKUP_DIR="${BASELINE_DIR:-$FLEET_BACKUPS_DIR}"
 CTX="${HARNESS_CONTEXT_DIR:-$HOME/.claude}"
 CTX_PARENT=$(dirname "$CTX"); CTX_NAME=$(basename "$CTX")
 STAMP=$(date +%Y-%m-%d_%H%M%S)

@@ -21,7 +21,7 @@ Not for Verifactu-compliant invoicing after 1 Jul 2027: that needs certified sof
 | `invlib/render.py` + `template.html` | record → HTML (A4, Roboto, traced SVG logo) → Chrome `--print-to-pdf` |
 
 - Data flow: `clients.json` defaults → `new` → `drafts/<n>-<client>-draft.{json,pdf}` (number not consumed) → `issue`
-  (under lock: read the draft, next number, date ≥ last, final `pdf/<n>.pdf`, append `ledger.json`) → tarball in `~/agents/backups/invoices/`.
+  (under lock: read the draft, next number, date ≥ last, final `pdf/<n>.pdf`, append `ledger.json`) → tarball in `~/agent-work/backups/invoices/`.
 - Records snapshot the client's billing data, so editing `clients.json` never changes old invoices.
 - Logo: `potrace` trace of `logo-onj.png` (crop, 4× upscale, threshold 128, colour #1e2e39) → `assets/logo-onj.svg`, 16 KB.
 
@@ -51,4 +51,4 @@ invoice list --unpaid ; invoice paid 2026-C-11 ; invoice check
 ## Links
 - Code: `~/.claude/skills/invoice/`, CLI symlink `~/agents/bin/invoice`
 - Tests: `~/.claude/skills/invoice/scripts/selftest.sh` (sandbox copy; prints PASS)
-- Data (private, 700): `~/invoices/`; backups `~/agents/backups/invoices/`
+- Data (private, 700): `~/invoices/`; backups `~/agent-work/backups/invoices/`

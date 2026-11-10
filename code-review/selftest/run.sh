@@ -15,7 +15,7 @@ code-review-sandbox --fixture "$FX" --selftest || exit 1
 
 roots=("$HOME/agents/bin" "$HOME/agents/dashboard" "$HOME/agents/hooks" "$HOME/agents/eye-relay" "$HOME/agents/adapters"
        "$HOME/agents/units" "$HOME/agents/KB" "$HOME/agents/improve" "$HOME/agents/toolsmith" "${AGENT_WORK:-$HOME/agent-work}/briefs"
-       "$HOME/agents/backups/code-review" "$HOME/agents/backups/retired" "$HOME/.claude/skills" "$HOME/.claude/agents"
+       "${FLEET_BACKUPS_DIR:-${AGENT_WORK:-$HOME/agent-work}/backups}/code-review" "${FLEET_BACKUPS_DIR:-${AGENT_WORK:-$HOME/agent-work}/backups}/retired" "${TOOLSMITH_PAPERS:-${AGENT_WORK:-$HOME/agent-work}/toolsmith}" "$HOME/.claude/skills" "$HOME/.claude/agents"
        "$HOME/.claude/hooks" "$HOME/.claude/projects/${HOME//\//-}/memory" "$HOME/.config/pc-harness"
        "$HOME/.config/systemd/user" "$HOME/.local/bin")
 files=("$HOME/CLAUDE.md" "$HOME/.claude/CLAUDE.md" "$HOME/.claude/settings.json" "$HOME/.bashrc" "$HOME/agents/AGENTS.md"

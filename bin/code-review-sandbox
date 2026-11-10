@@ -2,12 +2,13 @@
 # code-review-sandbox [--fixture <home>] [--post] [--selftest] -- <cmd…> — run the code-review swarm in an allowlist sandbox
 # (bwrap): the whole home read-only, writable only where the swarm may write; no network except the Claude API (through
 # code-review-netproxy); no D-Bus, systemd, docker, ssh-agent or tmux sockets; secrets and the voice corpus hidden; its own
-# pid namespace, so nothing outlives it. Real mode: ~/agents writable except .git, backups (but code-review/ and
-# retired/) and the swarm's own containment; $AGENT_WORK read-only. Fixture mode: only the fixture home and the audit log are writable.
+# pid namespace, so nothing outlives it. Real mode: ~/agents writable except .git and the swarm's own
+# containment; $AGENT_WORK read-only but $FLEET_BACKUPS_DIR/{code-review,retired} and $TOOLSMITH_PAPERS. Fixture mode: only the fixture home and the audit log are writable.
 # --post: after the session, also on timeout, drop stale claims, restore unverified backups and deliver the report outside.
 # --selftest proves every read-only, hidden and blocked path before anything runs.
 set -uo pipefail
 H="$HOME"; A="$H/agents"; ME="$A/code-review"; U="$(id -u)"; B="$A/bin"
+. "$B/env.sh"
 fixture=""; selftest=0; post=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -41,7 +42,7 @@ internal=".credentials.json .last-cleanup .last-update-result.json backups cache
 slug="$(printf '%s' "$PWD" | sed 's/[^a-zA-Z0-9]/-/g')"
 mkdir -p "$H/.claude/projects/$slug"
 
-ro=("$A/.git" "$A/AGENTS.md" "$A/FLEET.md" "${AGENT_WORK:-$H/agent-work}" "$A/backups" "$work")
+ro=("$A/.git" "$A/AGENTS.md" "$A/FLEET.md" "$AGENT_WORK" "$FLEET_BACKUPS_DIR" "$A/backups" "$work")
 while IFS= read -r p; do ro+=("$p"); done < <(python3 "$B/code-review" containment)
 for e in "$H"/.claude/* "$H"/.claude/.[!.]*; do
   n="${e##*/}"; case " $(echo $internal) " in *" $n "*) continue ;; esac
@@ -59,7 +60,10 @@ else
   rw=("$A" "$H/.claude/skills")
 fi
 rw_after=("$H/.claude/projects/$slug")
-[ -z "$fixture" ] && rw_after+=("$A/backups/code-review" "$A/backups/retired")
+if [ -z "$fixture" ]; then
+  mkdir -p "$FLEET_BACKUPS_DIR/code-review" "$FLEET_BACKUPS_DIR/retired" "$TOOLSMITH_PAPERS"
+  rw_after+=("$FLEET_BACKUPS_DIR/code-review" "$FLEET_BACKUPS_DIR/retired" "$TOOLSMITH_PAPERS")
+fi
 hide_dirs=("$A/secrets" "$A/asr-corpus" "$H/.ssh" "$H/.gnupg" "$H/.config/gh" "$H/.local/share/keyrings" "/run/user/$U")
 hide_files=(/run/dbus/system_bus_socket /run/docker.sock /run/containerd/containerd.sock "$H/.git-credentials" "$H/.netrc")
 

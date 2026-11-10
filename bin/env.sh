@@ -1,7 +1,7 @@
 # Harness environment: config values first, then the session variables desktop scripts need.
 HARNESS_CONFIG="${HARNESS_CONFIG:-$HOME/.config/pc-harness/config.env}"
 # Variables already exported by the caller win over config.env (one-off overrides on the command line).
-_harness_pre="$(export -p | grep -E '(HARNESS_|NTFY_|ORCHESTRATOR_|AGENT_SCRATCH_GLOBS|MOODLE_ENVS_DIR|AGENT_WORK|MAINT_|EYE_|OPENCODE_|PROTECTED_|WORK_REPO_ROOTS)' || true)"
+_harness_pre="$(export -p | grep -E '(HARNESS_|NTFY_|ORCHESTRATOR_|AGENT_SCRATCH_GLOBS|MOODLE_ENVS_DIR|AGENT_WORK|MAINT_|EYE_|OPENCODE_|PROTECTED_|WORK_REPO_ROOTS|FLEET_BACKUPS_DIR|CLAIMS_SNAP|TOOLSMITH_PAPERS|DASH_PLANS_DIR)' || true)"
 # Every config.env key is exported: child scripts skip this file (HARNESS_ENV_LOADED) and read them from the environment (T116).
 set -a
 # shellcheck source=/dev/null
@@ -26,10 +26,16 @@ eval "$_harness_pre"; unset _harness_pre
 : "${MOODLE_ENVS_DIR:=$HOME/moodle-envs}"
 : "${HARNESS_CONTEXT_DIR:=$HOME/.claude}"
 : "${AGENT_WORK:=$HOME/agent-work}"
+# Work material lives in $AGENT_WORK, never in $HARNESS_HOME (T1597): one key per kind.
+: "${FLEET_BACKUPS_DIR:=$AGENT_WORK/backups}"
+: "${CLAIMS_SNAP:=$AGENT_WORK/claims-snap}"
+: "${TOOLSMITH_PAPERS:=$AGENT_WORK/toolsmith}"
+: "${DASH_PLANS_DIR:=$AGENT_WORK/research/dashboard/plans}"
 HARNESS_ENV_LOADED=1
 export HARNESS_HOME HARNESS_UID HARNESS_HOST HARNESS_BRAND HARNESS_TAILNET_FQDN HARNESS_LAN_IP HARNESS_BUDS_MAC \
        HARNESS_AGENT HARNESS_AGENT_CMD NTFY_ENV_FILE ORCHESTRATOR_TMUX_SESSION \
-       ORCHESTRATOR_UNIT AGENT_SCRATCH_GLOBS MOODLE_ENVS_DIR HARNESS_CONTEXT_DIR AGENT_WORK HARNESS_ENV_LOADED
+       ORCHESTRATOR_UNIT AGENT_SCRATCH_GLOBS MOODLE_ENVS_DIR HARNESS_CONTEXT_DIR AGENT_WORK FLEET_BACKUPS_DIR CLAIMS_SNAP \
+       TOOLSMITH_PAPERS DASH_PLANS_DIR HARNESS_ENV_LOADED
 
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$HARNESS_UID}" WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$HARNESS_UID/bus" YDOTOOL_SOCKET=/tmp/.ydotool_socket
 # Agent shells can start without the sbin dirs, where sysctl, iw and smartctl live.

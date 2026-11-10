@@ -4,7 +4,9 @@ import argparse, json, os, re, subprocess, sys, time
 from datetime import date
 
 HOME = os.path.expanduser("~")
-PLANS = os.path.join(HOME, "agents", "dashboard", "plans")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
+from agent_work import dash_plans_dir  # noqa: E402
+PLANS = dash_plans_dir()
 INDEX = os.path.join(PLANS, "index.json")
 def public_host():
     """The tailnet name, so the URL works from his phone."""

@@ -20,9 +20,10 @@
 `~/agents/`: `bin/` (CLIs, on PATH), `KB/` (`toolbox.md`, `machine.md`, `quirks.md`, `runbooks/`, `guides/`: `guide
 <words>`), `README-pc-control.md`, `<name>/` (an agent: `BRIEF.md`, `agent.env`, `state/`, `logs/`, `REPORT.md`),
 `adapters/<agent>/`, `secrets/` (600: read, never print or push), `log/actions.jsonl` (tool-call audit,
-`agents-log`), `backups/` (configs, Moodle DB dumps), `config.example.env` (machine keys; real:
-`~/.config/pc-harness/config.env`). `~/agent-work` (`$AGENT_WORK`): papers outside every repo (`history.md`,
-`briefs/`, `research/<date>/<ticket>/`, `evidence/`, `archive/`, `owner/` = owner material, move only).
+`agents-log`), `config.example.env` (machine keys; real: `~/.config/pc-harness/config.env`): tools only.
+`~/agent-work` (`$AGENT_WORK`): papers outside every repo (`history.md`, `briefs/`, `research/<date>/<ticket>/`,
+`evidence/`, `archive/`, `owner/` = owner material, move only; `backups/` `$FLEET_BACKUPS_DIR`, `claims-snap/`,
+`toolsmith/`: work material, never under `~/agents`).
 `~/moodle-envs/<ver>`: Moodle Docker envs; `~/moodle-harness`: Moodle coding harness.
 
 ## 3. Act, then verify
@@ -64,7 +65,8 @@
 2. Reboot/shutdown outside the T23 reboot policy; killing the orchestrator tmux session (`$ORCHESTRATOR_TMUX_SESSION`).
 3. Editing your agent CLI's global instruction file (named in `adapters/<agent>/README.md`), `sshd_config`, `ufw`,
    `sudoers`, or any second access path.
-4. Deleting or moving owner data (`~/moodle-envs` sources, `~/agents/backups`, `~/agent-work/owner`, `~/Documents`).
+4. Deleting or moving owner data (`~/moodle-envs` sources, `~/agent-work/backups`, DB dumps left in `~/agents/backups`,
+   `~/agent-work/owner`, `~/Documents`).
 5. Writing outside your own `~/agents/<name>/` unless your brief says so.
 6. **Tests, benchmarks, experiments never touch a real owner repo, credentials, network service or unit.** Forbidden
    actions run only on a throwaway fixture in a sandbox that makes the real one impossible, proven by a selftest. (2026-09-07: a trial pushed `~/the-dark-eye`.)

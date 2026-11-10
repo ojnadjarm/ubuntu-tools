@@ -26,6 +26,6 @@ Fixed rules for this session, in addition to the proposal above:
 10. Commit only the files you changed (`git -C ~/agents commit -- <paths>`) and push; never force-push or rewrite history.
 
 11. Never smoke-test a guard, refusal or safety rule with the real command on the real machine (no real `sudo shutdown`, `git push`, `tailscale down`), even expecting a refusal. Prove refusals only with the test stubs (AGENTS.md §5.6).
-12. Never `git stash`, `checkout`, `reset` or `restore` to reproduce a "before" state; copy the file to a temp dir instead. Any test that runs a fleet script must run under a fake `$HOME` as well as fake data dirs (2026-09-07: a "before" check overwrote the real Moodle dump in `~/agents/backups`).
+12. Never `git stash`, `checkout`, `reset` or `restore` to reproduce a "before" state; copy the file to a temp dir instead. Any test that runs a fleet script must run under a fake `$HOME` and a fake `$AGENT_WORK` as well as fake data dirs (2026-09-07: a "before" check overwrote the real Moodle dump in the then `~/agents/backups`; 2026-11-10: an inherited `AGENT_WORK` sent fixture dumps to the real `~/agent-work/backups`).
 13. A code-review toolsmith lane (`code-review/LANES.md`, "Toolsmith lane") is a valid implementer for an `auto-ok`
     proposal: its `## Result` and `measuring` status count like this session's.

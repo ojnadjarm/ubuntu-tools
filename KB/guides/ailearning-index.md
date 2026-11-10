@@ -2,7 +2,7 @@
 
 **Retired.** Superseded by the one test site https://<tailnet>:8472/ailearning/ (`?review` lists every built sheet; guide `local-sites`).
 `~/drop/units/` and every `~/drop/tNNN/` lesson build were deleted on 2026-10-07 (not archived); rebuild from the repo or use the :8472 site. Restore the CLI: column 3 of
-`~/agents/backups/retired/2026-10-07/MANIFEST.tsv`. History below.
+`~/agent-work/backups/retired/2026-10-07/MANIFEST.tsv`. History below.
 
 Ticket: T247 · Last verified: 2026-10-20 by retired-state check (CLI absent from PATH, MANIFEST row present, `~/drop/units` and `~/drop/ailearning` gone); before retirement 2026-10-05 by `ailearning-index` (14 units, 15/15 links 200) and headless shots at 400/768/1366/1920/2560
 

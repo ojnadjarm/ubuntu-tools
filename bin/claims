@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """claims — add, release, list and expire rows on the file-claims board (~/agents/FILE-CLAIMS.md)."""
-import argparse, difflib, fcntl, hashlib, os, re, shutil, sys, time
+import argparse, difflib, fcntl, hashlib, os, re, shutil, subprocess, sys, time
 from datetime import datetime, timedelta
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
+import protectedlib  # noqa: E402
+from agent_work import claims_snap_dir  # noqa: E402
 
 FLOOR_H = 24
 STALE_H = max(FLOOR_H, int(os.environ.get("CLAIMS_STALE_H", "48")))
@@ -19,7 +24,20 @@ def board():
 
 
 def snap_root():
-    return os.environ.get("CLAIMS_SNAP") or os.path.expanduser("~/agents/state/claims-snap")
+    return claims_snap_dir()
+
+
+def protected_paths():
+    """Protected repo/path entries, lexical (no stat); None when the matcher fails, so nothing is snapshotted."""
+    try:
+        return protectedlib.lexical_paths()
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def under(p, roots):
+    """True when p is, holds or sits under one of roots (string compare only)."""
+    return any(p == r or p.startswith(r + "/") or r.startswith(p + "/") for r in roots)
 
 
 def absolute(p):
@@ -38,8 +56,13 @@ def manifest(d):
     return [tuple(l.split("\t", 1)) for l in open(m).read().splitlines()] if os.path.exists(m) else []
 
 
-def walk(top):
-    return sorted(os.path.join(r, f) for r, ds, fs in os.walk(top) if not NEVER.search(r) for f in fs)
+def walk(top, banned=()):
+    """Files under top; secrets/backups and protected subtrees are pruned before os.walk descends into them."""
+    out = []
+    for r, ds, fs in os.walk(top):
+        ds[:] = [x for x in ds if not NEVER.search(x) and not under(os.path.join(r, x), banned)]
+        out += [os.path.join(r, f) for f in fs if not under(os.path.join(r, f), banned)]
+    return sorted(out)
 
 
 def prune(root, live, now):
@@ -59,13 +82,20 @@ def snapshot(ticket, paths):
     used = sum(os.path.getsize(os.path.join(d, "files", p.lstrip("/"))) for k, p in rows if k not in ("absent", "dir", "skipped"))
     count = sum(k not in ("absent", "dir", "skipped") for k, _ in rows)
     new, notes = [], []
+    banned = protected_paths()
+    if banned is None:
+        return 0, ["claims: snapshot skipped (protected-projects matcher failed)"]
     for raw in paths:
         top = absolute(raw)
         if top in held or any(top.startswith(h + "/") for k, h in rows if k == "dir") or NEVER.search(top):
             continue
+        if any(top == b or top.startswith(b + "/") for b in banned):
+            new.append(("skipped", top))
+            notes.append("claims: snapshot skipped %s (protected project)" % top)
+            continue
         if os.path.isdir(top):
             new.append(("dir", top))
-            files = walk(top)
+            files = walk(top, banned)
         elif os.path.exists(top):
             files = [top]
         else:
@@ -125,7 +155,8 @@ def diff(ticket, stat):
             print("no baseline: %s (claimed before its snapshot; not in this diff)" % p)
     for kind, p in rows:
         if kind == "dir":
-            pairs += [(None, f) for f in walk(p) if f not in seen]
+            banned = protected_paths()
+            pairs += [(None, f) for f in (walk(p, banned) if banned is not None else []) if f not in seen]
         elif kind == "skipped":
             print("skipped at claim: %s" % p)
         else:

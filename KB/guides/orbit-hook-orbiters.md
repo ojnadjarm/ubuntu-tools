@@ -81,7 +81,7 @@ cd ~/the-dark-eye/body && node --test test/remote-orbiters.test.js test/orbiters
 - Code: `~/agents/bin/orbit-hook`, `~/agents/lib/agent_ends.py` (end signals), `~/agents/adapters/claude/hooks/audit-log.py` (TaskStop trigger), `~/agents/bin/sentinel-check` (sweep), hook config `~/.claude/settings.json`,
   page `~/the-dark-eye/body/src/remote-www/index.html` (`crowdSet`, `CROWD_MIN_MS`), body `body/src/main.js` + `body/src/orbiters.js`
 - Tests: `~/agents/bin/tests/orbit-hook.test.py`, `~/the-dark-eye/body/test/{remote-orbiters,orbiters}.test.js`
-- Briefs: `~/agent-work/briefs/T58-orbiters-instant.md`, `T68-orbit-sweep-workflow-agents.md` · backups `~/agents/backups/T58/`
+- Briefs: `~/agent-work/briefs/T58-orbiters-instant.md`, `T68-orbit-sweep-workflow-agents.md` · backups `~/agent-work/backups/T58/`
 - Docs: `KB/toolbox.md` (orbiters paragraph), `KB/runbooks/eye-relay.md`
 - Hook-time sources (T379, CLI 2.1.300, measured in `claude -p` probes): the subagent's `meta.json` and transcript land only
   **after** the hook returns (never seen in a 1.5 s in-hook poll), and the hook input has no prompt (`prompt_id` is the parent

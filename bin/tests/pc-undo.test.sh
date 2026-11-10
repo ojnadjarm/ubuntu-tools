@@ -212,5 +212,19 @@ echo 0 >"$D/k3"; echo 1500 >"$D/k4"; echo disabled >"$D/zufs"
 grep -v -e dfwb -e dfwc -e dvolb -e dvolc "$DL" >"$DL.ok"; mv "$DL.ok" "$DL"
 dr >/dev/null; is 'drift exits 0 when only boot-restored rows differ' "$?" 0
 
+# T1597: a pre-move ledger line names $HARNESS_HOME/backups; once that folder is gone the undo reads $FLEET_BACKUPS_DIR.
+HH="$WORK/hh"; FB="$WORK/aw/backups"; mkdir -p "$HH" "$FB/conf/s1"; echo old >"$FB/conf/s1/old"; echo new >"$WORK/mv-target"
+jq -nc --arg t "$WORK/mv-target" --arg rb "cat '$HH/backups/conf/s1/old' >'$WORK/mv-target'" --arg rd "cat '$WORK/mv-target'" \
+  '{ts:"2026-11-01T00:00:00+0100",id:"mv1",cmd:"x",target:$t,before:"old",after:"new",rollback:$rb,redo:"true",read:$rd}' >>"$PC_LEDGER"
+echo '{"id":"mv1","verified":true,"observed":"new"}' >>"$PC_LEDGER"
+HARNESS_HOME="$HH" FLEET_BACKUPS_DIR="$FB" "$BIN/pc-undo" mv1 --apply >/dev/null 2>&1
+is 'moved backups: undo of an old-path entry restores from FLEET_BACKUPS_DIR' "$(cat "$WORK/mv-target")" old
+echo new >"$WORK/mv-target"; mkdir -p "$HH/backups/moodle"
+HARNESS_HOME="$HH" FLEET_BACKUPS_DIR="$FB" "$BIN/pc-undo" mv1 --apply --force >/dev/null 2>&1
+is 'old folder kept for DB dumps only: a moved file still resolves' "$(cat "$WORK/mv-target")" old
+echo new >"$WORK/mv-target"; mkdir -p "$HH/backups/conf/s1"; echo legacy >"$HH/backups/conf/s1/old"
+HARNESS_HOME="$HH" FLEET_BACKUPS_DIR="$FB" "$BIN/pc-undo" mv1 --apply --force >/dev/null 2>&1
+is 'old folder still there: the ledger path is used as is' "$(cat "$WORK/mv-target")" legacy
+
 [ $bad = 0 ] && echo 'PASS pc-undo' || echo 'FAIL pc-undo'
 exit $bad

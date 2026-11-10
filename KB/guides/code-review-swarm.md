@@ -15,7 +15,7 @@ Ticket: T74 · Last verified: 2026-10-20 (T1005: split into runner + `lib/code_r
   (`code-review-sandbox --post --`) → `claude -p BRIEF.md` → `code-review prep` → `Workflow(swarm.js, args.json)` →
   `result.json` → `code-review finish` → session exits → outside the sandbox: `code-review cleanup` + `code-review deliver`.
 - **Allowlist sandbox**: `$HOME` read-only; writable only `~/agents` (real) or the fixture, `~/.claude/skills`, the
-  session's projects dir, `backups/code-review` and `backups/retired`. Read-only again over them: `.git`, AGENTS.md,
+  session's projects dir, `$FLEET_BACKUPS_DIR/{code-review,retired}` and `$TOOLSMITH_PAPERS` (T1597). Read-only again over them: `.git`, AGENTS.md,
   FLEET.md, research, backups, and everything `code-review containment` lists (the CLI, sandbox, netproxy, guards,
   runner, swarm files, its tests). tmpfs over secrets, asr-corpus, `.ssh`, `.gnupg`, gh config, keyrings,
   `/run/user/$UID`, `/tmp`; `/dev/null` over the docker and system D-Bus sockets; own pid namespace.
@@ -44,7 +44,7 @@ bash ~/agents/bin/tests/code-review.test.sh            # 52 fixture checks (2026
 bash ~/agents/code-review/selftest/run.sh              # real swarm on the seeded fixture (model, ~6-10 min, ~$7-10)
 code-review-sandbox --selftest                         # proves hidden secrets, read-only containment, Claude-only network
 code-review restore <run> <F-id>                       # undo one fix; what it left goes to the backup's displaced/
-cat ~/agents/backups/retired/<date>/MANIFEST.tsv       # col 3 = one-line restore (mv … …), col 4 = why
+cat ~/agent-work/backups/retired/<date>/MANIFEST.tsv       # col 3 = one-line restore (mv … …), col 4 = why
 code-review retire <path> --why obsolete --check       # would the gates let it go?
 agent-now code-review                                  # one real run now, through systemd (hours)
 ```

@@ -13,7 +13,7 @@ Existing: `apport-cli`/`whoopsie-upload-all` (upload only), `pc units reset-fail
 pc crashes                       # name, exe, signal, age, upload state, cmdline head
 pc crashes --json
 pc crashes archive <name>        # would: crash:<name> present → archived
-pc crashes archive <name> --apply   # moves to ~/agents/backups/crash/<stamp>-<name>/, resets the unit
+pc crashes archive <name> --apply   # moves to ~/agent-work/backups/crash/<stamp>-<name>/, resets the unit
 systemctl show apport-autoreport.service -p ActiveState,Result   # read-back
 ```
 

@@ -11,7 +11,7 @@ pc_usage 'usage: pc conf put <path> (--from <file> | --line <text> [--line <text
 
 put   replace <path> with the new content as one ledgered change. Without --apply prints
       "would: <path> <old> → <new> (+A -R)" and the diff -u; with it saves the old content (or its
-      absence) and the new one under $PC_CONF_BACKUP (default ~/agents/backups/conf)/<stamp>-<name>.XXXXXX/,
+      absence) and the new one under $PC_CONF_BACKUP (default $FLEET_BACKUPS_DIR/conf)/<stamp>-<name>.XXXXXX/,
       writes (sudo outside $HOME), runs `sudo etckeeper commit` for /etc, then the reload
       (`systemctl [--user] reload-or-restart <unit>` or `daemon-reload`), re-reads the file and
       prints "rollback: pc undo <id>" (the undo restores the old bytes or removes the file).
@@ -39,7 +39,7 @@ PC_SUB='pc conf'; PC_EXTRA_FLAGS=(--from: --line: --reload: --daemon-reload --us
 case ${!#} in --line|--from|--reload) echo "pc conf: ${!#} needs a value" >&2; exit 2;; esac
 pc_opt "$@"; ARGS=(${PC_ARGS[@]+"${PC_ARGS[@]}"})
 for f in --from --reload; do [ "${PC_OPT[$f]+set}" ] && [ -z "${PC_OPT[$f]}" ] && { echo "pc conf: $f needs a value" >&2; exit 2; }; done
-: "${PC_CONF_ROOT:=}" "${PC_CONF_BACKUP:=$HOME/agents/backups/conf}"
+: "${PC_CONF_ROOT:=}" "${PC_CONF_BACKUP:=$FLEET_BACKUPS_DIR/conf}"
 [ -n "$PC_CONF_ROOT" ] && PC_CONF_ROOT=$(readlink -m "$PC_CONF_ROOT")
 
 refuse() { printf 'refused: %s\n' "$1" >&2; exit 2; }

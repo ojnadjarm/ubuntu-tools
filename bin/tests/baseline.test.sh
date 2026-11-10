@@ -2,7 +2,7 @@
 # Fixtures for ~/agents/bin/baseline.sh: a mktemp HOME, context dir and output dir, a stub dconf; the real backups dir is never written.
 set -uo pipefail
 S="$HOME/agents/bin/baseline.sh"
-REAL="$HOME/agents/backups"
+REAL="${FLEET_BACKUPS_DIR:-${AGENT_WORK:-$HOME/agent-work}/backups}"
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 . "$HOME/agents/bin/tests/lib/assert.sh"
 

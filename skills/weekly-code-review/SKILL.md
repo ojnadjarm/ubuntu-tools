@@ -12,7 +12,7 @@ Guide with the measured pitfalls: `~/agents/KB/guides/code-review-swarm.md`. Arc
 1. **Read the last run**: `cat ~/agents/code-review/REPORT.md`; full list `~/agents/code-review/state/runs/<run>/findings.md`
    (`<run>` = `<date>-<HHMMSS>`, the latest is in `state/current-run`).
 2. **Undo a fix**: `code-review restore <run> <F-id>` (nothing is deleted: what the fix left goes to the backup's `displaced/`).
-   **Bring back a retired item**: run column 3 of `~/agents/backups/retired/<date>/MANIFEST.tsv` (column 4 = why).
+   **Bring back a retired item**: run column 3 of `~/agent-work/backups/retired/<date>/MANIFEST.tsv` (column 4 = why).
 3. **Change what lanes may do**: edit `~/agents/code-review/LANES.md` (binding for every lane); areas, lenses and
    policy live in `lib/code_review/` (`common.AREAS`, `lanes.LENSES`, `policy.CONTAINMENT`, `policy.policy()`); orchestration in `code-review/swarm.js`;
    the sandbox in `bin/code-review-sandbox` (+ `code-review-netproxy`). The swarm itself can never edit these.

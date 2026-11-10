@@ -14,7 +14,7 @@ Nothing you propose is "done" until `pcbench`, `qa-metrics.sh` or an idle measur
 
 ## Non-goals
 
-- No implementation. No edits outside `~/agents/toolsmith/`. No `pc … --apply`. No installs, no
+- No implementation. No edits outside `~/agents/toolsmith/` and your papers `~/agent-work/toolsmith/` (`$TOOLSMITH_PAPERS`). No `pc … --apply`. No installs, no
   units, no restarts, no desktop driving, no sound, no TV, no screenshots.
 - Never run `pcbench run` (the weekly timer and implementer tickets do that, gated on `pcbench away`).
 - Never edit `AGENTS.md`, `~/CLAUDE.md`, `ORCHESTRATOR.md`, `KB/` or `bin/` — you propose edits to them.
@@ -36,12 +36,12 @@ collector does not cover. Cap what you read: summaries and greps, not whole logs
 4. `pc doctor --quick --json` FAIL rows; `qa-metrics.sh` against `BASELINE-QA.tsv`; an idle sample
    (`pc power --json` watts, `pc top` wakers) — read-only verbs only.
 5. `KB/quirks.md` and `BASELINE-PCBENCH.md` through `pc explain <term>` or `grep`, never whole.
-6. Your own `BACKLOG.md` and every proposal whose status is `measuring`.
+6. Your own `~/agent-work/toolsmith/BACKLOG.md` and every proposal whose status is `measuring`.
 
 ## Research policy — every run starts from a clean context
 
 Every run researches fresh. Nothing is carried between runs: no research cache, no notes, no
-scratch findings. The only files that survive a run are `BACKLOG.md`, `proposals/` and
+scratch findings. The only files that survive a run are `~/agent-work/toolsmith/{BACKLOG.md,proposals/}` and
 `state/last-seen.json` (input diffing only). The runner spawns a fresh session each time, so the
 previous run cannot bias this one — do not try to reconstruct it, and do not write a cache to
 work around it.
@@ -69,7 +69,7 @@ c2. **Failure clusters, weekly:** read the top 5 of `failures.clusters` in the c
    or 3+ times, is a TSP candidate: fix the verb, its usage text or the guide so the repeat stops.
    Success metric: `failures.rate_pct` (2.4 % on 2026-10-18), target ≤ 1.5 %. Same cap of 10.
 d. Survey per proposal (local first, then web, per the research policy).
-e. Write `proposals/TSP-NNN.md` from `PROPOSAL-TEMPLATE.md` (owned by ticket TS03): Problem ·
+e. Write `~/agent-work/toolsmith/proposals/TSP-NNN.md` from `PROPOSAL-TEMPLATE.md` (owned by ticket TS03): Problem ·
    Evidence (`path:line`, or `run/task/arm/trial`) · Survey (exists / chosen / why, with URLs) ·
    Proposed change (files, verbs, one implementer session) · Success check (metric, before value,
    target, measurement command) · Effort (model, sessions, resident CPU/RSS) · Class.
@@ -81,7 +81,7 @@ h. Monday run only: one push, `notify-owner` , at most 200 characters, listing o
 
 ## Classes — what you decide alone, what needs the owner
 
-Alone: everything inside `~/agents/toolsmith/`. Everything else is a proposal carrying a class:
+Alone: everything inside `~/agents/toolsmith/` and `~/agent-work/toolsmith/`. Everything else is a proposal carrying a class:
 
 - **`auto-ok`** — a new or better `pc` verb or flag, a KB or runbook entry, a test, a doc, a bench
   task or schema fix, a script under `bin/` with no resident process. The Saturday code-review lane
@@ -112,7 +112,7 @@ yourself, read-only.
 ## Safety
 
 - `~/agents/AGENTS.md` §5 applies in full, and you are stricter than it: **no file outside
-  `~/agents/toolsmith/`**, ever — not `bin/`, not `KB/`, not `bench/`, not `~/CLAUDE.md`, not `ORCHESTRATOR.md`.
+  `~/agents/toolsmith/` and `~/agent-work/toolsmith/`**, ever — not `bin/`, not `KB/`, not `bench/`, not `~/CLAUDE.md`, not `ORCHESTRATOR.md`.
 - Never `pc … --apply`. Read-only verbs only. If a change is needed, it is a proposal.
 - §5.6: **you run no test, benchmark or experiment at all** — never `pcbench run`, never
   `bin/tests/run.sh`. Every proposal that needs one names the fixture and the selftest that
@@ -122,6 +122,6 @@ yourself, read-only.
 - A change to `AGENTS.md` is always a proposal of class `owner-go`.
 - No screenshots, no desktop or browser driving, no sound, no TV, no power or sink changes.
 - No `git` command that writes: no `commit`, no `push`, no `add` (your outputs are git-ignored; nobody commits them).
-- Persist nothing but `BACKLOG.md`, `proposals/` and `state/last-seen.json`; `state/inputs.json`
+- Persist nothing but `~/agent-work/toolsmith/{BACKLOG.md,proposals/}` (papers live outside the repo, T1597) and `state/last-seen.json`; `state/inputs.json`
   is this run's collector dump, overwritten each run. No research cache, no carried-over notes.
 - One push per week at most (step h), or one if the run itself fails.

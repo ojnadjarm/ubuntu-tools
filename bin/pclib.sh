@@ -38,7 +38,8 @@
 # The orchestrator's tmux session and unit are config values (GH11): the guards below refuse by
 # whatever they are named on this install, not by a hardcoded vendor name.
 # shellcheck source=/dev/null
-[ -n "${HARNESS_ENV_LOADED:-}" ] || { _pcl="$(dirname "${BASH_SOURCE[0]}")/env.sh"; [ -r "$_pcl" ] && . "$_pcl"; unset _pcl; }
+# FLEET_BACKUPS_DIR unset = env.sh loaded before T1597 added the material keys: load it again.
+[ -n "${HARNESS_ENV_LOADED:-}" ] && [ -n "${FLEET_BACKUPS_DIR:-}" ] || { _pcl="$(dirname "${BASH_SOURCE[0]}")/env.sh"; [ -r "$_pcl" ] && . "$_pcl"; unset _pcl; }
 : "${ORCHESTRATOR_TMUX_SESSION:=claude}" "${ORCHESTRATOR_UNIT:=claude-orchestrator.service}"
 ORCHESTRATOR_UNIT_BASE="${ORCHESTRATOR_UNIT%.*}"
 

@@ -29,8 +29,8 @@ check "race: no meta at all still lights the orbiter with the type, hook ${ms} m
   $([ "$r" = 0 ] && [ "$ms" -lt 5000 ] && echo 0 || echo 1) "$(cat "$W/never.jsonl" 2>/dev/null)"
 
 # 2. unused tool retired with a working one-line restore.
-man="$H/agents/backups/retired/$D/MANIFEST.tsv"
-check "unused: bin/old-sweeper moved out of bin" $([ ! -e "$B/old-sweeper" ] && [ -f "$H/agents/backups/retired/$D/agents/bin/old-sweeper" ] && echo 0 || echo 1)
+man="$H/agent-work/backups/retired/$D/MANIFEST.tsv"
+check "unused: bin/old-sweeper moved out of bin" $([ ! -e "$B/old-sweeper" ] && [ -f "$H/agent-work/backups/retired/$D/agents/bin/old-sweeper" ] && echo 0 || echo 1)
 line=$(grep '^agents/bin/old-sweeper' "$man" 2>/dev/null | cut -f3)
 cp -a "$H" "$W/copy"
 eval "${line//$H/$W/copy}" 2>/dev/null
@@ -57,7 +57,7 @@ out=$(cd "$H" && bash agents/bin/tests/run.sh 2>&1); r=$?
 check "fixture tests green" $r "$(printf '%s' "$out" | grep FAIL | head -3)"
 
 # 6-9. evidence of process: backups, report, one push, claims released, no refused attempt.
-nb=$(find "$H/agents/backups/code-review/" -path "*/$D-*/*" -name VERIFIED 2>/dev/null | wc -l)
+nb=$(find "$H/agent-work/backups/code-review/" -path "*/$D-*/*" -name VERIFIED 2>/dev/null | wc -l)
 check "backups: >= 3 fix backups verified by code-review tests ($nb)" $([ "$nb" -ge 3 ] && echo 0 || echo 1)
 check "unused: retired with a usefulness reason, not a usage count" $(grep '^agents/bin/old-sweeper' "$man" 2>/dev/null | cut -f4 | grep -qE '^(obsolete|duplicate|superseded|broken)' && echo 0 || echo 1)
 rep="$H/agents/code-review/REPORT.md"

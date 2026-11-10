@@ -12,6 +12,8 @@ from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from auditlib import error_class, error_cluster, outcome_rows, parse_age, raw_call, read_jsonl, rotated_rows, row_kind
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), 'lib'))
+from agent_work import toolsmith_papers  # noqa: E402
 
 ROOT = os.environ.get('TOOLSMITH_ROOT') or os.environ.get('HARNESS_HOME') \
     or os.path.expanduser('~/agents')
@@ -325,9 +327,10 @@ def cell_int(fields, i):
 def sec_hold():
     """Owner-held BACKLOG rows, every row's class, and those that changed since last-seen.json."""
     ts = os.path.join(ROOT, 'toolsmith')
+    papers = ts if os.environ.get('TOOLSMITH_ROOT') else toolsmith_papers()
     rows, classes = {}, {}
     try:
-        for line in open(os.path.join(ts, 'BACKLOG.md')):
+        for line in open(os.path.join(papers, 'BACKLOG.md')):
             c = [x.strip() for x in line.strip().strip('|').split('|')]
             if len(c) > 4 and re.fullmatch(r'TSP-\d+', c[1]):
                 classes[c[1]] = c[3]

@@ -31,7 +31,7 @@ stick() {
 }
 
 H="$WORK/home"; LBL="FBT$((RANDOM % 9000 + 1000))"; FULL="FBF$((RANDOM % 9000 + 1000))"
-mkdir -p "$H"/{finance,invoices,.config/pc-harness,moodle-envs/secretproj} "$H/agents"/{secrets,state,backups/moodle/{5.2,sp45}} \
+mkdir -p "$H"/{finance,invoices,.config/pc-harness,moodle-envs/secretproj} "$H/agents"/{secrets,state,backups/moodle/{5.2,4.1}} "$H/agent-work/backups/moodle"/{5.2,sp45} \
   "$H/agent-work"/{briefs,decisions,owner,research/2026-11-01/T1,evidence/E1,big,tmp} \
   "$H/.claude"/{skills/x,projects/-p1/memory,projects/-p1/s1} "$H/.claude/projects/${H//[\/.]/-}-moodle-envs-secretproj"
 head -c 200000 /dev/urandom >"$H/finance/a.bin"; echo inv >"$H/invoices/i.txt"; echo hist >"$H/agent-work/history.md"
@@ -39,11 +39,14 @@ echo brief >"$H/agent-work/briefs/b.md"; echo note >"$H/agent-work/research/2026
 head -c 5000000 /dev/urandom >"$H/agent-work/big/huge.bin"; echo junk >"$H/agent-work/tmp/j"
 echo mem >"$H/.claude/projects/-p1/memory/m.md"; echo '{}' >"$H/.claude/projects/-p1/s1.jsonl"; echo '{}' >"$H/.claude/settings.json"
 echo SECRET >"$H/moodle-envs/secretproj/x"; echo SECRET >"$H/.claude/projects/${H//[\/.]/-}-moodle-envs-secretproj/s.jsonl"
-echo old >"$H/agents/backups/moodle/5.2/2026-11-01.sql.gz"; echo new >"$H/agents/backups/moodle/5.2/2026-11-02.sql.gz"
-echo SECRET >"$H/agents/backups/moodle/sp45/2026-11-02.sql.gz"
+# T1597: dumps in $FLEET_BACKUPS_DIR, older ones still in the old folder (fallback read until the owner clears it).
+echo old >"$H/agents/backups/moodle/5.2/2026-11-01.sql.gz"; echo new >"$H/agent-work/backups/moodle/5.2/2026-11-02.sql.gz"
+echo only-old >"$H/agents/backups/moodle/4.1/2026-10-30.sql.gz"
+echo SECRET >"$H/agent-work/backups/moodle/sp45/2026-11-02.sql.gz"
 # Mirrors: a claims snapshot of the protected path (tier 1) and a word-named dir deep in a tier-2 ticket.
-mkdir -p "$H/agents/state/claims-snap/T9/files${H}/moodle-envs/secretproj" "$H/agent-work/T9/copy/SecretProj-dump"
-echo SECRET >"$H/agents/state/claims-snap/T9/files${H}/moodle-envs/secretproj/x"; echo SECRET >"$H/agent-work/T9/copy/SecretProj-dump/y"
+mkdir -p "$H/agent-work/claims-snap/T9/files${H}/moodle-envs/secretproj" "$H/agent-work/T9/copy/SecretProj-dump"
+echo base >"$H/agent-work/claims-snap/T9/manifest.tsv"
+echo SECRET >"$H/agent-work/claims-snap/T9/files${H}/moodle-envs/secretproj/x"; echo SECRET >"$H/agent-work/T9/copy/SecretProj-dump/y"
 echo keep >"$H/agent-work/T9/copy/ok.txt"
 cat >"$WORK/config.env" <<EOF
 FLEET_BACKUP_LABEL=$LBL
@@ -81,6 +84,8 @@ ok "protected: strace saw the run (restic opened the repo)" 'grep -q "fleet-back
 export RESTIC_PASSWORD_FILE="$H/agents/secrets/fleet-backup.pass" RESTIC_REPOSITORY="$M/fleet-backup/restic"
 restic ls latest >"$WORK/ls" 2>/dev/null
 ok "tier1: finance, memory, newest dump, settings" 'grep -q "/finance/a.bin$" "$WORK/ls" && grep -q "/memory/m.md$" "$WORK/ls" && grep -q "5.2/2026-11-02.sql.gz$" "$WORK/ls" && ! grep -q "2026-11-01.sql.gz$" "$WORK/ls" && grep -q "/.claude/settings.json$" "$WORK/ls"'
+ok "tier1: an env only in the old backups folder still gets its newest dump (fallback)" 'grep -q "/agents/backups/moodle/4.1/2026-10-30.sql.gz$" "$WORK/ls"'
+ok "tier1: claims snapshots from \$CLAIMS_SNAP" 'grep -q "/agent-work/claims-snap/T9/manifest.tsv$" "$WORK/ls"'
 ok "tier2: research ticket and transcript in" 'grep -q "/T1/n.md$" "$WORK/ls" && grep -q "/-p1/s1.jsonl$" "$WORK/ls"'
 ok "budget: 5 MB tier-2 file skipped and listed" '! grep -q "huge.bin" "$WORK/ls" && grep -q "/agent-work/big$" "$H/agents/state/fleet-backup/last-skipped.txt"'
 ok "mirrors: tier-2 sibling kept, both mirrors out" 'grep -q "/T9/copy/ok.txt$" "$WORK/ls" && ! grep -qi "moodle-envs/secretproj\|secretproj-dump" "$WORK/ls"'

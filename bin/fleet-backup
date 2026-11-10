@@ -74,21 +74,31 @@ kids() {
 # tier1 — the paths that must fit every night.
 tier1() {
   local p d f
-  for p in "$HOME/finance" "$HOME/invoices" "$HARNESS_HOME/secrets" "$HOME/.config/pc-harness" "$HARNESS_HOME/state" \
+  for p in "$HOME/finance" "$HOME/invoices" "$HARNESS_HOME/secrets" "$HOME/.config/pc-harness" "$HARNESS_HOME/state" "$CLAIMS_SNAP" \
            "$AGENT_WORK/history.md" "$AGENT_WORK/README.md" "$AGENT_WORK/briefs" "$AGENT_WORK/decisions" "$AGENT_WORK/owner"; do
     [ -e "$p" ] && printf '%s\n' "$p"
   done
   [ -d "$CLAUDE" ] && kids "$CLAUDE" | grep -vxF "$CLAUDE/projects"
   [ -d "$CLAUDE/projects" ] && kids "$CLAUDE/projects" | while read -r d; do [ -d "$d/memory" ] && printf '%s\n' "$d/memory"; done
-  [ -d "$HARNESS_HOME/backups/moodle" ] && kids "$HARNESS_HOME/backups/moodle" | while read -r d; do
-    f=$(kids "$d" | grep -E '\.sql(\.gz)?$' | sort | tail -1); [ -n "$f" ] && printf '%s\n' "$f"
-  done
+  newest_dumps
+}
+
+# newest_dumps — the newest dump per env across $FLEET_BACKUPS_DIR/moodle and the old folder (one-time fallback
+# until the owner clears it; guide fleet-backup says when to drop it).
+newest_dumps() {
+  local base d f
+  for base in "$FLEET_BACKUPS_DIR/moodle" "$HARNESS_HOME/backups/moodle"; do  # fallback
+    [ -d "$base" ] && kids "$base" | while read -r d; do
+      kids "$d" | grep -E '\.sql(\.gz)?$' | while read -r f; do printf '%s\t%s\n' "${d##*/}/${f##*/}" "$f"; done
+    done
+  done | sort -t$'\t' -k1,1 | awk -F'\t' '{split($1, k, "/"); last[k[1]] = $2} END {for (e in last) print last[e]}' | sort
 }
 
 # tier2_candidates — the rest of ~/agent-work and the transcripts, one entry per ticket/session, any order.
 tier2_candidates() {
   local e d
   [ -d "$AGENT_WORK" ] && kids "$AGENT_WORK" | while read -r e; do
+    case "$e" in "$CLAIMS_SNAP"|"$FLEET_BACKUPS_DIR") continue ;; esac
     case "${e##*/}" in history.md|README.md|briefs|decisions|owner|tmp|scratch) ;;
       research) kids "$e" | while read -r d; do kids "$d"; done ;;
       evidence|archive) kids "$e" ;;

@@ -61,6 +61,6 @@ curl -s 127.0.0.1:19999/api/v1/charts | python3 -c 'import json,sys,collections 
 - go.d auto-detection (`default_run: yes`) polled the Vass mongo/redis containers every 10 s; T1084 set `default_run: no` with only `docker: yes`. Never re-enable mongodb/redis jobs: Vass is never touched.
 
 ## Links
-- Code: /etc/netdata/netdata.conf, /etc/netdata/go.d.conf (backups: ~/agents/backups/conf/)
+- Code: /etc/netdata/netdata.conf, /etc/netdata/go.d.conf (backups: ~/agent-work/backups/conf/)
 - Tests: the T1041 CHECK in ~/agent-work/research/2026-10-21/T1037/BACKLOG.md
 - Design / results: ~/agent-work/research/2026-10-21/T1037/measurements.txt

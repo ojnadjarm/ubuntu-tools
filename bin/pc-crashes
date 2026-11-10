@@ -12,14 +12,14 @@ list     every <name>.crash in $PC_CRASH_DIR (default /var/crash): name, exe, si
          upload state (uploaded = whoopsie wrote .uploaded, queued = .upload only, none); then one
          ignored-by-apport row per program in $PC_APPORT_IGNORE (default ~/.apport-ignore.xml) with its
          kernel trap/segfault count in 24 h (apport writes no .crash for it, the kernel still logs each one)
-archive  move <name>.crash/.upload/.uploaded to $PC_CRASH_BACKUP (default ~/agents/backups/crash)/<stamp>-<name>/
+archive  move <name>.crash/.upload/.uploaded to $PC_CRASH_BACKUP (default $FLEET_BACKUPS_DIR/crash)/<stamp>-<name>/
          and reset-failed apport-autoreport.service, as one ledgered change ("rollback: pc undo <id>" moves
          the set back). <name> is the list name, with or without .crash. Without --apply prints "would:".' "$@"
 
 PC_SUB='pc crashes'
 pc_opt "$@"; ARGS=(${PC_ARGS[@]+"${PC_ARGS[@]}"})
 : "${PC_APPORT_IGNORE:=$HOME/.apport-ignore.xml}"
-: "${PC_CRASH_DIR:=/var/crash}" "${PC_CRASH_BACKUP:=$HOME/agents/backups/crash}" "${PC_CRASH_UNIT:=apport-autoreport.service}"
+: "${PC_CRASH_DIR:=/var/crash}" "${PC_CRASH_BACKUP:=$FLEET_BACKUPS_DIR/crash}" "${PC_CRASH_UNIT:=apport-autoreport.service}"
 EXTS=(crash upload uploaded)
 
 # key <file> <Key> — the first line of an apport key's value, read only up to its first match.

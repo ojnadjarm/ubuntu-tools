@@ -5,7 +5,7 @@
 set -uo pipefail
 BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/plan-publish"
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
-SHIM="$WORK/shim"; CALLS="$WORK/calls.log"; BLOCKED="$WORK/blocked.log"; PLANS="$WORK/home/agents/dashboard/plans"
+SHIM="$WORK/shim"; CALLS="$WORK/calls.log"; BLOCKED="$WORK/blocked.log"; PLANS="$WORK/home/agent-work/research/dashboard/plans"
 mkdir -p "$SHIM" "$WORK/home"; : >"$CALLS"
 . "$HOME/agents/bin/tests/lib/assert.sh"
 

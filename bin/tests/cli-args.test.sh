@@ -107,7 +107,7 @@ mkdir -p "$FH/moodle-envs/v1/www"
 printf 'name: v1\nservices:\n  app:\n    volumes:\n      - ./www:/var/www/html\n' >"$FH/moodle-envs/v1/docker-compose.yml"
 echo '<?php' >"$FH/moodle-envs/v1/www/config.php"
 call bash "$FH/agents/bin/moodle-keep" --dry-run
-if [ "$rc" = 0 ] && [ ! -s "$CALLS" ] && grep -q '^would: v1 ' "$WORK/out" && [ ! -e "$FH/agents/backups" ]; then
+if [ "$rc" = 0 ] && [ ! -s "$CALLS" ] && grep -q '^would: v1 ' "$WORK/out" && [ ! -e "$FH/agents/backups" ] && [ ! -e "$FH/agent-work/backups" ]; then
   pass moodle-keep "moodle-keep --dry-run: would: lines per env, no docker, no dump"
 else fail moodle-keep "moodle-keep --dry-run: would: lines per env, no docker, no dump" "rc=$rc calls=$(calls)"; fi
 

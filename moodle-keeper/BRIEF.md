@@ -1,7 +1,7 @@
 # moodle-keeper — daily care of the Moodle dev environments
 
 Run `moodle-keep` (bash, `~/agents/bin/moodle-keep`). It brings every env in `~/moodle-envs/<ver>`
-up, waits for HTTP, dumps its database to `~/agents/backups/moodle/<ver>/YYYY-MM-DD.sql.gz`,
+up, waits for HTTP, dumps its database to `~/agent-work/backups/moodle/<ver>/YYYY-MM-DD.sql.gz`,
 proves the dump restores into a scratch database, prunes dangling images/build cache and rotates
 `~/agents/log`. These dumps are the only backup of these databases: a failed dump is serious.
 
@@ -20,7 +20,7 @@ Stop. Do not push, do not investigate, do not touch anything else.
    - HTTP not answering but containers up → wait 60 s and re-run once.
    - disk over 85 % → `docker image prune -f`, `docker builder prune -f`, `journalctl --vacuum-size=200M`.
      Never `docker system prune --volumes`, never delete images or volumes of a running env.
-   - `~/agents/backups` growing → remove only dumps older than 14 days that are not dated `-01`.
+   - `~/agent-work/backups` growing → remove only dumps older than 14 days that are not dated `-01`.
    Anything else (DB corruption, upgrade failure, git conflicts, unknown errors): do not improvise.
 4. Re-run `moodle-keep` after any fix and record the new exit code.
 5. Write `REPORT.md` (≤5 lines): what failed, what you did, the final exit code.

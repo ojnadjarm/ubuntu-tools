@@ -247,7 +247,7 @@ const tsItems = (A.toolsmith_backlog || []).map(t => ({
   title: `${t.id} — ${t.title}`, severity: 'medium', lenses: ['toolsmith-backlog'], evidence: t.path,
   verdict: 'confirmed', votes: 'backlog', accept: t.accept,
 }))
-const backlog = `${A.home}/agents/toolsmith/BACKLOG.md`
+const backlog = `${A.toolsmith_dir}/BACKLOG.md`
 const toolsmithPrompt = t => `${head}\n\nTOOLSMITH LANE for ${t.id} (toolsmith backlog, class auto-ok, status ${t.status || 'proposed'}). ` +
   `The finding is the proposal ${t.file}; read it whole, every "Evidence update" and "rev." note included (the newest revision ` +
   `wins). Its Success check is the acceptance: ${t.accept || 'see the proposal'}. Follow "Toolsmith lane" in ${A.rules}.\n` +

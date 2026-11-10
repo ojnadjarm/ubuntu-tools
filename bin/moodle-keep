@@ -9,7 +9,8 @@ case ":$PATH:" in *:/usr/sbin:*) ;; *) PATH="$PATH:/usr/sbin:/sbin" ;; esac
 # shellcheck source=/dev/null
 . "$(dirname "$(readlink -f "$0")")/moodlelib.sh"
 ROOT="$(moodle_envs_root)"
-BACKUPS="$HOME/agents/backups/moodle"
+. "$(dirname "$(readlink -f "$0")")/env.sh"
+BACKUPS="$FLEET_BACKUPS_DIR/moodle"
 KEEP=14
 WEEKLY=0
 DRY=0

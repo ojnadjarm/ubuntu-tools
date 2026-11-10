@@ -8,7 +8,7 @@ Any persistent change to a sysctl.d, tmpfiles.d, journald/logind/oomd `.conf.d`,
 ## The path we took
 No fleet verb wrote a config file with an undo; six OS tickets (T1041 T1045 T1046 T1052 T1055 T1056) needed one. `pc-conf` reuses pclib's `pc_apply` ledger and `pc undo`, like `pc crashes archive`:
 - `put` checks the deny-list and roots, then dry-runs (`would: <path> <old> → <new> (+A -R)` + `diff -u`) or applies.
-- Apply: saves `old` (or an `absent` marker) and `new` under `~/agents/backups/conf/<stamp>-<path>/`; ledger before/after = `absent` or `sha:<12 hex>`; writes with `sudo install` (plain outside root for `$HOME`), keeps an existing file's owner, group and mode (`install -o -g -m`; new: 0644); `sudo etckeeper commit` for /etc; then the reload; re-reads the hash (`verified`).
+- Apply: saves `old` (or an `absent` marker) and `new` under `~/agent-work/backups/conf/<stamp>-<path>/`; ledger before/after = `absent` or `sha:<12 hex>`; writes with `sudo install` (plain outside root for `$HOME`), keeps an existing file's owner, group and mode (`install -o -g -m`; new: 0644); `sudo etckeeper commit` for /etc; then the reload; re-reads the hash (`verified`).
 - `pc undo <id>` restores the old bytes or removes the file, commits and reloads again.
 - `put` replaces the whole file: for a big file (netdata.conf) pass an edited copy with `--from`.
 

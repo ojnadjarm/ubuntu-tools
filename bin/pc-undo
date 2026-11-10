@@ -137,6 +137,12 @@ e=$(entries | jq --arg id "$id" 'if $id == "" then .[0] else (map(select(.id == 
 
 target=$(jq -r '.target' <<<"$e"); before=$(jq -r '.before' <<<"$e"); after=$(jq -r '.after' <<<"$e")
 rollback=$(jq -r '.rollback' <<<"$e"); redo=$(jq -r '.redo // .cmd' <<<"$e"); readcmd=$(jq -r '.read // ""' <<<"$e")
+# Entries before T1597 name the old backups folder; once it is gone their files live in $FLEET_BACKUPS_DIR.
+old="$HARNESS_HOME/backups/"  # fallback for pre-T1597 ledger lines
+while IFS= read -r p; do
+  [ -e "$p" ] || [ ! -e "$FLEET_BACKUPS_DIR/${p#"$old"}" ] && continue
+  rollback=${rollback//"$p"/"$FLEET_BACKUPS_DIR/${p#"$old"}"}; redo=${redo//"$p"/"$FLEET_BACKUPS_DIR/${p#"$old"}"}
+done < <(grep -oE "$(printf '%s' "$old" | sed 's/[.[\*^$]/\\&/g')[^ '\"]+" <<<"$rollback $redo" | sort -u)
 
 if [ -n "$readcmd" ] && [ "$FORCE" != 1 ]; then
   now=$(eval "$readcmd" 2>/dev/null)

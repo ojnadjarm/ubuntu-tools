@@ -1,11 +1,13 @@
 """The ~/drop file browser, drop files served with Range, and the published plan pages."""
 import html, json, os, re, subprocess, sys, threading, urllib.parse, zipfile
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "lib"))
+from agent_work import backups_dir, dash_plans_dir  # noqa: E402
 from dash.cache import forget
-from dash.env import HERE, HOME, PUBLIC_HOST
+from dash.env import HOME, PUBLIC_HOST
 from dash.routes import route
 from dash.services.sites import SITES
 
-PLANS = os.path.join(HERE, "plans")
+PLANS = dash_plans_dir()
 DROP = os.path.join(HOME, "drop")
 KINDS = {".png": "image", ".jpg": "image", ".jpeg": "image", ".gif": "image", ".webp": "image", ".svg": "image",
          ".md": "markdown", ".txt": "text", ".log": "text", ".csv": "text", ".json": "text", ".yml": "text", ".yaml": "text",
@@ -189,7 +191,7 @@ def trash(*paths):
     return (r.stderr.strip() or "trash failed") if r.returncode else None
 
 
-PROTECTED = [os.path.join(HOME, p) for p in ("agent-work/owner", "Documents", "moodle-envs", "agents/backups", "agents/secrets")]
+PROTECTED = [os.path.join(HOME, p) for p in ("agent-work/owner", "Documents", "moodle-envs", "agents/backups", "agents/secrets")] + [backups_dir()]  # agents/backups: fallback guard
 
 
 def entry_path(raw):

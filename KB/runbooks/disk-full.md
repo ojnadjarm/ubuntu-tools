@@ -7,5 +7,5 @@
    - journald: `journalctl --disk-usage` -> `sudo journalctl --vacuum-size=500M`.
    - apt cache: `sudo apt clean`.
    - `~/.cache` (playwright browsers, npm): `du -xhd1 ~/.cache | sort -h | tail`.
-3. Old backups: `~/agents/backups` keeps the last 20 tarballs; delete older ones by hand.
+3. Old backups: `~/agent-work/backups` keeps the last 20 tarballs; delete older ones by hand.
 4. Verify: `pc status --check` exit 0, and tell the owner what was deleted with `notify-owner`.

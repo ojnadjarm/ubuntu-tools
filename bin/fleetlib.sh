@@ -10,6 +10,8 @@
 #   agent_name_check <cli> <name>  2 unless <name> is an existing ~/agents/<name>/BRIEF.md
 # shellcheck source=/dev/null
 [ -n "${HARNESS_ENV_LOADED:-}" ] || . "$HOME/agents/bin/env.sh"
+# FLEET_BACKUPS_DIR unset = env.sh loaded before T1597 added the material keys: load it again when it is there.
+[ -n "${FLEET_BACKUPS_DIR:-}" ] || [ ! -r "$HOME/agents/bin/env.sh" ] || . "$HOME/agents/bin/env.sh"
 
 # bin/guards goes first: it refuses the FLEET.md §5 orders (git commit/push, reboot outside
 # the window, tailscale down) for headless runs and forwards everything else. The owner's

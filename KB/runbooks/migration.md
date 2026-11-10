@@ -15,15 +15,15 @@ Steps marked **owner** touch sudoers, sshd, ufw or a second access path: agents 
 ## 0. On the old box: export (owner, ~1 h, mostly the copy)
 
 ```bash
-machine-inventory > ~/agents/backups/inventory-$(date +%F).txt            # the list this runbook replays
+machine-inventory > ~/agent-work/backups/inventory-$(date +%F).txt            # the list this runbook replays
 machine-inventory --etc-list | grep -vE '^/etc/(passwd|group|shadow|gshadow)$' | sudo tar -czf ~/etc-fleet.tgz -T -
-moodle-keep                                                                  # fresh pg_dump into ~/agents/backups/moodle/{4.5,5.2}/<date>.sql.gz, restore-tested
-tailscale serve status > ~/agents/backups/tailscale-serve-$(date +%F).txt
-gsettings list-recursively > ~/agents/backups/gsettings-$(date +%F).txt
+moodle-keep                                                                  # fresh pg_dump into ~/agent-work/backups/moodle/{4.5,5.2}/<date>.sql.gz, restore-tested
+tailscale serve status > ~/agent-work/backups/tailscale-serve-$(date +%F).txt
+gsettings list-recursively > ~/agent-work/backups/gsettings-$(date +%F).txt
 ```
 - `etc-fleet.tgz` holds S files (`/etc/agents/ntfy.env`, a Wi-Fi PSK in `/etc/netplan/90-NM-*.yaml`): keep it mode 600, move it with the home copy, delete it after step 5.
 - Restic is skipped (T22 owner decision), so there is no off-machine backup: the copy in step 7 **is** the backup. Keep the old box intact until step 12 passes.
-- **Verify:** `tar -tzf ~/etc-fleet.tgz | wc -l` equals `machine-inventory --etc-list | grep -cvE '/(passwd|group|shadow|gshadow)$'`; the newest dump in `~/agents/backups/moodle/5.2/` has today's date.
+- **Verify:** `tar -tzf ~/etc-fleet.tgz | wc -l` equals `machine-inventory --etc-list | grep -cvE '/(passwd|group|shadow|gshadow)$'`; the newest dump in `~/agent-work/backups/moodle/5.2/` has today's date.
 
 ## 1. Base install (owner)
 
@@ -113,7 +113,7 @@ sudo ufw reload && sudo systemctl restart systemd-journald NetworkManager docker
 | `/etc/needrestart/conf.d/50-agents.conf` | `$nrconf{restart} = 'l'; $nrconf{kernelhints} = 0;` | list only, never restarts · T23 | P |
 | `/etc/smartd.conf` + `/usr/local/sbin/smart-alert` | `DEVICESCAN -H -l error -l selftest -m root -M exec /usr/local/sbin/smart-alert` | disk alarms → notify-owner · T24 | P |
 | `/etc/agents/ntfy.env` | ntfy topic for root-side alerts, root 600 | smart/netdata pushes · T24 | S |
-| `/etc/netdata/netdata.conf` | from the bundle: bind `0.0.0.0:19999 [::]:19999`, allow localhost/`100.*`/`192.168.1.*`, `update every = 5`, dbengine tiers 512/256/256 MiB, page cache 32 MiB, cloud off; old full copy also in `~/agents/backups/ef08/netdata.conf` | tailnet+LAN dashboard, light · T26, D20, EF08 | P |
+| `/etc/netdata/netdata.conf` | from the bundle: bind `0.0.0.0:19999 [::]:19999`, allow localhost/`100.*`/`192.168.1.*`, `update every = 5`, dbengine tiers 512/256/256 MiB, page cache 32 MiB, cloud off; old full copy also in `~/agent-work/backups/ef08/netdata.conf` | tailnet+LAN dashboard, light · T26, D20, EF08 | P |
 | `/etc/netdata/go.d/docker.conf` | `update_every: 60`, `collect_container_size: no` | dockerd CPU 24 % → 1.2 % · EF01 | P |
 | `/etc/netdata/health_alarm_notify.conf` + `/usr/local/sbin/netdata-alert` + `/usr/local/sbin/netdata-alert-drain` | email off, custom sender → `netdata-alert` (critical only) | alarms to the phone · T26, D21 | P |
 | `/etc/systemd/system/netdata-alert-drain.path`, `/etc/systemd/system/netdata-alert-drain.service`, `/etc/systemd/system/netdata-alert-drain.timer` | retries failed pushes every 5 min | · D21 | P |
@@ -180,12 +180,12 @@ rsync -aHAX --info=progress2 --exclude='.cache/' --exclude='snap/*/common/.cache
   "$USER@<old-tailnet-name>:" "$HOME/"
 ```
 What that brings (D unless marked), and why it matters:
-- `~/agents` (6 GB), `~/agents/backups` (DB dumps, config baselines), `~/agents/log`, `~/agents/state`; `~/agent-work` (`$AGENT_WORK`, 37 GB, 33 GB of it `research/`: briefs, research, evidence, archive, owner material).
+- `~/agents` (6 GB), `~/agent-work/backups` (DB dumps, config baselines), `~/agents/log`, `~/agents/state`; `~/agent-work` (`$AGENT_WORK`, 37 GB, 33 GB of it `research/`: briefs, research, evidence, archive, owner material).
 - `~/moodle-envs` (code + moodledata; the database is **not** here — step 10), `~/moodle-harness`, `~/the-dark-eye` (3.6 GB), `~/projects` (3 GB), `~/drop` (3.8 GB), `~/sites`, `~/obsidian-vault`, `~/Documents`, `~/finance`, `~/invoices`.
 - `~/.claude` (2.7 GB: skills, settings, hooks, `projects/` memory and transcripts), `~/CLAUDE.md`.
 - `~/.config/systemd/user/` (all user units, step 8), `~/.config/drop/Caddyfile`, `~/.config/sites/Caddyfile` (both bind the tailnet + LAN IPs: H), `~/.config/pc-harness/config.env`, `~/.config/monitors.xml`, `~/.config/dark-eye/`.
 - `~/.local/share/tts` (1.8 GB xtts model), `~/.local/opt` (the `/kokoro-narration` venv `kokoro/`), `~/.local/share/dev-cert` (vite HTTPS cert), `~/nltk_data`, `~/.local/share/pipx`, `~/.nvm` (or reinstall in step 6).
-- **Verify:** `du -sh --exclude=.cache ~` within 1 GB of the old box; `ls ~/agents/backups/moodle/5.2 | tail -1` is the step-0 dump.
+- **Verify:** `du -sh --exclude=.cache ~` within 1 GB of the old box; `ls ~/agent-work/backups/moodle/5.2 | tail -1` is the step-0 dump.
 
 ## 8. Fleet install
 
@@ -243,7 +243,7 @@ the Eye's own config under `~/.config/dark-eye/`.
 ```bash
 docker compose -f ~/moodle-envs/shared/docker-compose.yml up -d
 docker compose -f ~/moodle-envs/5.2/docker-compose.yml up -d
-gzip -dc "$(ls ~/agents/backups/moodle/5.2/*.sql.gz | tail -1)" | docker exec -i moodle52-db-1 psql -q -U moodle -d moodle
+gzip -dc "$(ls ~/agent-work/backups/moodle/5.2/*.sql.gz | tail -1)" | docker exec -i moodle52-db-1 psql -q -U moodle -d moodle
 ```
 (The DB lives in the docker volume `moodle52_dbdata`; user and db are both `moodle` (`POSTGRES_USER`, `POSTGRES_DB` in the compose file). Images pull again: `moodlehq/moodle-php-apache:8.4`, `postgres:16`, `nginx:alpine`, `moodlehq/selenium-standalone-chrome:96.0-moodlehq`, `mailhog/mailhog`.)
 4.5 (vass): `docker compose -f ~/moodle-envs/4.5/docker-compose.yml up -d` (code is the owner's `~/moodle-envs/vass` checkout, copied with `~/moodle-envs`; DB in volume `moodle45_dbdata`, fixture-only, no dump); enable `moodle45-cron.timer`. Then `docker compose -f ~/moodle-envs/vass-services/docker-compose.yml up -d` (redis + mongo, `unless-stopped`) and `systemctl --user enable --now vass-middleware.service vass-frontend.service vass-frontend-proxy.service`; verify with `pc status | sed -n '/^KEEPALIVE/,/^$/p'` (all OK, guide `vass-keepalive`). A fresh reinstall needs `php local/h5phandler/cli/install_h5p_libraries.php` run once after `/moodle-install` (H5P library order).

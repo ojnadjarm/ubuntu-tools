@@ -12,7 +12,7 @@ status     per protected repo root (`protected entries repo`: PROTECTED_<NAME>_R
 install    add `includeIf "gitdir:<root>/".path = <include>` per root to the global gitconfig ($GIT_CONFIG_GLOBAL or
            ~/.gitconfig) and write <include> (~/.config/pc-harness/work-repo-guard.gitconfig, core.hooksPath =
            '"$HARNESS_HOME"'/git-guard/hooks). Without --apply prints would: lines; with it backs the gitconfig up
-           once to $HARNESS_HOME/backups/gitconfig.T1251.bak, writes, then runs status.
+           once to $FLEET_BACKUPS_DIR/gitconfig.T1251.bak, writes, then runs status.
 uninstall  remove those lines and the include file (same --apply rule).
 Hooks: under an agent marker (CLAUDECODE, HARNESS_AGENT, OPENCODE, GEMINI_CLI, CODEX_SANDBOX, CODEX_THREAD_ID)
 refuse commit, push, merge, rebase and branch/HEAD ref updates; every hook then runs the repo'"'"'s own .git/hooks/<name>.'
@@ -28,7 +28,7 @@ done
 HOOKS="$(cd "$BIN/../git-guard/hooks" && pwd)"
 INC="$HOME/.config/pc-harness/work-repo-guard.gitconfig"
 GCFG="${GIT_CONFIG_GLOBAL:-$HOME/.gitconfig}"
-BAK="$HARNESS_HOME/backups/gitconfig.T1251.bak"
+BAK="$FLEET_BACKUPS_DIR/gitconfig.T1251.bak"
 roots=()
 while IFS= read -r r; do [[ " ${roots[*]-} " == *" $r "* ]] || roots+=("$r"); done < <(protected_entries repo)
 [ ${#roots[@]} -gt 0 ] || { echo "work-repo-guard: no protected repo roots (PROTECTED_<NAME>_REPOS or WORK_REPO_ROOTS in config.env)" >&2; exit 2; }

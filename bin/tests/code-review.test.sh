@@ -235,9 +235,9 @@ python3 "$CR/selftest/build.py" "$WORK/home" >/dev/null
 H="$WORK/home"; export CR_HOME="$H" CR_DATE=2026-09-26
 
 t "policy: bin edit, backups/research/containment forbidden, harness review-only"
-got="$(cr policy "$H/agents/bin/x" "$H/agents/backups/x" "$H/agent-work/research/x" "$H/moodle-harness/x" "$H/CLAUDE.md" \
-  "$H/agents/bin/code-review-sandbox" "$H/agents/bin/guards/git" "$H/agents/.git/index" | cut -f1 | tr '\n' ' ')"
-[ "$got" = "edit forbidden forbidden review-only forbidden forbidden forbidden forbidden " ] && ok || no "$got"
+got="$(cr policy "$H/agents/bin/x" "$H/agents/backups/x" "$H/agent-work/backups/x" "$H/agent-work/research/x" "$H/moodle-harness/x" "$H/CLAUDE.md" \
+  "$H/agents/bin/code-review-sandbox" "$H/agents/bin/guards/git" "$H/agents/.git/index" "$H/agent-work/toolsmith/BACKLOG.md" | cut -f1 | tr '\n' ' ')"
+[ "$got" = "edit forbidden forbidden forbidden review-only forbidden forbidden forbidden forbidden edit " ] && ok || no "$got"
 
 t "policy: owner-go paths (units, hooks, installer, guards) review-only"
 got="$(cr policy "$H/agents/units/x.timer" "$H/agents/hooks/x" "$H/agents/install.sh" "$H/agents/uninstall.sh" \
@@ -264,9 +264,9 @@ out="$(cr retire "$H/agents/bin/old-sweeper" --why duplicate --by no-such-tool -
 
 t "retire: moves to backups/retired/<date>/ with the reason, restore line works"
 out="$(cr retire "$H/agents/bin/old-sweeper" --id F09 --why obsolete)"; rc=$?
-line="$(cut -f3 "$H/agents/backups/retired/2026-09-26/MANIFEST.tsv" 2>/dev/null)"
-{ [ "$rc" = 0 ] && [ ! -e "$H/agents/bin/old-sweeper" ] && [ -f "$H/agents/backups/retired/2026-09-26/agents/bin/old-sweeper" ] &&
-  [ "$(cut -f4 "$H/agents/backups/retired/2026-09-26/MANIFEST.tsv")" = obsolete ] && ! ls "$H/agents/bin" | grep -q cr-retiring &&
+line="$(cut -f3 "$H/agent-work/backups/retired/2026-09-26/MANIFEST.tsv" 2>/dev/null)"
+{ [ "$rc" = 0 ] && [ ! -e "$H/agents/bin/old-sweeper" ] && [ -f "$H/agent-work/backups/retired/2026-09-26/agents/bin/old-sweeper" ] &&
+  [ "$(cut -f4 "$H/agent-work/backups/retired/2026-09-26/MANIFEST.tsv")" = obsolete ] && ! ls "$H/agents/bin" | grep -q cr-retiring &&
   eval "$line" && [ -x "$H/agents/bin/old-sweeper" ]; } && ok || no "rc=$rc $out / $line"
 
 t "claim: absolute, relative and extension-less rows all block (rc 3)"
@@ -286,7 +286,7 @@ done
 [ "$rc2" = 0 ] && [ "$has" = 1 ] && ! grep -q 'code-review-F02' "$H/agents/FILE-CLAIMS.md" && [ "$race" = 1111111111 ] && ok || no "rc2=$rc2 has=$has race=$race"
 
 export CR_RUN=2026-09-26-030000
-B1="$H/agents/backups/code-review/$CR_RUN"
+B1="$H/agent-work/backups/code-review/$CR_RUN"
 t "backup/restore: content back, what the fix created is moved to displaced/, never deleted"
 before="$(sha256sum <"$H/agents/bin/log-size")"
 cr backup F03 "$H/agents/bin/log-size" "$H/agents/bin/sizelib.py" >/dev/null
@@ -394,7 +394,7 @@ t "swarm: fix lanes inside one area never overlap"
 
 t "finish: an unverified 'fixed' is restored and deferred; 5 report lines; deliver pushes once"
 : >"$H/agents/code-review/REPORT.md"
-RD="$H/agents/code-review/state/runs/$RUN"; BR="$H/agents/backups/code-review/$RUN"
+RD="$H/agents/code-review/state/runs/$RUN"; BR="$H/agent-work/backups/code-review/$RUN"
 id() { jq -r --arg t "$1" '.items[] | select(.title == $t and (.merged_into|not)) | .id' <<<"$res"; }
 for t_ in 'label read before meta lands' '--json documented'; do mkdir -p "$BR/$(id "$t_")"; : >"$BR/$(id "$t_")/VERIFIED"; done
 D="$(id 'human_size copied')"; cr backup "$D" "$H/agents/bin/log-size" >/dev/null; echo '# unverified edit' >>"$H/agents/bin/log-size"
@@ -419,7 +419,7 @@ cr claim F01 "$H/agents/bin/orbit-lite" >/dev/null; cr backup F01 "$H/agents/bin
 echo '# half-applied' >>"$H/agents/bin/orbit-lite"
 cr backup F03 "$H/agents/bin/old-sweeper" >/dev/null; cr tests F03 before >/dev/null
 cr retire "$H/agents/bin/old-sweeper" --id F03 --why obsolete >/dev/null; vt="$(cr tests F03 after)"; rv=$?
-rm -f "$H/agents/backups/code-review/$RUN2/F03/VERIFIED"
+rm -f "$H/agent-work/backups/code-review/$RUN2/F03/VERIFIED"
 out="$(cr cleanup)"
 { ! grep -q '^- code-review-' "$H/agents/FILE-CLAIMS.md" && ! grep -q 'half-applied' "$H/agents/bin/orbit-lite" &&
   [ "$rv" = 0 ] && [ ! -e "$H/agents/bin/old-sweeper" ] &&
@@ -473,7 +473,7 @@ grep -qF -- "$want" "$f" && [ "$(grep -o '<redacted>' <<<"$want" | wc -l)" = 3 ]
   no "want '$want' in: $(grep leak -A2 "$f")"
 
 # Toolsmith lane (TSP-029): fixture BACKLOG.md and proposals in the fixture home only.
-TS="$H/agents/toolsmith"; mkdir -p "$TS/proposals"
+TS="$H/agent-work/toolsmith"; mkdir -p "$TS/proposals"
 cat >"$TS/BACKLOG.md" <<'EOF'
 | rank | id | title | class | status | metric before → target | sessions | score |
 |---|---|---|---|---|---|---|---|
@@ -497,7 +497,7 @@ tmock="$(node "$BIN/tests/fixtures/code-review/swarm-mock.mjs" "$CR/swarm.js" "$
   ok || no "$(jq -c '.calls' <<<"$tmock" | head -c 300)"
 
 t "finish: toolsmith append + status flip kept; a changed earlier line is restored"
-BR3="$H/agents/backups/code-review/$RUN3"
+BR3="$H/agent-work/backups/code-review/$RUN3"
 tsb() { cr backup "TSP-$1" "$TS/proposals/TSP-$1.md" "$TS/BACKLOG.md" >/dev/null; : >"$BR3/TSP-$1/VERIFIED"; }
 tsb 103; printf '\n## Result\nlanded\n' >>"$TS/proposals/TSP-103.md"; sed -i 's/| auto-ok | proposed | x → y | 1 | 6 |/| auto-ok | measuring | x → y | 1 | 6 |/' "$TS/BACKLOG.md"
 tsb 101; sed -i 's/^- metric: m$/- metric: rewritten/' "$TS/proposals/TSP-101.md"

@@ -258,7 +258,7 @@ sysctl_persist() {
   [ $rc = 0 ] || { printf '%s\n' "$conf" >&2; rm -f "$new"; return $rc; }
   ftok=$("$PC_CONF_BIN" state "$SYSCTL_CONF"); ntok="sha:$(sha256sum <"$new" | cut -c1-12)"
   n=${SYSCTL_CONF#/}; printf -v stamp '%(%Y%m%d-%H%M%S)T' -1
-  bk="${PC_CONF_BACKUP:-$HOME/agents/backups/conf}/$stamp-sysctl-${n//\//_}.XXXXXX"
+  bk="${PC_CONF_BACKUP:-$FLEET_BACKUPS_DIR/conf}/$stamp-sysctl-${n//\//_}.XXXXXX"
   if [ "$APPLY" = 1 ]; then
     mkdir -p "${bk%/*}" && bk=$(mktemp -d "$bk") && cp -- "$new" "$bk/new" || { rm -f "$new"; return 1; }
     if [ "$ftok" = absent ]; then : >"$bk/absent"; else cat -- "${PC_CONF_ROOT:-}$SYSCTL_CONF" >"$bk/old"; fi
