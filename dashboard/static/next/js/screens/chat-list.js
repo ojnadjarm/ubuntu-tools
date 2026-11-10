@@ -36,3 +36,13 @@ export function when(m) {
   if (d.toDateString() === new Date(now - 864e5).toDateString()) return "Yesterday";
   return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
+
+/* The list's scroll survives every repaint of Chat: a new list node, or rows replaced under the old one, gets back the last scrollTop. */
+let listEl = null, listTop = 0;
+document.addEventListener("scroll", (e) => { if (e.target === listEl) listTop = listEl.scrollTop; }, true);
+new MutationObserver(() => {
+  const el = document.querySelector("#grid .chat .chans");
+  if (!el) return;
+  listEl = el;
+  if (el.scrollTop !== listTop) el.scrollTop = listTop;
+}).observe(document.getElementById("grid"), { childList: true, subtree: true });
