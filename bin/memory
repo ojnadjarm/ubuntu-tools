@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""memory — load the core card plus domain cards, drop a note in the inbox, check the store, or install the carriers; the store is $MEMORY_HOME (T1599)."""
+"""memory — load the core card plus domain cards, drop a note in the inbox, check the store, install the carriers, or run the keeper's verbs (sources, stage, apply); the store is $MEMORY_HOME (T1599)."""
 import argparse
 import importlib.machinery
 import importlib.util
@@ -161,6 +161,27 @@ def install(store, seat_, args):
     sys.exit(carrier().install(store, args.plan))
 
 
+def sources(store, seat_, args):
+    """Print the project files the keeper may read: domain<TAB>path<TAB>protected|-."""
+    import memory_sources
+    for d, p, prot in memory_sources.sources(store, args.changed, args.mark):
+        print(f"{d}\t{memory_sources.tilde(p)}\t{'protected' if prot else '-'}")
+    if args.mark:
+        print(f"memory sources: marked every source file as read ({memory_sources.tilde(memory_sources.state_file())})", file=sys.stderr)
+
+
+def stage(store, seat_, args):
+    """Print the path of a new staging copy of the store."""
+    import memory_txn
+    print(memory_txn.stage(store))
+
+
+def apply(store, seat_, args):
+    """Gate a staging copy and move it in (exit 0 green, 1 red, 2 not a staging folder)."""
+    import memory_txn
+    sys.exit(memory_txn.apply(store, args.staging, carrier()))
+
+
 def main():
     ap = argparse.ArgumentParser(prog="memory", description=__doc__.split("— ", 1)[1])
     sub = ap.add_subparsers(dest="verb", required=True)
@@ -180,11 +201,18 @@ def main():
                    help="--live: the domains the agent gets besides core (comma-separated)")
     p = sub.add_parser("install", help="write the carriers: the core line, project stubs, MEMORY.md, agent.env domains")
     p.add_argument("--plan", action="store_true", help="print what would be written, write nothing")
+    p = sub.add_parser("sources", help="the project files the keeper may read (read-only): domain, path, protected")
+    p.add_argument("--changed", action="store_true", help="only files new or changed since the last --mark")
+    p.add_argument("--mark", action="store_true", help="remember every file's sha256 now (outside the store)")
+    sub.add_parser("stage", help="copy the store to a new staging folder and print its path")
+    p = sub.add_parser("apply", help="the keeper's commit: owner edits first, gate, move in, notes filed, views, commit, guarded push")
+    p.add_argument("staging")
     args = ap.parse_args()
     store = memory_store.Store(memory_store.home())
     if args.verb == "check" and args.domains:
         unknown(store, args.domains)
-    {"load": load, "note": note, "check": check, "install": install}[args.verb](store, seat(store), args)
+    {"load": load, "note": note, "check": check, "install": install, "sources": sources, "stage": stage,
+     "apply": apply}[args.verb](store, seat(store), args)
 
 
 if __name__ == "__main__":

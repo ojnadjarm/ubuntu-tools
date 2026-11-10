@@ -1,0 +1,4 @@
+id	page	state	source
+k01	core/CORE.md	live	seed.md
+k02	core/CORE.md	retired:superseded 26-11-09 by ^k03	seed.md
+k03	core/CORE.md	live	n2-owner.md

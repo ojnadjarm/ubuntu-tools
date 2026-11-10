@@ -1,0 +1,6 @@
+# Synthetic map; @P@ is the test's project root.
+seat:orchestrator   orchestrator   owner
+@P@/garden          garden
+@P@/kiln            kiln
+@P@/harbor          harbor         protected
+seat:harbor         harbor         protected

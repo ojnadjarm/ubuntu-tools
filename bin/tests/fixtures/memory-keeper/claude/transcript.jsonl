@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":"Change of plan: from now on every chart is amber, not teal."}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Noted."}]}}

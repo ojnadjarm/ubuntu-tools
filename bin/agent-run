@@ -10,12 +10,17 @@ agent_name_check agent-run "$name" || exit 2
 dir="$HARNESS_HOME/$name"
 fleet_path
 
-MODEL=opus; TIMEOUT=3600
+MODEL=opus; TIMEOUT=3600; PRECHECK=""
 # shellcheck source=/dev/null
 [ -r "$dir/agent.env" ] && . "$dir/agent.env"
 [ -n "${AGENT_TOOLS:-}" ] && export AGENT_TOOLS
 [ -n "${AGENT_WRAP:-}" ] && export AGENT_WRAP
 [ -n "${AGENT_ENV_KEEP:-}" ] && export AGENT_ENV_KEEP
+
+# PRECHECK (agent.env): a shell test; non-zero = nothing to do, so no model call and no log files.
+if [ -n "$PRECHECK" ] && ! (cd "$dir" && bash -c "$PRECHECK") >/dev/null 2>&1 </dev/null; then
+  echo "agent-run: $name skipped (PRECHECK: nothing to do)"; exit 0
+fi
 
 mkdir -p "$dir/logs" "$dir/state"
 fleet_lock "$dir/.lock" 8 || { echo "agent-run: $name is already running" >&2; exit 0; }

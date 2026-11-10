@@ -1,0 +1,3 @@
+id	question	must	source
+gd01	How wide are seed photos?	800	seed.md
+gd03	How do seed photos load?	lazily	n4-lesson.md

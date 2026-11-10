@@ -222,5 +222,18 @@ rm "$SB/agents/bin/memory"; printf '#!/usr/bin/env bash\necho partial\nexit 1\n'
 { [ "$(sysp)" = preamble ] && [ "$(tail -1 "$idx" | cut -f3)" = 0 ]; } && ok || no "$(cat "$SB/claude-args.log")"
 rm -f "$SB/agents/bin/memory" "$SB/CLAUDE.md"
 
+t "T1599-M09: PRECHECK non-zero skips in under 1 s: 1 line, 0 model calls"
+printf 'PRECHECK="test -e %s/nothing-here"\n' "$SB" >"$SB/agents/demo/agent.env"; : >"$SB/claude-args.log"; rows="$(wc -l <"$idx")"
+s0=$(date +%s%N)
+out="$(env -i HOME="$SB" PATH=/usr/bin:/bin TERM=dumb HARNESS_CONFIG=/nonexistent HARNESS_HOME="$SB/agents" HARNESS_AGENT=claude \
+       bash "$SB/agents/bin/agent-run" demo 2>&1)"; rc=$?; ms=$(( ($(date +%s%N) - s0) / 1000000 ))
+{ [ "$rc" = 0 ] && [ "$out" = "agent-run: demo skipped (PRECHECK: nothing to do)" ] && [ ! -s "$SB/claude-args.log" ] \
+  && [ "$(wc -l <"$idx")" = "$rows" ] && [ "$ms" -lt 1000 ]; } && ok || no "rc $rc, $ms ms: $out"
+
+t "T1599-M09: PRECHECK zero runs the agent as before"
+printf 'PRECHECK=true\n' >"$SB/agents/demo/agent.env"; run_agent claude; rm -f "$SB/agents/demo/agent.env"
+{ [ -s "$SB/claude-args.log" ] && [ "$(wc -l <"$idx")" = $((rows + 1)) ] && [ "$(tail -1 "$idx" | cut -f3)" = 0 ]; } \
+  && ok || no "$(tail -1 "$idx")"
+
 [ $fail = 0 ] && echo "agent-run.test.sh: all green" || echo "agent-run.test.sh: FAILURES"
 exit $fail
