@@ -27,6 +27,8 @@
 .office .otag.mini b { font-weight: 400; color: var(--mid); }
 .office .otag.mini.working b { color: var(--g2); }
 .office .otags:not(.near) .otag.mini { display: none; }
+.office .otag.led::after { content: ""; position: absolute; left: 50%; top: 100%; height: var(--lead); border-left: 1px solid var(--line3); pointer-events: none; }
+.office .otag.led.dn::after { top: auto; bottom: 100%; height: calc(-1 * var(--lead)); }
 @container (max-width: 1500px) { .office .otag small { display: none; } }
 @container (max-width: 760px) { .office .otag span { display: none; } }
 .office .hud { position: absolute; right: .7rem; bottom: .7rem; display: flex; gap: .3rem; z-index: 3; }
@@ -49,7 +51,7 @@
 .office .mem .rk { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .office .mem .pill.dot { padding: 0; border: 0; background: none; }
 .office .mem .pill.off::before { background: none; box-shadow: inset 0 0 0 1px currentColor; }
-.ocard { position: fixed; inset: auto; margin: 0; width: min(27rem, calc(100vw - 16px)); max-height: calc(100svh - 16px); overflow: auto; padding: 1rem; gap: 1rem; border: 1px solid var(--line3); background: color-mix(in srgb, var(--bg1) 94%, transparent); color: var(--txt); box-shadow: 0 0 40px -10px var(--g), 0 12px 40px var(--bg); }
+.ocard { position: fixed; inset: auto; margin: 0; width: min(38rem, calc(100vw - 16px)); max-height: calc(100svh - 16px); overflow: auto; padding: 1rem; gap: 1rem; border: 1px solid var(--line3); background: color-mix(in srgb, var(--bg1) 94%, transparent); color: var(--txt); box-shadow: 0 0 40px -10px var(--g), 0 12px 40px var(--bg); }
 .ocard:popover-open { display: flex; }
 .ocard .cfig { flex: 0 0 5rem; }
 .ocard .cfig svg { width: 100%; height: auto; display: block; }
@@ -58,6 +60,7 @@
 .ocard h2 span { display: block; font-weight: 400; color: var(--mute); font-size: max(var(--fs-min), .75rem); text-transform: uppercase; letter-spacing: .16em; }
 .ocard p { margin: .45rem 0 0; font-size: max(var(--fs-min), .9rem); overflow-wrap: anywhere; }
 .ocard .area { color: var(--g); }
+.ocard .ln { color: var(--mid); }
 .ocard .st i { margin-right: .6em; }
 .ocard progress { display: block; width: 100%; height: .35rem; margin-top: .6rem; accent-color: var(--g); }
 .ocard dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .3rem 1rem; margin: .7rem 0 0; padding-top: .6rem; border-top: 1px solid var(--line); font-size: max(var(--fs-min), .9rem); }
@@ -73,5 +76,5 @@
   .office .hud button, .office .who, .ocard .chip, .ocard .btn { min-width: 44px; min-height: 44px; }
 }
 @media (max-width: 700px) { .office .stage { height: min(70svh, 125vw); } .office .hint { display: none; } }
-@media (max-width: 600px) { .ocard { left: 8px; right: 8px; bottom: 8px; top: auto; width: auto; max-height: 70svh; } }
+@media (max-width: 600px) { .ocard { left: 8px; right: 8px; bottom: 8px; top: auto; width: auto; max-height: 70svh; } .ocard p, .ocard dl { font-size: max(var(--fs-min), 1.08rem); } }
 .office .crew b, .office .folded b { font-size: max(11px, .82rem); }

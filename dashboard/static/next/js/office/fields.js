@@ -1,4 +1,4 @@
-/* Card content for whoever is tapped in the office: one entry per kind in CARDS, plain data (the overlay escapes and draws it). */
+/* Card content for whoever is tapped in the office: one entry per kind in CARDS, plain data (the overlay escapes and draws it); `lines` are prose lines under the sub. */
 import { dmOf } from "../seats.js";
 import { rest } from "./model.js";
 import { ago, until, progress, took } from "./time.js";
@@ -14,21 +14,27 @@ const now = (p, t) => "Now " + (SAY[p.state] || p.state) + (p.pose === "sleep" |
 const message = (p) => [{ label: "Message " + p.name, href: "#chat?ch=" + dmOf(p.id) }];
 const base = (p, t, sub) => ({ title: p.name, rank: p.rank || "", sub: sub || "", state: { pose: p.pose, text: now(p, t) }, rows: [], actions: [] });
 
-/* The CEO: its role, how many agents work at the desk pool, a message button. */
+/* A seat's about, role and wake lines, as the old Org tooltip read them. */
+const lines = (r) => [r.about, ROLE[r.role], WAKE[r.wake]].filter(Boolean);
+/* A session's folder, who started it and when it was last active; a protected one shows its last activity only. */
+const where = (s, t) => (!s ? [] : !("pid" in s) ? [["Folder", "protected project"], ["Last active", ago(s.since, t) + " ago"]]
+  : keep([["Folder", s.cwd], ["Started by", s.started_by], ["Last active", s.since ? ago(s.since, t) + " ago" : ""]]));
+
+/* The CEO: about, role and wake lines, how many agents work at the desk pool, its session, a message button. */
 function ceo(p, t) {
-  const c = p.raw.crew || { n: 0, on: 0 };
-  return { ...base(p, t, ROLE.ceo), rows: [["Agents working", String(c.on)], ["At the desk pool", String(c.n)]], actions: message(p) };
+  const r = p.raw, c = r.crew || { n: 0, on: 0 };
+  return { ...base(p, t, r.area), lines: lines(r), rows: [["Agents working", String(c.on)], ["At the desk pool", String(c.n)], ...where(r.session, t)], actions: message(p) };
 }
 
-/* A product owner or manager seat: area, workers, about, role and wake lines, a message button. */
+/* A product owner or manager seat: area, about, role and wake lines, workers, its session, a message button. */
 function seat(p, t) {
   const r = p.raw, c = r.crew || { n: 0, on: 0 };
-  return { ...base(p, t, r.area), rows: keep([["Workers", c.n ? plural(c.n, "worker") + ", " + c.on + " working" : "no workers"], ["About", r.about], ["Role", ROLE[r.role]], ["Wakes", WAKE[r.wake]]]), actions: message(p) };
+  return { ...base(p, t, r.area), lines: lines(r), rows: [["Workers", c.n ? plural(c.n, "worker") + ", " + c.on + " working" : "no workers"], ...where(r.session, t)], actions: message(p) };
 }
 
-/* A session a seat started: who it works for, its folder, who started it. */
+/* A session a seat started: who it works for, its folder, who started it, when it was last active. */
 function worker(p, t) {
-  return { ...base(p, t, "Works for " + p.raw.boss), rows: keep([["Folder", p.raw.cwd], ["Started by", p.raw.started_by]]) };
+  return { ...base(p, t, "Works for " + p.raw.boss), rows: where(p.raw, t) };
 }
 
 /* An agent the CEO runs: its ticket, what it is doing now and since when, or how it ended. */

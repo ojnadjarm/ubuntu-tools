@@ -1,9 +1,9 @@
 // Org screen (T1515-P21): a message button per seat opens its direct message in Chat, workers hang under the seat that
 // started them (3 shown, the rest folded behind a "hidden N" line), managers wear their own gear, no sideways scroll.
-// P35: a card shows avatar, name, state dot and a message icon; the state and description lines live in the avatar's tooltip.
+// P35: a card shows avatar, name, state dot and a message icon; the state and description lines live in the office card the avatar opens (T1601-07).
 // V3: every creature is a moving Familiar; a new message makes its sender talk for about 2 s, the owner never.
-// T1553: the ceo seat's tooltip leads with "DarkSaddler · CEO" (name and rank from the API).
-// T1554: every seat's tooltip leads with "Name · Rank" and names its area; a worker row is titled "name · Worker".
+// T1553: the ceo seat's office card leads with "DarkSaddler · CEO" (name and rank from the API).
+// T1554: every seat's office card leads with "Name · Rank" and names its area; a worker row is titled "name · Worker".
 // Run: node tests/test_org_screen.js   (fixture API only; POSTs never leave this file's server)
 "use strict";
 const assert = require("assert");
@@ -55,23 +55,25 @@ const srv = serveStatic((u, res) => {
     assert.deepStrictEqual(msg, ["", "Message DarkSaddler", "Message DarkSaddler", true, true], "the message button is an icon, named, 32 px or more");
     const dot = await p.$eval(orch + " h3 .pill", (d) => [d.textContent.trim() === d.querySelector(".sr-only").textContent.trim(), d.textContent.trim(), d.getBoundingClientRect().width < 20]);
     assert.deepStrictEqual(dot, [true, "working", true], "the state is a dot, its name only for screen readers");
-    const tip = await p.$eval(orch + " .avb", (b) => { const t = document.getElementById(b.getAttribute("aria-describedby")); return t && [t.getAttribute("role"), t.textContent]; });
-    assert.ok(tip && tip[0] === "tooltip" && /working/.test(tip[1]) && /Runs the fleet/.test(tip[1]) && /Always on/.test(tip[1]), "the avatar describes itself by its tooltip: state and both lines");
-    assert.deepStrictEqual(await p.$eval(orch, (c) => [c.querySelector(".tip b").textContent, c.querySelector("h3").firstChild.textContent.trim()]), ["DarkSaddler · CEO", "DarkSaddler"], "T1553: the tooltip leads with name · rank, the card shows the name only");
+    const shown = () => p.$$eval("#office-card:popover-open", (l) => (l.length ? l[0].dataset.for : ""));
+    assert.strictEqual(await shown(), "", "the card is closed at rest");
+    await p.click(orch + " .avb");
+    const tip = await p.$eval("#office-card", (c) => [c.getAttribute("role"), c.textContent]);
+    assert.ok(tip[0] === "dialog" && /working/.test(tip[1]) && /Runs the fleet/.test(tip[1]) && /Always on/.test(tip[1]), "the avatar opens its card: state and both lines");
+    assert.deepStrictEqual([await p.$eval("#office-card h2", (h) => h.textContent), await p.$eval(orch, (c) => c.querySelector("h3").firstChild.textContent.trim())], ["DarkSaddler · CEO", "DarkSaddler"], "T1553: the card leads with name · rank, the seat shows the name only");
     assert.deepStrictEqual(await p.$$eval(".org .seat h3", (l) => l.filter((e) => /Orchestrator/.test(e.textContent)).length), 0, "T1553: no seat card says Orchestrator");
-    const shown = () => p.$eval(orch + " .tip", (t) => getComputedStyle(t).display !== "none");
-    assert.strictEqual(await shown(), false, "the tooltip is closed at rest");
-    await p.hover(orch + " .avb");
-    assert.strictEqual(await shown(), true, "hover opens it");
-    await p.mouse.move(1, 1);
-    assert.strictEqual(await shown(), false, "leaving closes it");
-    await p.focus(orch + " .avb"); await p.keyboard.press("Shift+Tab"); await p.keyboard.press("Tab");
-    assert.strictEqual(await shown(), true, "keyboard focus opens it");
+    await p.keyboard.press("Escape");
+    assert.strictEqual(await shown(), "", "Escape closes it");
+    await p.focus(orch + " .avb"); await p.keyboard.press("Shift+Tab"); await p.keyboard.press("Tab"); await p.keyboard.press("Enter");
+    assert.strictEqual(await shown(), "orchestrator", "keyboard focus + Enter opens it");
+    await p.keyboard.press("Escape");
     await p.evaluate(() => document.activeElement.blur());
 
     const mos = '.org .seat[data-seat="mosaico"]';
-    assert.deepStrictEqual(await p.$eval(mos, (c) => [c.querySelector(".tip b").textContent, [...c.querySelectorAll(".tip span")].some((e) => e.textContent === "Mosaico"), c.querySelector("h3").firstChild.textContent.trim(), c.querySelector("h3 .rk").textContent]),
-      ["Speckle · Manager", true, "Speckle", "Manager"], "T1554: the tooltip leads with name · rank and names the area, the card shows name and rank");
+    await p.click(mos + " .avb");
+    assert.deepStrictEqual([await p.$eval("#office-card h2", (h) => h.textContent), await p.$eval("#office-card .area", (e) => e.textContent), ...(await p.$eval(mos, (c) => [c.querySelector("h3").firstChild.textContent.trim(), c.querySelector("h3 .rk").textContent]))],
+      ["Speckle · Manager", "Mosaico", "Speckle", "Manager"], "T1554: the card leads with name · rank and names the area, the seat shows name and rank");
+    await p.keyboard.press("Escape");
     assert.strictEqual(await p.$eval(mos + " .crew > li", (l) => l.title), "m-a · Worker", "T1554: a worker row says its rank");
     const crew = (id) => p.$$eval(`.org .seat[data-seat="${id}"] .crew > li`, (l) => l.map((x) => x.querySelector("b").textContent));
     assert.deepStrictEqual(await crew("orchestrator"), ["w-b", "w-d", "w-a"], "working first, 3 shown under the seat that started them");
@@ -95,14 +97,15 @@ const srv = serveStatic((u, res) => {
     const ph = await (await b.newContext({ viewport: { width: 400, height: 850 }, hasTouch: true, isMobile: true })).newPage();
     await ph.goto(base + "/#org", { waitUntil: "load" });
     await ph.waitForSelector(".org .otree", { timeout: 15000 });
-    const tips = ph.locator(".org .tip:visible");
+    const tips = ph.locator("#office-card:popover-open");
     for (const id of ["orchestrator", "mosaico"]) {
       await ph.tap(`.org .seat[data-seat="${id}"] .avb`);
-      assert.strictEqual(await tips.count(), 1, `a tap on ${id}'s avatar opens its tooltip`);
+      assert.deepStrictEqual([await tips.count(), await tips.first().getAttribute("data-for")], [1, id], `a tap on ${id}'s avatar opens its card`);
       const r = await tips.first().boundingBox();
-      assert.ok(r.x >= 0 && r.x + r.width <= 400, `${id}'s tooltip stays inside 400 px`);
+      assert.ok(r.x >= 0 && r.x + r.width <= 400, `${id}'s card stays inside 400 px`);
+      if (id === "orchestrator") await ph.keyboard.press("Escape");
     }
-    await ph.tap(".org .band");
+    await ph.tap(".org .olist h2");
     assert.strictEqual(await tips.count(), 0, "a tap elsewhere closes it");
 
     const talkers = () => p.$$eval(".org .seat:has(.av .cr.talking)", (l) => l.map((x) => x.dataset.seat));
@@ -135,6 +138,6 @@ const srv = serveStatic((u, res) => {
     assert.strictEqual(await p.evaluate(() => location.hash), "#chat?ch=dm-mooblox--owner", "the button lands on the direct message");
     assert.strictEqual(await p.textContent(".chat .stream header h2"), "Mooblox", "Chat opens that direct message");
     assert.deepStrictEqual(errs, [], "no page errors");
-    console.log("ok · avatar tooltip on hover/focus/tap, inside 400 · state dot · message icon · 4 message buttons -> dm · workers under parent, 3 + hidden 2 · manager gear · Familiars move, sender talks ~2 s, owner silent, paused hidden, reduced motion · no sideways scroll 400/768/1366/1920");
+    console.log("ok · avatar opens its card on click/Enter/tap, inside 400 · state dot · message icon · 4 message buttons -> dm · workers under parent, 3 + hidden 2 · manager gear · Familiars move, sender talks ~2 s, owner silent, paused hidden, reduced motion · no sideways scroll 400/768/1366/1920");
   } finally { await b.close(); srv.close(); }
 })().catch((e) => { console.error(e); process.exit(1); });

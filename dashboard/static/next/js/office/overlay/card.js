@@ -1,6 +1,8 @@
-/* The office pop-up: the card of the person or room that was tapped, a top-layer popover placed by its anchor. */
+/* The office pop-up: the card of the person or room that was tapped, a top-layer popover placed by its anchor; a seat that posts talks on it for 2 s. */
 import { esc } from "/static/js/core/fmt.js";
 import { creature } from "../../avatar.js";
+import { talking, watch } from "../../familiars/talk.js";
+import { sync } from "../../ui/sync.js";
 import { card } from "../fields.js";
 
 let M = null, el = null;
@@ -20,10 +22,11 @@ const chip = (p) => `<li><button type="button" class="chip ${esc(p.pose)}" data-
 
 /* Markup of the card of p (a person or a room). */
 function html(p) {
-  const c = card(p);
-  return (p.people ? "" : `<div class="cfig" aria-hidden="true">${creature(p.id, p.pose, p.role)}</div>`) +
-    `<div class="cbody"><h2>${esc(c.title)} <span>${esc(c.rank)}</span></h2>` + (c.sub ? `<p class="area">${esc(c.sub)}</p>` : "") +
-    `<p class="st ${esc(c.state.pose)}"><i></i>${esc(c.state.text)}</p>` +
+  const c = card(p), pose = talking(p.id) ? "talking" : c.state.pose;
+  return (p.people ? "" : `<div class="cfig" aria-hidden="true">${creature(p.id, talking(p.id) ? "talking" : p.pose, p.role)}</div>`) +
+    `<div class="cbody"><h2>${esc(c.title)}${c.rank ? `<span><b class="sr-only"> · </b>${esc(c.rank)}</span>` : ""}</h2>` + (c.sub ? `<p class="area">${esc(c.sub)}</p>` : "") +
+    (c.lines || []).map((l) => `<p class="ln">${esc(l)}</p>`).join("") +
+    `<p class="st ${esc(pose)}"><i></i>${esc(c.state.text)}</p>` +
     (c.bar != null ? `<progress max="100" value="${Math.round(c.bar)}" aria-label="To the next run"></progress>` : "") +
     (c.rows.length ? `<dl>${c.rows.map(([k, v, tone]) => `<dt>${esc(k)}</dt><dd${tone ? ` class="${esc(tone)}"` : ""}>${esc(v)}</dd>`).join("")}</dl>` : "") +
     (c.roll ? `<ul class="roll">${c.roll.map((id) => M.who[id]).filter(Boolean).map(chip).join("")}</ul>` : "") +
@@ -49,8 +52,10 @@ export function refresh(next) {
   M = next;
   if (!isOpen()) return;
   const p = M.who[el.dataset.for];
-  if (p) el.innerHTML = html(p); else close();
+  if (p) sync(el, html(p)); else close();
 }
+
+watch(() => { if (M) refresh(M); });
 
 export const isOpen = () => !!el && el.matches(":popover-open");
 export function close() { if (isOpen()) el.hidePopover(); }

@@ -9,12 +9,7 @@
 .org .seat .av { grid-row: span 2; }
 .org .seat.him .av { grid-row: auto; }
 .org .seat .av svg { width: 100%; height: auto; display: block; }
-.org .avb { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; cursor: help; }
-.org .tip { position: fixed; inset: auto; margin: 0; width: min(100vw - 1rem, 36ch + 1.5rem); max-height: calc(100vh - 1rem); overflow: auto; padding: .55rem .75rem; border: 1px solid var(--line3); background: var(--bg); color: var(--mid); font-size: max(var(--fs-min), .85rem); text-align: left; }
-.org .tip > * { display: block; }
-.org .tip b { color: var(--txt); font-weight: 400; }
-.org .tip:popover-open { display: block; }
-@media (min-width: 768px) { .org .tip { width: min(100vw - 2rem, 58ch + 1.5rem); } }
+.org .avb { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; cursor: pointer; }
 .org .seat .pill.dot { padding: 0; border: 0; background: none; }
 .org .seat .pill.dot::before { width: .55rem; height: .55rem; }
 .org .seat .pill.off::before { background: none; box-shadow: inset 0 0 0 1px currentColor; }
