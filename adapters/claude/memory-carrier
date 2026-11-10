@@ -137,6 +137,11 @@ def folders(store):
     return out
 
 
+def served(folder):
+    """A served build (`sites publish` stamps a build.json into it): it gets no stub and needs no approval."""
+    return os.path.isfile(os.path.join(folder, "build.json"))
+
+
 def generated(store):
     """The orchestrator's MEMORY.md: the owner seat's cards (PRIVATE pages left out: subagents read it) and INDEX.md."""
     seats = [w[5:] for w, _, fl in store.map() if w.startswith("seat:") and "owner" in fl]
@@ -183,7 +188,7 @@ def verify(store):
     prot = protected_paths(store)
     out = []
     for f in folders(store):
-        if os.path.isdir(f) and not Writer(True, prot).blocked(f):
+        if os.path.isdir(f) and not served(f) and not Writer(True, prot).blocked(f):
             out.append((f, bool(projects.get(git_root(f), {}).get("hasClaudeMdExternalIncludesApproved"))))
     return out
 
@@ -212,6 +217,9 @@ def install(store, plan=False):
             continue
         if not os.path.isdir(folder):
             print(f"skipped (missing): {tilde(folder)}")
+            continue
+        if served(folder):
+            print(f"skipped (served build): {tilde(folder)}")
             continue
         stub = os.path.join(folder, "CLAUDE.local.md")
         text = read(stub)

@@ -1,6 +1,6 @@
 # Agent memory: load the core and a domain card, note a lesson, check the store, run the keeper (agent-memory)
 
-Ticket: T1599 (M00-M10) · Last verified: 2026-11-10 by `memory check` (exit 0), `memory-index-cap.test.sh`, `fleet-backup.test.sh` (25/25), `memory-keeper.test.sh`, `memory check --live` on the real store
+Ticket: T1599 (M00-M10) · Last verified: 2026-11-10 by `memory check` (exit 0), `memory-index-cap.test.sh`, `fleet-backup.test.sh` (25/25), `memory-keeper.test.sh`, `memory check --live` on the real store (5/5, 5/5 with mooblox; M10b)
 
 ## When to use
 - You need what the owner taught the fleet: `memory load [domain]` (core card, then the domain cards, ids stripped).
@@ -47,8 +47,11 @@ bash ~/agents/bin/tests/memory-keeper.test.sh   # fixture store only
 - A test that writes a wrapper through a symlink overwrote `bin/memory` for 2 minutes and every `memory` call recursed
   (M09); the keeper test now guards the tool files' sha.
 - The generated `MEMORY.md` holds no index until the keeper's first apply writes `INDEX.md` (M10: 38 lines, 4,224 B).
-- `memory install` writes a stub into every mapped folder that exists, `~/sites/<site>` (a served build) included; the
-  next `sites publish` swaps the folder and drops it (M10: 2 of 24 stubs; read in `bin/sites`, not run).
+- `memory install` skips a served build (a folder holding the `sites publish` stamp `build.json`): `skipped (served
+  build)`, no stub, no approval asked (M10 wrote 2 useless stubs there; M10b).
+- `memory check --live` draws only questions whose must words are in the agent's `memory load` text: a card line with
+  `→ topic` can carry an id whose question is answered only in the topic file (M10: 4/5, 2/5; M10b: 53 of 65 core
+  questions drawable, 63 of 73 with mooblox); reds get the quiz's majority of 3.
 
 ## Links
 - Code: `bin/memory`, `lib/memory_store.py`, `lib/memory_route.py`, `lib/memory_check.py`, `lib/memory_quiz.py`,

@@ -95,6 +95,9 @@ ev "adapter run: marked worker, gets core + its folder's card, never the owner's
   'grep -qx MEMORY_WORKER=1 "$H/env.log" && grep -q Pemberton "$H/args.log" && grep -q "teal" "$H/args.log" && ! grep -q marmalade "$H/args.log"'
 
 # 5. memory check --live: the seam gets 5 questions; the stub answers each with what the carrier loads (memory load).
+# A core question only a topic page answers (not in `memory load`) is never drawn.
+printf -- '- The mascot snacks on figs at dusk. ^c04\n' >"$S/core/garden.md"
+printf 'c04\tWhat does the mascot snack on?\tfigs\n' >>"$S/checks/questions.d/core.tsv"
 cat >"$WORK/bin/quiz-stub" <<'EOS'
 #!/usr/bin/env bash
 cat >"$HOME/quiz-prompt.txt"; m=$(memory load | tr '\n' ' ')
@@ -110,6 +113,26 @@ out=$(fx MEMORY_QUIZ_CMD='cat >/dev/null; echo "1: no idea"' "$BIN/memory" check
 ev "--live: wrong answers give 0/5, rc 1, each miss named" '[ "$rc" = 1 ] && grep -qx "live · 0/5" <<<"$out" && [ "$(grep -c "missing:" <<<"$out")" = 5 ]'
 out=$(fx MEMORY_QUIZ_CMD=quiz-stub "$BIN/memory" check --live); rc=$?
 ev "--live: core only has 3 questions: rc 1, said so" '[ "$rc" = 1 ] && grep -q "only 3 questions" <<<"$out"'
+ev "--live: the topic-page question is not drawn" '! grep -q snack "$H/quiz-prompt.txt"'
+cat >"$WORK/bin/quiz-noload" <<'EOS'
+#!/usr/bin/env bash
+cat >/dev/null; m=$(MEMORY_HOME="$HOME/nowhere" memory load 2>/dev/null | tr '\n' ' ')
+for i in 1 2 3 4 5; do echo "$i: $m"; done
+EOS
+chmod +x "$WORK/bin/quiz-noload"
+out=$(fx MEMORY_QUIZ_CMD=quiz-noload "$BIN/memory" check --live --domains zebra 2>/dev/null); rc=$?
+ev "--live: the carrier's load fails -> red (rc 1, 0/5)" '[ "$rc" = 1 ] && grep -qx "live · 0/5" <<<"$out"'
+cat >"$WORK/bin/quiz-flaky" <<'EOS'
+#!/usr/bin/env bash
+cat >/dev/null; n=$(cat "$HOME/flaky.n" 2>/dev/null || echo 0); echo $((n + 1)) >"$HOME/flaky.n"
+m=$(memory load | tr '\n' ' '); [[ " $FLAKY_WRONG " == *" $n "* ]] && m=""
+for i in 1 2 3 4 5; do echo "$i: $m"; done
+EOS
+chmod +x "$WORK/bin/quiz-flaky"
+out=$(fx MEMORY_QUIZ_CMD=quiz-flaky FLAKY_WRONG=0 "$BIN/memory" check --live --domains zebra 2>/dev/null); rc=$?
+is "--live: majority of 3 (wrong, right, right) -> green" "$rc $(grep -x 'live · 5/5' <<<"$out") $(cat "$H/flaky.n")" "0 live · 5/5 3"
+rm -f "$H/flaky.n"; out=$(fx MEMORY_QUIZ_CMD=quiz-flaky FLAKY_WRONG="0 1" "$BIN/memory" check --live --domains zebra 2>/dev/null); rc=$?
+is "--live: majority of 3 (wrong, wrong, right) -> red" "$rc $(grep -x 'live · 0/5' <<<"$out") $(cat "$H/flaky.n")" "1 live · 0/5 3"
 if [ "${MEMORY_LIVE:-}" = 1 ]; then
   out=$(cd "$WORK" && MEMORY_HOME="$S" "$BIN/memory" check --live --domains zebra); rc=$?
   ev "MEMORY_LIVE=1: one real haiku run through the adapter prints 5/5" '[ "$rc" = 0 ] && grep -qx "live · 5/5" <<<"$out"' || echo "$out"
@@ -123,6 +146,14 @@ ev "brief-lint: project named, no Memory: line -> WARN, rc 0" \
   '[ "$rc" = 0 ] && grep -q "^WARN .*B1.md: names the zebra project but has no \`Memory:\` line; add \`Memory: memory load zebra\`" <<<"$out"'
 out=$(bl B2 $'Edit ~/proj/zebra/src/a.py.\nMemory: memory load zebra'); ev "brief-lint: Memory: line present -> quiet" '! grep -q WARN <<<"$out"'
 out=$(bl B3 'See ~/agents/FILE-CLAIMS.md and ~/proj/zebra-two/x.'); ev "brief-lint: harness folder and look-alike paths -> quiet" '! grep -q WARN <<<"$out"'
+
+# 7. A served build (a folder holding the `sites publish` stamp build.json) gets no stub and asks no approval.
+mkdir -p "$H/sites/blog"; printf '{"commit":"abc"}\n' >"$H/sites/blog/build.json"; printf '~/sites/blog  zebra\n' >>"$S/domains.map"
+out=$(fx "$BIN/memory" install); rc=$?
+ev "install: served build skipped, no stub, rc 0" \
+  '[ "$rc" = 0 ] && grep -qx "skipped (served build): ~/sites/blog" <<<"$out" && [ ! -e "$H/sites/blog/CLAUDE.local.md" ]'
+out=$(fx MEMORY_QUIZ_CMD=quiz-stub "$BIN/memory" check --live --domains zebra 2>/dev/null)
+ev "--live: no approval line for the served build" '! grep -q "sites/blog" <<<"$out"'
 
 [ "$bad" = 0 ] && echo "memory-carrier.test.sh: all green" || echo "memory-carrier.test.sh: FAILURES"
 exit "$bad"

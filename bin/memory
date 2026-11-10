@@ -6,11 +6,14 @@ import importlib.util
 import json
 import os
 import re
+import subprocess
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
 import memory_check  # noqa: E402
+import memory_quiz  # noqa: E402
 import memory_route  # noqa: E402
 import memory_store  # noqa: E402
 
@@ -128,30 +131,45 @@ def questions(store, domains):
     return out
 
 
+def loaded(domains):
+    """The text `memory load` gives a worker the carrier starts with these domains (same env, a fresh cwd); "" when it fails."""
+    env = dict(os.environ, MEMORY_DOMAINS=",".join(domains), MEMORY_WORKER="1")
+    with tempfile.TemporaryDirectory(prefix="memory-live.") as t:
+        r = subprocess.run([os.path.realpath(__file__), "load"], env=env, cwd=t, capture_output=True, text=True, timeout=60)
+    return r.stdout if r.returncode == 0 else ""
+
+
+def norm(text):
+    return " ".join(text.lower().split())
+
+
 def live(store, domains):
-    """5 quiz questions through one real headless agent that gets its memory from the carrier; prints the score, returns it."""
+    """5 quiz questions the loaded cards answer, through one real headless agent fed by the carrier; majority-of-3 on reds."""
     car = carrier()
     for f, ok in car.verify(store):
         print(f"approval · {car.tilde(f)} · {'yes' if ok else 'no'}")
-    qs = questions(store, domains)
+    text = norm(loaded(domains))
+    qs = [memory_quiz.Q(where, "", "", "", q, words) for where, q, words in questions(store, domains)
+          if all(norm(w) in text for w in words)]
     if len(qs) < LIVE_N:
         print(f"live · only {len(qs)} questions for core{''.join(' ' + d for d in domains)}, need {LIVE_N}")
         return 0
     pick = [qs[i * len(qs) // LIVE_N] for i in range(LIVE_N)]
-    prompt = ("Closed-book quiz. Answer only from what your system prompt already tells you; use no tool.\n"
-              f"Reply with exactly {LIVE_N} lines, each `<number>: <short answer>`.\n\n"
-              + "\n".join(f"{i}: {q}" for i, (_, q, _) in enumerate(pick, 1)))
-    answers = {}
-    for line in car.ask(prompt, domains).splitlines():
-        m = re.match(r"\s*\**(\d+)\**\s*[:.)]\s*(.*)", line)
-        if m:
-            answers.setdefault(int(m.group(1)), m.group(2).lower())
-    score = 0
-    for i, (where, _, words) in enumerate(pick, 1):
-        miss = [w for w in words if w.lower() not in answers.get(i, "")]
-        score += not miss
-        if miss:
-            print(f"live · {where} · missing: {', '.join(miss)}")
+
+    def ask(store_, part, used):
+        prompt = ("Closed-book quiz. Answer only from what your system prompt already tells you; use no tool.\n"
+                  f"Reply with exactly {len(part)} lines, each `<number>: <short answer>`.\n\n"
+                  + "\n".join(f"{i}: {q.question}" for i, q in enumerate(part, 1)))
+        out, tokens = car.ask_usage(prompt, domains)
+        used.update(tokens, calls=1)
+        got = memory_quiz.answers(out)
+        return {q.key: [w for w in q.must if norm(w) not in got.get(i, "")] for i, q in enumerate(part, 1)}
+
+    miss = memory_quiz.vote(store, pick, ask)
+    for q in pick:
+        if miss[q.key]:
+            print(f"live · {q.key} · missing: {', '.join(miss[q.key])}")
+    score = sum(not miss[q.key] for q in pick)
     print(f"live · {score}/{LIVE_N}")
     return score
 
