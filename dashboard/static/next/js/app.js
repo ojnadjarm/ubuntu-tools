@@ -17,6 +17,8 @@ const M = {}, L = {}, Q = {}, S = {}, grid = document.getElementById("grid"), bo
 const byId = Object.fromEntries(SCREENS.map((s) => [s.id, s]));
 const still = matchMedia("(prefers-reduced-motion: reduce)");
 const WORKING = (A) => ((A || {}).subagents || []).filter((s) => s.state === "working").length;
+/* Hashes of retired screens and the screen that took them over. */
+const MOVED = { agents: "org", roster: "org" };
 let FAILED = false, lastKey = "", lastScreen = "", rendered = "", tTimer = 0, aTimer = 0;
 
 const SKEL = `<div class="nxs skel" aria-busy="true"><p class="sr-only">loading</p>${[0, 1, 2, 3, 4, 5].map((i) => `<div class="sk" style="--w:${38 + ((i * 23) % 50)}%"><i></i></div>`).join("")}</div>`;
@@ -62,6 +64,7 @@ function readHash() {
   if (i >= 0 && M[id] && M[id].read) M[id].read(h.slice(i + 1));
   else if (i >= 0 && byId[id] && byId[id].load) Q[id] = h.slice(i + 1);
   if (id === "voice") return firstOf("voice").id;
+  if (MOVED[id]) { history.replaceState(null, "", "#" + MOVED[id]); return MOVED[id]; }
   return S[id] ? id : "eye";
 }
 const hash = (to) => (M[to] && M[to].hash ? M[to].hash() : Q[to] != null ? "#" + to + "?" + Q[to] : location.hash.indexOf("#" + to + "?") === 0 ? location.hash : "#" + to);
@@ -83,7 +86,7 @@ function motion() { roll(grid); draw(grid); }
 function chrome() {
   const D = store.D, s = byId[cur] || byId.eye, k = newKeys(), A = store.A, v = verdict(D);
   const n = (id) => (k[id] || []).length, errs = ((A || {}).subagents || []).filter((x) => x.state === "error").length;
-  const badge = (id) => (id === "agents" ? errs : id === "chat" ? store.chatUnread : n(id)), live = (id) => (id === "agents" ? WORKING(A) : 0);
+  const badge = (id) => (id === "org" ? errs : id === "chat" ? store.chatUnread : n(id)), live = (id) => (id === "org" ? WORKING(A) : 0);
   document.querySelectorAll(".dock .sec").forEach((a) => {
     const sec = a.dataset.sec, on = sec === s.sec, b = subsOf(sec).reduce((t, x) => t + badge(x.id), 0), w = subsOf(sec).reduce((t, x) => t + live(x.id), 0), f = firstOf(sec);
     a.classList.toggle("on", on); a.setAttribute("aria-current", on ? "true" : "false");
@@ -170,10 +173,10 @@ function life() {
 function agents() {
   return getJSON("/api/agents").then((a) => { store.A = a; life(); }).catch(() => {});
 }
-/* Fast agents poll while the office, court or roster is on screen and someone works; otherwise agents ride the 30 s tick. */
+/* Fast agents poll while the office is on screen and someone works; otherwise agents ride the 30 s tick. */
 function fast() {
   clearTimeout(aTimer);
-  if (document.hidden || (cur !== "agents" && cur !== "roster" && cur !== "org") || !WORKING(store.A)) return;
+  if (document.hidden || cur !== "org" || !WORKING(store.A)) return;
   aTimer = setTimeout(() => agents().then(() => { refresh(); fast(); }), 5000);
 }
 /* The 30 s tick, aligned to the wall clock so the minute display is never late; nothing runs while hidden. */

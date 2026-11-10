@@ -3,6 +3,7 @@
 // the still note without a graphics card, one canvas through #chat and back, a swipe on the stage keeps the sub-tab,
 // /api/office read at most once per 5 s and never while hidden. With the GPU flags: the real chunks, every room and creature in view, no tags, a tap on a creature and on a room sign, + − Reset.
 // Staff cards (T1601-08): every Roster row label per runner kind, a seat's runner rows, gold when bad, dim when off, the Unassigned room.
+// Tabs (T1601-15): #agents and #roster open #org; the Office sub-tab and the Agents dock carry the working count, the gold failed count first.
 // Run: node tests/test_office_screen.js   (fixture API only; SHOTS=<dir> adds 1366 shots: home, 2 angles, a card, night)
 "use strict";
 const assert = require("assert");
@@ -16,12 +17,12 @@ const WORKERS = ["agent-T9001", "agent-T9004", "T9002", "T9003-04"];
 const NOTE = "Still picture: this browser has no graphics acceleration. The list below is live.";
 const SIZES = [[400, 850], [768, 1024], [1366, 768], [1920, 1080], [2560, 1440]];
 const reads = [];
-let night = false;
+let night = false, failed = false;
 const srv = serveStatic((u) => {
   if (u === "/api/status") return STATUS;
   if (u === "/api/office") { reads.push(Date.now()); return night ? NIGHT : FIX; }
   if (u === "/api/org") return { seats: FIX.seats, sessions: FIX.sessions, hidden: 0 };
-  if (u === "/api/agents") return { ...FIX.agents, agents: [], roster: [] };
+  if (u === "/api/agents") return { ...FIX.agents, subagents: FIX.agents.subagents.concat(failed ? [{ id: "a-err", label: "T9009 broke", state: "error" }] : []), agents: [], roster: [] };
   if (u === "/api/chat") return { messages: [], channels: [], wakes: { cap: 12, today: {} } };
 });
 
@@ -155,6 +156,26 @@ async function poll(b, base) {
   return gaps;
 }
 
+/* Court and Roster are gone (T1601-15): #agents and #roster open #org, the Office sub-tab and the Agents dock carry the working count, gold failed count first. */
+async function tabs(b, base) {
+  const p = await (await b.newContext({ viewport: { width: 1366, height: 768 } })).newPage();
+  for (const old of ["agents", "roster"]) {
+    await p.goto(base + "/#" + old, { waitUntil: "load" });
+    await p.waitForSelector(".office .olist [data-who]", { timeout: 20000 });
+    assert.strictEqual(new URL(p.url()).hash, "#org", `#${old} lands on #org`);
+  }
+  assert.deepStrictEqual(await p.$$eval("#subs a", (l) => l.map((a) => a.dataset.nav)).then((l) => l.filter((x) => x === "agents" || x === "roster")), [], "no Court or Roster sub-tab");
+  const badge = () => p.evaluate(() => [document.querySelector('#subs a[data-nav="org"] i'), document.querySelector('.dock .sec[data-sec="agents"] i')].map((i) => (i ? i.className + ":" + i.textContent : "")));
+  const working = FIX.agents.subagents.filter((s) => s.state === "working").length;
+  assert.deepStrictEqual(await badge(), ["live:" + working, "live:" + working], "the Office sub-tab and the Agents dock show the working count");
+  failed = true;
+  await p.goto(base + "/#org", { waitUntil: "load" });
+  await p.waitForFunction(() => (document.querySelector('#subs a[data-nav="org"] i') || {}).className === "", null, { timeout: 20000 });
+  assert.deepStrictEqual(await badge(), [":1", ":1"], "a failed agent: the gold count on the Office sub-tab and the Agents dock");
+  failed = false;
+  await p.context().close();
+}
+
 /* The 3D path: real chunks, labels, a tap on a creature, the stage buttons, one context for the visit. */
 async function gpu(base) {
   const b = await chromium.launch({ headless: true, args: ["--mute-audio", ...GPU] }), shots = process.env.SHOTS;
@@ -240,12 +261,14 @@ async function gpu(base) {
   let gaps;
   try {
     if (process.env.ONLY === "staff") { for (const s of [SIZES[0], SIZES[2]]) await staffCards(b, base, s); console.log("ok staff cards"); srv.close(); return; }
+    if (process.env.ONLY === "tabs") { await tabs(b, base); console.log("ok tabs"); srv.close(); return; }
+    await tabs(b, base);
     for (const s of SIZES) await soft(b, base, s);
     for (const s of [SIZES[0], SIZES[2]]) await staffCards(b, base, s);
     gaps = await poll(b, base);
   } finally { await b.close(); }
   try {
     const st = await gpu(base);
-    console.log(`ok office screen · 5 widths: 1 canvas, ${SEATS.length} seats + ${TEAMS.length} teams + ${MEMBERS.length} members + ${WORKERS.length} workers named, ${SEATS.length} Message links, ${FIX.sessions.length} Sessions rows, 4 cards, still note, no sideways scroll, #chat and back 1 canvas, stage swipe stays · poll gaps ${gaps.join("/")} ms, 0 hidden · GPU: ${st.chunks} chunks, ${st.verts} vertices, labels, tap, + − Reset, 1 context, hud 44 px`);
+    console.log(`ok office screen · #agents and #roster open #org, Office tab counts · 5 widths: 1 canvas, ${SEATS.length} seats + ${TEAMS.length} teams + ${MEMBERS.length} members + ${WORKERS.length} workers named, ${SEATS.length} Message links, ${FIX.sessions.length} Sessions rows, 4 cards, still note, no sideways scroll, #chat and back 1 canvas, stage swipe stays · poll gaps ${gaps.join("/")} ms, 0 hidden · GPU: ${st.chunks} chunks, ${st.verts} vertices, labels, tap, + − Reset, 1 context, hud 44 px`);
   } finally { srv.close(); }
 })().catch((e) => { console.error(e); process.exit(1); });
