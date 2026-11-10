@@ -29,7 +29,7 @@ if (!document.querySelector('link[href="/static/css/org.css"]')) {
 function pull() {
   if (busy || (O && Date.now() - at < STALE_MS)) return;
   busy = true;
-  getJSON("/api/org").then((j) => { O = j; err = ""; }, (e) => { err = e.message || "unreadable"; })
+  getJSON("/api/org").then((j) => { O = j; err = j.error || ""; }, (e) => { err = e.message || "unreadable"; })
     .finally(() => { busy = false; at = Date.now(); if (cur === "org") go("org", true); });
 }
 

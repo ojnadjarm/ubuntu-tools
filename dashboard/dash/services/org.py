@@ -1,6 +1,6 @@
-"""GET /api/org (tailnet only): the org seats, the live Claude sessions with their seat, and how many registry rows are hidden."""
+"""GET /api/org (tailnet only): the org seats, the live Claude sessions with their seat, how many registry rows are hidden, and error when the last read failed."""
 import glob, os, sys
-from dash.cache import cached
+from dash.cache import cache_meta, cached
 from dash.env import HOME
 from dash.routes import route
 from dash.services.sites import trusted
@@ -31,4 +31,6 @@ def org_payload():
 def org_route(h, path):
     if not trusted(h.client_address[0], h.headers.get("X-Forwarded-For")):
         return h.json({"error": "tailnet only"}, 403)
-    h.json(cached("org", ORG_TTL, org_payload, empty={"seats": [], "sessions": [], "hidden": 0}))
+    body = cached("org", ORG_TTL, org_payload, empty={"seats": [], "sessions": [], "hidden": 0})
+    err = cache_meta({"org": (org_payload, None, ORG_TTL)})[1].get("org")
+    h.json({**body, "error": err} if err else body)

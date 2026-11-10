@@ -90,6 +90,21 @@ class Org(unittest.TestCase):
         self.assertNotIn("secret", json.dumps(body))
         self.assertNotIn("acme", json.dumps(body))
 
+    def test_bad_org_says_error(self):
+        code, body = self.call("127.0.0.1")
+        self.assertNotIn("error", body)
+        with open(os.environ["ORG_FILE"], "w") as f:
+            f.write('{"seats": [')
+        cache._cache["org"]["tried"] = 0
+        code, body = self.call("127.0.0.1")
+        self.assertEqual(code, 200)
+        self.assertEqual([s["id"] for s in body["seats"]], ["owner", "ceo", "fx"], "the last good seats stay")
+        self.assertTrue(body["error"], "the failed read is named")
+        with open(os.environ["ORG_FILE"], "w") as f:
+            json.dump(SEATS, f)
+        cache._cache["org"]["tried"] = 0
+        self.assertNotIn("error", self.call("127.0.0.1")[1])
+
     def test_lan_is_403(self):
         for ip, code in (("192.0.2.10", 403), ("::ffff:10.0.0.4", 403), ("100.101.102.103", 200), ("::1", 200)):
             self.assertEqual(self.call(ip)[0], code, ip)
