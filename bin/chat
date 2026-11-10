@@ -172,13 +172,15 @@ def one(ch, seat, seats):
 
 
 def read(a, seat, seats):
-    visible = [c for c in chat_store.channels(seat)
-               if not pull(seat, seats) or c["ch"] == "harness" or c["ch"].startswith("dm-")]
+    def mine(ch):
+        return not pull(seat, seats) or ch == "harness" or ch.startswith("dm-")
+
     if a.ch is None and not a.unread:
-        for c in visible:
-            print(f"{c['ch']} {c['unread']} unread")
+        for c in chat_store.channels(seat):
+            if mine(c["ch"]):
+                print(f"{c['ch']} {c['unread']} unread")
         return 0
-    chs = [c["ch"] for c in visible] if a.ch is None else [one(a.ch, seat, seats)]
+    chs = [c for c in chat_store.visible(seat) if mine(c)] if a.ch is None else [one(a.ch, seat, seats)]
     rows = []
     for ch in chs:
         got = chat_store.read(ch, after=chat_store.cursor(seat, ch)) if a.unread else chat_store.read(ch)
@@ -225,7 +227,10 @@ def words(text):
 
 def guide_hits(question):
     """[(slug, head line, summary line)] of the top `guide` hits for the question."""
-    out = subprocess.run([os.path.join(BIN, "guide"), *question.split()], capture_output=True, text=True,
+    words = [w for w in (w.lstrip("-") for w in question.split()) if w]
+    if not words:
+        return []
+    out = subprocess.run([os.path.join(BIN, "guide"), *words], capture_output=True, text=True,
                          timeout=60).stdout.splitlines()
     hits = []
     for head, body in zip(out[0::2], out[1::2]):

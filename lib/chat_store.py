@@ -258,7 +258,9 @@ def channels(seat):
     for ch in visible(seat):
         paths = files[ch]
         seen = cur.get(ch, 0)
-        unread = sum(1 for p in paths for r in _rows(p) if r["id"] > seen and r["from"] != seat)
+        month = f"{_utc(seen):%Y-%m}" if seen > 0 else ""
+        unread = sum(1 for p in paths if FILE.match(os.path.basename(p)).group(2) >= month
+                     for r in _rows(p) if r["id"] > seen and r["from"] != seat)
         out.append({"ch": ch, "unread": unread, "last": _last(paths)})
     return out
 

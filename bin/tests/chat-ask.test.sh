@@ -62,6 +62,12 @@ PY
   out=$(printf 'from stdin\n' | CHAT_SEAT=fx chat ask -); rc=$?
   is 'ask -: question from stdin' "$rc $(last 'r["text"]')" '0 from stdin'
   CHAT_SEAT=fx chat ask >/dev/null 2>&1; is 'ask: no question: rc 2' "$?" 2
+  out=$(printf -- '--help\n' | CHAT_SEAT=fx chat ask - 2>&1); rc=$?
+  is 'ask: the question --help is posted, not run as a guide option' "$rc $(last 'r["text"]')" '0 --help'
+  out=$(printf -- '--help how does a seat wake\n' | CHAT_SEAT=fx chat ask - 2>&1); rc=$?
+  ev 'ask: a leading --help still finds real hits, never the usage text' '[ "$rc" = 4 ] && grep -q "/guides/chat-wake.md" <<<"$out" && ! grep -q "usage" <<<"$out"'
+  out=$(printf -- '--new zzfoo\n' | CHAT_SEAT=fx chat ask - 2>&1); rc=$?
+  is 'ask: the question --new zzfoo makes no guide file' "$rc $(ls "$GUIDES_DIR")" '0 INDEX.md'
 
   # P16: an answer read while blocked is withdrawn from the asker's batch, so its armed timer files no extra wake.
   local P="$HARNESS_HOME/po-fx" flush

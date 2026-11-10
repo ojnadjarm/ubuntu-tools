@@ -204,7 +204,7 @@ check("search: full from the newest month, the older month is never opened", not
 
 os.environ["HARNESS_HOME"] = f"{work}/h6"
 for i in range(500):
-    s._now_ms = lambda: 1793491300000 - (i < 250) * 86400000 * 3
+    s._now_ms = lambda: 1793491300000 - (0 if i >= 250 else 86400000 * 3)
     s.post({"ch": f"c{i % 5}", "from": "fx", "text": f"message {i} about the dashboard " + "x" * 300})
 t = time.perf_counter()
 got = s.search("owner", "DASHBOARD 499")
@@ -212,6 +212,30 @@ ms = (time.perf_counter() - t) * 1000
 print(f"info search of 500 messages: {ms:.1f} ms")
 check("search: 500 messages, one hit", ids(got) and got[0]["text"].startswith("message 499 "), got)
 check("search: 500 messages under 20 ms", ms < 20, ms)
+os.environ["HARNESS_HOME"] = f"{work}/h7"
+month = {}
+for m, t in (("09", 1788220800000), ("10", 1790812800000), ("11", 1793491200000)):   # 2026-09-01 .. 2026-11-01 UTC
+    for i in range(2):
+        s._now_ms = lambda: t + i * 1000
+        month[m, "a", i] = s.post({"ch": "ca", "from": "gx", "text": f"{m} {i}"})
+        month[m, "b", i] = s.post({"ch": "cb", "from": "gx", "text": f"{m} {i}"})
+def unread_and_opened(seat):
+    opened, real_rows = [], s._rows
+    s._rows = lambda p: (opened.append(os.path.basename(p)), real_rows(p))[1]
+    try:
+        return {c["ch"]: c["unread"] for c in s.channels(seat)}, sorted(opened)
+    finally:
+        s._rows = real_rows
+got, opened = unread_and_opened("fx")
+check("channels: no cursor, every month counted", got == {"ca": 6, "cb": 6}, got)
+s.mark("fx", "ca", month["11", "a", 0]); s.mark("fx", "cb", month["11", "b", 0])
+got, opened = unread_and_opened("fx")
+check("channels: cursor in the newest month, unread counts its newer rows", got == {"ca": 1, "cb": 1}, got)
+check("channels: cursor in the newest month opens 1 file per channel", opened == ["ca.2026-11.jsonl", "cb.2026-11.jsonl"], opened)
+s.mark("gy", "ca", month["10", "a", 0]); s.mark("gy", "cb", month["11", "b", 0])
+got, opened = unread_and_opened("gy")
+check("channels: cursor a month back counts that month and the newer one", got == {"ca": 3, "cb": 1}, got)
+check("channels: cursor a month back skips the older month", "ca.2026-09.jsonl" not in opened, opened)
 sys.exit(bad)
 PY
 [ $? = 0 ] || bad=1
