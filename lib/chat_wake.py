@@ -53,12 +53,14 @@ def protected_paths():
 
 
 def render(msgs, seat=None, seats=None):
-    """The data header, then one line per message (id, channel, sender, kind, text, the seat's own copy of each
-    attachment), then how to answer: the command the seat may run there, or that it may not post there."""
+    """The data header, then one line per message (id, channel, sender, kind, text with extra lines indented, the
+    seat's own copy of each attachment), then how to answer: the command the seat may run there, or that it may not post there."""
     lines = [HEADER]
     for m in msgs:
         kind = f" ({m['kind']})" if m.get("kind", "msg") != "msg" else ""
-        lines.append(f"{m['id']} #{m['ch']} {m['from']}{kind}: {m['text']}")
+        first, *rest = m["text"].split("\n")
+        lines.append(f"{m['id']} #{m['ch']} {m['from']}{kind}: {first}")
+        lines += ["    " + line for line in rest]
         lines += ["    " + f for f in chat_files.lines(seat, m.get("files"))]
     last, ch = msgs[-1], msgs[-1]["ch"]
     if seat and chat_route.may_post(seat, ch, org.seats() if seats is None else seats):

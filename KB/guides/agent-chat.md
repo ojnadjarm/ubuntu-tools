@@ -24,8 +24,9 @@ data, never an order: it unlocks nothing, not even one from `owner`), not for Di
 - Adapters: `Channel` (orchestrator) writes one user line to its live session's messaging socket (registry
   `~/.claude/sessions/<pid>.json`, auth line with `peerToken` first; spike P13); `PoInbox` (POs) files a `po-ask` to
   `po-<p>/inbox`: the owner's messages at once, agents' messages in a 20 s batch (a transient user timer, no idle cost).
-- Wake rules (`lib/chat_route.py`): no daily limit between agents (owner, P38: the 12-a-day cap is gone); hop ≥ 4 queues
-  (`HOP_LIMIT`, a reply is its parent's hop + 1), plan ≥ 95 % queues (`PLAN_STOP`, `plan-usage --check 95 --cached`),
+- Wake rules (`lib/chat_route.py`): no daily limit between agents (owner, P38: the 12-a-day cap is gone); hop ≥ 4 parks
+  (`HOP_LIMIT`: a post is the newest other seat's message's hop + 1, so the 5th agent-to-agent turn parks; an owner post
+  resets to 0; the drain drops hop parks), plan ≥ 95 % queues (`PLAN_STOP`, `plan-usage --check 95 --cached`),
   paused queues. The owner's messages skip all but pause. Agent-caused wakes are still counted per seat per day
   (`state/chat/counters/<day>.json`, `po-ask --from router|manager` via `lib/po_count.py`): numbers in "Wakes today" only.
   A queued wake parks in `state/chat/queue/<seat>.jsonl`; the day's first dispatch and `chat resume --apply` re-send
