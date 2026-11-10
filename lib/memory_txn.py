@@ -44,7 +44,9 @@ def stage(store):
     os.makedirs(top, exist_ok=True)
     path = tempfile.mkdtemp(prefix="staging-", dir=top)
     shutil.copytree(store.root, path, symlinks=True, dirs_exist_ok=True, ignore=shutil.ignore_patterns(".git"))
-    memory_store._atomic(_base(path), "".join(f"{k}\t{v}\n" for k, v in sorted(files(store.root).items())))
+    head = git(store, "rev-parse", "HEAD", check=False).stdout.strip()
+    rows = sorted(files(store.root).items()) + ([(".git", head)] if head else [])
+    memory_store._atomic(_base(path), "".join(f"{k}\t{v}\n" for k, v in rows))
     return path
 
 
@@ -137,6 +139,7 @@ def apply(store, staging, car=None):
         print(f"memory apply: {staging} is not a staging folder made by `memory stage`")
         return 2
     base = dict(l.rstrip("\n").split("\t", 1) for l in open(_base(staging), encoding="utf-8") if "\t" in l)
+    head = base.pop(".git", None)
     stg, today = memory_store.Store(staging), time.strftime("%Y-%m-%d")
     commit_others(store, today)
 
@@ -150,7 +153,7 @@ def apply(store, staging, car=None):
         if os.path.isfile(stg.path(r)):
             os.remove(stg.path(r))
 
-    now, new, red = files(store.root), files(staging), []
+    now, new, red, held = files(store.root), files(staging), [], []
     for rel in sorted(set(base) | set(now) | set(new)):
         b, n, s = base.get(rel), now.get(rel), new.get(rel)
         if s == n or (s is None and is_note(rel)):
@@ -160,6 +163,9 @@ def apply(store, staging, car=None):
                 os.remove(stg.path(rel))
             else:
                 _put(store.path(rel), stg.path(rel))
+        elif n == b and head and rel.endswith(".md") and rel.split("/")[0] in ("core", "domains") \
+                and _committed(store, head, rel) != (_read(store.path(rel)) if n else None):
+            held += _owner_wins(store, stg, rel, _committed(store, head, rel), today)
         elif n == b and s is None:
             red.append(f"apply · red · {rel} · the staging copy removes a file: retire lines, never delete a page")
         elif n != b and not (None not in (b, n, s) and rel.endswith("ledger.md") and _append_merge(store, stg, rel, b)):
@@ -168,6 +174,9 @@ def apply(store, staging, car=None):
         print("\n".join(red))
         return 1
 
+    if held:
+        with open(stg.path("REVIEW.md"), "a", encoding="utf-8") as f:
+            f.write("".join(held))
     if os.path.isdir(stg.path("checks/ids.d")):
         import memory_quiz
         memory_quiz.merge(stg)
@@ -207,7 +216,8 @@ def apply(store, staging, car=None):
     print(push(store))
     shutil.rmtree(staging)
     os.remove(_base(staging))
-    print(f"apply · green · {len(take)} file(s) moved in, {filed} note(s) filed, {len(rejected)} rejected")
+    print(f"apply · green · {len(take)} file(s) moved in, {filed} note(s) filed, {len(rejected)} rejected, "
+          f"{len(held)} held (owner edit wins, REVIEW.md)")
     return 0
 
 
@@ -221,3 +231,33 @@ def _append_merge(store, stg, rel, base_sha):
         return False
     memory_store._atomic(stg.path(rel), live + "".join(b[k:]))
     return True
+
+
+def _committed(store, head, rel):
+    """The page's text in the store's commit at stage time, None when it was not there."""
+    r = git(store, "show", f"{head}:{rel}", check=False)
+    return r.stdout if r.returncode == 0 else None
+
+
+def _ids(text):
+    return {l.id: l.raw for l in map(memory_store.parse, (text or "").splitlines()) if l.id}
+
+
+def _owner_wins(store, stg, rel, committed, today):
+    """A page he edited by hand before the stage: each line (by id) he changed keeps his text; returns REVIEW.md lines for the keeper's dropped ones."""
+    live = _read(store.path(rel)) if os.path.isfile(store.path(rel)) else None
+    if live is None:
+        os.remove(stg.path(rel))
+        return [f"- {today[2:]} · {rel} · held: owner edit wins · page deleted by hand\n"]
+    old, his, out = _ids(committed), _ids(live), stg.lines(rel)
+    mine = {l.id: l.raw for l in out if l.id}
+    held = [i for i in sorted(set(old) | set(his)) if old.get(i) != his.get(i) and mine.get(i) != his.get(i)]
+    lines = [l for l in (his.get(l.id) if l.id in held else l.raw for l in out) if l is not None]
+    order = [memory_store.parse(l).id for l in live.splitlines()]
+    for i in [i for i in order if i in held and i not in mine]:
+        before = set(order[:order.index(i)]) - {None}
+        lines.insert(max((k + 1 for k, l in enumerate(lines) if memory_store.parse(l).id in before), default=len(lines)), his[i])
+    if held:
+        memory_store._atomic(stg.path(rel), "\n".join(lines) + "\n")
+    return [f"- {today[2:]} · {rel} ^{i} · held: owner edit wins · "
+            + (f"keeper's line: {mine[i]}" if i in mine else "keeper removed his line") + "\n" for i in held]

@@ -89,16 +89,33 @@ S="$(mem stage)"; mem apply "$S" >"$T/d.out" 2>&1; rc=$?
   && git -C "$St" ls-files | grep -qx '.obsidian/app.json' && [ -z "$(git -C "$St" status --porcelain)" ]; } \
   && ok || no "rc $rc, head moved: $(git -C "$St" log -2 --format=%s)"
 
-# Known gap (lib/memory_txn.py, not this ticket): apply cannot tell his uncommitted edit made before `memory stage`
-# from the keeper's own text, so a keeper that rewrites his line from an older note goes green. Kept as an expected
-# failure: it prints GAP while the gap is open and XPASS once apply guards it.
-t "gap: edit before the run, the keeper rewrites it from the older note"
+t "edit before the run, the keeper rewrites it from a note: his kept, held"
 setup; his_edit; older_note
 S="$(mem stage)"
 swap "$S/$CARD" "$HIS" "$OLD"
 mem apply "$S" >"$T/e.out" 2>&1; rc=$?
-if grep -qxF -- "$HIS" "$St/$CARD"; then echo "XPASS — apply now keeps his line (rc $rc): make this case a plain check"
-else echo "GAP — apply rc $rc, his line replaced by the older one; guard belongs in memory_txn.apply"; fi
+{ [ "$rc" = 0 ] && grep -qxF -- "$HIS" "$St/$CARD" && ! grep -qF '800 px' "$St/$CARD" \
+  && grep -qF "$CARD ^gd01 · held: owner edit wins · keeper's line: $OLD" "$St/REVIEW.md" \
+  && grep -q '^apply · green · .* 1 held' "$T/e.out" && [ -z "$(git -C "$St" status --porcelain)" ]; } \
+  && ok || no "rc $rc: $(cat "$T/e.out"; cat "$St/REVIEW.md" 2>&1)"
+
+t "edit before the run: keeper lines on other ids of the page still land"
+setup; his_edit; older_note
+S="$(mem stage)"
+swap "$S/$CARD" "$HIS" "$OLD"
+swap "$S/$CARD" '- The catalogue builds with `make seeds`. (26-02-02) ^gd02' '- The catalogue builds with `make catalogue`. (26-02-02) ^gd02'
+printf -- '- Seed packets list the sowing month. (26-11-10) ^gd07\n' >>"$S/$CARD"
+mem apply "$S" >"$T/f.out" 2>&1; rc=$?
+{ [ "$rc" = 0 ] && grep -qxF -- "$HIS" "$St/$CARD" && grep -q 'make catalogue.*\^gd02$' "$St/$CARD" && grep -q '\^gd07$' "$St/$CARD" \
+  && [ "$(grep -c 'held: owner edit wins' "$St/REVIEW.md")" = 1 ]; } && ok || no "rc $rc: $(cat "$T/f.out"; cat "$St/$CARD")"
+
+t "page deleted by hand before the run, the keeper writes it: deleted, held"
+setup; rm "$St/$CARD"
+S="$(mem stage)"
+printf '# Garden\n- Seed photos are 800 px wide. (26-02-01) ^gd01\n' >"$S/$CARD"
+mem apply "$S" >"$T/g.out" 2>&1; rc=$?
+{ [ "$rc" = 0 ] && [ ! -e "$St/$CARD" ] && grep -qF "$CARD · held: owner edit wins · page deleted by hand" "$St/REVIEW.md"; } \
+  && ok || no "rc $rc: $(cat "$T/g.out")"
 
 t "the real store holds no fixture text"
 ! fixture_in_real && ok || no "fixture text found under the real store"
