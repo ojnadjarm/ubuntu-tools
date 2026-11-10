@@ -130,6 +130,15 @@ def post(a, seat, seats):
     return 0
 
 
+def one(ch, seat, seats):
+    """The channel a seat names (a room, @seat or its own direct message); ValueError when it may not read it."""
+    if ch.startswith("@"):
+        return target(ch, seat, seats)[0]
+    if ch.startswith("dm-") and seat not in ch[3:].split("--"):
+        raise ValueError(f"{ch} is not your direct message")
+    return room(ch, seat, seats)
+
+
 def read(a, seat, seats):
     visible = [c for c in chat_store.channels(seat)
                if not pull(seat, seats) or c["ch"] == "harness" or c["ch"].startswith("dm-")]
@@ -137,14 +146,7 @@ def read(a, seat, seats):
         for c in visible:
             print(f"{c['ch']} {c['unread']} unread")
         return 0
-    if a.ch is None:
-        chs = [c["ch"] for c in visible]
-    elif a.ch.startswith("@"):
-        chs = [target(a.ch, seat, seats)[0]]
-    elif a.ch.startswith("dm-") and seat not in a.ch[3:].split("--"):
-        raise ValueError(f"{a.ch} is not your direct message")
-    else:
-        chs = [room(a.ch, seat, seats)]
+    chs = [c["ch"] for c in visible] if a.ch is None else [one(a.ch, seat, seats)]
     rows = []
     for ch in chs:
         got = chat_store.read(ch, after=chat_store.cursor(seat, ch)) if a.unread else chat_store.read(ch)
@@ -152,6 +154,22 @@ def read(a, seat, seats):
             chat_store.mark(seat, ch, got[-1]["id"])
         rows += [r for r in got if not (a.unread and r["from"] == seat)]
     show(rows, with_ch=a.ch is None, seat=seat)
+    return 0
+
+
+def search(a, seat, seats):
+    """Print the newest messages holding every word, from --ch or the seat's channels (a pull seat's own); marks nothing."""
+    if a.ch is not None:
+        chs = [one(a.ch, seat, seats)]
+    elif pull(seat, seats):
+        chs = [c for c in chat_store.visible(seat) if c == "harness" or c.startswith("dm-")]
+    else:
+        chs = [None]
+    rows = sorted((r for c in chs for r in chat_store.search(seat, a.words, c)), key=lambda r: r["id"])
+    if not rows:
+        print("chat: no match")
+        return 0
+    show(rows[-chat_store.SEARCH_LIMIT:], with_ch=a.ch is None, seat=seat)
     return 0
 
 
@@ -306,6 +324,10 @@ def main():
     s = sub.add_parser("read", help="no channel: your channels with unread counts; else the messages, marked read")
     s.add_argument("ch", nargs="?", help="a channel or @<seat>")
     s.add_argument("--unread", action="store_true", help="only messages since you last read, not your own")
+    s = sub.add_parser("search", help="the newest 30 messages holding every word (any order, any case) in your channels, "
+                                      "oldest first; marks nothing read")
+    s.add_argument("words", help="the words (2 characters at least)")
+    s.add_argument("--ch", help="one channel or @<seat>")
     s = sub.add_parser("ask", help="ask the harness: a 7-day repeat prints its answer; guide hits print first "
                                    "(exit 4, nothing posted); else posts to #harness and prints the id")
     s.add_argument("question", help="the question, or - to read it from stdin")
@@ -327,7 +349,7 @@ def main():
         if a.cmd == "prune":
             return prune(a)
         seats = org.seats()
-        return {"post": post, "read": read, "ask": ask, "answer": answer}[a.cmd](a, seat_of(seats), seats)
+        return {"post": post, "read": read, "search": search, "ask": ask, "answer": answer}[a.cmd](a, seat_of(seats), seats)
     except ValueError as e:
         print(f"chat: {e}", file=sys.stderr)
         return 2

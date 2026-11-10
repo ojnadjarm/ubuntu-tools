@@ -1,4 +1,4 @@
-"""Chat routes (tailnet only): GET /api/chat reads, POST /api/chat/post (then wakes), /seen and /upload act as the owner,
+"""Chat routes (tailnet only): GET /api/chat reads, GET /api/chat/search finds, POST /api/chat/post (then wakes), /seen and /upload act as the owner,
 GET /api/chat/file/<id> serves an attachment to the owner; the lib does the work."""
 import ipaddress, os, re, sys, urllib.parse
 from dash.routes import route
@@ -58,6 +58,29 @@ def read_route(h, path):
             "wakes": {"today": chat_dispatch.today()}, "thinking": chat_thinking.now()})
 
 
+@route("GET", "/api/chat/search")
+def search_route(h, path):
+    """{q, messages}: the newest messages of every channel (or ch) holding every word of q; bad q or channel 400."""
+    if not tailnet(h):
+        return h.json({"error": "tailnet only"}, 403)
+    q = urllib.parse.parse_qs(urllib.parse.urlsplit(h.path).query)
+    words, ch = q.get("q", [""])[0], q.get("ch", [""])[0] or None
+    try:
+        h.json({"q": words, "messages": chat_store.search(OWNER, words, ch)})
+    except ValueError as e:
+        h.json({"error": str(e)}, 400)
+
+
+def replied(ch, mid):
+    """mid when it is None or the int id of a message in ch; ValueError "bad re" otherwise."""
+    if mid is None:
+        return None
+    if type(mid) is not int or not isinstance(ch, str) or not chat_store.NAME.match(ch) or \
+            [r["id"] for r in chat_store.read(ch, after=mid - 1, limit=1)] != [mid]:
+        raise ValueError("bad re")
+    return mid
+
+
 def attached(ids):
     """The stored metadata of the posted file ids; ValueError on a bad list or an unknown id."""
     if not isinstance(ids, list) or len(ids) > chat_files.MAX_FILES:
@@ -73,6 +96,7 @@ def post_route(h, path):
     ch, text = body.get("ch"), body.get("text")
     try:
         files = attached(body.get("files", []))
+        re_id = replied(ch, body.get("re"))
     except ValueError as e:
         return h.json({"error": str(e)}, 400)
     ok, reason = chat_guard.check(text, OWNER, ch if isinstance(ch, str) else None, (), [f["name"] for f in files])
@@ -80,12 +104,12 @@ def post_route(h, path):
         if isinstance(ch, str) and chat_store.NAME.match(ch):
             chat_store.audit({"seat": OWNER, "ch": ch, "held": reason})
         return h.json({"held": reason}, 422)
-    msg = {"ch": ch, "from": OWNER, "text": text, **({"files": files} if files else {})}
+    msg = {"ch": ch, "from": OWNER, "text": text, "re": re_id, **({"files": files} if files else {})}
     try:
         mid = chat_store.post(msg)
     except ValueError as e:
         return h.json({"error": str(e)}, 400)
-    woke = chat_dispatch.dispatch({**msg, "id": mid, "to": [], "kind": "msg", "re": None, "hop": 0})
+    woke = chat_dispatch.dispatch({**msg, "id": mid, "to": [], "kind": "msg", "hop": 0})
     h.json({"id": mid, "wakes": [{"seat": seat, "outcome": out} for seat, out in woke]})
 
 

@@ -13,6 +13,7 @@ MAX_TEXT = 2000
 MAX_FILES = 5
 FILE_KEYS = {"id", "name", "size", "mime"}
 LAST_TEXT = 80
+SEARCH_LIMIT = 30
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 FILE = re.compile(r"^([a-z0-9][a-z0-9-]*)\.(\d{4}-\d{2})\.jsonl$")
 
@@ -215,6 +216,28 @@ def recent(seat, after=None, before=None, limit=50):
         rows += read(c, after=after, before=before, limit=limit)
     rows.sort(key=lambda r: r["id"])
     return rows[:limit] if after is not None else rows[-limit:]
+
+
+def search(seat, q, ch=None, limit=SEARCH_LIMIT):
+    """Messages of the seat's visible channels (or of ch) whose text holds every word of q in any case: the newest
+    `limit`, oldest first, read newest month first; ValueError when q has under 2 characters."""
+    if not isinstance(q, str) or len(q.strip()) < 2:
+        raise ValueError("bad q: 2 characters at least")
+    want = q.casefold().split()
+    files = _files()
+    chans = visible(seat) if ch is None else [c for c in visible(seat) if c == _channel(ch)]
+    months = {}
+    for c in chans:
+        for p in files[c]:
+            months.setdefault(FILE.match(os.path.basename(p)).group(2), []).append(p)
+    out = []
+    for month in sorted(months, reverse=True):
+        for p in months[month]:
+            out += [r for r in _rows(p) if all(w in (r.get("text") or "").casefold() for w in want)]
+        if len(out) >= limit:
+            break
+    out.sort(key=lambda r: r["id"])
+    return out[-limit:] if limit else []
 
 
 def visible(seat):

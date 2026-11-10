@@ -140,5 +140,81 @@ sys.exit(bad)
 PY
 [ $? = 0 ] || bad=1
 
+# T1545-C: search(seat, q, ch, limit) over the seat's visible channels, every word, any case, newest `limit` oldest first.
+python3 - "$AG" "$WORK" <<'PY'
+import os, sys, time
+ag, work = sys.argv[1:]
+sys.path.insert(0, f"{ag}/lib")
+import chat_store as s
+os.environ["HARNESS_HOME"] = f"{work}/h4"
+bad = 0
+def check(name, cond, got=""):
+    global bad
+    print(("ok   " if cond else "FAIL ") + name + ("" if cond else f": {got}"))
+    bad |= not cond
+def raises(name, fn, word):
+    try:
+        fn(); check(name, False, "accepted")
+    except ValueError as e:
+        check(name, word in str(e), str(e))
+ids = lambda rows: [r["id"] for r in rows]
+
+clock = iter([1793491200000 - 9, 1793491200000 + 3])   # 2026-10-31, then 2026-11-01
+s._now_ms = lambda: next(clock)
+a = s.post({"ch": "harness", "from": "fx", "text": "Build is GREEN on main"})
+b = s.post({"ch": "org", "from": "gx", "text": "main build green again\nsecond line"})
+s._now_ms = lambda: 1793491300000
+c = s.post({"ch": "harness", "from": "ceo", "kind": "system", "text": "build paused: green light later"})
+d = s.post({"ch": s.dm("ceo", "gx"), "from": "ceo", "text": "green build, private"})
+e = s.post({"ch": s.dm("fx", "gx"), "from": "gx", "text": "the BUILD is green"})
+with open(os.path.join(s.root(), "harness.2026-11.jsonl"), "a") as f:
+    f.write('{"torn green build\n')
+f2 = s.post({"ch": "harness", "from": "fx", "text": "red build"})
+
+check("search: words in any order, any case, across two months, oldest first", ids(s.search("fx", "green BUILD")) == [a, b, c, e],
+      ids(s.search("fx", "green BUILD")))
+check("search: every word must match", ids(s.search("fx", "green red")) == [] and ids(s.search("fx", "red build")) == [f2])
+check("search: rows carry ch and keep their keys", [r["ch"] for r in s.search("fx", "main")] == ["harness", "org"]
+      and s.search("fx", "main")[1]["text"].endswith("second line"))
+check("search: a system line is included", s.search("fx", "paused light")[0]["kind"] == "system")
+check("search: another pair's direct message hidden from a third seat", d not in ids(s.search("fx", "green build")))
+check("search: the pair and the owner see it", d in ids(s.search("gx", "private")) and d in ids(s.search("owner", "private")))
+check("search: one channel", ids(s.search("fx", "green build", ch="harness")) == [a, c])
+check("search: a channel the seat cannot see gives nothing", s.search("fx", "private", ch=s.dm("ceo", "gx")) == [])
+check("search: an unknown channel gives nothing", s.search("fx", "green", ch="nothing") == [])
+check("search: a torn line skipped", "torn" not in str(s.search("owner", "green build")))
+check("search: surrounding spaces stripped", ids(s.search("fx", "  red  ")) == [f2])
+for q in ("", " ", "x", " x ", None, 5):
+    raises(f"search: q {q!r} refused", lambda: s.search("fx", q), "q")
+raises("search: a bad channel name refused", lambda: s.search("fx", "green", ch="../x"), "channel")
+
+os.environ["HARNESS_HOME"] = f"{work}/h5"
+s._now_ms = lambda: 1793491200000 - 86400000
+old = [s.post({"ch": "harness", "from": "fx", "text": f"hit old {i}"}) for i in range(5)]
+s._now_ms = lambda: 1793491300000
+new = [s.post({"ch": ("harness", "org")[i % 2], "from": "fx", "text": f"hit new {i}"}) for i in range(40)]
+check("search limit: the newest 30, oldest first", ids(s.search("fx", "hit")) == new[-30:])
+check("search limit 5", ids(s.search("fx", "hit", limit=5)) == new[-5:])
+check("search: not full in the newest month reads the older one", ids(s.search("fx", "hit", limit=44)) == old[-4:] + new)
+opened, real_rows = [], s._rows
+s._rows = lambda p: (opened.append(os.path.basename(p)), real_rows(p))[1]
+s.search("fx", "hit")
+s._rows = real_rows
+check("search: full from the newest month, the older month is never opened", not any("2026-10" in p for p in opened), opened)
+
+os.environ["HARNESS_HOME"] = f"{work}/h6"
+for i in range(500):
+    s._now_ms = lambda: 1793491300000 - (i < 250) * 86400000 * 3
+    s.post({"ch": f"c{i % 5}", "from": "fx", "text": f"message {i} about the dashboard " + "x" * 300})
+t = time.perf_counter()
+got = s.search("owner", "DASHBOARD 499")
+ms = (time.perf_counter() - t) * 1000
+print(f"info search of 500 messages: {ms:.1f} ms")
+check("search: 500 messages, one hit", ids(got) and got[0]["text"].startswith("message 499 "), got)
+check("search: 500 messages under 20 ms", ms < 20, ms)
+sys.exit(bad)
+PY
+[ $? = 0 ] || bad=1
+
 is "real store untouched" "$(ls -la --time-style=full-iso "$REAL" 2>/dev/null | md5sum)" "$real_before"
 exit $bad

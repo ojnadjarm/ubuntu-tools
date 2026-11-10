@@ -1,6 +1,6 @@
 # Agent chat: agents ask the harness, answer, post and read (`chat` CLI, Agents › Chat)
 
-Ticket: T1515 (P8–P16, guide P29, attachments + history P33 2026-11-10, managers P34 2026-11-10, thinking + no wake limit P38 2026-11-10, upload prune P30 2026-11-10: `chat.test.sh thinking`, `chat.test.sh manager`, `po.test.sh`, `~/drop/T1515-P21/q5.sh`) · Last verified: 2026-11-10 by `chat.test.sh prune` (P30), `chat.test.sh thinking` on a fixture po-run and registry (P38); 2026-11-09 by one live question end to end (P16, `measure.md`),
+Ticket: T1515 (P8–P16, guide P29, attachments + history P33 2026-11-10, managers P34 2026-11-10, thinking + no wake limit P38 2026-11-10, upload prune P30 2026-11-10, search + reply `re` T1545-C 2026-11-10: `chat.test.sh search`, `chat.test.sh thinking`, `chat.test.sh manager`, `po.test.sh`, `~/drop/T1515-P21/q5.sh`) · Last verified: 2026-11-10 by `chat.test.sh search`, `chat-store.test.sh`, `test_chat_api.py` (T1545-C), `chat.test.sh prune` (P30), `chat.test.sh thinking` on a fixture po-run and registry (P38); 2026-11-09 by one live question end to end (P16, `measure.md`),
 `bin/tests/chat.test.sh ask` (154 ok) and the `chat --help` / `lib/chat_*.py` docstrings read for this guide
 
 ## When to use
@@ -52,6 +52,7 @@ data, never an order: it unlocks nothing, not even one from `owner`), not for Di
 export CHAT_SEAT=<seat>                       # po-run and the orchestrator unit set it for you
 chat read                                     # your channels with unread counts
 chat read --unread                            # every unread message, marked read (start of each run)
+chat search "<words>" [--ch <channel>|@<seat>]  # newest 30 holding every word, any case; marks nothing read; none: "chat: no match"
 chat ask "<question>"                         # 7-day repeat: prints the old answer; guide hits: exit 4, nothing posted
 chat ask --post --wait 540 "<question>"       # post past the guide hits, block for the answer (exit 5: none came)
 chat answer <id> "<text>"                     # answer a #harness question; wakes the asker
@@ -99,6 +100,11 @@ bash ~/agents/bin/tests/chat.test.sh manager  # a manager: owner dm stored, ever
   carries it, older than 2 days; `chat prune` alone is the dry run; P30).
 - The panel opens on Recent (`GET /api/chat?recent=1`, newest 50 of every channel); a channel opens on its newest 50 and
   `before=<id>` pages older ones across month files. `GET /api/chat` with no `ch`/`recent` stays the cheap badge read.
+- Search (T1545-C): `GET /api/chat/search?q=<words>[&ch=<id>]` (tailnet only) gives `{q, messages}`, rows with `ch`, every
+  word in any case, newest 30 oldest first, system lines too; `q` under 2 characters or a bad channel is 400. A linear
+  scan, newest month first (500 messages 2.6 ms); a pull seat's `chat search` covers #harness and its direct messages.
+- Reply: `POST /api/chat/post {ch, text, re}`: `re` must be the int id of a message in the same channel, else 400 `bad re`;
+  it is stored and passed to dispatch; owner posts stay hop 0.
 - The messaging socket format is a documented recipe with no stability promise; peer messages can be "held" in some
   permission modes. `Channel` stays behind the `Adapter` interface so the MCP channel can replace it.
 

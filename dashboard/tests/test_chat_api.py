@@ -304,6 +304,37 @@ class ChatApi(unittest.TestCase):
         self.assertEqual(self.req("/api/chat/seen", {"ch": "harness", "id": "1"})[0], 400)
         self.assertEqual(self.store_files(), [])
 
+    def test_search(self):
+        """Every word in any case over every channel the owner sees (or one), oldest first, rows with ch; bad q or channel 400."""
+        a = svc.chat_store.post({"ch": "harness", "from": "fx", "text": "Build is GREEN"})
+        b = svc.chat_store.post({"ch": "dm-fx--owner", "from": "fx", "text": "green build here"})
+        svc.chat_store.post({"ch": "org", "from": "fx", "text": "red build"})
+        code, body, _ = self.req("/api/chat/search?q=build%20green")
+        self.assertEqual((code, body["q"], [(m["id"], m["ch"]) for m in body["messages"]]),
+                         (200, "build green", [(a, "harness"), (b, "dm-fx--owner")]))
+        self.assertEqual([m["id"] for m in self.req("/api/chat/search?q=green&ch=harness")[1]["messages"]], [a])
+        self.assertEqual(self.req("/api/chat/search?q=blue")[1], {"q": "blue", "messages": []})
+        for bad in ("", "?q=", "?q=x", "?q=%20x%20", "?q=green&ch=../etc"):
+            self.assertEqual(self.req("/api/chat/search" + bad)[0], 400, bad)
+
+    def test_post_with_re(self):
+        """re is the id of a message in the same channel: stored and passed to dispatch; another channel's or none is 400."""
+        mid = svc.chat_store.post({"ch": "harness", "from": "fx", "text": "question"})
+        other = svc.chat_store.post({"ch": "org", "from": "fx", "text": "elsewhere"})
+        seen, real = [], svc.chat_dispatch.dispatch
+        svc.chat_dispatch.dispatch = lambda m, *x: seen.append(m) or []
+        try:
+            code, body, _ = self.req("/api/chat/post", {"ch": "harness", "text": "answer", "re": mid})
+        finally:
+            svc.chat_dispatch.dispatch = real
+        self.assertEqual(code, 200)
+        got = self.req("/api/chat?ch=harness")[1]["messages"][-1]
+        self.assertEqual((got["id"], got["re"], got["hop"]), (body["id"], mid, 0))
+        self.assertEqual((seen[0]["re"], seen[0]["hop"]), (mid, 0))
+        for re in (other, mid + 1, str(mid), True, -1):
+            self.assertEqual(self.req("/api/chat/post", {"ch": "harness", "text": "x", "re": re})[:2], (400, {"error": "bad re"}), re)
+        self.assertEqual(len(self.req("/api/chat?ch=harness")[1]["messages"]), 2)
+
     def test_seen_moves_the_owner_cursor(self):
         mid = svc.chat_store.post({"ch": "harness", "from": "ceo", "text": "from the orchestrator"})
         self.assertEqual(bare(self.req("/api/chat")[1]["channels"]), [{"ch": "harness", "unread": 1}])
@@ -324,6 +355,7 @@ class ChatApi(unittest.TestCase):
                               (TAILNET, None, 200), ("::1", None, 200), ("127.0.0.1", TAILNET, 200)):
             hdr = {"X-Forwarded-For": fwd} if fwd else {}
             self.assertEqual(dispatch("GET", "/api/chat", ip, hdr), code, (ip, fwd))
+            self.assertEqual(dispatch("GET", "/api/chat/search?q=hello", ip, hdr), code, ("search", ip, fwd))
         for path in ("/api/chat/upload",):
             self.assertEqual(dispatch("POST", path, LAN, own), 403, path)
             self.assertEqual(dispatch("POST", path, TAILNET, own), 403, path)
@@ -336,6 +368,7 @@ class ChatApi(unittest.TestCase):
     def test_routes_registered(self):
         self.assertIn(svc, server.MODULES, "server.py imports the chat service")
         self.assertTrue(routes.find("GET", "/api/chat") and routes.find("POST", "/api/chat/post") and routes.find("POST", "/api/chat/seen"))
+        self.assertTrue(routes.find("GET", "/api/chat/search"))
         self.assertTrue(routes.find("POST", "/api/chat/upload") and routes.find("GET", "/api/chat/file/0123456789abcdef"))
 
 
