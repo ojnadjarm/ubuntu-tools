@@ -29,7 +29,7 @@ echo "start $(ls "$d/current" | wc -l)" >>"$WORK/runs.log"; echo "$PO_BUDGET" >>
 if [ ! -e "$WORK/leave" ]; then
   for f in "$d"/current/*.md; do [ -e "$f" ] || continue; echo "outcome: answered" >>"$f"; mv "$f" "$d/done/"; done
 fi
-echo "ESCALATE: fx decision" >"$d/REPORT.md"
+cat "$WORK/report" 2>/dev/null >"$d/REPORT.md" || echo "ESCALATE: fx decision" >"$d/REPORT.md"
 rmdir "$WORK/running"; echo end >>"$WORK/runs.log"
 STUB
 printf '#!/bin/sh\nexit $(cat "$WORK/plan.rc" 2>/dev/null || echo 0)\n' >"$WORK/stubs/plan-usage"
@@ -191,6 +191,14 @@ is 'manager: its ESCALATE line filed once to the parent' "$(printf '%s' "$f" | g
 ev 'manager: the parent request quotes it' 'grep -qx "po-mgr: ESCALATE: fx decision" $f'
 po-ask mgr --from liaison "again" >/dev/null; po-run mgr >/dev/null 2>&1
 is 'manager: the same line is not filed again' "$(grep -l '^from: manager' "$P"/inbox/*.md | wc -l)" 1
+echo "ESCALATE: owner must pick A or B" >"$WORK/report"; po-ask mgr --from liaison "b" >/dev/null; po-run mgr >/dev/null 2>&1
+f=$(grep -l '^from: manager' "$P"/inbox/*.md | xargs grep -lx 'po-mgr: ESCALATE: owner must pick A or B')
+is 'manager: a second run with a different ESCALATE line files a second request (B3)' "$(grep -l '^from: manager' "$P"/inbox/*.md | wc -l) $(printf '%s' "$f" | grep -c .)" '2 1'
+echo "no escalation" >"$WORK/report"; po-ask mgr --from liaison "c" >/dev/null; po-run mgr >/dev/null 2>&1
+rm -f "$WORK/report"; po-ask mgr --from liaison "d" >/dev/null; po-run mgr >/dev/null 2>&1
+is 'manager: a run without ESCALATE does not make an old line new again' "$(grep -l '^from: manager' "$P"/inbox/*.md | wc -l)" 2
+for i in $(seq 60); do echo "ESCALATE: n$i"; done >"$WORK/report"; po-ask mgr --from liaison "e" >/dev/null; po-run mgr >/dev/null 2>&1; rm -f "$WORK/report"
+is 'manager: state/escalated keeps the newest 50 hashes' "$(wc -l <"$M/state/escalated") $(grep -cvx '[0-9a-f]\{40\}' "$M/state/escalated")" '50 0'
 
 # P34: a running po-run survives an in-place edit of its own file (bash parses the whole body before it runs it).
 mkdir -p "$WORK/edit/bin" "$WORK/edit/stubs"; cp "$BIN/po-run" "$BIN/polib.sh" "$WORK/edit/bin/"
