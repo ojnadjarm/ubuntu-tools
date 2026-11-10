@@ -1,4 +1,4 @@
-/* Chat: Recent (every channel, newest last) or a channel's stream (newest 50, older on scroll-up), the channels and direct messages, a composer with attachments, who is in it, who is thinking and today's wakes, from GET /api/chat. */
+/* Chat: Recent (every channel, newest last) or a channel's stream (newest 50, older on scroll-up), the channels and direct messages, a composer with attachments, who is in it, who is thinking and today's wakes, from GET /api/chat; below 900 px a messenger: the conversation list, then one conversation full screen. */
 import { esc, p2 } from "/static/js/core/fmt.js";
 import { getJSON, postJSON } from "/static/js/core/api.js";
 import { cur, go } from "/static/js/core/router.js";
@@ -12,6 +12,7 @@ import { seatState, dmOf } from "./org.js";
 import { composer, bind, forget } from "./chat-compose.js";
 import { attachments } from "./chat-files.js";
 import { store } from "../store.js";
+import { note, lastIn, byActivity, peek, when } from "./chat-list.js";
 
 export const own = true;
 const POLL_MS = 3000, ORG_MS = 20000, QUOTE = 44;
@@ -20,8 +21,10 @@ const PILL = { working: "running", idle: "idle", asleep: "off", off: "off", your
 const LINE = { working: "working now", idle: "idle", asleep: "asleep, wakes on its name", off: "off", yours: "your session" };
 const TAG = { ask: `<span class="ctag">question</span>`, answer: `<span class="ctag ans">answer</span>` };
 const ROOMS = ["harness", "org"];
-let C = null, msgs = [], ch = "", err = "", busy = false, timer = 0, O = null, oat = 0, stick = true, W = null;
+let C = null, msgs = [], ch = "", err = "", busy = false, timer = 0, O = null, oat = 0, follow = false, W = null;
 let more = false, jump = true, early = false, io = null, watched = null, T = [];
+let listing = true, pushed = false, listY = 0, fresh = 0, shown = "";
+const phone = matchMedia("(max-width: 899px)");
 const seen = {};
 
 if (!document.querySelector('link[href="/static/css/chat.css"]')) {
@@ -30,12 +33,17 @@ if (!document.querySelector('link[href="/static/css/chat.css"]')) {
   document.head.appendChild(l);
 }
 
-/* The hash carries the open channel: #chat?ch=<id>. */
-export function read(q) {
-  const want = new URLSearchParams(q).get("ch") || "";
-  if (want !== ch) { ch = want; msgs = []; stick = true; jump = true; more = false; forget(); }
+/* Opens channel c ("" = Recent); the phone list shows when list is true. */
+function open(c, list) {
+  listing = list;
+  if (c !== ch) { ch = c; msgs = []; jump = true; more = false; fresh = 0; forget(); }
 }
-export const hash = () => "#chat" + (ch ? "?ch=" + encodeURIComponent(ch) : "");
+/* The hash carries the open view: #chat?ch=<id>, #chat?recent=1 (Recent), #chat (the phone list; Recent from 900 px). */
+export function read(q) {
+  const u = new URLSearchParams(q), want = u.get("ch") || "";
+  open(want, !want && u.get("recent") !== "1");
+}
+export const hash = () => "#chat" + (ch ? "?ch=" + encodeURIComponent(ch) : listing ? "" : "?recent=1");
 if (location.hash.startsWith("#chat?")) read(location.hash.slice(6));
 
 /* The query of the open view: a channel, or Recent (no channel). */
@@ -52,8 +60,11 @@ function pull() {
       err = "";
       if (want !== ch) return;
       C = j.channels || []; W = j.wakes || null; T = j.thinking || [];
-      msgs = after ? msgs.concat(j.messages || []) : j.messages || [];
-      if (after) heard(j.messages || []);
+      const got = j.messages || [], box = document.querySelector("#grid .chat .msgs");
+      if (after && got.length && box && !atEnd(box)) fresh += got.length;
+      msgs = after ? msgs.concat(got) : got;
+      note(got);
+      if (after) heard(got);
       if (!after) more = !!j.more;
       markRead();
     }, (e) => { err = e.message || "unreadable"; })
@@ -65,8 +76,8 @@ function pull() {
     });
 }
 
-/* The element that scrolls the stream: the stream box from 900 px, else the page. */
-const scroller = (box) => (getComputedStyle(box).overflowY === "auto" ? box : document.scrollingElement);
+/* True while the stream box shows its newest line (or is not on screen). */
+const atEnd = (box) => !box.clientHeight || box.scrollHeight - box.scrollTop - box.clientHeight < 40;
 
 /* The page before the oldest message shown, prepended without moving what he is reading. */
 function older() {
@@ -76,7 +87,7 @@ function older() {
   getJSON(src(want) + "&before=" + msgs[0].id)
     .then((j) => {
       if (want !== ch) return;
-      const box = document.querySelector("#grid .chat .msgs"), s = box && scroller(box), h0 = s ? s.scrollHeight : 0;
+      const s = document.querySelector("#grid .chat .msgs"), h0 = s ? s.scrollHeight : 0;
       msgs = (j.messages || []).concat(msgs); more = !!j.more;
       paint();
       if (s) s.scrollTop += s.scrollHeight - h0;
@@ -93,8 +104,8 @@ function watch(grid) {
   if (top) io.observe(top);
 }
 
-/* After a send: repaint now, then read what is new at once. */
-function paintNow() { clearTimeout(timer); timer = 0; paint(); pull(); }
+/* After a send: repaint now, then read what is new at once and show it. */
+function paintNow() { clearTimeout(timer); timer = 0; follow = true; paint(); pull(); }
 
 /* Moves his read cursor to the newest message of the open channel once per new message; the badges follow. */
 function markRead() {
@@ -106,19 +117,31 @@ function markRead() {
   postJSON("/api/chat/seen", { ch, id: last }).catch(() => {});
 }
 
-/* Repaints in place (the stream keeps its scroll) and keeps the newest message in view while he is at the bottom. */
+/* Repaints in place: only the stream box scrolls, and only to the newest line when he was already there (or just sent);
+   otherwise it keeps his place and the "new messages" pill counts what came. */
 function paint() {
   if (cur !== "chat") return;
-  const grid = document.getElementById("grid"), box0 = grid.querySelector(".chat .msgs");
-  if (box0) stick = box0.scrollHeight - box0.scrollTop - box0.clientHeight < 40;
+  const grid = document.getElementById("grid"), box0 = grid.querySelector(".chat .msgs"), top = box0 ? box0.scrollTop : 0;
+  const end = !box0 || atEnd(box0);
+  if (end) fresh = 0;
   if (grid.querySelector(":scope > .nxs.chat")) sync(grid, render(), 1); else go("chat", true);
   const box = grid.querySelector(".chat .msgs");
-  if (box && stick) box.scrollTop = box.scrollHeight;
-  if (box && jump && msgs.length) { jump = false; const s = scroller(box); if (s !== box) s.scrollTop = s.scrollHeight; }
+  if (box && ((jump && msgs.length) || follow || end)) { box.scrollTop = box.scrollHeight; follow = false; if (msgs.length) jump = false; }
+  else if (box) box.scrollTop = top;
   watch(grid);
 }
 
 onTalk(() => paint());
+phone.addEventListener("change", () => paint());
+/* Scrolled down to the newest line by hand: the pill goes. */
+document.addEventListener("scroll", (e) => { if (fresh && e.target.matches && e.target.matches("#grid .chat .msgs") && atEnd(e.target)) { fresh = 0; paint(); } }, true);
+/* Browser back and forward between the phone list and a conversation. */
+addEventListener("hashchange", () => {
+  if (cur !== "chat" || !location.hash.startsWith("#chat")) return;
+  read(location.hash.slice(6));
+  if (listing) pushed = false;
+  if (shown !== ch + "|" + listing) show();
+});
 
 const names = () => Object.fromEntries(((O && O.seats) || []).map((s) => [s.id, s.name]));
 const nameOf = (id, N) => (id === "owner" ? "You" : N[id] || id);
@@ -185,7 +208,9 @@ function chanLink(c, N) {
   const who = c.ch.startsWith("dm-") ? pair(c.ch).find((s) => s !== "owner") || "" : "", st = who ? stateOf(who) : "";
   const think = T.filter((t) => t.ch === c.ch).map((t) => `<span class="think" title="${busyLine(t, N)}"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></span>`).join("");
   const tail = c.unread ? `<span class="unread" title="${plural(c.unread, "unread message")}">${c.unread}</span>` : st && !think ? `<span class="pill ${PILL[st] || "idle"}">${esc(st)}</span>` : "";
-  return `<a href="#chat${c.ch ? "?ch=" + esc(c.ch) : ""}" data-ch="${esc(c.ch)}"${c.ch === ch ? ` class="on" aria-current="page"` : ""}>${who ? familiar(who, st, roleOf(who)) : ""}<span class="cn">${esc(label(c.ch, N))}</span>${think}${tail}</a>`;
+  const m = lastIn(c.ch), dm = c.ch.startsWith("dm-"), glyph = who ? "" : `<span class="glyph" aria-hidden="true">${c.ch ? "#" : "◆"}</span>`;
+  const pv = `<span class="pv">${m ? esc(peek(m, (id) => nameOf(id, N), dm)) : !c.ch ? "Every channel, newest first" : C.some((x) => x.ch === c.ch) ? "" : "No messages yet"}</span>${m ? `<time class="tm" datetime="${esc(m.ts)}">${esc(when(m))}</time>` : ""}`;
+  return `<a href="#chat${c.ch ? "?ch=" + esc(c.ch) : "?recent=1"}" data-ch="${esc(c.ch)}"${c.ch === ch ? ` class="on" aria-current="page"` : ""}>${who ? familiar(who, st, roleOf(who)) : glyph}<span class="cn">${esc(label(c.ch, N))}</span>${pv}${think}${tail}</a>`;
 }
 function members(N) {
   const ids = ch.startsWith("dm-") ? pair(ch) : [...new Set(msgs.filter((m) => m.kind !== "system").map((m) => m.from))];
@@ -204,34 +229,59 @@ function wakes(N) {
   });
   return `<section class="wakes" aria-label="Wakes today"><h2><span data-dec>wakes today</span></h2>${rows.join("") || `<p class="none">no seats</p>`}<p class="none">Agents only: your messages never count.</p></section>`;
 }
+/* The open view's title and description; below 900 px also a back arrow, the seat's Familiar and its state or who is thinking. */
 function head(N) {
-  if (!ch) return `<header><h2>Recent</h2><p>The newest messages of every channel, newest at the bottom. Open a channel to write.</p></header>`;
-  const desc = ch.startsWith("dm-") ? "Direct messages between " + pair(ch).map((s) => nameOf(s, N)).join(" and ") + "." : DESC[ch] || (N[ch] ? N[ch] + "'s channel." : "");
-  return `<header><h2>${esc(label(ch, N))}</h2>${desc ? `<p>${esc(desc)}</p>` : ""}</header>`;
+  const back = `<a class="back" href="#chat" data-back aria-label="Back to the conversations"><span aria-hidden="true">←</span></a>`;
+  if (!ch) return `<header>${back}<span class="hav"><span class="glyph" aria-hidden="true">◆</span></span><h2>Recent</h2><p class="desc">The newest messages of every channel, newest at the bottom. Open a channel to write.</p><p class="st">Every channel, read only</p></header>`;
+  const dm = ch.startsWith("dm-"), who = dm ? pair(ch).find((s) => s !== "owner") || "" : "", st = who ? stateOf(who) : "";
+  const desc = dm ? "Direct messages between " + pair(ch).map((s) => nameOf(s, N)).join(" and ") + "." : DESC[ch] || (N[ch] ? N[ch] + "'s channel." : "");
+  const busyNow = T.filter((t) => t.ch === ch), av = who ? familiar(who, st, roleOf(who)) : `<span class="glyph" aria-hidden="true">#</span>`;
+  const line = busyNow.length ? busyNow.map((t) => busyLine(t, N)).join(", ") + `<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>` : esc(who ? LINE[st] || "" : desc);
+  return `<header>${back}<span class="hav" aria-hidden="true">${av}</span><h2>${esc(label(ch, N))}</h2>${desc ? `<p class="desc">${esc(desc)}</p>` : ""}<p class="st">${line}</p></header>`;
 }
 
 export function render() {
   if (!timer && !busy) pull();
   if (!C) return `<div class="nxs skel" aria-busy="true"><p class="sm pad">${err ? "chat unreadable · " + esc(err) : "reading the chat…"}</p></div>`;
   bind(paintNow, (id) => nameOf(id, names()), paint);
-  const N = names(), { rooms, dms } = listed();
+  shown = ch + "|" + listing;
+  const N = names(), L = listed(), rooms = phone.matches ? byActivity(L.rooms) : L.rooms, dms = phone.matches ? byActivity(L.dms) : L.dms;
   const unread = C.filter((c) => c.unread && c.ch !== ch), n = msgs.filter((m) => m.kind !== "system").length;
   const sum = `<b>${esc(label(ch, N))}</b>, ${plural(n, "message")}` + (unread.length ? ` · <span class="gold">${unread.map((c) => `${c.unread} new in ${esc(label(c.ch, N))}`).join(", ")}</span>` : "");
   const nav = `<nav class="chans" aria-label="Channels">${chanLink({ ch: "", unread: 0 }, N)}<h3>Channels</h3>${rooms.map((c) => chanLink(c, N)).join("")}` +
     (dms.length ? `<h3>Direct</h3>${dms.map((c) => chanLink(c, N)).join("")}` : "") + `</nav>`;
-  const body = `<section class="pane stream" aria-label="Messages">${head(N)}<ol class="msgs" aria-live="polite">${stream(N)}</ol>${ch ? composer(ch, label(ch, N)) : ""}</section>`;
-  return `<div class="nxs chat"><section class="band" aria-label="Chat summary"><div class="perch" id="perch" aria-hidden="true"></div><div class="bt"><p class="kin" data-dec>Chat</p>` +
+  const body = `<section class="pane stream" aria-label="Messages">${head(N)}<ol class="msgs" aria-live="polite">${stream(N)}</ol><button type="button" class="btn newer" data-newer${fresh ? "" : " hidden"}>${plural(fresh, "new message")} ↓</button>${ch ? composer(ch, label(ch, N)) : ""}</section>`;
+  return `<div class="nxs chat ${listing && !ch ? "list" : "conv"}"><section class="band" aria-label="Chat summary"><div class="perch" id="perch" aria-hidden="true"></div><div class="bt"><p class="kin" data-dec>Chat</p>` +
     `<p class="bsum">${sum}${err ? ` · stale: ${esc(err)}` : ""}</p></div></section><div class="cgrid">${nav}${body}` +
     `<aside class="pane cside" aria-label="In this channel"><h2><span data-dec>in this channel</span></h2>${members(N)}${wakes(N)}</aside></div></div>`;
 }
 
-/* A tap on a channel opens it in place. */
+/* Paints the view the state names and reads it at once; back on the phone list, at the scroll he left it. */
+function show() {
+  clearTimeout(timer); timer = 0;
+  go("chat", true);
+  if (listing && phone.matches) scrollTo(0, listY);
+  pull();
+}
+
+/* A tap on a channel opens it in place (on the phone list as a new history entry, so Back returns to the list);
+   the back arrow returns to the list; the pill jumps to the newest line. */
 export function click(e) {
   if (e.target.closest(".chat [data-older]")) { older(); return true; }
+  if (e.target.closest(".chat [data-newer]")) { const box = document.querySelector("#grid .chat .msgs"); if (box) box.scrollTop = box.scrollHeight; fresh = 0; paint(); return true; }
+  if (e.target.closest(".chat [data-back]")) {
+    e.preventDefault();
+    if (pushed) { history.back(); return true; }
+    open("", true); history.replaceState(null, "", hash()); show();
+    return true;
+  }
   const a = e.target.closest(".chat [data-ch]");
   if (!a || e.metaKey || e.ctrlKey || e.shiftKey) return false;
   e.preventDefault();
-  if (a.dataset.ch !== ch) { ch = a.dataset.ch; msgs = []; stick = true; jump = true; more = false; forget(); clearTimeout(timer); timer = 0; go("chat", true); pull(); }
+  if (a.dataset.ch === ch && !listing) return true;
+  if (phone.matches && listing && a.closest(".chans")) { listY = scrollY; open(a.dataset.ch, false); history.pushState(null, "", hash()); pushed = true; }
+  else open(a.dataset.ch, false);
+  show();
   return true;
 }
 
