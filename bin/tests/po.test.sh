@@ -2,20 +2,19 @@
 # T1412 product-owner agents: po-new, po-ask, po-run (queue, one run at a time), po-status, po-push (cap, pick buttons),
 # po-picks (tap -> inbox, once), deploy-lock (second deployer waits and reads the new version).
 # Fixture-only (FLEET §5.6): bwrap --unshare-net, a fake ntfy on 127.0.0.1, HARNESS_HOME in a temp dir, a fake agent-run
-# (no LLM); the selftest proves no route out and that the real PO folders are untouched.
+# (no LLM); the selftest proves no route out and that the real agents tree is read-only in the sandbox.
 set -uo pipefail
 SELF=$(readlink -f "$0"); BIN=$(cd "$(dirname "$SELF")/.." && pwd)
 if [ -z "${PO_SANDBOXED:-}" ]; then
-  exec bwrap --dev-bind / / --unshare-net --setenv PO_SANDBOXED 1 -- bash "$SELF"
+  REAL_HOME=$(readlink -f "${HARNESS_HOME:-$HOME/agents}")
+  exec bwrap --dev-bind / / --ro-bind "$REAL_HOME" "$REAL_HOME" --unshare-net --setenv PO_SANDBOXED 1 \
+    --setenv REAL_HOME "$REAL_HOME" -- bash "$SELF"
 fi
 . "$BIN/tests/lib/assert.sh"
-REAL_HOME="${HARNESS_HOME:-$HOME/agents}"
-real_count() { find "$REAL_HOME"/po-*/inbox "$REAL_HOME"/po-*/done -type f 2>/dev/null | wc -l; }
-real_before=$(real_count)
 
 WORK=$(mktemp -d); trap 'kill "${SRV:-0}" 2>/dev/null; rm -rf "$WORK"' EXIT
-export HARNESS_ENV_LOADED=1 HARNESS_HOME="$WORK/agents" HARNESS_CONFIG=/dev/null
-mkdir -p "$HARNESS_HOME" "$WORK/stubs"
+export HARNESS_ENV_LOADED=1 HARNESS_HOME="$WORK/agents" AGENT_WORK="$WORK/agent-work" HARNESS_CONFIG=/dev/null
+mkdir -p "$HARNESS_HOME" "$AGENT_WORK/decisions" "$WORK/stubs"
 cp -r "$BIN/../po-template" "$HARNESS_HOME/po-template"
 
 # Fake agent-run: logs start/end, flags overlap, files current/ like a PO (unless $WORK/leave), may drop a new request.
@@ -70,6 +69,7 @@ ok 'selftest: no route to ntfy.sh'
 is 'selftest: agent-run is the fake' "$(command -v agent-run)" "$WORK/stubs/agent-run"
 is 'selftest: plan-usage is the fake' "$(command -v plan-usage)" "$WORK/stubs/plan-usage"
 case "$HARNESS_HOME" in "$WORK"/*) ok 'selftest: HARNESS_HOME is the fixture';; *) nok 'selftest: HARNESS_HOME' "$HARNESS_HOME";; esac
+case "$AGENT_WORK" in "$WORK"/*) ok 'selftest: AGENT_WORK is the fixture';; *) nok 'selftest: AGENT_WORK' "$AGENT_WORK";; esac
 
 # po-new
 out=$(po-new fx "Fixture Game"); is 'po-new: exit 0' "$?" 0
@@ -205,6 +205,19 @@ is 'manager: a run without ESCALATE does not make an old line new again' "$(grep
 for i in $(seq 60); do echo "ESCALATE: n$i"; done >"$WORK/report"; po-ask mgr --from liaison "e" >/dev/null; po-run mgr >/dev/null 2>&1; rm -f "$WORK/report"
 is 'manager: state/escalated keeps the newest 50 hashes' "$(wc -l <"$M/state/escalated") $(grep -cvx '[0-9a-f]\{40\}' "$M/state/escalated")" '50 0'
 
+# T1557-C3: a manager's run is wrapped by `po-context repo` before and `po-context check` after; misses -> REPORT.md
+touch "$AGENT_WORK/decisions/mgr.md"; po-ask mgr --from liaison "f" >/dev/null; po-run mgr >/dev/null 2>&1
+is 'context (T1557-C3): a clean manager run adds no context: line' "$(grep -c '^context: ' "$M/REPORT.md")" 0
+grep -q '^context: ' "$P/REPORT.md"; is 'context (T1557-C3): a PO without PARENT gets no check' "$?" 1
+cp "$M/state/PROJECT.md" "$WORK/project.bak"
+for i in $(seq 10); do printf '%0700d\n' 0; done >>"$M/state/PROJECT.md"
+po-ask mgr --from liaison "g" >/dev/null; po-run mgr >/dev/null 2>&1
+is 'context (T1557-C3): a 7 KB PROJECT.md gives one context: line' "$(grep -c '^context: ' "$M/REPORT.md") $(grep -c '^context: PROJECT.md [0-9]* bytes > 6 KB' "$M/REPORT.md")" '1 1'
+echo "## stale" >"$WORK/report"; echo "context: old miss" >>"$WORK/report"
+po-ask mgr --from liaison "h" >/dev/null; po-run mgr >/dev/null 2>&1; rm -f "$WORK/report"
+is 'context (T1557-C3): old context: lines are replaced, not stacked' "$(grep -c '^context: ' "$M/REPORT.md") $(grep -c 'old miss' "$M/REPORT.md")" '1 0'
+cp "$WORK/project.bak" "$M/state/PROJECT.md"
+
 # P34: a running po-run survives an in-place edit of its own file (bash parses the whole body before it runs it).
 mkdir -p "$WORK/edit/bin" "$WORK/edit/stubs"; cp "$BIN/po-run" "$BIN/polib.sh" "$WORK/edit/bin/"
 cat >"$WORK/edit/stubs/agent-run" <<'STUB'
@@ -222,5 +235,5 @@ U="$BIN/../units"
 ev 'units: path unit wakes po@%i.service on a non-empty inbox' 'grep -qx "DirectoryNotEmpty=%h/agents/po-%i/inbox" "$U/po@.path" && grep -qx "Unit=po@%i.service" "$U/po@.path"'
 ev 'units: service runs po-run' 'grep -qx "ExecStart=%h/agents/bin/po-run %i" "$U/po@.service"'
 
-is 'selftest: real PO folders untouched' "$(real_count)" "$real_before"
+touch "$REAL_HOME/.po-test-probe" 2>/dev/null; is 'selftest: the real agents tree is read-only in the sandbox' "$?" 1
 exit $bad

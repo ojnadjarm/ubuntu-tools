@@ -5,7 +5,9 @@
 # Each run gets PO_BUDGET=stop when `plan-usage --check 95` exits 1 (the PO then spawns no worker), else ok;
 # CHAT_SEAT=<p> lets the run post with `chat` (a manager only in its direct message with the owner, T1515 P34). For a
 # manager (PARENT=<seat> in agent.env, T1515 P31) each new REPORT.md `ESCALATE:` line goes to its parent with
-# `po-ask <seat> --from manager` once: state/escalated keeps a sha1 per sent line (newest 50).
+# `po-ask <seat> --from manager` once: state/escalated keeps a sha1 per sent line (newest 50). A manager's run is
+# wrapped by `po-context repo <p>` before (state/REPO.md) and `po-context check <p>` after: each miss becomes one
+# `context: ...` line at the end of REPORT.md, which the next run reads and fixes first (T1557-C3).
 help() { awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; }
 case "${1:-}" in -h|--help) help; exit 0 ;; '') help >&2; exit 2 ;; esac
 { # one block: bash parses it whole before running, so an edit of this file cannot break a running po-run
@@ -25,6 +27,11 @@ escalate() {
   done
   [ -e "$mark" ] && tail -n 50 "$mark" >"$mark.tmp" && mv "$mark.tmp" "$mark"
 }
+context() {
+  local r="$dir/REPORT.md"
+  { grep -v '^context: ' "$r" 2>/dev/null; po-context check "$1" 2>&1 | sed -n "s/^miss: $1: /context: /p"; } >"$r.tmp"
+  mv "$r.tmp" "$r"
+}
 mkdir -p "$dir/current" "$dir/done"
 exec 9>"$dir/.po-run.lock"
 flock -n 9 || { echo "po-run: $name is already running; that run picks up new requests"; exit 0; }
@@ -35,8 +42,9 @@ for _ in $(seq "${PO_MAX_LOOPS:-5}"); do
   [ ${#reqs[@]} -gt 0 ] || break
   mv -n "${reqs[@]}" "$dir/current/"
   PO_BUDGET=ok; plan-usage --check 95 >/dev/null 2>&1; [ $? -ne 1 ] || PO_BUDGET=stop
+  [ -z "$parent" ] || po-context repo "$1" >/dev/null 2>&1 9>&-
   PO_BUDGET=$PO_BUDGET CHAT_SEAT="$1" agent-run "$name" 9>&-; rc=$?
-  [ -z "$parent" ] || escalate
+  [ -z "$parent" ] || { escalate; context "$1"; }
   for f in "$dir"/current/*.md; do
     printf '\noutcome: left in current/ by the run (agent-run exit %s); see REPORT.md\n' "$rc" >>"$f"
     mv -n "$f" "$dir/done/"
