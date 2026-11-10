@@ -1,4 +1,4 @@
-/* Agents › Chat: channel list, message stream, composer, who is in the channel, who is thinking, wakes today, attachments and Recent (T1515-P9, P10, P33, P38); below 900 px a messenger list and a full-screen conversation (P39); from 900 px messenger rows in a list column sized to its names (T1545-A); eye.css tokens only. */
+/* Agents › Chat: channel list, message stream, composer, who is in the channel, who is thinking, wakes today, attachments and Recent (T1515-P9, P10, P33, P38); below 900 px a messenger list and a full-screen conversation (P39); from 900 px messenger rows in a list column sized to its names (T1545-A); the search box and results (T1545-D); eye.css tokens only. */
 .chat { display: grid; gap: 1rem; }
 .chat .cgrid { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr); align-items: start; }
 .chat .pill.off { color: var(--mute); border-color: var(--line); border-style: dashed; }
@@ -75,6 +75,12 @@
 .chat .think .dots i { width: .26rem; height: .26rem; }
 @keyframes chat-dot { 0%, 70%, 100% { opacity: .25; transform: none; } 35% { opacity: 1; transform: translateY(-.18rem); } }
 @media (prefers-reduced-motion: reduce) { .chat .dots i { animation: none; opacity: .8; } }
+.chat .csq { position: sticky; top: 0; z-index: 1; flex: none; padding: 0 0 .4rem; background: var(--bg); }
+.chat .csq input { width: 100%; min-height: max(44px, 2.75rem); padding: 0 .8rem; border: 1px solid var(--line3); background: var(--bg); color: var(--hi); font: inherit; font-size: max(11px, .9rem); }
+.chat .csq input:focus { outline: none; border-color: var(--gold); }
+.chat .csq input::placeholder { color: var(--mute); }
+.chat .stream header .csq { display: none; }
+.chat mark { color: var(--gold); background: var(--gold-w); padding: 0 .1em; }
 .chat .cside { display: none; }
 .chat .cside .mem { display: grid; grid-template-columns: 2.6rem minmax(0, 1fr); gap: .7rem; align-items: center; margin-bottom: .8rem; }
 .chat .cside .mem svg { width: 100%; height: auto; display: block; }
@@ -151,6 +157,11 @@
   .chat .stream header h2 { grid-area: h2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .chat .stream header .st { grid-area: st; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .chat .stream header .desc { display: none; }
+  .chat .chans > .csq { padding: .6rem 1rem; border-bottom: 1px solid var(--line); background: var(--bg1); }
+  .chat .csq input { font-size: max(16px, 1rem); }
+  .chat .stream header.find { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "back box" "back h2"; }
+  .chat .stream header.find .csq { display: block; grid-area: box; position: static; padding: 0; background: none; }
+  .chat .stream header.find h2 { font-size: max(11px, .9rem); color: var(--mid); }
   .chat .compose { padding: .6rem var(--gut); }
 }
 @media (max-width: 700px) { .chat .csys { padding-left: 0; } }

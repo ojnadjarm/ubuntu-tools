@@ -1,4 +1,4 @@
-/* Chat: Recent (every channel, newest last) or a channel's stream (newest 50, older on scroll-up), the channels and direct messages, a composer with attachments, who is in it, who is thinking and today's wakes, from GET /api/chat; below 900 px a messenger: the conversation list, then one conversation full screen. */
+/* Chat: Recent (every channel, newest last), a channel's stream or a search over every channel (newest 50, older on scroll-up), the channels and direct messages, a composer with attachments, who is in it, who is thinking and today's wakes, from GET /api/chat; below 900 px a messenger: the conversation list, then one conversation full screen. */
 import { esc, p2 } from "/static/js/core/fmt.js";
 import { getJSON, postJSON } from "/static/js/core/api.js";
 import { cur, go } from "/static/js/core/router.js";
@@ -13,6 +13,7 @@ import { composer, bind, forget } from "./chat-compose.js";
 import { attachments } from "./chat-files.js";
 import { store } from "../store.js";
 import { note, seed, lastIn, byActivity, peek, when } from "./chat-list.js";
+import { box, bindSearch, mark, words, fill, focusBox } from "./chat-search.js";
 
 export const own = true;
 const POLL_MS = 3000, ORG_MS = 20000, QUOTE = 44;
@@ -24,6 +25,7 @@ const ROOMS = ["harness", "org"];
 let C = null, msgs = [], ch = "", err = "", busy = false, timer = 0, O = null, oat = 0, follow = false, W = null;
 let more = false, jump = true, early = false, io = null, watched = null, T = [];
 let listing = true, pushed = false, listY = 0, fresh = 0, shown = "";
+let q = "", hits = null, asked = "", serr = "", from = ["", true], spushed = false;
 const phone = matchMedia("(max-width: 899px)");
 const seen = {};
 
@@ -38,16 +40,42 @@ function open(c, list) {
   listing = list;
   if (c !== ch) { ch = c; msgs = []; jump = true; more = false; fresh = 0; forget(); }
 }
-/* The hash carries the open view: #chat?ch=<id>, #chat?recent=1 (Recent), #chat (the phone list; Recent from 900 px). */
-export function read(q) {
-  const u = new URLSearchParams(q), want = u.get("ch") || "";
+/* The hash carries the open view: #chat?ch=<id>, #chat?recent=1 (Recent), #chat?q=<words> (search), #chat (the phone list; Recent from 900 px). */
+export function read(s) {
+  const u = new URLSearchParams(s), want = u.get("ch") || "", w = u.get("q") || "";
+  if (w.trim().length >= 2) { if (!q) from = [ch, listing]; q = w; open("", false); return; }
+  q = ""; hits = null; asked = ""; spushed = false;
   open(want, !want && u.get("recent") !== "1");
 }
-export const hash = () => "#chat" + (ch ? "?ch=" + encodeURIComponent(ch) : listing ? "" : "?recent=1");
+export const hash = () => "#chat" + (q ? "?q=" + encodeURIComponent(q) : ch ? "?ch=" + encodeURIComponent(ch) : listing ? "" : "?recent=1");
 if (location.hash.startsWith("#chat?")) read(location.hash.slice(6));
 
-/* The query of the open view: a channel, or Recent (no channel). */
-const src = (c) => "/api/chat?" + (c ? "ch=" + encodeURIComponent(c) : "recent=1");
+/* The query of the open view: a search for words, a channel, or Recent (no channel). */
+const src = (c, w) => (w ? "/api/chat/search?q=" + encodeURIComponent(w) : "/api/chat?" + (c ? "ch=" + encodeURIComponent(c) : "recent=1"));
+
+/* The one read of a search: the newest 30 messages of every channel holding every word, oldest first. */
+function look() {
+  const w = q.trim();
+  asked = w; hits = null; serr = "";
+  getJSON(src("", w)).then((j) => { if (w === asked) { hits = j.messages || []; follow = true; } }, (e) => { if (w === asked) serr = e.message || "unreadable"; })
+    .finally(() => { if (w === asked) paint(); });
+}
+
+/* Typing in the box: 2+ characters open or refine the search view (a history entry of its own), fewer return. */
+function seek(v) {
+  if (v.trim().length < 2) { if (q) leave(); return; }
+  if (v === q) return;
+  if (!q) { from = [ch, listing]; open("", false); q = v; history.pushState(null, "", hash()); spushed = true; }
+  else { q = v; history.replaceState(null, "", hash()); }
+  paint();
+}
+
+/* Leaves the search view for the view he came from (history back when the search pushed an entry). */
+function leave() {
+  q = ""; hits = null; asked = ""; serr = ""; fill("");
+  if (spushed) { spushed = false; history.back(); return; }
+  open(from[0], from[1]); history.replaceState(null, "", hash()); show();
+}
 
 /* One read of the open view (only what is newer than the last message), then the next one in POLL_MS while Chat is on screen. */
 function pull() {
@@ -126,6 +154,7 @@ function paint() {
   const end = !box0 || atEnd(box0);
   if (end) fresh = 0;
   if (grid.querySelector(":scope > .nxs.chat")) sync(grid, render(), 1); else go("chat", true);
+  fill(q);
   const box = grid.querySelector(".chat .msgs");
   if (box && ((jump && msgs.length) || follow || end)) { box.scrollTop = box.scrollHeight; follow = false; if (msgs.length) jump = false; }
   else if (box) box.scrollTop = top;
@@ -141,7 +170,7 @@ addEventListener("hashchange", () => {
   if (cur !== "chat" || !location.hash.startsWith("#chat")) return;
   read(location.hash.slice(6));
   if (listing) pushed = false;
-  if (shown !== ch + "|" + listing) show();
+  if (shown !== ch + "|" + listing + "|" + q) show();
 });
 
 const names = () => Object.fromEntries(((O && O.seats) || []).map((s) => [s.id, s.name]));
@@ -180,13 +209,13 @@ let rich = text;
 import("./chat-text.js").then((m) => { rich = m.rich; paint(); }, () => {});
 const clip = (t) => (t.length > QUOTE ? t.slice(0, QUOTE).trimEnd() + "…" : t);
 
-function msg(m, byId, N) {
-  if (m.kind === "system") return `<li class="csys">${rich(m.text)}</li>`;
+function msg(m, byId, N, fmt = rich) {
+  if (m.kind === "system") return `<li class="csys">${fmt(m.text)}</li>`;
   const him = m.from === "owner", r = m.re != null ? byId[m.re] : null;
   const av = him ? `<i class="dia"></i>` : familiar(m.from, stateOf(m.from), roleOf(m.from), m.id);
   const re = m.re == null ? "" : `<p class="re">${r ? esc(nameOf(r.from, N) + " " + time(r) + ": " + clip(r.text)) : "a reply to an earlier message"}</p>`;
   const where = ch ? "" : `<a class="chtag" href="#chat?ch=${esc(m.ch)}" data-ch="${esc(m.ch)}">${esc(label(m.ch, N))}</a>`;
-  return `<li class="msg${him ? " him" : ""}"><span class="av" aria-hidden="true">${av}</span><div><p class="who"><b>${esc(nameOf(m.from, N))}</b>${where}${TAG[m.kind] || ""}<time datetime="${esc(m.ts)}">${time(m)}</time></p>${re}${m.text ? `<div class="tx">${rich(m.text)}</div>` : ""}${attachments(m.files)}</div></li>`;
+  return `<li class="msg${him ? " him" : ""}"><span class="av" aria-hidden="true">${av}</span><div><p class="who"><b>${esc(nameOf(m.from, N))}</b>${where}${TAG[m.kind] || ""}<time datetime="${esc(m.ts)}">${time(m)}</time></p>${re}${m.text ? `<div class="tx">${fmt(m.text)}</div>` : ""}${attachments(m.files)}</div></li>`;
 }
 /* "<seat> is thinking" (or "woken, starting") for an agent woken from channel c and still running. */
 const busyLine = (t, N) => esc(nameOf(t.seat, N)) + (t.state === "thinking" ? " is thinking" : " woken, starting");
@@ -196,14 +225,27 @@ function thinking(N) {
     return `<li class="thinking"><span class="av" aria-hidden="true">${familiar(t.seat, "working", roleOf(t.seat))}</span><p><b>${busyLine(t, N)}</b><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>${where}</p></li>`;
   }).join("");
 }
-function stream(N) {
-  const byId = Object.fromEntries(msgs.map((m) => [m.id, m]));
+/* Rows of list with a day line before each new day; fmt turns text to HTML. */
+function rows(list, N, fmt) {
+  const byId = Object.fromEntries(list.map((m) => [m.id, m]));
   let last = "", out = "";
-  for (const m of msgs) {
+  for (const m of list) {
     const d = day(m);
     if (d !== last) { out += `<li class="cday">${esc(d)}</li>`; last = d; }
-    out += msg(m, byId, N);
+    out += msg(m, byId, N, fmt);
   }
+  return out;
+}
+/* The search view's rows: Recent's rows with each word marked, or why there are none. */
+function found(N) {
+  if (serr) return `<li class="csys">Search failed: ${esc(serr)}</li>`;
+  if (!hits) return `<li class="csys">Searching…</li>`;
+  if (!hits.length) return `<li class="csys">No message has ${esc(q.trim())}.</li>`;
+  const ws = words(q);
+  return rows(hits, N, (t) => mark(rich(t), ws));
+}
+function stream(N) {
+  const out = rows(msgs, N, rich);
   return ((more ? `<li class="older"><button type="button" class="btn" data-older>Older messages</button></li>` : "") + out ||
     `<li class="csys">No messages ${ch ? "in this channel" : "anywhere"} yet.</li>`) + thinking(N);
 }
@@ -214,7 +256,7 @@ function chanLink(c, N) {
   const tail = c.unread ? `<span class="unread" title="${plural(c.unread, "unread message")}">${c.unread}</span>` : st && !think ? `<span class="pill ${PILL[st] || "idle"}">${esc(st)}</span>` : "";
   const m = lastIn(c.ch), dm = c.ch.startsWith("dm-"), glyph = who ? "" : `<span class="glyph" aria-hidden="true">${c.ch ? "#" : "◆"}</span>`;
   const pv = `<span class="pv">${m ? esc(peek(m, (id) => nameOf(id, N), dm)) : !c.ch ? "Every channel, newest first" : C.some((x) => x.ch === c.ch) ? "" : "No messages yet"}</span>${m ? `<time class="tm" datetime="${esc(m.ts)}">${esc(when(m))}</time>` : ""}`;
-  return `<a href="#chat${c.ch ? "?ch=" + esc(c.ch) : "?recent=1"}" data-ch="${esc(c.ch)}"${c.ch === ch ? ` class="on" aria-current="page"` : ""}>${who ? familiar(who, st, roleOf(who)) : glyph}<span class="cn">${esc(label(c.ch, N))}</span>${pv}${think}${tail}</a>`;
+  return `<a href="#chat${c.ch ? "?ch=" + esc(c.ch) : "?recent=1"}" data-ch="${esc(c.ch)}"${c.ch === ch && !q ? ` class="on" aria-current="page"` : ""}>${who ? familiar(who, st, roleOf(who)) : glyph}<span class="cn">${esc(label(c.ch, N))}</span>${pv}${think}${tail}</a>`;
 }
 function members(N) {
   const ids = ch.startsWith("dm-") ? pair(ch) : [...new Set(msgs.filter((m) => m.kind !== "system").map((m) => m.from))];
@@ -236,6 +278,7 @@ function wakes(N) {
 /* The open view's title and description; below 900 px also a back arrow, the seat's Familiar and its state or who is thinking. */
 function head(N) {
   const back = `<a class="back" href="#chat" data-back aria-label="Back to the conversations"><span aria-hidden="true">←</span></a>`;
+  if (q) return `<header class="find">${back}${box(q, "cq2")}<h2>${esc(serr ? "Search failed" : hits ? plural(hits.length, "result") + " for " + q.trim() : "Searching for " + q.trim() + "…")}</h2></header>`;
   if (!ch) return `<header>${back}<span class="hav"><span class="glyph" aria-hidden="true">◆</span></span><h2>Recent</h2><p class="desc">The newest messages of every channel, newest at the bottom. Open a channel to write.</p><p class="st">Every channel, read only</p></header>`;
   const dm = ch.startsWith("dm-"), who = dm ? pair(ch).find((s) => s !== "owner") || "" : "", st = who ? stateOf(who) : "";
   const desc = dm ? "Direct messages between " + pair(ch).map((s) => nameOf(s, N)).join(" and ") + "." : DESC[ch] || (N[ch] ? N[ch] + "'s channel." : "");
@@ -248,13 +291,15 @@ export function render() {
   if (!timer && !busy) pull();
   if (!C) return `<div class="nxs skel" aria-busy="true"><p class="sm pad">${err ? "chat unreadable · " + esc(err) : "reading the chat…"}</p></div>`;
   bind(paintNow, (id) => nameOf(id, names()), paint);
-  shown = ch + "|" + listing;
+  bindSearch(seek, () => { if (q) leave(); });
+  if (q && q.trim() !== asked) look();
+  shown = ch + "|" + listing + "|" + q;
   const N = names(), L = listed(), rooms = byActivity(L.rooms), dms = byActivity(L.dms);
   const unread = C.filter((c) => c.unread && c.ch !== ch), n = msgs.filter((m) => m.kind !== "system").length;
-  const sum = `<b>${esc(label(ch, N))}</b>, ${plural(n, "message")}` + (unread.length ? ` · <span class="gold">${unread.map((c) => `${c.unread} new in ${esc(label(c.ch, N))}`).join(", ")}</span>` : "");
-  const nav = `<nav class="chans" aria-label="Channels">${chanLink({ ch: "", unread: 0 }, N)}<h3>Channels</h3>${rooms.map((c) => chanLink(c, N)).join("")}` +
+  const sum = (q ? `<b>Search</b>${hits ? ", " + plural(hits.length, "result") : ""}` : `<b>${esc(label(ch, N))}</b>, ${plural(n, "message")}`) + (unread.length ? ` · <span class="gold">${unread.map((c) => `${c.unread} new in ${esc(label(c.ch, N))}`).join(", ")}</span>` : "");
+  const nav = `<nav class="chans" aria-label="Channels">${box(q, "cq")}${chanLink({ ch: "", unread: 0 }, N)}<h3>Channels</h3>${rooms.map((c) => chanLink(c, N)).join("")}` +
     (dms.length ? `<h3>Direct</h3>${dms.map((c) => chanLink(c, N)).join("")}` : "") + `</nav>`;
-  const body = `<section class="pane stream" aria-label="Messages">${head(N)}<ol class="msgs" aria-live="polite">${stream(N)}</ol><button type="button" class="btn newer" data-newer${fresh ? "" : " hidden"}>${plural(fresh, "new message")} ↓</button>${ch ? composer(ch, label(ch, N)) : ""}</section>`;
+  const body = `<section class="pane stream" aria-label="Messages">${head(N)}<ol class="msgs" aria-live="polite">${q ? found(N) : stream(N)}</ol><button type="button" class="btn newer" data-newer${fresh && !q ? "" : " hidden"}>${plural(fresh, "new message")} ↓</button>${ch ? composer(ch, label(ch, N)) : ""}</section>`;
   return `<div class="nxs chat ${listing && !ch ? "list" : "conv"}"><section class="band" aria-label="Chat summary"><div class="perch" id="perch" aria-hidden="true"></div><div class="bt"><p class="kin" data-dec>Chat</p>` +
     `<p class="bsum">${sum}${err ? ` · stale: ${esc(err)}` : ""}</p></div></section><div class="cgrid">${nav}${body}` +
     `<aside class="pane cside" aria-label="In this channel"><h2><span data-dec>in this channel</span></h2>${members(N)}${wakes(N)}</aside></div></div>`;
@@ -264,6 +309,7 @@ export function render() {
 function show() {
   clearTimeout(timer); timer = 0;
   go("chat", true);
+  fill(q);
   if (listing && phone.matches) scrollTo(0, listY);
   pull();
 }
@@ -275,6 +321,7 @@ export function click(e) {
   if (e.target.closest(".chat [data-newer]")) { const box = document.querySelector("#grid .chat .msgs"); if (box) box.scrollTop = box.scrollHeight; fresh = 0; paint(); return true; }
   if (e.target.closest(".chat [data-back]")) {
     e.preventDefault();
+    if (q) { leave(); return true; }
     if (pushed) { history.back(); return true; }
     open("", true); history.replaceState(null, "", hash()); show();
     return true;
@@ -282,11 +329,20 @@ export function click(e) {
   const a = e.target.closest(".chat [data-ch]");
   if (!a || e.metaKey || e.ctrlKey || e.shiftKey) return false;
   e.preventDefault();
-  if (a.dataset.ch === ch && !listing) return true;
+  const was = q;
+  if (q) { q = ""; hits = null; asked = ""; spushed = false; }
+  if (a.dataset.ch === ch && !listing && !was) return true;
   if (phone.matches && listing && a.closest(".chans")) { listY = scrollY; open(a.dataset.ch, false); history.pushState(null, "", hash()); pushed = true; }
   else open(a.dataset.ch, false);
   show();
   return true;
+}
+
+/* "/" puts him in the search box; Esc leaves the search view. */
+export function key(e) {
+  if (e.key === "/" && focusBox()) { e.preventDefault(); return true; }
+  if (e.key === "Escape" && q) { leave(); return true; }
+  return false;
 }
 
 /* The eye on the band's perch over a field of dust, as on the Org screen. */
