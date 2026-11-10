@@ -6,18 +6,27 @@ set -uo pipefail
 # TSP-013: headless runs load no MCP servers, no auto-memory, only $AGENT_TOOLS, and skip the
 # orchestrator's ~/CLAUDE.md; the fleet contract arrives once, through $SYSTEM_FILE.
 export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
+# T1599: a headless run is a worker: an inherited owner seat (CHAT_SEAT=orchestrator) is not honoured by `memory`.
+export MEMORY_WORKER=1
 # E3: no PASSWORD/TOKEN/SECRET variable reaches the model unless AGENT_ENV_KEEP (agent.env) names it.
 for v in $(compgen -e); do
   [[ $v =~ PASSWORD|TOKEN|SECRET && " ${AGENT_ENV_KEEP:-} " != *" $v "* ]] && unset "$v"
 done
 cmd=(claude -p "$(cat "$PROMPT_FILE")" --model "$MODEL" --permission-mode bypassPermissions
-     --strict-mcp-config --tools "${AGENT_TOOLS:-Bash,Read,Edit,Write}"
+     --strict-mcp-config --tools "${AGENT_TOOLS-Bash,Read,Edit,Write}"
      --settings "{\"claudeMdExcludes\":[\"$HOME/CLAUDE.md\"]}")
 [ -n "${AGENT_NAME:-}" ] && cmd+=(--name "agent-$AGENT_NAME")
 [ -n "${EFFORT:-}" ] && cmd+=(--effort "$EFFORT")
-if [ -n "${SYSTEM_FILE:-}" ] && [ -r "$SYSTEM_FILE" ]; then
-  cmd+=(--append-system-prompt "$(cat "$SYSTEM_FILE")")
+sys=""
+[ -n "${SYSTEM_FILE:-}" ] && [ -r "$SYSTEM_FILE" ] && sys="$(cat "$SYSTEM_FILE")"
+# T1599: once `memory install` wrote the core line in ~/CLAUDE.md (or MEMORY_DOMAINS is set), the memory (core +
+# MEMORY_DOMAINS + this folder's domain) follows the contract; a failed load adds nothing.
+mem=""
+if { [ -n "${MEMORY_DOMAINS+set}" ] || grep -qs '^@.*/core/CORE\.md$' "$HOME/CLAUDE.md"; } && command -v memory >/dev/null; then
+  mem="$(timeout 30 memory load 2>/dev/null)" || mem=""
 fi
+[ -n "$mem" ] && sys="${sys:+$sys$'\n\n'}$mem"
+[ -n "$sys" ] && cmd+=(--append-system-prompt "$sys")
 cmd+=(--output-format stream-json --verbose)
 # AGENT_WRAP (agent.env): a command prefix such as a sandbox, e.g. "code-review-sandbox --".
 [ -n "${AGENT_WRAP:-}" ] && { read -ra wrap <<<"$AGENT_WRAP"; cmd=("${wrap[@]}" "${cmd[@]}"); }

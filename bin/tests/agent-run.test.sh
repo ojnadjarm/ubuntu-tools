@@ -188,5 +188,39 @@ shim_n="$(wc -l <"$SHIM_LOG")"
 { grep -q '^pc doctor ' "$SHIM_LOG" && grep -q '^pc power ' "$SHIM_LOG" && grep -q '^pc top ' "$SHIM_LOG"; } \
   && { ok; echo "agent-run: 0 live pc/sudo calls ($shim_n recorded by the shim)"; } || no "$(cat "$SHIM_LOG")"
 
+# T1599-M08: the adapter appends `memory load`'s text (synthetic fixture store at the sandbox's ~/memory) after the contract.
+cp -r "$BIN/tests/fixtures/memory-carrier/store" "$SB/memory"; ln -s "$BIN/memory" "$SB/agents/bin/memory"
+printf '@~/memory/core/CORE.md\n' >"$SB/CLAUDE.md"
+mem_of() { (cd "$SB/agents/demo" && env -i HOME="$SB" PATH=/usr/bin:/bin HARNESS_CONFIG=/nonexistent MEMORY_WORKER=1 "$@" "$BIN/memory" load); }
+sysp() { : >"$SB/claude-args.log"; run_agent claude; python3 -c 'import sys; a=open(sys.argv[1]).read(); \
+  print(a.split("--append-system-prompt ",1)[1].rsplit(" --output-format",1)[0] if "--append-system-prompt " in a else "")' "$SB/claude-args.log"; }
+
+t "T1599 selftest: the sandbox memory store is the fixture"
+[ "$(env -i HOME="$SB" PATH=/usr/bin:/bin HARNESS_CONFIG=/nonexistent python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import memory_store; print(memory_store.home())' "$ROOT/lib")" = "$SB/memory" ] \
+  && grep -q Pemberton "$SB/memory/core/CORE.md" && ok || { no "store is not the sandbox fixture"; exit 1; }
+
+t "T1599: the system prompt is the contract, then memory load's text"
+want="$(printf 'preamble\n\n%s' "$(mem_of)")"
+{ [ "$(sysp)" = "$want" ] && grep -q Pemberton <<<"$want"; } && ok || no "$(cat "$SB/claude-args.log")"
+
+t "T1599: MEMORY_DOMAINS in agent.env adds that card"
+printf 'export MEMORY_DOMAINS=zebra\n' >"$SB/agents/demo/agent.env"
+want="$(printf 'preamble\n\n%s' "$(mem_of MEMORY_DOMAINS=zebra)")"; got="$(sysp)"; rm -f "$SB/agents/demo/agent.env"
+{ [ "$got" = "$want" ] && grep -q teal <<<"$got"; } && ok || no "$got"
+
+t "T1599: missing store adds nothing, the run still exits 0"
+mv "$SB/memory" "$SB/memory.off"
+{ [ "$(sysp)" = preamble ] && [ "$(tail -1 "$idx" | cut -f3)" = 0 ]; } && ok || no "$(cat "$SB/claude-args.log")"
+
+t "T1599: empty store adds nothing, the run still exits 0"
+mkdir "$SB/memory"
+{ [ "$(sysp)" = preamble ] && [ "$(tail -1 "$idx" | cut -f3)" = 0 ]; } && ok || no "$(cat "$SB/claude-args.log")"
+rmdir "$SB/memory"; mv "$SB/memory.off" "$SB/memory"
+
+t "T1599: a failing memory load adds nothing, the run still exits 0"
+rm "$SB/agents/bin/memory"; printf '#!/usr/bin/env bash\necho partial\nexit 1\n' >"$SB/agents/bin/memory"; chmod +x "$SB/agents/bin/memory"
+{ [ "$(sysp)" = preamble ] && [ "$(tail -1 "$idx" | cut -f3)" = 0 ]; } && ok || no "$(cat "$SB/claude-args.log")"
+rm -f "$SB/agents/bin/memory" "$SB/CLAUDE.md"
+
 [ $fail = 0 ] && echo "agent-run.test.sh: all green" || echo "agent-run.test.sh: FAILURES"
 exit $fail

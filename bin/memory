@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""memory — load the core card plus domain cards, drop a note in the inbox, or check the store; the store is $MEMORY_HOME (T1599)."""
+"""memory — load the core card plus domain cards, drop a note in the inbox, check the store, or install the carriers; the store is $MEMORY_HOME (T1599)."""
 import argparse
+import importlib.machinery
+import importlib.util
 import json
 import os
+import re
 import sys
 import time
 
@@ -10,6 +13,29 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath
 import memory_check  # noqa: E402
 import memory_route  # noqa: E402
 import memory_store  # noqa: E402
+
+
+ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+LIVE_N = 5
+
+
+def carrier():
+    """The agent CLI's memory carrier module: adapters/$HARNESS_AGENT/memory-carrier (default claude)."""
+    path = os.path.join(ROOT, "adapters", os.environ.get("HARNESS_AGENT") or "claude", "memory-carrier")
+    if not os.path.isfile(path):
+        die(f"no memory carrier at {path}")
+    loader = importlib.machinery.SourceFileLoader("memory_carrier", path)
+    mod = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(mod)
+    return mod
+
+
+def seat(store):
+    """CHAT_SEAT, except that an owner seat inherited by a worker (sub-agent, headless run) counts as no seat."""
+    s = os.environ.get("CHAT_SEAT", "")
+    if s and memory_route.source_for(s, True, store) == "owner" and carrier().is_worker():
+        return ""
+    return s
 
 
 def die(msg):
@@ -69,7 +95,70 @@ def check(store, seat, args):
     found = memory_check.run(store, before, folders)
     for f in found:
         print(memory_check.fmt(f))
-    sys.exit(1 if found else 0)
+    score = live(store, args.domains) if args.live else LIVE_N
+    sys.exit(1 if found or score < LIVE_N else 0)
+
+
+def questions(store, domains):
+    """[(where, question, [must words])]: checks/questions.tsv, else checks/questions.d/*.tsv (private-* left out), for core + domains."""
+    tsv = store.path("checks/questions.tsv")
+    qd = store.path("checks/questions.d")
+    files = [tsv] if os.path.isfile(tsv) else sorted(
+        os.path.join(qd, f) for f in (os.listdir(qd) if os.path.isdir(qd) else [])
+        if f.endswith(".tsv") and not f.startswith("private-"))
+    out = []
+    for path in files:
+        stem = os.path.basename(path)[:-4] if path != tsv else None
+        with open(path, encoding="utf-8") as f:
+            rows = [l.rstrip("\n").split("\t") for l in f]
+        head = [c.strip().lower() for c in rows[0]] if rows else []
+        named = "question" in head and "must" in head
+        for n, r in enumerate(rows[1:] if named else rows, 2 if named else 1):
+            if named:
+                cell = dict(zip(head, r))
+                q, must, dom = cell.get("question", ""), cell.get("must", ""), cell.get("domain") or stem
+            else:
+                i = next((i for i, c in enumerate(r) if c.strip().endswith("?")), None)
+                if i is None or i + 1 >= len(r):
+                    continue
+                q, must, dom = r[i], r[i + 1], stem
+            words = [w.strip() for w in re.split(r"[|;,]", must) if w.strip()]
+            if q.strip() and words and dom in (None, "core", *domains):
+                out.append((f"{os.path.relpath(path, store.root)}:{n}", q.strip(), words))
+    return out
+
+
+def live(store, domains):
+    """5 quiz questions through one real headless agent that gets its memory from the carrier; prints the score, returns it."""
+    car = carrier()
+    for f, ok in car.verify(store):
+        print(f"approval · {car.tilde(f)} · {'yes' if ok else 'no'}")
+    qs = questions(store, domains)
+    if len(qs) < LIVE_N:
+        print(f"live · only {len(qs)} questions for core{''.join(' ' + d for d in domains)}, need {LIVE_N}")
+        return 0
+    pick = [qs[i * len(qs) // LIVE_N] for i in range(LIVE_N)]
+    prompt = ("Closed-book quiz. Answer only from what your system prompt already tells you; use no tool.\n"
+              f"Reply with exactly {LIVE_N} lines, each `<number>: <short answer>`.\n\n"
+              + "\n".join(f"{i}: {q}" for i, (_, q, _) in enumerate(pick, 1)))
+    answers = {}
+    for line in car.ask(prompt, domains).splitlines():
+        m = re.match(r"\s*\**(\d+)\**\s*[:.)]\s*(.*)", line)
+        if m:
+            answers.setdefault(int(m.group(1)), m.group(2).lower())
+    score = 0
+    for i, (where, _, words) in enumerate(pick, 1):
+        miss = [w for w in words if w.lower() not in answers.get(i, "")]
+        score += not miss
+        if miss:
+            print(f"live · {where} · missing: {', '.join(miss)}")
+    print(f"live · {score}/{LIVE_N}")
+    return score
+
+
+def install(store, seat_, args):
+    """Write every carrier for this agent CLI (idempotent; --plan writes nothing)."""
+    sys.exit(carrier().install(store, args.plan))
 
 
 def main():
@@ -84,9 +173,16 @@ def main():
     p = sub.add_parser("check", help="the gate: budgets, ids, format, secrets, machine values, untrusted, provenance, experience")
     p.add_argument("--before", help="the store folder to compare ids against (default: the store's git HEAD)")
     p.add_argument("folders", nargs="*", help="check only these folders of the store")
+    p.add_argument("--live", action="store_true", help=f"then ask {LIVE_N} quiz questions through one real headless agent (haiku)")
+    p.add_argument("--domains", type=lambda v: [d for d in re.split(r"[\s,]+", v) if d], default=[],
+                   help="--live: the domains the agent gets besides core (comma-separated)")
+    p = sub.add_parser("install", help="write the carriers: the core line, project stubs, MEMORY.md, agent.env domains")
+    p.add_argument("--plan", action="store_true", help="print what would be written, write nothing")
     args = ap.parse_args()
     store = memory_store.Store(memory_store.home())
-    {"load": load, "note": note, "check": check}[args.verb](store, os.environ.get("CHAT_SEAT", ""), args)
+    if args.verb == "check" and args.domains:
+        unknown(store, args.domains)
+    {"load": load, "note": note, "check": check, "install": install}[args.verb](store, seat(store), args)
 
 
 if __name__ == "__main__":

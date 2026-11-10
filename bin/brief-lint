@@ -4,6 +4,7 @@ import argparse, os, re, sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
 import decisions  # noqa: E402
+import memory_store  # noqa: E402
 
 RULES = [
     ('check', re.compile(r'^\s*(?:[-*]\s*)?CHECK:\s*\S', re.M)),
@@ -149,6 +150,29 @@ def tier_warn(text):
     return None
 
 
+MEMORY_LINE = re.compile(r'^\s*(?:[-*]\s*)?Memory:\s*\S', re.M)
+
+
+def memory_domains(text):
+    """Domains whose domains.map folder the brief names (the harness folder itself left out), when it has no `Memory:` line (T1599)."""
+    if MEMORY_LINE.search(text):
+        return []
+    try:
+        rows = memory_store.Store(memory_store.home()).map()
+    except OSError:
+        return []
+    harness = os.path.abspath(os.environ.get('HARNESS_HOME') or os.path.expanduser('~/agents'))
+    out = []
+    for w, d, _ in rows:
+        full = os.path.abspath(os.path.expanduser(w))
+        if w.startswith('seat:') or full == harness:
+            continue
+        forms = {w, full} | ({'$HOME' + full[len(os.path.expanduser('~')):]} if w.startswith('~/') else set())
+        if any(re.search(re.escape(f) + r'(?![\w.-])', text) for f in forms):
+            out.append(d)
+    return list(dict.fromkeys(out))
+
+
 def devzero_hits(path):
     """Line numbers where /dev/zero feeds script or tmux (T399: 34 GB OOM)."""
     with open(path, encoding='utf-8', errors='replace') as f:
@@ -198,6 +222,9 @@ def main():
                 print(f"WARN {p}: names {name} but not its decisions ledger {decisions.path(name)}")
             for n in devzero_hits(p):
                 print(f"WARN {p}:{n}: /dev/zero feeds script/tmux; use </dev/null or `sleep inf |`")
+            doms = memory_domains(text_of(p))
+            if doms:
+                print(f"WARN {p}: names the {', '.join(doms)} project but has no `Memory:` line; add `Memory: memory load {' '.join(doms)}`")
             full = tier_warn(text_of(p))
             if full:
                 print(f"WARN {p}: CHECK runs {full} but the brief has no `Class: engine` line; test at the change's tier (change-class)")

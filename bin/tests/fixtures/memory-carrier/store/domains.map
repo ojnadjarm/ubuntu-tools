@@ -1,0 +1,11 @@
+# Synthetic map: every name here is invented.
+seat:boss            boss     owner
+seat:boss            vault
+~/proj/zebra         zebra
+~/proj/zebra/sub     quokka
+~/proj/plain         plain
+~/proj/gone          zebra
+~/proj/locked        locked   protected
+~/clients/acme       acme
+~/agents/herd-po     zebra
+~/agents             herd
