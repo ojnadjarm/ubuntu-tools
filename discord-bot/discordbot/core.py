@@ -140,8 +140,11 @@ class ForumBot:
 
     async def on_message_create(self, d):
         author = d.get('author', {})
-        if self.cfg.forum_replies == 'liaison' and author.get('id') != self.me_id and d.get('type', 0) in (0, 19):
-            self.nudge()
+        if self.cfg.forum_replies == 'liaison' and d.get('type', 0) in (0, 19):
+            if author.get('id') != self.me_id:
+                self.nudge()
+            elif (self.store.thread(d['channel_id']) or {}).get('tag') == 'new':
+                await self.set_tag(d['channel_id'], 'done')
         if self.cfg.forum_replies == 'liaison' or author.get('id') == self.me_id or d.get('type', 0) not in (0, 19):
             return
         tid = d['channel_id']

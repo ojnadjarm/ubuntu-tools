@@ -167,6 +167,10 @@ class TestForumBot(Base):
         await self.bot.dispatch('MESSAGE_CREATE', ev('MESSAGE_CREATE_STARTER'))
         self.assertEqual(self.pending(), [])
         self.assertTrue(os.path.exists(os.path.join(self.bot.store.dir, 'liaison.nudge')))
+        self.assertEqual(self.tag_name('400'), ['new'])
+        await self.bot.dispatch('MESSAGE_CREATE', ev('MESSAGE_CREATE_SELF'))
+        self.assertEqual(self.tag_name('400'), ['done'])
+        self.assertEqual(self.pending(), [])
 
     async def test_network_error_in_a_handler_stays_inside_dispatch_and_deliver(self):
         await self.server.close()
