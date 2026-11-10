@@ -1,0 +1,43 @@
+/* Library › Memory: page index beside the reader from 900 px, stacked below it; eye.css tokens only. */
+.mem { display: grid; gap: 1rem; }
+.mem .mgrid { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr); align-items: start; }
+.mem ul { list-style: none; margin: 0; padding: 0; }
+.mem .pane h2 s { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mem .mgrp + .mgrp { margin-top: .9rem; }
+.mem .mgrp h3 { font-size: max(11px, .72rem); letter-spacing: .14em; text-transform: uppercase; color: var(--mute); font-weight: 400; padding: 0 0 .3rem; border-bottom: 1px solid var(--line); }
+.mem .mrow { display: flex; align-items: center; justify-content: space-between; gap: .4rem 1rem; flex-wrap: wrap; min-height: 2.75rem; padding: .35rem .6rem; border-bottom: 1px solid var(--line); color: var(--txt); text-decoration: none; min-width: 0; }
+.mem .mrow b { color: var(--hi); font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
+.mem .mrow span { color: var(--mute); font-size: max(11px, .8rem); font-variant-numeric: tabular-nums; }
+.mem a.mrow:hover, .mem a.mrow:focus-visible { background: var(--w08); }
+.mem a.mrow:hover b, .mem a.mrow:focus-visible b { color: var(--g); }
+.mem li.on .mrow { background: var(--w08); box-shadow: inset 2px 0 0 var(--g); }
+.mem li.on .mrow b { color: var(--g); }
+.mem li.priv .mrow b { color: var(--mid); font-weight: 400; }
+.mem li.priv .mrow span { color: var(--gold); }
+.mem .mread h2 { flex-wrap: wrap; }
+.mem .mpath { overflow-wrap: anywhere; min-width: 0; text-transform: none; letter-spacing: .04em; }
+.mem .mback { display: inline-flex; align-items: center; min-height: 2.75rem; margin: -.4rem 0 .4rem; color: var(--g); text-decoration: none; }
+.mem .mtext, .mem .mabout { color: var(--txt); font-size: max(var(--fs-min), .95rem); line-height: 1.6; overflow-wrap: anywhere; }
+.mem .mtext h3 { color: var(--hi); font-size: 1.25rem; font-weight: 600; margin: .2rem 0 .6rem; }
+.mem .mtext h4 { color: var(--g); font-size: max(var(--fs-min), .78rem); letter-spacing: .14em; text-transform: uppercase; font-weight: 600; margin: 1.1rem 0 .4rem; padding-top: .6rem; border-top: 1px solid var(--line); }
+.mem .mtext li { position: relative; padding: .25rem 0 .25rem 1.1rem; border-bottom: 1px solid var(--line); }
+.mem .mtext li:last-child { border-bottom: 0; }
+.mem .mtext li::before { content: "·"; position: absolute; left: .3rem; color: var(--g); }
+.mem .mtext p, .mem .mabout p { margin: .3rem 0; }
+.mem .mtext code, .mem .mabout code { color: var(--g2); background: var(--w08); padding: 0 .3rem; border: 1px solid var(--line); }
+.mem .mfold { margin-top: 1rem; border-top: 1px solid var(--line); }
+.mem .mfold table { font-size: max(11px, .86rem); }
+.mem .mfold td.n a { min-height: max(36px, 2.4rem); display: flex; align-items: center; }
+.mem .mfold th, .mem .mfold td.a { font-size: max(11px, .78rem); }
+.mem .md { color: var(--mute); font-variant-numeric: tabular-nums; }
+.mem a.mt { display: inline-block; color: var(--g); text-decoration: none; border-bottom: 1px solid var(--line3); }
+.mem a.mt:hover, .mem a.mt:focus-visible { border-bottom-color: var(--g); }
+.mem .sm.bad { color: var(--gold); }
+@media (pointer: coarse) { .mem .mrow, .mem .mback, .mem .mfold td.n a { min-height: 44px; } .mem a.mt { min-height: 44px; line-height: 44px; } }
+@media (max-width: 899px) { .mem .mgrid.open .mlist { display: none; } }
+@media (min-width: 900px) {
+  .mem .mgrid { grid-template-columns: minmax(16rem, 1fr) minmax(0, 2.4fr); }
+  .mem .mlist { position: sticky; top: calc(var(--rail) + .5rem); max-height: calc(100svh - var(--rail) - 1rem); overflow-y: auto; scrollbar-width: thin; }
+  .mem .mread { min-height: calc(100svh - var(--rail) - 1rem); }
+  .mem .mback { display: none; }
+}

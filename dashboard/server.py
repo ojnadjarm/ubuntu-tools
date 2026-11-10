@@ -2,9 +2,9 @@
 """Phone-first status page for this machine: the unit's entry point; the code lives in dash/."""
 import ctypes, sys, types
 from dash import cache, env, http, routes
-from dash.services import agents, chat, files, office, org, reports, sites, state, system, thumbs, todo, voice
+from dash.services import agents, chat, files, memory, office, org, reports, sites, state, system, thumbs, todo, voice
 
-MODULES = (env, cache, routes, http, system, sites, files, reports, thumbs, voice, state, agents, todo, org, office, chat)
+MODULES = (env, cache, routes, http, system, sites, files, reports, thumbs, voice, state, agents, todo, org, office, chat, memory)
 
 
 class Facade(types.ModuleType):
