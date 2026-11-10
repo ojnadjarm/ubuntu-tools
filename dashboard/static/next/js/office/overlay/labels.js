@@ -2,7 +2,7 @@
 import { esc } from "/static/js/core/fmt.js";
 import { SLOTS } from "../model.js";
 
-const NEAR_PX = 160, GAP = 3, TRIES = 12;
+const NEAR_PX = 160, GAP = 3, TRIES = 12, SLOP = 8;
 const KIND = { ceo: 0, seat: 1, pool: 2, team: 3 };
 const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
 const busy = (pose) => pose === "working" || pose === "talking";
@@ -35,10 +35,29 @@ function spot(taken, x, y, w, h, H, last) {
   return null;
 }
 
+/* A finger that lands on a tag and moves past SLOP px goes on to the canvas as if it had landed there (it turns the office); a tap stays the tag's click. */
+function relay(host) {
+  const held = new Map();
+  const send = (e, type, at) => { const c = host.parentElement && host.parentElement.querySelector("canvas"); if (c) c.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: e.pointerId, pointerType: "touch", isPrimary: e.isPrimary, clientX: at.x, clientY: at.y, buttons: type === "pointerup" || type === "pointercancel" ? 0 : 1 })); };
+  host.addEventListener("pointerdown", (e) => { if (e.pointerType === "touch" && e.target.closest(".otag")) held.set(e.pointerId, { x: e.clientX, y: e.clientY, on: false }); });
+  host.addEventListener("pointermove", (e) => {
+    const h = held.get(e.pointerId);
+    if (!h || (!h.on && Math.hypot(e.clientX - h.x, e.clientY - h.y) < SLOP)) return;
+    if (!h.on) { h.on = true; send(e, "pointerdown", h); }
+    send(e, "pointermove", { x: e.clientX, y: e.clientY });
+  });
+  for (const t of ["pointerup", "pointercancel", "lostpointercapture"]) host.addEventListener(t, (e) => {
+    const h = held.get(e.pointerId);
+    held.delete(e.pointerId);
+    if (h && h.on && t !== "lostpointercapture") send(e, t, { x: e.clientX, y: e.clientY });
+  });
+}
+
 /* labels(host, renderer) → {update(M), place()}: update redraws the tags (worker tags show once the CEO and the desk pool are NEAR_PX apart, a close view), place moves them to their projected points, whole inside the stage, no two overlapping: a moved tag draws a leader line to its point. */
 export function labels(host, R) {
   let html = "", ends = [];
   const lift = new Map();
+  relay(host);
   function place() {
     const a = ends.map((id) => R.project(id));
     host.classList.toggle("near", a.length === 2 && Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) > NEAR_PX);

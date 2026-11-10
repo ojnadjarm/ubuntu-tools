@@ -2,6 +2,7 @@
 // a Message link per seat, the Sessions table, a list button opens the card of the same name, no sideways scroll at 5 widths,
 // the still note without a graphics card, one canvas through #chat and back, a swipe on the stage keeps the sub-tab,
 // /api/office read at most once per 5 s and never while hidden. With the GPU flags: the real chunks, labels, tap, + − Reset.
+// Staff cards (T1601-08): every Roster row label per runner kind, a seat's runner rows, gold when bad, dim when off, the Unassigned room.
 // Run: node tests/test_office_screen.js   (fixture API only; SHOTS=<dir> adds 1366 shots: home, 2 angles, a card, night)
 "use strict";
 const assert = require("assert");
@@ -88,6 +89,41 @@ async function soft(b, base, [w, h]) {
     await p.waitForSelector(".chat", { timeout: 15000 });
   }
   assert.deepStrictEqual(errs, [], `${w}: no page errors`);
+  await p.context().close();
+}
+
+const LAST4 = ["Last run", "Last exit", "Took", "Report"];
+const STAFF = {
+  "sentinel-digest": ["Status", "Schedule", "Next run", ...LAST4],
+  sentinel: ["Status", "Schedule", "Unit", "Next run", "Last check", "Result", "Took", "Fallback last ran", "Fallback report"],
+  "fleet-backup": ["Status", "Schedule", "Unit", "Next run", "Last check", "Result", "Took", "Report"],
+  "night-relay": ["Status", "Schedule", "Unit", "Up since", "Unit state", "Tmux", "Report"],
+  "ci-fix": ["Status", "Schedule", ...LAST4],
+  "tiny-epic-narrator": ["Workers", "Folder", "Started by", "Last active", ...LAST4],
+  vass: ["Workers", "Folder", "Last active"],
+};
+/* The staff cards on the list path: row labels per runner kind, the id line, gold when bad, dim when off, no Message, the Unassigned room. */
+async function staffCards(b, base, [w, h]) {
+  const { p, errs } = await open(b, base, w, h, w < 900);
+  assert.ok(!/\bhello\b/.test(await p.$eval(".office .olist", (e) => e.innerText)), `${w}: a hidden agent is not in the list`);
+  for (const [id, labels] of Object.entries(STAFF)) {
+    await p.click(`.office .olist [data-who="${id}"]`);
+    const c = await p.$eval("#office-card:popover-open", (e) => ({ dt: [...e.querySelectorAll("dt")].map((d) => d.textContent), gold: [...e.querySelectorAll("dd.bad")].map((d) => d.previousElementSibling.textContent),
+      ln: e.querySelector(".area") && e.querySelector(".area").textContent, dim: !!e.querySelector(".cfig.dim"), msg: e.querySelectorAll("a.btn").length, box: e.getBoundingClientRect().toJSON() }));
+    assert.deepStrictEqual(c.dt, labels, `${w}: the card of ${id} has the Roster's rows`);
+    assert.ok(c.box.left >= 0 && c.box.right <= w && c.box.top >= 0 && c.box.bottom <= h, `${w}: the card of ${id} is inside the viewport`);
+    if (id in FIX.seats.reduce((o, s) => ({ ...o, [s.id]: 1 }), {})) assert.strictEqual(c.msg, 1, `${w}: a seat keeps its Message`);
+    else assert.deepStrictEqual([c.ln.split(" · ")[0], c.msg], [id, 0], `${w}: a staff card names its id under its name and has no Message`);
+    if (id === "sentinel") assert.deepStrictEqual(c.gold, ["Status", "Result"], `${w}: a bad bash timer's pill and result are gold`);
+    if (id === "night-relay") assert.deepStrictEqual(c.gold, [], `${w}: a healthy service has no gold`);
+    assert.strictEqual(c.dim, id === "ci-fix", `${w}: only the off agent's card is dim (${id})`);
+    await p.keyboard.press("Escape");
+  }
+  await p.click('.office .olist [data-who="team-unassigned"]');
+  assert.deepStrictEqual(await p.$eval("#office-card:popover-open", (e) => [e.querySelector("h2").firstChild.textContent, [...e.querySelectorAll(".roll [data-who]")].map((x) => x.dataset.who)]),
+    ["Unassigned", ["night-relay"]], `${w}: the Unassigned room's card rolls the agent no team names`);
+  assert.strictEqual(await p.evaluate(() => document.documentElement.scrollWidth), w, `${w}: no sideways scroll with a staff card`);
+  assert.deepStrictEqual(errs, [], `${w}: no page errors on the staff cards`);
   await p.context().close();
 }
 
@@ -187,7 +223,9 @@ async function gpu(base) {
   const b = await chromium.launch({ headless: true, args: ["--disable-3d-apis", "--mute-audio"] });
   let gaps;
   try {
+    if (process.env.ONLY === "staff") { for (const s of [SIZES[0], SIZES[2]]) await staffCards(b, base, s); console.log("ok staff cards"); srv.close(); return; }
     for (const s of SIZES) await soft(b, base, s);
+    for (const s of [SIZES[0], SIZES[2]]) await staffCards(b, base, s);
     gaps = await poll(b, base);
   } finally { await b.close(); }
   try {

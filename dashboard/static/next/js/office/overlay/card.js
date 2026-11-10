@@ -23,10 +23,10 @@ const chip = (p) => `<li><button type="button" class="chip ${esc(p.pose)}" data-
 /* Markup of the card of p (a person or a room). */
 function html(p) {
   const c = card(p), pose = talking(p.id) ? "talking" : c.state.pose;
-  return (p.people ? "" : `<div class="cfig" aria-hidden="true">${creature(p.id, talking(p.id) ? "talking" : p.pose, p.role)}</div>`) +
+  return (p.people ? "" : `<div class="cfig${c.dim ? " dim" : ""}" aria-hidden="true">${creature(p.id, talking(p.id) ? "talking" : p.pose, p.role)}</div>`) +
     `<div class="cbody"><h2>${esc(c.title)}${c.rank ? `<span><b class="sr-only"> · </b>${esc(c.rank)}</span>` : ""}</h2>` + (c.sub ? `<p class="area">${esc(c.sub)}</p>` : "") +
     (c.lines || []).map((l) => `<p class="ln">${esc(l)}</p>`).join("") +
-    `<p class="st ${esc(pose)}"><i></i>${esc(c.state.text)}</p>` +
+    `<p class="st ${esc(pose)}${c.dim ? " dim" : ""}"><i></i>${esc(c.state.text)}</p>` +
     (c.bar != null ? `<progress max="100" value="${Math.round(c.bar)}" aria-label="To the next run"></progress>` : "") +
     (c.rows.length ? `<dl>${c.rows.map(([k, v, tone]) => `<dt>${esc(k)}</dt><dd${tone ? ` class="${esc(tone)}"` : ""}>${esc(v)}</dd>`).join("")}</dl>` : "") +
     (c.roll ? `<ul class="roll">${c.roll.map((id) => M.who[id]).filter(Boolean).map(chip).join("")}</ul>` : "") +

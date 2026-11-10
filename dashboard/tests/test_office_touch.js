@@ -1,6 +1,7 @@
 // Office phone gestures (T1601-11), driven by real touch events (CDP Input.dispatchTouchEvent) at 400×850 and 768×1024, DPR 2, with a graphics card:
 // one finger sideways turns, one finger up or down scrolls the page and leaves the view alone, a pinch zooms, two fingers dragged tilt,
-// a tap opens the card, Reset view restores, frames stop within 1 s of release.
+// a tap opens the card, Reset view restores, frames stop within 1 s of release; a finger that lands on a name tag turns the office too (T1601-08)
+// and a tap on a tag still opens its card.
 // Run: node tests/test_office_touch.js   (fixture API only; SHOTS=<dir> adds 400 px shots: start, turned, zoomed, card)
 "use strict";
 const assert = require("assert");
@@ -121,6 +122,29 @@ async function gestures(b, base, [w, h], shots) {
   await settle(p);
   const v7 = await view(p);
   assert.ok(same(v0, v7), `${w}: Reset view restores the first view: ${JSON.stringify([v0, v7])}`);
+
+  const tg = await p.evaluate((d) => {
+    const c = document.querySelector(".office .stage canvas").getBoundingClientRect();
+    for (const t of document.querySelectorAll(".office .otags .otag:not([hidden]):not(.mini)")) {
+      const r = t.getBoundingClientRect(), x = Math.round(r.left + r.width / 2), y = Math.round(r.top + r.height / 2), dx = x - d > c.left + 12 ? -d : d;
+      if (document.elementFromPoint(x, y).closest(".otag") === t && x + dx > c.left + 12 && x + dx < c.right - 12) return { id: t.dataset.who, name: t.querySelector("b").textContent, x, y, dx };
+    }
+    return null;
+  }, quarter);
+  assert.ok(tg, `${w}: a name tag with room for a sideways drag`);
+  await drag(p, cdp, [[[tg.x, tg.y], [tg.x + tg.dx, tg.y]]]);
+  await settle(p);
+  const vg = await view(p);
+  assert.ok(Math.abs(vg.turn - v7.turn) > 0.15, `${w}: one finger sideways from the tag of ${tg.id} turns the office (${(vg.turn - v7.turn).toFixed(3)} rad)`);
+  assert.deepStrictEqual([vg.scroll, vg.hash, await p.$$eval("#office-card:popover-open", (l) => l.length)], [0, "#org", 0], `${w}: a drag from a tag scrolls nothing and opens no card`);
+  await p.touchscreen.tap(...await p.$eval("#office-reset", (e) => { const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }));
+  await settle(p);
+  const t2 = await p.$eval(`.office .otags .otag[data-who="${tg.id}"]`, (t) => { const r = t.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)]; });
+  await p.touchscreen.tap(...t2);
+  await p.waitForSelector("#office-card:popover-open", { timeout: 3000 });
+  assert.strictEqual(await p.$eval("#office-card:popover-open h2", (e) => e.firstChild.textContent.trim()), tg.name, `${w}: a tap on the tag of ${tg.id} opens its card`);
+  await p.keyboard.press("Escape");
+  assert.ok(same(v7, await view(p)), `${w}: a tap on a tag leaves the view alone`);
 
   const m = await p.evaluate(() => { const q = window.__office.project("maintenance"), r = document.querySelector(".office .stage canvas").getBoundingClientRect(); return [r.left + q.x, r.top + q.y + 10]; });
   await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ id: 0, x: Math.round(m[0]), y: Math.round(m[1]) }] });

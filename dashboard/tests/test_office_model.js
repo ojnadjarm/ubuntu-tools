@@ -21,11 +21,12 @@ const ok = (name, fn) => { fn(); n++; console.log("ok " + n + " " + name); };
   const F = await load("office/fields.js"), S = await load("seats.js");
   const M = Mo.build(P);
 
-  ok("seats.js holds seatState, titled, dmOf as org.js wrote them", () => {
+  ok("seats.js is the one source of seatState, titled, dmOf: org.js re-exports them and holds no copy", () => {
     const org = fs.readFileSync(path.join(JS, "screens", "org.js"), "utf8"), mine = fs.readFileSync(path.join(JS, "seats.js"), "utf8");
+    assert.ok(/export \{ seatState, titled, dmOf \} from "\.\.\/seats\.js";/.test(org), "org.js re-exports them from ../seats.js");
     for (const head of ["export function seatState", "export const titled", "export const dmOf"]) {
-      const i = org.indexOf(head), body = org.slice(i, org.indexOf("\n\n", i));
-      assert(i > 0 && mine.includes(body), head + " is byte-for-byte");
+      assert.ok(mine.includes(head), "seats.js defines " + head);
+      assert.ok(!org.includes(head) && !org.includes(head.replace("export ", "")), "org.js holds no copy of " + head);
     }
     assert.strictEqual(S.titled({ name: "Bramble", rank: "Manager" }), "Bramble · Manager");
     assert.strictEqual(S.dmOf("vass"), "dm-owner--vass");
@@ -244,7 +245,7 @@ const ok = (name, fn) => { fn(); n++; console.log("ok " + n + " " + name); };
     assert.strictEqual(st.sub, "sentinel · Operations");
     assert.deepStrictEqual(st.actions, []);
     assert.strictEqual(rowOf(st, "Schedule"), "every 15 min");
-    assert.deepStrictEqual(st.rows.find((r) => r[0] === "Last exit"), ["Last exit", "1", "bad"]);
+    assert.deepStrictEqual(st.rows.find((r) => r[0] === "Result"), ["Result", "1", "bad"]);
     assert.strictEqual(rowOf(st, "Took"), "3 s");
     assert(st.bar >= 0 && st.bar <= 100);
     const off = F.card(M.who.toolsmith, NOW); shape(off);

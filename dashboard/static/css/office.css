@@ -10,6 +10,7 @@
 .office .otags { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .office .otag { position: absolute; left: 0; top: 0; pointer-events: auto; cursor: pointer; min-width: 33px; min-height: 33px; border: 1px solid var(--line2); background: color-mix(in srgb, var(--bg1) 82%, transparent); color: var(--txt); padding: .15rem .55rem; font: inherit; font-size: clamp(11px, .3cqi + 8px, 14px); line-height: 1.2; text-transform: none; letter-spacing: normal; display: grid; grid-template-columns: auto auto auto; column-gap: .5em; align-items: center; align-content: center; justify-content: center; white-space: nowrap; will-change: transform; }
 .office .otag[hidden] { display: none; }
+.office .otag { touch-action: pan-y; }
 .office .otag b { font-weight: 700; color: var(--hi); letter-spacing: .04em; }
 .office .otag span { color: var(--mute); font-size: max(11px, .82em); text-transform: uppercase; letter-spacing: .12em; }
 .office .otag small { grid-column: 1 / -1; color: var(--mid); font-size: max(11px, .8em); }
@@ -62,6 +63,7 @@
 .ocard .area { color: var(--g); }
 .ocard .ln { color: var(--mid); }
 .ocard .st i { margin-right: .6em; }
+.ocard .cfig.dim, .ocard .st.dim { opacity: .5; }
 .ocard progress { display: block; width: 100%; height: .35rem; margin-top: .6rem; accent-color: var(--g); }
 .ocard dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .3rem 1rem; margin: .7rem 0 0; padding-top: .6rem; border-top: 1px solid var(--line); font-size: max(var(--fs-min), .9rem); }
 .ocard dt { color: var(--mute); text-transform: uppercase; letter-spacing: .12em; font-size: max(var(--fs-min), .75rem); align-self: center; }
