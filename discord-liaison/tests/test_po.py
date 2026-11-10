@@ -25,6 +25,7 @@ class TestPO(Base):
         self.env['LIAISON_PO_ASK'] = f"sh -c {shlex.quote('printf \"%s|\" \"$@\" >>' + self.asklog + '; echo >>' + self.asklog)} fake"
         self.outbox = os.path.join(self.tmp.name, 'agents', 'po-other', 'outbox', 'discord')
         os.makedirs(self.outbox)
+        await self.run_cli('map', '400', 'other')
 
     async def message(self, project):
         await self.run_cli('tick')
@@ -59,8 +60,41 @@ class TestPO(Base):
         self.assertEqual(self.fake.sent('400'), ['Listo, ya está'])
         self.assertEqual(self.fake.sent('999'), [])
         self.assertEqual(sorted(os.listdir(os.path.join(self.outbox, 'sent'))), ['a.md'])
-        self.assertEqual(sorted(os.listdir(os.path.join(self.outbox, 'refused'))), ['b.md', 'c.md'])
+        self.assertEqual(sorted(os.listdir(os.path.join(self.outbox, 'refused'))), ['b.md', 'b.md.why', 'c.md'])
         self.assertEqual([f for f in os.listdir(self.outbox) if f.endswith('.md')], [])
+
+    async def test_relay_refuses_a_managers_reply_in_a_foreign_thread_or_general(self):
+        await self.message('other')
+        self.fake.say('450', '2', 'hola')
+        await self.run_cli('map', '450', 'ten')
+        self.env['DISCORD_GENERAL_ID'] = '999'
+        for name, body in (('a.md', 'thread: 400\nmío'), ('b.md', 'thread: 450\nde ten'), ('c.md', 'thread: 999\ngeneral')):
+            with open(os.path.join(self.outbox, name), 'w') as f:
+                f.write(body)
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(await po.amain(['relay'], self.env, self.rest), 0)
+        self.assertEqual((self.fake.sent('400'), self.fake.sent('450'), self.fake.sent('999')), (['mío'], [], []))
+        refused = os.path.join(self.outbox, 'refused')
+        self.assertEqual(sorted(os.listdir(refused)), ['b.md', 'b.md.why', 'c.md', 'c.md.why'])
+        with open(os.path.join(refused, 'b.md.why')) as f:
+            self.assertEqual(f.read(), 'thread 450 is not a thread of a project po-other manages\n')
+
+    async def test_relay_lets_the_router_post_in_any_project_thread_or_general(self):
+        await self.message('other')
+        with open(self.env['LIAISON_REGISTRY']) as f:
+            reg = json.load(f)
+        reg['router'] = 'po-discord'
+        with open(self.env['LIAISON_REGISTRY'], 'w') as f:
+            json.dump(reg, f)
+        self.env['DISCORD_GENERAL_ID'] = '999'
+        box = os.path.join(self.tmp.name, 'agents', 'po-discord', 'outbox', 'discord')
+        os.makedirs(box)
+        for name, body in (('a.md', 'thread: 400\nruta'), ('b.md', 'thread: 999\ngeneral')):
+            with open(os.path.join(box, name), 'w') as f:
+                f.write(body)
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(await po.amain(['relay'], self.env, self.rest), 0)
+        self.assertEqual((self.fake.sent('400'), self.fake.sent('999')), (['ruta'], ['general']))
 
     async def test_relay_waits_for_a_running_relay_and_posts_once(self):
         with open(os.path.join(self.outbox, 'a.md'), 'w') as f:

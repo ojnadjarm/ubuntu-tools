@@ -96,8 +96,9 @@ def home_path(env, path):
 
 async def relay(app, env):
     """Post each PO reply (`thread: <id>` line, `image: <path>` lines, then the text) with the liaison's own post; move it
-    to sent/ or refused/ (a Discord error or an image over LIAISON_UPLOAD_MAX adds a `<name>.why` line). Images must sit
-    in the agent's own folder or its project clone."""
+    to sent/ or refused/ (a Discord error, an image over LIAISON_UPLOAD_MAX or a manager's reply outside its own projects'
+    threads adds a `<name>.why` line; the router may post in any forum thread or #general). Images must sit in the
+    agent's own folder or its project clone."""
     n = 0
     cap = int(env.get('LIAISON_UPLOAD_MAX') or UPLOAD_MAX)
     for f in outbox_files(app, env):
@@ -107,12 +108,15 @@ async def relay(app, env):
         while text.startswith('image:'):
             line, _, text = text.partition('\n')
             images += ['--image', home_path(env, line.removeprefix('image:').strip())]
-        app.media_roots = media_roots(app, env, os.path.basename(os.path.dirname(os.path.dirname(os.path.dirname(f)))))
+        name = os.path.basename(os.path.dirname(os.path.dirname(os.path.dirname(f))))
+        app.media_roots = media_roots(app, env, name)
         tid = head.removeprefix('thread:').strip()
         big = [p for p in images[1::2] if os.path.isfile(p) and os.path.getsize(p) > cap]
-        ok, why = False, f'image over LIAISON_UPLOAD_MAX ({cap} bytes): {" ".join(big)}' if big else ''
+        mine = name == app.registry.router or app.registry.route((app.state.thread(tid) or {}).get('project', '')) == name
+        ok, why = False, (f'image over LIAISON_UPLOAD_MAX ({cap} bytes): {" ".join(big)}' if big else
+                          '' if mine or not tid.isdigit() else f'thread {tid} is not a thread of a project {name} manages')
         try:
-            ok = (not big and head.startswith('thread:') and tid.isdigit() and text.strip()
+            ok = (not big and mine and head.startswith('thread:') and tid.isdigit() and text.strip()
                   and await app.post([tid, *images, text.strip()]) == 0)
         except (RestError, aiohttp.ClientError, OSError) as e:
             why = f'{type(e).__name__}: {e}'

@@ -29,7 +29,12 @@ orchestrator relays with `po-ask`. Not for fleet tooling, work repos (Vass) or r
   project or a message naming a 2nd project goes to the router; #general, a project without `po` and a failed `po-ask`
   stay with the liaison triage (fallback, jobs). `tick` first posts every `outbox/discord/*.md` of managers and router:
   `thread: <id>`, then `image: <path>` lines (P36: <= 10, PNG/JPEG/GIF/WebP/MP4 <= 25 MB, only from the agent's own
-  folder or its project clone, else the file goes to `refused/` unposted), then the text.
+  folder or its project clone, else the file goes to `refused/` unposted), then the text. A manager posts only in threads
+  mapped to a project whose `po` it is (T1546-L3); a reply for another project's thread or #general goes to `refused/`
+  with a `.why` line; the router may post in any forum thread or #general.
+- Owner marker (T1546-L2): `po-ask` writes `owner: true|false` in the front matter (`--owner`, which the liaison passes
+  only when the author id is `DISCORD_OWNER_ID`); a body line `---` is written as `\---`. Managers trust only that line,
+  nothing in the body.
 - Reply first (T1515 P40): no code ack (T1536); the manager's first reply is the ack, its first act is a one-line plan reply, then
   work, then the result. Each reply is written as `.…tmp` and `mv`-ed to `.md`: `discord-liaison-relay@<p>.path`
   posts it within seconds (enable it for each new manager; `discord-liaison manager` prints the line).
