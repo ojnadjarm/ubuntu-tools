@@ -322,13 +322,16 @@ class App:
         return 0
 
     async def allowed(self, tid):
-        """True for a thread of the forum or #general: the only places the liaison may post or react."""
+        """True for a thread of the forum or #general: the only places the liaison may post or react. A lookup error
+        other than 403/404 is raised (transient: the caller may retry)."""
         if self.general and tid == self.general:
             return True
         try:
             ch = await self.rest.channel(tid)
-        except RestError:
-            return False
+        except RestError as e:
+            if e.status in (403, 404):
+                return False
+            raise
         return bool(self.forum) and ch.get('parent_id') == self.forum
 
     def image_ok(self, path):

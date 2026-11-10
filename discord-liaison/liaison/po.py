@@ -2,12 +2,14 @@
 `po-ask`; the PO's replies in <po>/outbox/discord/ are posted to their thread. `python -m liaison.po handoff|relay`."""
 import asyncio
 import glob
+import io
 import json
 import os
 import shlex
 import shutil
 import subprocess
 import sys
+from contextlib import redirect_stdout
 
 import aiohttp
 from discordbot.config import Config
@@ -94,14 +96,16 @@ def home_path(env, path):
     return os.path.join(env.get('HOME', os.path.expanduser('~')), path[2:]) if path.startswith('~/') else path
 
 
-async def relay(app, env):
+async def relay(app, env, kept=None):
     """Post each PO reply (`thread: <id>` line, `image: <path>` lines, then the text) with the liaison's own post; move it
-    to sent/ or refused/ (a Discord error, an image over LIAISON_UPLOAD_MAX or a manager's reply outside its own projects'
-    threads adds a `<name>.why` line; the router may post in any forum thread or #general). Images must sit in the
-    agent's own folder or its project clone."""
-    n = 0
+    to sent/ or refused/ (with a `<name>.why` line and a line in the agent's REPORT.md; the router may post in any forum
+    thread or #general, a manager only in its own projects' threads). A transient error on the thread lookup leaves the
+    file in the outbox (added to `kept`) for the next relay. Images must sit in the agent's own folder or its clone."""
+    n, kept = 0, set() if kept is None else kept
     cap = int(env.get('LIAISON_UPLOAD_MAX') or UPLOAD_MAX)
     for f in outbox_files(app, env):
+        if f in kept:
+            continue
         with open(f) as fh:
             head, _, text = fh.read().partition('\n')
         images = []
@@ -113,19 +117,33 @@ async def relay(app, env):
         tid = head.removeprefix('thread:').strip()
         big = [p for p in images[1::2] if os.path.isfile(p) and os.path.getsize(p) > cap]
         mine = name == app.registry.router or app.registry.route((app.state.thread(tid) or {}).get('project', '')) == name
-        ok, why = False, (f'image over LIAISON_UPLOAD_MAX ({cap} bytes): {" ".join(big)}' if big else
-                          '' if mine or not tid.isdigit() else f'thread {tid} is not a thread of a project {name} manages')
-        try:
-            ok = (not big and mine and head.startswith('thread:') and tid.isdigit() and text.strip()
-                  and await app.post([tid, *images, text.strip()]) == 0)
-        except (RestError, aiohttp.ClientError, OSError) as e:
-            why = f'{type(e).__name__}: {e}'
+        ok = not big and mine and head.startswith('thread:') and tid.isdigit() and bool(text.strip())
+        why = (f'image over LIAISON_UPLOAD_MAX ({cap} bytes): {" ".join(big)}' if big else
+               f'thread {tid} is not a thread of a project {name} manages' if tid.isdigit() and not mine else
+               '' if ok else 'no `thread: <id>` line or no text')
+        if ok:
+            try:
+                await app.allowed(tid)
+            except (RestError, aiohttp.ClientError, asyncio.TimeoutError, OSError):
+                kept.add(f)
+                continue
+            out = io.StringIO()
+            try:
+                with redirect_stdout(out):
+                    ok = await app.post([tid, *images, text.strip()]) == 0
+            except (RestError, aiohttp.ClientError, OSError) as e:
+                ok, why = False, f'{type(e).__name__}: {e}'
+            sys.stdout.write(out.getvalue())
+            if not ok and not why:
+                why = (out.getvalue().strip().splitlines() or ['post failed'])[-1]
         dest = os.path.join(os.path.dirname(f), 'sent' if ok else 'refused')
         os.makedirs(dest, exist_ok=True)
         shutil.move(f, os.path.join(dest, os.path.basename(f)))
-        if why:
+        if not ok:
             with open(os.path.join(dest, os.path.basename(f) + '.why'), 'w') as w:
                 w.write(why + '\n')
+            with open(os.path.join(po_home(env), name, 'REPORT.md'), 'a') as r:
+                r.write(f'refused reply: outbox/discord/refused/{os.path.basename(f)} ({why})\n')
         n += bool(ok)
     return n
 
@@ -150,9 +168,9 @@ async def amain(argv, env=None, rest=None):
             cfg = Config.from_env(env)
             rest = Rest(cfg.api_base, cfg.token())
         try:
-            n = 0
-            while any(True for _ in outbox_files(probe, env)):
-                n += await relay(App(env, rest), env)
+            n, kept = 0, set()
+            while any(f not in kept for f in outbox_files(probe, env)):
+                n += await relay(App(env, rest), env, kept)
             print(f'relayed {n} PO repl(ies)')
             return 0
         finally:

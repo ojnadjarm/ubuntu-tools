@@ -60,7 +60,8 @@ class TestPO(Base):
         self.assertEqual(self.fake.sent('400'), ['Listo, ya está'])
         self.assertEqual(self.fake.sent('999'), [])
         self.assertEqual(sorted(os.listdir(os.path.join(self.outbox, 'sent'))), ['a.md'])
-        self.assertEqual(sorted(os.listdir(os.path.join(self.outbox, 'refused'))), ['b.md', 'b.md.why', 'c.md'])
+        self.assertEqual(sorted(os.listdir(os.path.join(self.outbox, 'refused'))),
+                         ['b.md', 'b.md.why', 'c.md', 'c.md.why'])
         self.assertEqual([f for f in os.listdir(self.outbox) if f.endswith('.md')], [])
 
     async def test_relay_refuses_a_managers_reply_in_a_foreign_thread_or_general(self):
@@ -159,7 +160,7 @@ class TestPO(Base):
             ('', [{'filename': 'render.gif', 'size': os.path.getsize(clone)}])])
         self.assertEqual(os.listdir(os.path.join(self.outbox, 'sent')), ['a.md'])
         self.assertEqual(sorted(os.listdir(os.path.join(self.outbox, 'refused'))),
-                         sorted(bodies.keys() - {'a.md'} | {'g.md.why'}))
+                         sorted(bodies.keys() - {'a.md'} | {k + '.why' for k in bodies.keys() - {'a.md'}}))
 
     async def test_relay_rest_error_mid_reply_refuses_that_reply_and_goes_on(self):
         self.env['HOME'] = self.tmp.name
@@ -180,6 +181,46 @@ class TestPO(Base):
         self.assertEqual(os.listdir(os.path.join(self.outbox, 'sent')), ['b.md'])
         with open(os.path.join(self.outbox, 'refused', 'a.md.why')) as f:
             self.assertEqual(f.read(), 'RestError: discord rest 413\n')
+
+    async def test_relay_keeps_a_reply_on_a_transient_lookup_error_and_posts_it_next_time(self):
+        real, calls = self.rest.channel, []
+
+        async def flaky(cid):
+            calls.append(cid)
+            if len(calls) == 1:
+                raise RestError(503, None)
+            return await real(cid)
+        self.rest.channel = flaky
+        with open(os.path.join(self.outbox, 'a.md'), 'w') as f:
+            f.write('thread: 400\nListo')
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(await po.amain(['relay'], self.env, self.rest), 0)
+        self.assertEqual((self.fake.sent('400'), os.listdir(self.outbox)), ([], ['a.md']))
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(await po.amain(['relay'], self.env, self.rest), 0)
+        self.assertEqual(self.fake.sent('400'), ['Listo'])
+        self.assertEqual(os.listdir(os.path.join(self.outbox, 'sent')), ['a.md'])
+
+    async def test_relay_refusal_writes_why_and_a_report_line_and_po_status_counts_it(self):
+        await self.run_cli('map', '998', 'other')
+        os.makedirs(os.path.join(self.tmp.name, 'agents', 'po-other', 'inbox'))
+        open(os.path.join(self.tmp.name, 'agents', 'po-other', 'BRIEF.md'), 'w').close()
+        for name, body in (('b.md', 'thread: 998\nno existe'), ('c.md', 'sin hilo')):
+            with open(os.path.join(self.outbox, name), 'w') as f:
+                f.write(body)
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(await po.amain(['relay'], self.env, self.rest), 0)
+        refused = os.path.join(self.outbox, 'refused')
+        self.assertEqual(sorted(os.listdir(refused)), ['b.md', 'b.md.why', 'c.md', 'c.md.why'])
+        with open(os.path.join(refused, 'b.md.why')) as f:
+            self.assertEqual(f.read(), 'refused: 998 is neither a thread of the forum nor #general\n')
+        with open(os.path.join(self.tmp.name, 'agents', 'po-other', 'REPORT.md')) as f:
+            self.assertEqual(f.read().splitlines(), [
+                'refused reply: outbox/discord/refused/b.md (refused: 998 is neither a thread of the forum nor #general)',
+                'refused reply: outbox/discord/refused/c.md (no `thread: <id>` line or no text)'])
+        out = subprocess.run([os.path.join(AGENTS, 'bin', 'po-status'), 'other'], capture_output=True, text=True,
+                             env=dict(os.environ, HARNESS_HOME=self.env['LIAISON_PO_HOME']))
+        self.assertIn('  refused 2\n', out.stdout + '\n')
 
     async def test_relay_refuses_an_image_over_the_upload_max(self):
         self.env['HOME'] = self.tmp.name
