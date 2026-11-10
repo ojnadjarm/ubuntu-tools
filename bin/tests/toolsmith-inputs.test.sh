@@ -288,6 +288,23 @@ c="$(TOOLSMITH_ROOT="$R" HARNESS_HOME=/nonexistent "$CLI" --check 2>&1)"; rc2=$?
   printf '%s' "$c" | grep -q TSP-102 && ok || no "keys $(printf '%s' "$o" | jq -c '.hold') rc $rc1/$rc2 $c"
 rm -rf "$R"
 
+t "class: --check flags a row whose class changed"
+R="$(mktemp -d)"; mkdir -p "$R/toolsmith/state"
+hdr='| rank | id | title | class | status | metric | sessions | score |\n|---|---|---|---|---|---|---|---|\n'
+printf "$hdr| 1 | TSP-201 | unit | owner-go | proposed | a | 1 | 9 |\n| 2 | TSP-202 | cli | auto-ok | proposed | b | 1 | 9 |\n" \
+  > "$R/toolsmith/BACKLOG.md"
+o="$(TOOLSMITH_ROOT="$R" HARNESS_HOME=/nonexistent "$CLI" --since 4d 2>/dev/null)"
+printf '%s' "$o" | jq '{hold: .hold.rows, class: .hold.classes}' > "$R/toolsmith/state/last-seen.json"
+printf "$hdr| 1 | TSP-202 | cli | auto-ok | go | b | 1 | 9 |\n| 2 | TSP-201 | unit | owner-go | proposed | a | 1 | 9 |\n| 3 | TSP-203 | new | auto-ok | proposed | c | 1 | 9 |\n" \
+  > "$R/toolsmith/BACKLOG.md"
+TOOLSMITH_ROOT="$R" HARNESS_HOME=/nonexistent "$CLI" --check >/dev/null 2>&1; rc1=$?
+printf "$hdr| 1 | TSP-201 | unit | auto-ok | proposed | a | 1 | 9 |\n| 2 | TSP-202 | cli | auto-ok | go | b | 1 | 9 |\n" \
+  > "$R/toolsmith/BACKLOG.md"
+c="$(TOOLSMITH_ROOT="$R" HARNESS_HOME=/nonexistent "$CLI" --check 2>&1)"; rc2=$?
+[ "$(printf '%s' "$o" | jq -c '.hold.classes')" = '{"TSP-201":"owner-go","TSP-202":"auto-ok"}' ] && [ $rc1 = 0 ] && [ $rc2 = 1 ] &&
+  printf '%s' "$c" | grep -q 'class changed: TSP-201 now auto-ok' && ok || no "$(printf '%s' "$o" | jq -c '.hold') rc $rc1/$rc2 $c"
+rm -rf "$R"
+
 t "no live probe: the fixture run never calls pc"
 grep -q "mock" "$CLI" && [ ! -x "$FIX/bin/pc" ] && ok || no "probe would fall through to live pc"
 

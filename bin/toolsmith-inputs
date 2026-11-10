@@ -2,7 +2,7 @@
 """toolsmith-inputs [--since 4d] [--json|--md] [--qa] [--check] — read-only evidence collector for toolsmith.
 
 One JSON object with the sections bench_last, bench_failures, audit, failures, guards, changes, doctor,
-qa, idle, tokens and hold; --check exits 1 when a `hold` row changed since state/last-seen.json.
+qa, idle, tokens and hold; --check exits 1 when a `hold` row or a row's class changed since state/last-seen.json.
 Reads only; runs no mutating verb. Root: TOOLSMITH_ROOT, else HARNESS_HOME,
 else ~/agents. A live probe is replaced by $ROOT/mock/<name>.json (doctor, power, top) or
 $ROOT/mock/qa.tsv when that file exists; TOOLSMITH_NO_LIVE=1 skips the rest, so tests never call pc.
@@ -323,18 +323,23 @@ def cell_int(fields, i):
 
 
 def sec_hold():
-    """Owner-held BACKLOG rows (cells after rank) and those that changed since last-seen.json."""
+    """Owner-held BACKLOG rows, every row's class, and those that changed since last-seen.json."""
     ts = os.path.join(ROOT, 'toolsmith')
-    rows = {}
+    rows, classes = {}, {}
     try:
         for line in open(os.path.join(ts, 'BACKLOG.md')):
             c = [x.strip() for x in line.strip().strip('|').split('|')]
+            if len(c) > 4 and re.fullmatch(r'TSP-\d+', c[1]):
+                classes[c[1]] = c[3]
             if len(c) > 4 and c[4] == 'hold':
                 rows[c[1]] = ' | '.join(c[1:])
     except OSError:
         pass
-    seen = (read_json(os.path.join(ts, 'state', 'last-seen.json'), {}) or {}).get('hold') or {}
-    return {'rows': rows, 'changed': sorted(k for k, v in seen.items() if rows.get(k) != v)}
+    last = read_json(os.path.join(ts, 'state', 'last-seen.json'), {}) or {}
+    seen, seen_class = last.get('hold') or {}, last.get('class') or {}
+    return {'rows': rows, 'changed': sorted(k for k, v in seen.items() if rows.get(k) != v),
+            'classes': classes,
+            'class_changed': sorted(k for k, v in seen_class.items() if classes.get(k) != v)}
 
 
 def sec_tokens(cut):
@@ -475,14 +480,16 @@ def main():
     ap.add_argument('--md', action='store_true', help='markdown digest instead of JSON')
     ap.add_argument('--qa', action='store_true', help='also run qa-metrics.sh (several seconds)')
     ap.add_argument('--check', action='store_true',
-                    help='exit 1 if a hold row changed since state/last-seen.json')
+                    help='exit 1 if a hold row or a class changed since state/last-seen.json')
     a = ap.parse_args()
     if a.check:
         h = sec_hold()
         for k in h['changed']:
             print(f"hold changed: {k} now {h['rows'].get(k, 'gone')}")
-        print(f"hold: {len(h['rows'])} rows, {len(h['changed'])} changed")
-        sys.exit(1 if h['changed'] else 0)
+        for k in h['class_changed']:
+            print(f"class changed: {k} now {h['classes'].get(k, 'gone')}")
+        print(f"hold: {len(h['rows'])} rows, {len(h['changed'])} changed; class: {len(h['class_changed'])} changed")
+        sys.exit(1 if h['changed'] or h['class_changed'] else 0)
     try:
         cut = time.time() - parse_age(a.since)
     except ValueError as e:

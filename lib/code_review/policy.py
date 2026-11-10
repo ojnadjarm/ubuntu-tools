@@ -13,6 +13,9 @@ CONTAINMENT = ['agents/bin/code-review', 'agents/lib/code_review', 'agents/bin/c
                'agents/code-review/swarm.js', 'agents/code-review/agent.env', 'agents/code-review/selftest',
                'agents/code-review/state', 'agents/bin/tests/code-review.test.sh', 'agents/bin/tests/fixtures/code-review',
                'agents/log', 'agents/FILE-CLAIMS.md', 'agents/.git']
+# What toolsmith's BRIEF reserves for an owner go (units, hooks, installer, protected-project guards): lanes review only.
+OWNER_GO = ['agents/units', 'agents/hooks', 'agents/install.sh', 'agents/uninstall.sh', 'agents/git-guard',
+            'agents/bin/work-repo-guard', 'agents/bin/protected', 'agents/bin/protectedlib.py', 'agents/toolsmith/BRIEF.md']
 WRITTEN_BY_CLI = ('agents/code-review/state', 'agents/log', 'agents/FILE-CLAIMS.md')  # forbidden to lanes, written by the CLI/hooks
 FORBIDDEN = ['agents/backups', 'agents/secrets', 'agents/asr-corpus', f'{AW_REL}/research', f'{AW_REL}/owner', 'agents/AGENTS.md',
              'agents/ORCHESTRATOR.md', 'agents/FLEET.md', '.claude/CLAUDE.md', '.claude/settings.json', 'CLAUDE.md'] + CONTAINMENT
@@ -47,7 +50,7 @@ def policy(path):
     under = lambda root: r == root or r.startswith(root + '/')
     if any(under(f) for f in FORBIDDEN):
         return 'forbidden'
-    if any(under(f) for f in REVIEW_ONLY_ROOTS):
+    if any(under(f) for f in REVIEW_ONLY_ROOTS + OWNER_GO):
         return 'review-only'
     if under('.claude/skills'):
         parts = r.split('/')
@@ -61,7 +64,7 @@ def policy_rules():
     """Longest-prefix rules for swarm.js: [[absolute prefix, policy], ...]."""
     rules = [[os.path.join(HOME, 'agents'), 'edit']]
     rules += [[os.path.join(HOME, f), 'forbidden'] for f in FORBIDDEN]
-    rules += [[os.path.join(HOME, f), 'review-only'] for f in REVIEW_ONLY_ROOTS]
+    rules += [[os.path.join(HOME, f), 'review-only'] for f in REVIEW_ONLY_ROOTS + OWNER_GO]
     if os.path.isdir(SKILLS):
         rules.append([SKILLS, 'review-only'])
         rules += [[os.path.join(SKILLS, s), skill_policy(s)] for s in sorted(os.listdir(SKILLS))]

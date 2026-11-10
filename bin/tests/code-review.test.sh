@@ -239,6 +239,12 @@ got="$(cr policy "$H/agents/bin/x" "$H/agents/backups/x" "$H/agent-work/research
   "$H/agents/bin/code-review-sandbox" "$H/agents/bin/guards/git" "$H/agents/.git/index" | cut -f1 | tr '\n' ' ')"
 [ "$got" = "edit forbidden forbidden review-only forbidden forbidden forbidden forbidden " ] && ok || no "$got"
 
+t "policy: owner-go paths (units, hooks, installer, guards) review-only"
+got="$(cr policy "$H/agents/units/x.timer" "$H/agents/hooks/x" "$H/agents/install.sh" "$H/agents/uninstall.sh" \
+  "$H/agents/git-guard/x" "$H/agents/bin/work-repo-guard" "$H/agents/bin/protected" "$H/agents/bin/protectedlib.py" \
+  "$H/agents/toolsmith/BRIEF.md" "$H/agents/bin/protected-x" | cut -f1 | tr '\n' ' ')"
+[ "$got" = "review-only review-only review-only review-only review-only review-only review-only review-only review-only edit " ] && ok || no "$got"
+
 t "usage: 0 uses of old-sweeper, >0 of disk-report, coverage >= 28 d"
 u="$(cr usage old-sweeper disk-report)"
 [ "$(jq '.names["old-sweeper"].uses' <<<"$u")" = 0 ] && [ "$(jq '.names["disk-report"].uses > 0' <<<"$u")" = true ] &&
