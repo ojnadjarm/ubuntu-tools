@@ -23,9 +23,20 @@ ok "$("$HERE/../scripts/mv-new" "$FX/nogame" --kind trailer >/dev/null 2>&1 && e
 P=$FX/tr
 ok "$(yes grep -q "^GAME=\${GAME:-$G}" "$P/build.sh")" "build.sh GAME filled in"
 
+blocked() {   # on the runner's SIGTERM: the started-but-unfinished timed step, the build's process tree and log tail, then stop the build
+  echo "TERM during build.sh --draft; step running: $(comm -23 <(ls "$P/out/c" 2>/dev/null) <(ls "$P/out/t" 2>/dev/null) | tr '\n' ' ')"
+  pstree -aplT "$bpid" 2>/dev/null | head -30
+  tail -20 "$FX/build.log"
+  kill -TERM -- -"$bpid" 2>/dev/null
+  exit 124
+}
 t=$(date +%s.%N)
-(cd "$P" && MAX_PER_CPU=${MAX_PER_CPU:-4} GATE_WAIT=${GATE_WAIT:-600} ./build.sh --draft) >"$FX/build.log" 2>&1
+(cd "$P" && MAX_PER_CPU=${MAX_PER_CPU:-4} exec setsid ./build.sh --draft) >"$FX/build.log" 2>&1 &
+bpid=$!
+trap blocked TERM INT
+wait $bpid
 rc=$?
+trap - TERM INT
 wall=$(awk -v a="$t" -v b="$(date +%s.%N)" 'BEGIN{printf "%.1f", b - a}')
 [[ $rc == 0 ]] || tail -5 "$FX/build.log"
 ok "$([[ $rc == 0 ]] && echo 1 || echo 0)" "build.sh --draft exit 0 (rc $rc)"
