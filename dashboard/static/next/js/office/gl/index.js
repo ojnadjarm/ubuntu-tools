@@ -5,7 +5,7 @@ import { creatures } from "./creatures.js";
 import { effects } from "./fx.js";
 import { halos } from "./halos.js";
 
-const HALL = "hall", made = new WeakMap(), inks = new Map();
+const HALL = "hall", SLICE_MS = 8, REACH = 2.6, made = new WeakMap(), inks = new Map();
 
 /* Lit pixel runs of a text set in the page's monospace: {w, h, runs: [[x0, x1, y]]}. */
 function ink(text) {
@@ -25,35 +25,75 @@ function reach(p, a, b) {
   return Math.hypot(p.x - a.x - dx * k, p.y - a.y - dy * k);
 }
 
-/* createRenderer(canvas, {theme, kit, still?, chunk?, ink?}) → Renderer; one per canvas, a second call returns the first. chunk defaults to build/index.js. */
+/* The lamps that reach the box of chunk c on the ground plan: bake cuts a lamp at REACH radii. */
+const near = (c, lamps) => lamps.filter((l) => l.i > 0 && Math.hypot(Math.max(c.lo[0] - l.x, 0, l.x - c.hi[0]), Math.max(c.lo[2] - l.z, 0, l.z - c.hi[2])) <= REACH * l.r);
+
+/* createRenderer(canvas, {theme, kit, still?, build?, chunk?, ink?}) → Renderer; one per canvas, a second call returns the first. build = {steps, stamp?} defaults to build/index.js; chunk is a one-step build. */
 export function createRenderer(canvas, opts) {
   if (made.has(canvas)) return made.get(canvas);
   const S = stage(canvas, { still: opts.still }), mesh = chunks(S), fam = creatures(S.scene), fx = effects(S.scene), halo = halos(S), built = new Map(), anchors = new Map();
-  let make = opts.chunk, actors = [], layout = true, night = null, queued = null, last = { rebuilt: 0, ms: 0 };
+  let B = opts.build || (opts.chunk && { steps: (...a) => [() => opts.chunk(...a)] }), actors = [], jobs = [], raf = 0, cur = null, fit = false, queued = null, tally = { rebuilt: 0, relit: 0, ms: 0 };
   S.ticker((t, dt) => { fx.step(t); return fam.step(t, dt); });
 
-  /* Rebuilds the chunks the patch names, then hands actors, lamps and anchors to the scene parts. */
-  function apply(M, plan, patch = {}) {
-    if (!make) { queued = [M, plan, patch]; return; }
-    const t0 = performance.now(), ids = [HALL, ...Object.keys(plan.cells)], all = layout || patch.layout || patch.night || night !== !!M.night;
-    const todo = ids.filter((id) => all || !built.has(id) || (patch.rooms || []).includes(id));
-    for (const id of [...built.keys()]) if (!ids.includes(id)) { built.delete(id); mesh.drop(id); fx.drop(id); todo.dirty = true; }
-    for (const id of todo) { const c = make(id, M, plan, opts.theme, opts.kit, opts.ink || ink); built.set(id, c); mesh.set(id, c); fx.set(id, c.quads || []); }
-    last = { rebuilt: todo.length, ms: performance.now() - t0 };
-    if (!todo.length && !todo.dirty) return;
-    const lamps = [], lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
+  /* Runs queued jobs for SLICE_MS, then leaves the rest to the next frame. */
+  function pump() {
+    const t0 = performance.now();
+    while (jobs.length && performance.now() - t0 < SLICE_MS) jobs.shift()();
+    tally.ms += performance.now() - t0;
+    raf = jobs.length ? requestAnimationFrame(pump) : 0;
+  }
+  /* Queues the build of chunk id in its steps; the last one keeps the Chunk, unlit and not yet on screen. */
+  function build(id, stamp) {
+    const { M, plan } = cur, st = B.steps(id, M, plan, opts.theme, opts.kit, opts.ink || ink);
+    return st.map((f, i) => (i < st.length - 1 ? f : () => { built.set(id, { c: f(), stamp, night: M.night, fresh: true, quads: true, lit: null }); tally.rebuilt++; }));
+  }
+  /* Queues a bake for every chunk that is new or whose lamps changed (the hall takes its own lamps only: its bake is the longest task), then the hand-over. */
+  function light() {
+    const { M } = cur, lamps = [...built.values()].flatMap((b) => b.c.lamps || []);
+    for (const [id, b] of built) {
+      const L = id === HALL ? b.c.lamps : near(b.c, lamps), lit = b.c.bake ? JSON.stringify([M.night, L]) : "";
+      if (!b.fresh && lit === b.lit) continue;
+      jobs.push(() => {
+        if (b.c.bake) b.c.bake(opts.theme.env[M.night ? "night" : "day"], L);
+        if (b.fresh) mesh.set(id, b.c); else mesh.recolor(id, b.c.color);
+        if (b.quads) fx.set(id, b.c.quads || []);
+        b.fresh = b.quads = false; b.lit = lit; tally.relit++;
+      });
+    }
+    jobs.push(done);
+  }
+  /* Hands actors, lamps and anchors to the scene parts and asks for one frame. */
+  function done() {
+    const { M, plan } = cur, lamps = [], lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
     actors = []; anchors.clear();
-    for (const c of built.values()) {
+    for (const { c } of built.values()) {
       actors.push(...(c.actors || [])); lamps.push(...(c.lamps || []));
       for (let i = 0; i < 3; i++) { lo[i] = Math.min(lo[i], c.lo[i]); hi[i] = Math.max(hi[i], c.hi[i]); }
     }
     for (const a of actors) anchors.set(a.id, [a.x, a.y + (0.8 * a.scale) / 0.36, a.z]);
-    for (const c of built.values()) for (const l of c.labels || []) anchors.set(l.id ?? l.who, l.pos);
+    for (const { c } of built.values()) for (const l of c.labels || []) anchors.set(l.id ?? l.who, l.pos);
     fam.set(actors); halo(lamps); fx.look(opts.theme, M.night);
-    if (all) S.view({ lo, hi, ...plan.home }); else S.invalidate();
-    layout = false; night = !!M.night; last.ms = performance.now() - t0;
+    if (fit) S.view({ lo, hi, ...plan.home }); else { S.invalidate(); canvas.dispatchEvent(new Event("view")); }
+    fit = false;
   }
-  if (!make) import("../build/index.js").then((m) => { make = m.chunk; if (queued) apply(...queued); queued = null; });
+  /* Queues what the patch asks: a chunk with a new stamp is rebuilt, one that only changed day or night is re-lit, the rest keep their buffers; an empty patch does nothing. */
+  function apply(M, plan, patch = {}) {
+    if (!B) { queued = [M, plan, patch]; return; }
+    const ids = [HALL, ...Object.keys(plan.cells)], all = !cur || jobs.length > 0 || patch.layout || patch.night || cur.M.night !== M.night;
+    tally = { rebuilt: 0, relit: 0, ms: 0 };
+    if (!all && !(patch.rooms || []).length) return;
+    fit = fit || !cur || !!patch.layout; cur = { M, plan }; jobs = [];
+    for (const id of [...built.keys()]) if (!ids.includes(id)) { built.delete(id); mesh.drop(id); fx.drop(id); }
+    for (const id of all ? ids : patch.rooms.filter((r) => ids.includes(r))) {
+      const b = built.get(id), stamp = B.stamp ? B.stamp(id, M, plan) : null;
+      if (!b || stamp === null || b.stamp !== stamp) jobs.push(...build(id, stamp));
+      else if (b.night !== M.night) jobs.push(() => { if (b.c.relight(M, plan)) Object.assign(b, { night: M.night, quads: true, lit: null }); else jobs.unshift(...build(id, stamp)); });
+    }
+    jobs.push(light);
+    if (raf) cancelAnimationFrame(raf);
+    pump();
+  }
+  if (!B) import("../build/index.js").then((m) => { B = m; if (queued) apply(...queued); queued = null; });
 
   const R = {
     still: S.still,
@@ -71,7 +111,8 @@ export function createRenderer(canvas, opts) {
     },
     reset: S.reset,
     zoom: S.zoom,
-    stats: () => ({ chunks: mesh.size, rebuilt: last.rebuilt, verts: mesh.verts(), ms: last.ms, frames: S.stats.frames }),
+    /* rebuilt, relit and ms count the last apply; pending is its jobs still queued. */
+    stats: () => ({ chunks: mesh.size, rebuilt: tally.rebuilt, relit: tally.relit, pending: jobs.length, verts: mesh.verts(), ms: tally.ms, frames: S.stats.frames }),
   };
   made.set(canvas, R);
   return R;
