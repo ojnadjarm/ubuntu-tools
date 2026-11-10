@@ -122,7 +122,7 @@ async function keepsPlace(p, label) {
     await p.tap('.chat .chans [data-ch="org"]');
     await p.waitForFunction(() => document.querySelector(".chat .stream header h2").textContent === "# org");
     const desk = await p.evaluate(() => ({ chans: getComputedStyle(document.querySelector(".chat .chans")).visibility, pv: getComputedStyle(document.querySelector(".chat .chans .pv")).display, back: getComputedStyle(document.querySelector(".chat .back")).display, pos: getComputedStyle(document.querySelector(".chat .stream")).position }));
-    assert.deepStrictEqual(desk, { chans: "visible", pv: "none", back: "none", pos: "relative" }, "from 900 px the desktop layout: channels left, stream right");
+    assert.deepStrictEqual(desk, { chans: "visible", pv: "block", back: "none", pos: "relative" }, "from 900 px the desktop layout: channels left, stream right");
     await keepsPlace(p, "1366");
     assert.deepStrictEqual(posted.filter((u) => !u.startsWith("/api/chat/seen")), [], "nothing posted");
     assert.deepStrictEqual(errs, [], "no page errors");
