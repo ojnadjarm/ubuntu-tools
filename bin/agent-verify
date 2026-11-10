@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a brief's `CHECK: <command>` and record the verdict in $AGENT_WORK/evidence/<ticket>/check.json (T381)."""
+"""Run a brief's `CHECK: <command>` and record the verdict in $AGENT_WORK/evidence/<ticket>/check.json (T381); list changed existing tests for review (T1591)."""
 import argparse, datetime, glob, json, os, re, shutil, signal, subprocess, sys, tempfile, time
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
@@ -140,6 +140,57 @@ def change_class(text, cwd):
     return out
 
 
+def claimed(ticket):
+    """Absolute paths the claims board holds for TICKET (relative ones are under the board's dir)."""
+    board = os.environ.get('CLAIMS_FILE') or os.path.expanduser('~/agents/FILE-CLAIMS.md')
+    try:
+        rows = open(board, encoding='utf-8', errors='replace').read().splitlines()
+    except OSError:
+        return []
+    out = []
+    for row in rows:
+        parts = row.split(' · ')
+        if len(parts) >= 3 and parts[0].lstrip('- ').strip() == ticket:
+            out += [os.path.join(os.path.dirname(board), os.path.expanduser(p)) for p in re.split(r'[\s,]+', parts[1]) if p]
+    return out
+
+
+def toplevel(path):
+    d = path if os.path.isdir(path) else os.path.dirname(path)
+    while d and not os.path.isdir(d):
+        d = os.path.dirname(d)
+    p = subprocess.run(['git', '-C', d or '/', 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
+    return p.stdout.strip() if p.returncode == 0 else None
+
+
+def test_changes(ticket, brief, cwd):
+    """{'test_changes': …} after `test-changes --ticket` on the cwd's repo and each claimed path's repo (T1591), or {} when none changed."""
+    tc = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'test-changes')
+    repos = {}
+    for path in [None] + claimed(ticket):
+        top = toplevel(path or cwd)
+        if top:
+            repos.setdefault(top, [])
+            if path:
+                repos[top].append(path)
+    notes = [brief, os.path.join(os.path.dirname(brief), f'{ticket}-report.md'), os.path.join(evidence_dir(), ticket)]
+    notes = [n for n in notes if os.path.exists(n)]
+    outs, bad = [], False
+    for top, scope in sorted(repos.items()):
+        args = [tc, '--repo', top, '--ticket', ticket] + [x for s in scope for x in ('--scope', s)] + ([] if scope else ['--committed-only'])
+        try:
+            p = subprocess.run(args + [x for n in notes for x in ('--note', n)], capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if 'NEEDS REVIEW' in p.stdout:
+            outs.append(p.stdout.rstrip())
+            bad |= p.returncode == 1
+    if not outs:
+        return {}
+    print('\n'.join(outs))
+    return {'test_changes': {'noted': not bad, 'report': '\n'.join(outs)}}
+
+
 def evidence_dir():
     return os.path.join(os.environ.get('AGENT_WORK', os.path.expanduser('~/agent-work')), 'evidence')
 
@@ -274,8 +325,12 @@ def main():
     ticket = a.ticket or ticket_of(a.brief)
     rec = {'ticket': ticket, 'brief': os.path.abspath(a.brief), **({'section': section} if section else {}), **run(cmd, a.timeout),
            **change_class(text, os.getcwd())}
+    rec.update(test_changes(ticket, rec['brief'], os.getcwd()))
     write(os.path.join(evidence_dir(), ticket, 'check.json'), rec)
-    sys.exit(0 if rec['ok'] else 1)
+    noted = rec.get('test_changes', {}).get('noted', True)
+    if not noted:
+        print('red: existing tests changed without a "Test changes" note; add one, then the orchestrator reviews it (guide test-changes)')
+    sys.exit(0 if rec['ok'] and noted else 1)
 
 if __name__ == '__main__':
     main()

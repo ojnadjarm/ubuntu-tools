@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+"""List existing test files changed against a base (a removed line or an added skip), what each change weakens, and whether a "Test changes" note covers it (T1591)."""
+import argparse, os, re, subprocess, sys
+
+TEST_FILE = re.compile(r'(^|/)tests?/.*(_test|Test)\.php$|\.feature$|\.(test|spec)\.[cm]?[jt]sx?$|(^|/)__tests__/.*\.[cm]?[jt]sx?$'
+                       r'|\.test\.sh$|(^|/)test_[^/]*\.py$|_test\.py$')
+ASSERT = re.compile(r'\bassert\w*\s*\(|->assert\w*\(|::assert\w*\(|^\s*assert\s|\bexpect\s*\(|\bt\.(?:is|not|deepEqual|true|false|equal|ok|throws)\b'
+                    r'|^\s*(?:Then|And|But)\s|(?:&&|\|\|)\s*n?ok\s|^\s*n?ok\s')
+STRICT = re.compile(r'assert(?:Equals|Same|Count|StringContainsString|MatchesRegularExpression|EqualsCanonicalizing|JsonStringEqualsJsonString)\b'
+                    r'|\.toBe\(|\.toEqual|\.toStrictEqual|deepEqual|strictEqual|\bt\.is\(|==|\bshould see\b|\bgrep\b|\[\s')
+SKIP = re.compile(r'markTestSkipped|markTestIncomplete|@skip\b|\.skip\s*\(|\bx(?:it|describe|test)\s*\(|\.todo\s*\(|pytest\.mark\.(?:skip|xfail)'
+                  r'|pytest\.skip\s*\(|unittest\.skip|^\s*return\s*;?\s*$|^\s*exit\s+0\b')
+TESTDEF = re.compile(r'function\s+(test\w*)\s*\(|^\s*def\s+(test\w*)|\b(?:it|test)\s*\(\s*([\'"`][^\'"`]+[\'"`])|^\s*(Scenario(?: Outline)?:.*?)\s*$'
+                     r'|\bn?ok\s+([\'"][^\'"]+[\'"])')
+NOTE_HEAD = re.compile(r'^\s*(?:#+\s*|\*\*|\d+\.\s*)?test changes\b', re.I)
+MAX = 20
+NOTE_ITEM = re.compile(r'^\s*(?:[-*]|\d+\.)\s+\S')
+
+
+def git(repo, *args, ok=(0,)):
+    p = subprocess.run(['git', '-C', repo, *args], capture_output=True, text=True)
+    if p.returncode not in ok:
+        raise RuntimeError(p.stderr.strip() or f'git {" ".join(args)} failed')
+    return p.stdout
+
+
+def ticket_base(repo, ticket):
+    """(base ref, files the ticket's commits touched): the parent of its oldest `T<n>:` commit, else HEAD."""
+    shas = git(repo, 'log', '-n', '500', '--format=%H', '-E', f'--grep=^{ticket}:').split()
+    files = set()
+    for s in shas:
+        files.update(git(repo, 'show', '--format=', '--name-only', s).split('\n'))
+    if not shas:
+        return 'HEAD', set()
+    oldest = shas[-1]
+    base = f'{oldest}^' if git(repo, 'rev-parse', '-q', '--verify', f'{oldest}^', ok=(0, 1)).strip() else git(repo, 'hash-object', '-t', 'tree', '/dev/null').strip()
+    return base, files - {''}
+
+
+def in_scope(path, scope):
+    return any(path == s or path.startswith(s.rstrip('/') + '/') or s in ('', '.') for s in scope)
+
+
+def changed(repo, base, scope, ticket, committed_only):
+    """{path: status} for test files that exist in BASE and differ in the work tree."""
+    files = None
+    if ticket:
+        base, files = ticket_base(repo, ticket)
+        if not committed_only:
+            dirty = set(git(repo, 'diff', '--name-only', 'HEAD').split('\n')) - {''}
+            files |= {f for f in dirty if scope is None or in_scope(f, scope)}
+    out = {}
+    for line in git(repo, 'diff', '--name-status', '-M', base).splitlines():
+        status, *paths = line.split('\t')
+        old = paths[0]
+        if not TEST_FILE.search(old) or (files is not None and old not in files and paths[-1] not in files):
+            continue
+        if not ticket and scope is not None and not in_scope(old, scope):
+            continue
+        if status[0] in 'MDR':
+            out[old] = (status[0], paths)
+    return base, out
+
+
+def hunks(diff):
+    """[(removed lines, added lines)] per @@ hunk."""
+    out = []
+    for line in diff.splitlines():
+        if line.startswith('@@'):
+            out.append(([], []))
+        elif out and line[:1] == '-' and not line.startswith('---'):
+            out[-1][0].append(line[1:].strip())
+        elif out and line[:1] == '+' and not line.startswith('+++'):
+            out[-1][1].append(line[1:].strip())
+    return out
+
+
+def name_of(m):
+    return next(g for g in m.groups() if g)
+
+
+def findings(diff):
+    """Removed, weakened and changed assertions, added skips, deleted tests in one file's diff."""
+    out, gone, kept = [], [], set()
+    for rem, add in hunks(diff):
+        ra = [l for l in rem if ASSERT.search(l) and l not in add]
+        aa = [l for l in add if ASSERT.search(l) and l not in rem]
+        for i, r in enumerate(ra):
+            if i >= len(aa):
+                out.append(f'removed assertion: {r}')
+            elif STRICT.search(r) and not STRICT.search(aa[i]):
+                out.append(f'weakened: {r} → {aa[i]}')
+            else:
+                out.append(f'changed assertion: {r} → {aa[i]}')
+        out += [f'added skip: {l}' for l in add if SKIP.search(l) and l not in rem]
+        rn = [name_of(m) for l in rem for m in [TESTDEF.search(l)] if m]
+        an = [name_of(m) for l in add for m in [TESTDEF.search(l)] if m]
+        new = [n for n in an if n not in rn]
+        for i, n in enumerate(x for x in rn if x not in an):
+            if i < len(new):
+                out.append(f'renamed test: {n} → {new[i]}')
+            else:
+                gone.append(n)
+        kept.update(an)
+    out += [f'deleted test: {n}' for n in gone if n not in kept]
+    return out
+
+
+def touches(diff):
+    """True when the diff removes a line or adds a skip: pure additions to a test file are new tests, not changed ones."""
+    return any(rem or any(SKIP.search(l) for l in add) for rem, add in hunks(diff))
+
+
+def note_lines(paths):
+    """Every list line under a "Test changes" heading in the note files (a dir: its *.md)."""
+    lines = []
+    for p in paths:
+        files = sorted(os.path.join(p, f) for f in os.listdir(p) if f.endswith('.md')) if os.path.isdir(p) else [p]
+        for f in files:
+            try:
+                text = open(f, encoding='utf-8', errors='replace').read().splitlines()
+            except OSError:
+                continue
+            on = False
+            for line in text:
+                if NOTE_HEAD.match(line):
+                    on = True
+                elif on and NOTE_ITEM.match(line):
+                    lines.append(line.strip())
+                elif on and line.strip():
+                    on = False
+    return lines
+
+
+def covering(path, notes):
+    """The note line naming PATH (or its basename) with a before → after, else None."""
+    base = os.path.basename(path)
+    return next((n for n in notes if (path in n or re.search(rf'(^|[\s/`]){re.escape(base)}\b', n)) and ('→' in n or '->' in n)), None)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, epilog='Note format (one line per changed test, under a "Test changes" heading): '
+                                 '- <file> · <test> · <requirement that changed> · <assertion before> → <assertion after>. '
+                                 'Exit 0: no existing test changed, or every changed file has a note line; 1: a file has none; 2: usage.')
+    ap.add_argument('--repo', default='.', help='git repo or a dir inside it (default: cwd)')
+    ap.add_argument('--base', default='HEAD', help='ref the work tree is compared with (default HEAD)')
+    ap.add_argument('--ticket', help='T<n>: base = parent of its oldest `T<n>:` commit; only files its commits or the work tree touched')
+    ap.add_argument('--scope', action='append', help='only paths under this (repo-relative or absolute; repeatable)')
+    ap.add_argument('--committed-only', action='store_true', help='with --ticket: ignore uncommitted changes')
+    ap.add_argument('--note', action='append', default=[], help='file or dir holding the "Test changes" note (repeatable; default $TEST_CHANGES_NOTE, colon-separated)')
+    a = ap.parse_args()
+    try:
+        top = git(a.repo, 'rev-parse', '--show-toplevel').strip()
+    except (RuntimeError, OSError) as e:
+        print(f'test-changes: not a git repo: {a.repo} ({e})', file=sys.stderr)
+        sys.exit(2)
+    scope = None
+    if a.scope:
+        scope = [os.path.relpath(os.path.realpath(os.path.expanduser(s)), top) if os.path.isabs(os.path.expanduser(s)) else s for s in a.scope]
+        scope = [s for s in scope if not s.startswith('..')]
+    if a.repo != '.' and scope is None and os.path.realpath(a.repo) != os.path.realpath(top):
+        scope = [os.path.relpath(os.path.realpath(a.repo), top)]
+    try:
+        base, files = changed(top, a.base, scope, a.ticket, a.committed_only)
+    except RuntimeError as e:
+        print(f'test-changes: {e}', file=sys.stderr)
+        sys.exit(2)
+    short = git(top, 'rev-parse', '--short', base, ok=(0, 128)).strip() or base
+    diffs = {p: git(top, 'diff', '-M', base, '--', *v[1]) for p, v in files.items()}
+    files = {p: v for p, v in files.items() if v[0] == 'D' or touches(diffs[p])}
+    if not files:
+        print(f'test-changes: no existing test changed in {top} (base {short})')
+        return
+    notes = note_lines(a.note or [p for p in os.environ.get('TEST_CHANGES_NOTE', '').split(':') if p])
+    bad = 0
+    print(f'NEEDS REVIEW: test changes ({len(files)} existing test files in {top}, base {short})')
+    for path, (status, paths) in sorted(files.items()):
+        note = covering(path, notes)
+        bad += note is None
+        print(f"- {path}{' -> ' + paths[-1] if status == 'R' else ''}: {'deleted file; ' if status == 'D' else ''}{'noted' if note else 'NO NOTE'}")
+        found = findings(diffs[path])
+        for f in found[:MAX]:
+            print(f'  {f}')
+        if len(found) > MAX:
+            print(f'  … {len(found) - MAX} more (git diff {short} -- {path})')
+        if note:
+            print(f'  note: {note}')
+    if bad:
+        print(f'test-changes: {bad} of {len(files)} changed test files have no "Test changes" note line '
+              '(<file> · <test> · <requirement that changed> · <before> → <after>); see `guide test-changes`')
+    sys.exit(1 if bad else 0)
+
+
+if __name__ == '__main__':
+    main()

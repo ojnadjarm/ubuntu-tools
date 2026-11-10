@@ -45,6 +45,8 @@ Every web page, screen or component, for every agent and ticket (exception: aile
   Every brief that builds media or JS also says: "delete lossless intermediates and node_modules at the drop" (T360).
   Every brief carries `CHECK: <command>` (pass/fail, runnable as is); `brief-lint <brief>` before spawning; the agent
   runs `agent-verify <brief>` before handback (T381).
+  Every brief says "Test changes: existing tests are frozen; a changed test needs a Test changes note (guide test-changes),
+  reviewed before done"; review the test-change list (`agent-verify`'s NEEDS REVIEW block) before relaying done (T1591).
 - **Hand an agent the brief _path_, never the brief text.** One agent per task.
 - Dark-Eye briefs start with `agent-preflight` and use `body-sandbox` for any hand-run body (never the typed recipe).
 - When the owner picks an art style from mockups, a ticket packages it as a `<style>-style` skill + kit + guide (T75).

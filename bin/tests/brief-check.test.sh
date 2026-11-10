@@ -7,11 +7,11 @@ WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 export AGENT_WORK="$WORK"
 . "$HOME/agents/bin/tests/lib/assert.sh"
 
-# 1. lint: green (rules via _common include) and red pass; bare misses all four.
+# 1. lint: green (rules via _common include) and red pass; bare misses all five.
 "$BIN/brief-lint" "$FIX/T901-green.md" "$FIX/T902-red.md" >/dev/null && ok 'lint passes complete briefs' || nok 'lint complete' 'rc != 0'
 out=$("$BIN/brief-lint" "$FIX/T903-bare.md"); rc=$?
-[ "$rc" = 1 ] && grep -q 'missing check, claims, timebox, report-cap' <<<"$out" && ok 'lint flags 4/4 on bare brief' || nok 'lint bare' "rc=$rc $out"
-[ "$("$BIN/brief-lint" --summary "$FIX"/T90*.md)" = 'pass 2/3 · check 2/3 · claims 2/3 · timebox 2/3 · report-cap 2/3' ] \
+[ "$rc" = 1 ] && grep -q 'missing check, claims, timebox, report-cap, test-changes' <<<"$out" && ok 'lint flags 5/5 on bare brief' || nok 'lint bare' "rc=$rc $out"
+[ "$("$BIN/brief-lint" --summary "$FIX"/T90*.md)" = 'pass 2/3 · check 2/3 · claims 2/3 · timebox 2/3 · report-cap 2/3 · test-changes 2/3' ] \
   && ok 'summary counts' || nok 'summary' "$("$BIN/brief-lint" --summary "$FIX"/T90*.md)"
 
 # 2. verify green: rc 0, backticks stripped, json ok=true under the temp AGENT_WORK.
@@ -59,7 +59,7 @@ out=$("$BIN/brief-lint" --tests "$WORK/tests"); rc=$?
 out=$("$BIN/brief-lint" --tests); [ -z "$out" ] && ok 'bin/tests has no /dev/zero feed' || nok 'bin/tests devzero' "$out"
 
 # 6b. change tiers (T1399): a CHECK at the full tier (perf gate, whole run.sh) without `Class: engine` warns, rc stays 0.
-tb() { printf '# %s\nFILE-CLAIMS, time box 1 h. Report: max 5 lines.\n%sCHECK: %s\n' "$1" "$2" "$3" >"$WORK/$1.md"; "$BIN/brief-lint" "$WORK/$1.md"; }
+tb() { printf '# %s\nFILE-CLAIMS, time box 1 h, test changes noted. Report: max 5 lines.\n%sCHECK: %s\n' "$1" "$2" "$3" >"$WORK/$1.md"; "$BIN/brief-lint" "$WORK/$1.md"; }
 out=$(tb T1 '' 'cd ~/m/client && npm run test:perf'); rc=$?
 [ "$rc" = 0 ] && grep -q "^WARN .*T1.md: CHECK runs test:perf but the brief has no \`Class: engine\` line" <<<"$out" && ok 'tier: test:perf without Class warns' || nok 'tier perf' "rc=$rc $out"
 out=$(tb T2 '' 'bash ~/agents/bin/tests/run.sh -j 8'); grep -q 'CHECK runs tests/run.sh without --only' <<<"$out" && ok 'tier: full run.sh warns' || nok 'tier run.sh' "$out"

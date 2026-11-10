@@ -105,6 +105,25 @@ own=$(awk '$2 ~ /agent-verify\./ {print $2}' "$WM_PIDS")
 grep -qxF "shutdown $own" "$WM_LOG" 2>/dev/null && ok 'watchman: shutdown-server asked on the private TMPDIR' || nok shutdown "$(cat "$WM_LOG" 2>&1)"
 alive "$WORK/foreign" && ok 'watchman: a foreign TMPDIR daemon is kept' || nok foreign 'stopped'
 alive '' && ok 'watchman: the default daemon is kept' || nok default 'stopped'
+# T1591: changed existing tests are listed under NEEDS REVIEW and turn the verdict red until a Test changes note covers them.
+TR="$WORK/tcrepo"; mkdir -p "$TR/tests"; tg() { git -C "$TR" -c user.name=t -c user.email=t@t "$@"; }
+printf '<?php\n$this->assertEquals(3, f());\n' >"$TR/tests/f_test.php"; tg init -q; tg add -A; tg commit -qm base
+sed -i 's/assertEquals(3, f())/assertNotNull(f())/' "$TR/tests/f_test.php"; tg commit -qam 'T21: relax f'
+printf '# T21\nCHECK: true\n' >"$WORK/T21-x.md"
+out=$(cd "$TR" && "$BIN/agent-verify" "$WORK/T21-x.md"); rc=$?
+is 'test changes: committed test change without a note exits 1' $rc 1
+grep -q '^NEEDS REVIEW: test changes' <<<"$out" && grep -q 'weakened: \$this->assertEquals(3, f());' <<<"$out" \
+  && ok 'test changes: NEEDS REVIEW list with the weakened assertion' || nok 'needs review' "$out"
+is 'test changes: check.json noted=false, CHECK still ok' "$(jq -r '"\(.test_changes.noted) \(.ok)"' "$E/T21/check.json")" 'false true'
+mkdir -p "$E/T21"; printf '## Test changes\n- tests/f_test.php · f · f may be null (R1) · assertEquals(3, f()) → assertNotNull(f())\n' >"$E/T21/test-changes.md"
+(cd "$TR" && "$BIN/agent-verify" "$WORK/T21-x.md" >/dev/null); is 'test changes: note in evidence/<T>/ makes it green' $? 0
+sed -i 's/assertNotNull/assertTrue/' "$TR/tests/f_test.php"
+(cd "$TR" && "$BIN/agent-verify" "$WORK/T21-x.md" >/dev/null); is 'test changes: uncommitted change without a claim is not counted' $? 0
+printf -- '- T21 · %s · 2026-11-10 14:00\n' "$TR/tests/f_test.php" >"$WORK/claims.md"
+(cd "$TR" && CLAIMS_FILE="$WORK/claims.md" "$BIN/agent-verify" "$WORK/T21-x.md" >/dev/null); is 'test changes: a claimed uncommitted change counts (same note)' $? 0
+printf '# T22\nCHECK: true\n' >"$WORK/T22-x.md"
+(cd "$TR" && "$BIN/agent-verify" "$WORK/T22-x.md" >/dev/null); is 'test changes: another ticket with no commits stays green' $? 0
+is 'test changes: no key when none changed' "$(jq -r '.test_changes // "none"' "$E/T22/check.json")" none
 "$BIN/agent-verify" >/dev/null 2>&1; is 'no brief and no --recheck exits 2' $? 2
 "$BIN/agent-verify" --help | grep -q -- --recheck && ok '--help names --recheck' || nok help 'no --recheck'
 exit $bad
