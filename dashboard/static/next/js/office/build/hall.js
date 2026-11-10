@@ -1,5 +1,5 @@
 /* The hall round the rooms: floor, brick walls with city windows, the mezzanine over the kitchen, commons and machines in the free bays, aisle shelves and floor lines. */
-import { RW, RD, COLS, MW, MD, GAP, AISLE } from "../layout.js";
+import { COLS, MW, MD, GAP, X0, PX, PZ, bay } from "../layout.js";
 import { mul, tone, glow, lamp, neon, rack, grow, cable, pane, holo } from "./props.js";
 
 export const DECK = 1.34;
@@ -59,7 +59,7 @@ function kitchen(ctx) {
 function aisles(ctx, all, X0, WD, DP) {
   const { B, th } = ctx;
   for (let r = 0; r < all; r++) for (let c = 1; c < COLS; c++) {
-    const x = X0 + c * RW, z0 = r * (RD + AISLE) + 0.15;
+    const x = X0 + c * PX - GAP / 2, z0 = r * PZ + 0.15;
     for (let k = 0; k < 3; k++) {
       const z = z0 + 0.5 + k * 0.82, v = (c + k * 2 + r) % 4;
       if (v === 0) rack(ctx, x, z, Math.PI / 2, { seed: "s" + r + c + k, h: 0.95, live: !ctx.night });
@@ -68,24 +68,23 @@ function aisles(ctx, all, X0, WD, DP) {
     }
   }
   const dim = glow(ctx, [...mul(th.accent, ctx.night ? 0.1 : 0.22), 1]);
-  for (let r = 1; r < all; r++) { const z = r * (RD + AISLE) - AISLE / 2 + 0.1; B.cells([X0 - 0.5, 0.006, z + 0.28], [WD - X0 + 0.3, 0, 0], [0, 0, -0.02], 1, 1, th.accent, { glow: dim }); }
+  for (let r = 1; r < all; r++) { const z = r * PZ + 0.2 - GAP / 2; B.cells([X0 - 0.5, 0.006, z + 0.01], [WD - X0 + 0.3, 0, 0], [0, 0, -0.02], 1, 1, th.accent, { glow: dim }); }
   B.cells([X0 - 0.5, 0.006, DP - 0.3], [0.02, 0, 0], [0, 0, -(DP - 0.6)], 1, 1, th.accent, { glow: dim });
   cable(ctx, [[X0 - 0.3, 0.4], [X0 - 0.3, DP - 0.5], [X0 + 2, DP - 0.5]]);
 }
 
 /* The whole hall for a plan; the rooms themselves are other chunks. */
 export function hall(ctx, plan) {
-  const { B, M, th } = ctx, { w: WD, d: DP, h: H } = plan.hall, X0 = MW + GAP, F = th.floor, wc = (i, j) => tone(th.wall.col, i, j, th.wall.k);
+  const { B, M, th } = ctx, { w: WD, d: DP, h: H } = plan.hall, F = th.floor, wc = (i, j) => tone(th.wall.col, i, j, th.wall.k);
   const n = M.rooms.filter((r) => r.kind !== "pool").length, rows = Math.max(2, Math.ceil(n / COLS)), all = rows + Math.ceil(M.staff.length / COLS);
-  const cell = (i) => ({ x: X0 + (i % COLS) * RW + RW / 2, z: Math.floor(i / COLS) * (RD + AISLE) + RD / 2 + 0.1 });
   B.cells([0, 0, 0], [0, 0, DP], [WD, 0, 0], Math.round(DP / F.cu), Math.round(WD / F.cv), (i, j) => tone(F.col, i, j, F.k), { stagger: F.stagger, sub: F.sub });
-  const bays = (len, x0, x1) => { for (let x = x0 + RW / 2; x < Math.min(x1, len) - 1; x += RW) pane(ctx, x, 0.6, 2.5, 1.55); };
+  const bays = (len, x0, x1) => { for (let x = x0 + PX / 2; x < Math.min(x1, len) - 1; x += PX) pane(ctx, x, 0.6, 2.5, 1.55); };
   wall(B, 0, 0, WD, 0, H, wc, th.wall, (len) => bays(len, X0, len));
   wall(B, WD, 0, WD, DP, H, wc, th.wall, (len) => bays(len, 0.5, len));
   wall(B, WD, DP, 0, DP, H, wc, th.wall, (len) => bays(len, 0.2, len));
   wall(B, 0, DP, 0, 0, H, wc, th.wall, (len) => bays(len, 0.5, len - MD));
-  for (let i = n; i < rows * COLS; i++) { B.push(cell(i)); commons(ctx); B.pop(); }
-  for (let i = rows * COLS + M.staff.length; i < all * COLS; i++) { B.push(cell(i)); machines(ctx); B.pop(); }
+  for (let i = n; i < rows * COLS; i++) { B.push(bay(i)); commons(ctx); B.pop(); }
+  for (let i = rows * COLS + M.staff.length; i < all * COLS; i++) { B.push(bay(i)); machines(ctx); B.pop(); }
   aisles(ctx, all, X0, WD, DP); deck(ctx); kitchen(ctx);
   if (DP - MD > 7.5) { B.push({ x: MW / 2, z: DP - 2.3 }); machines(ctx); B.pop(); }
   B.model("rugDoormat", { x: 0.5, z: DP - 0.5, r: Math.PI / 2, s: 2 });
