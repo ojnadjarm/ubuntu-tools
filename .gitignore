@@ -14,10 +14,11 @@
 # Generated machine facts: `pc status --facts > KB/machine.md`.
 /KB/machine.md
 
-# Per-agent runtime (BRIEF.md and agent.env are tracked, the rest is not).
+# Per-agent runtime (BRIEF.md and agent.env are tracked, the rest is not; ci-fix's BRIEF.md is generated per run).
 */logs/
 */state/
 */REPORT.md
+/ci-fix/BRIEF.md
 */.lock
 
 # Benchmark data: 12 MB of run output and the two frozen arm copies.

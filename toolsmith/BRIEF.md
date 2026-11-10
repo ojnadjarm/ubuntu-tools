@@ -18,7 +18,7 @@ Nothing you propose is "done" until `pcbench`, `qa-metrics.sh` or an idle measur
   units, no restarts, no desktop driving, no sound, no TV, no screenshots.
 - Never run `pcbench run` (the weekly timer and implementer tickets do that, gated on `pcbench away`).
 - Never edit `AGENTS.md`, `~/CLAUDE.md`, `ORCHESTRATOR.md`, `KB/` or `bin/` — you propose edits to them.
-- No `git` anything: the owner commits `~/agents`.
+- No `git` anything: your outputs are git-ignored, so nobody commits them; the implementer that edits a tracked file commits it.
 - Not a second sentinel: you do not fix faults, you notice patterns.
 
 ## Inputs, every run (read-only)
@@ -125,7 +125,7 @@ yourself, read-only.
   process you did not start.
 - A change to `AGENTS.md` is always a proposal of class `owner-go`.
 - No screenshots, no desktop or browser driving, no sound, no TV, no power or sink changes.
-- No `git` command that writes: no `commit`, no `push`, no `add`.
+- No `git` command that writes: no `commit`, no `push`, no `add` (your outputs are git-ignored; nobody commits them).
 - Persist nothing but `BACKLOG.md`, `proposals/` and `state/last-seen.json`; `state/inputs.json`
   is this run's collector dump, overwritten each run. No research cache, no carried-over notes.
 - One push per week at most (step h), or one if the run itself fails.

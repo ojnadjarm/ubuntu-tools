@@ -70,7 +70,9 @@ brief="$(cat "$WORK/brief.seen")"
 eq "fixer brief names the repo" yes "$(has "Find the cause in $WORK/repo" "$brief")"
 eq "fixer brief names the note with ~" yes "$(has "~/agents/state/ci-fix/$(date +%F).md" "$brief")"
 eq "fixer brief holds no home path" no "$(has "$H" "$brief")"
-eq "fixer brief forbids commit and push" yes "$(has 'never `git commit`/`git push`' "$brief")"
+eq "fixer brief commits only its own files" yes "$(has 'Commit only the files you changed (`git commit -- <paths>`' "$brief")"
+eq "fixer brief no longer leaves the fix unstaged" no "$(has 'leave the change unstaged' "$brief")"
+eq "fixer brief forbids history rewrites" yes "$(has 'never `reset`/`checkout`/`stash`' "$brief")"
 eq "fixer brief has no placeholder left" "" "$(printf '%s' "$brief" | grep -o '@[A-Z]*@')"
 
 FAILS=2 FIXTURE_MSG="declutter 02-b: 1 FAIL" run; eq "fails twice: rc 1" 1 $?
