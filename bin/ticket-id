@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """ticket-id — allocate fleet ticket ids (T<n>) that no brief, history line, evidence or backlog has used, and find double uses.
 
-  ticket-id next [-n N] [--reserve SLUG]   the next N free ids above the highest T-id in use; --reserve writes stub
-                                           briefs/T<n>-SLUG.md under a lock, so parallel planners never get the same id
+  ticket-id next [-n N] [--reserve [SLUG]] the next N free ids above the highest T-id in use; --reserve writes stub
+                                           briefs/T<n>-SLUG.md under a lock, so parallel planners never get the same id;
+                                           a bare --reserve uses the slug `reserved`
   ticket-id check T716                     every use of the id (brief, history, evidence, research, backlog); exit 1 on a double use
   ticket-id dups                           every double-used id with its owners
   ticket-id release T121 [T122 ...]        delete unused reserved stubs (first line still the reserved marker)
@@ -107,7 +108,7 @@ def owners(us):
 
 
 def cmd_next(a):
-    if not a.reserve:
+    if a.reserve is None:
         top = highest()
         print('\n'.join(f'T{top + i}' for i in range(1, a.n + 1)))
         print('ticket-id: not reserved; parallel planners use --reserve SLUG', file=sys.stderr)
@@ -177,7 +178,8 @@ def main():
     sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('next', help='the next free ids')
     p.add_argument('-n', type=int, default=1, choices=range(1, 101), metavar='N', help='how many (1-100, default 1)')
-    p.add_argument('--reserve', metavar='SLUG', help='write stub briefs/T<n>-SLUG.md under a lock')
+    p.add_argument('--reserve', nargs='?', const='reserved', metavar='SLUG',
+                   help='write stub briefs/T<n>-SLUG.md under a lock (no SLUG: reserved)')
     p.set_defaults(fn=cmd_next)
     p = sub.add_parser('check', help='every use of one id; exit 1 on a double use')
     p.add_argument('id')

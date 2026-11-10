@@ -67,6 +67,11 @@ out=$(tid release T140); is "release: rc 0, names the stub" "$?:$(basename "$out
 tid release T61 >/dev/null 2>&1; is "release: a real brief is never deleted" "$?:$(ls "$B" | grep -c '^T61-')" "1:2"
 tid next --reserve 'Bad Slug' >/dev/null 2>&1; is "bad slug: rc 2" "$?" 2
 tid check foo >/dev/null 2>&1; is "bad id: rc 2" "$?" 2
+is "bare --reserve: slug reserved" "$(tid next --reserve 2>/dev/null)" "T151"
+is "bare --reserve: stub written" "$(head -1 "$B/T151-reserved.md" 2>/dev/null | sed 's/ ([0-9-]*)$//')" "# T151 — reserved by ticket-id: reserved"
+is "-n 2 --reserve: 2 ids" "$(tid next -n 2 --reserve 2>/dev/null | tr '\n' ' ')" "T152 T153 "
+is "-n 2 --reserve: 2 stubs" "$(ls "$B" | grep -cE '^T15[23]-reserved\.md$')" 2
+"$TI" next --help | grep -q 'reserved' && ok "next --help names the default slug" || nok "next --help names the default slug" "$("$TI" next --help)"
 tid next -n 0 >/dev/null 2>&1; is "-n 0: rc 2" "$?" 2
 is "empty AGENT_WORK: T1" "$(AGENT_WORK="$W/none" "$TI" next)" "T1"
 [ ! -e "$W/none" ] && ok "empty AGENT_WORK: next writes nothing" || nok "empty AGENT_WORK: next writes nothing" "created"

@@ -1,6 +1,6 @@
 # Next ticket number: allocate a free T-id and find ids used twice
 
-Ticket: T741 · Last verified: 2026-10-20 by `ticket-id --help` and code read (T846); earlier by `bin/tests/ticket-id.test.sh` (40 ok) and a live run (`next` T761, 3 double uses: T716, T717, T718; 0.08 s)
+Ticket: T741 · Last verified: 2026-11-10 by `bin/tests/ticket-id.test.sh` (45 ok, bare `--reserve`, T1545-J); 2026-10-20 by `ticket-id --help` and code read (T846); earlier by `bin/tests/ticket-id.test.sh` (40 ok) and a live run (`next` T761, 3 double uses: T716, T717, T718; 0.08 s)
 
 ## When to use
 Before writing a brief or a backlog: take the id from `ticket-id next` (planners: `--reserve`), never by hand.
@@ -22,6 +22,7 @@ Not for which wave item shipped: that is `fleet-survey --shipped`.
 ```bash
 ticket-id next                      # T760
 ticket-id next -n 15 --reserve wave20   # planners: writes briefs/T<n>-wave20.md stubs
+ticket-id next --reserve            # no slug: writes briefs/T<n>-reserved.md
 ticket-id check T716                # every use; exit 1 on a double use
 ticket-id dups                      # every double-used id with its owners
 ticket-id release T761 T762         # delete unused reserved stubs (first line only, marker intact)
@@ -31,6 +32,8 @@ bash ~/agents/bin/tests/ticket-id.test.sh
 ## Pitfalls (measured)
 - Plain `next` takes no lock and writes nothing: two planners at once get the same id. It says so on stderr;
   parallel planners use `--reserve`.
+- `next --reserve` with no slug exited 2 until T1545-J (6 failures in 4 sessions, 2026-11-07..10; templates say it bare):
+  it now uses the slug `reserved`; a bad slug (`'Bad Slug'`, empty) still exits 2.
 - Unused `--reserve` stubs push `next` up until `release`d; a stub with any line under its header is a real brief and
   stays (release exits 1).
 - A reserved stub's first line is `# T<n> — reserved by ticket-id: <slug> (<date>)`; keep it or overwrite the file
