@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pcbench-weekly — the Sunday 02:00 A/B run of the whole task pack (PB09).
+# pcbench-weekly — the Sunday 06:47 A/B run of the whole task pack (PB09).
 # Gated on "nobody home": the run drives the real desktop, so it never starts while the owner
 # is at the machine. Skips are counted; the owner is pushed once at three skips in a row.
 set -uo pipefail
