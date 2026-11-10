@@ -1,6 +1,7 @@
-/* One room per builder, in its own frame (centre at the origin, back wall at -z): a desk station per person, decor in the empty places, a lounge corner, the room's name on its floor sign or its status board, and the room light. */
+/* One room per builder, in its own frame (centre at the origin, back wall at -z): a desk station per person, decor in the empty places, a lounge corner, the room's name board, and the room light. */
 import { hash, genome } from "../../familiars/genome.js";
-import { mul, glow, lamp, rack, grow, holo, cable, sign } from "./props.js";
+import { mul, glow, lamp, rack, grow, holo } from "./props.js";
+import { board } from "./sign.js";
 
 export const SEAT = 0.28, SCALE = 0.36;
 const CREAM = [0.6, 0.66, 0.62], OFF = [0.12, 0.14, 0.14], STANDBY = [0.16, 0.32, 0.36];
@@ -59,32 +60,15 @@ function places(ctx, R, list, tint, w, d, slots, tags, bare) {
     B.pop();
   }
 }
-/* The room's name as a dot sign on the floor at its entrance: bright while someone works, dim when all sleep; its corners go to labels so a click on it opens the room's card. */
-function plate(ctx, R, d, col) {
-  const z = d / 2 + 0.32, h = 0.27, w = sign(ctx, R.info.name.toUpperCase(), [0, 0.012, z], [1, 0, 0], [0, 0, -1], h, mul(col, R.busy ? 1 : R.awake ? 0.75 : 0.42), { i: R.busy ? 0.22 : 0, halo: 0.12 });
-  mark(ctx, R, (x, y) => [x * (w / 2 + 0.05), 0.012, z - y * (h / 2 + 0.05)], w);
-}
-/* The room's back status board (a holo between its racks) with the room's name across it in dot letters; a click on it opens the room's card. */
-function screen(ctx, R) {
-  const { th } = ctx, col = R.busy ? th.accent : th.second, W = 0.8, H = 0.62, t = ctx.ink(R.info.name.toUpperCase());
-  holo(ctx, [-W / 2, 0.5, 0.05], [W, 0, 0], [0, H, 0], col, R.busy ? 1 : 0.4);
-  sign(ctx, R.info.name.toUpperCase(), [0, 0.5 + H / 2, 0.06], [1, 0, 0], [0, 1, 0], Math.min(0.3, (W - 0.08) * t.h / t.w), col, { i: 0 });
-  mark(ctx, R, (x, y) => [x * W / 2, 0.5 + H / 2 + y * H / 2, 0.05], W);
-}
-/* Pushes the clickable outline of room R's name: f(±1, ±1) gives its corners in the current frame. */
-function mark(ctx, R, f, w) {
-  const at = (x, y) => { const q = f(x, y), p = ctx.B.at(...q); return [p.x, p.y, p.z]; };
-  ctx.labels.push({ id: R.sign, pos: at(0, 0), quad: [at(-1, -1), at(1, -1), at(1, 1), at(-1, 1)], r: w * 0.7 });
-}
 /* The furnished size of a room, its desk count, its tint and its hash, from its cell of the plan. */
 function frame(ctx, R, k) {
   const c = ctx.plan.cells[R.id], h = hash(R.id);
   return { w: c.w, d: c.d, slots: c.slots, h, tint: mul(ctx.th.tints[Math.max(0, R.team) % ctx.th.tints.length], k(h)) };
 }
 
-/* A seat's room: the seat at the lead desk by the back wall, its workers at the side desks. */
+/* A seat's room: the seat at the lead desk under the room's name board, its workers at the side desks. */
 export function seatRoom(ctx, R) {
-  const { B, th } = ctx, { w, d, slots, h, tint } = frame(ctx, R, (h) => 0.86 + (h % 5) * 0.07), lead = R.people[0];
+  const { B } = ctx, { w, d, slots, h, tint } = frame(ctx, R, (h) => 0.86 + (h % 5) * 0.07), lead = R.people[0];
   trace(ctx, R, w, d); rug(ctx, R, tint, h);
   B.push({ z: -d / 2 + 0.5 });
   const p = station(ctx, lead, tint, true);
@@ -92,34 +76,30 @@ export function seatRoom(ctx, R) {
   places(ctx, R, R.people.slice(1), tint, w, d, slots, false);
   B.push({ z: d / 2 - 0.75 }); LOUNGE[h % LOUNGE.length](B, mul(tint, 0.9)); B.pop();
   const lit = R.awake || ctx.night;
-  B.model("lampRoundFloor", { x: -0.8, z: -d / 2 + 0.3, glow: { lamp: lit ? glow(ctx, [1, 0.82, 0.5, 1]) : 0 } });
-  if (lit) lamp(ctx, -0.8, 0.95, -d / 2 + 0.4, ctx.night ? 0.8 : 0.5, 1.3, { halo: 0.3 });
-  plate(ctx, R, d, R.busy ? th.accent : th.second);
+  B.model("lampRoundFloor", { x: -0.8, z: -d / 2 + 0.6, glow: { lamp: lit ? glow(ctx, [1, 0.82, 0.5, 1]) : 0 } });
+  if (lit) lamp(ctx, -0.8, 0.95, -d / 2 + 0.7, ctx.night ? 0.8 : 0.5, 1.3, { halo: 0.3 });
+  B.push({ z: -d / 2 + 0.15 }); board(ctx, R, { id: R.sign, name: R.info.name, y: 0.8, h: 1.85 }); B.pop();
   ctx.labels.push({ id: R.id, pos: [p.x, p.y + 0.82, p.z] });
 }
 
-/* A team room of staff: racks and the team's status board with its name at the back, one desk per member. */
+/* A team room of staff: the team's name board at the back, one desk per member. */
 export function teamRoom(ctx, R) {
-  const { B, th } = ctx, { w, d, slots, h, tint } = frame(ctx, R, () => 0.9);
+  const { B } = ctx, { w, d, slots, h, tint } = frame(ctx, R, () => 0.9);
   trace(ctx, R, w, d); rug(ctx, R, tint, h);
-  B.push({ z: -d / 2 + 0.3 });
-  rack(ctx, -0.62, 0, 0, { seed: R.id, live: R.busy > 0 }); rack(ctx, 0.62, 0, 0, { seed: R.id + "b", live: R.busy > 0 });
-  screen(ctx, R);
-  cable(ctx, [[-0.62, 0.3], [-0.62, 0.55], [0.62, 0.55], [0.62, 0.3]]);
-  B.pop();
+  B.push({ z: -d / 2 + 0.3 }); board(ctx, R, { id: R.sign, name: R.info.name }); B.pop();
   places(ctx, R, R.people, tint, w, d, slots, true);
   B.push({ z: d / 2 - 0.75 }); LOUNGE[(h + 1) % LOUNGE.length](B, mul(tint, 0.9)); B.pop();
 }
 
-/* The desk pool: one desk per agent the CEO runs himself (bare when free), no lead desk, a status board with its name at the back. */
+/* The desk pool: one desk per agent the CEO runs himself (bare when free), no lead desk, its name board at the back. */
 export function pool(ctx, R) {
   const { B } = ctx, { w, d, slots, h, tint } = frame(ctx, R, () => 0.9);
   trace(ctx, R, w, d); rug(ctx, R, tint, h);
-  B.push({ z: -d / 2 + 0.3 }); screen(ctx, R); B.pop();
+  B.push({ z: -d / 2 + 0.3 }); board(ctx, R, { id: R.sign, name: R.info.name }); B.pop();
   places(ctx, R, R.people, tint, w, d, slots, true, true);
 }
 
-/* The CEO's place: a neon ring on the deck, a wide desk under three holo screens and the Conductor standing on the floor with the model's motes, lamp and failing agent. */
+/* The CEO's place: a neon ring on the deck, a wide desk under three holo screens, the name board and the Conductor standing on the floor with the model's motes, lamp and failing agent. */
 export function ceoSpot(ctx, R) {
   const { B, th } = ctx, on = R.pose === "working" || R.pose === "talking", col = th.state[R.pose] || th.accent, k = on ? 1 : R.pose === "sleep" ? 0.15 : 0.5;
   B.model("rugRound", { s: [2.6, 1, 2.6], tint: { carpet: [0.1, 0.13, 0.26], carpetDarker: [0.5, 0.28, 0.2], carpetWhite: mul(CREAM, 0.8) } });
@@ -127,8 +107,9 @@ export function ceoSpot(ctx, R) {
   B.model("desk", { x: -0.37, z: -0.75 }); B.model("desk", { x: 0.37, z: -0.75 });
   B.model("books", { x: -0.5, y: 0.384, z: -0.75 }); B.model("computerKeyboard", { x: 0, y: 0.384, z: -0.68 });
   for (const s of [-1, 0, 1]) { B.push({ x: s * 0.5, y: 0.46, z: -0.86 + Math.abs(s) * 0.1, r: -s * 0.5 }); holo(ctx, [-0.22, 0, 0], [0.44, 0, 0], [0, 0.34, 0], s ? th.second : col, on ? 1 : 0.35); B.pop(); }
-  grow(ctx, 1.25, -0.6, -0.5, { w: 0.6 }); rack(ctx, -1.3, -0.75, 0.4, { seed: "ceo", h: 0.9, live: on });
-  B.model("lampRoundFloor", { x: -0.9, z: -0.2, glow: { lamp: glow(ctx, [1, 0.82, 0.5, 1]) } }); lamp(ctx, -0.9, 0.95, -0.1, ctx.night ? 0.8 : 0.5, 1.3, { halo: 0.3 });
+  grow(ctx, 1.25, -0.6, -0.5, { w: 0.6 });
+  B.push({ x: -1.35, z: -0.3, r: 0.8 }); board(ctx, { busy: on ? 1 : 0, awake: R.pose !== "sleep" }, { id: "sign-" + R.id, who: R.id, name: R.rank || R.name, w: 0.9, sh: 0.6, y: 0.35, h: 1.05 }); B.pop();
+  B.model("lampRoundFloor", { x: -0.9, z: 0.75, glow: { lamp: glow(ctx, [1, 0.82, 0.5, 1]) } }); lamp(ctx, -0.9, 0.95, 0.85, ctx.night ? 0.8 : 0.5, 1.3, { halo: 0.3 });
   lamp(ctx, 0, 0.7, -0.6, on ? 0.8 : 0.3, 0.9, { col, halo: on ? 0.4 : 0.15 });
   const p = B.at(0, 0, 0), L = R.live || { motes: [], lamp: "ok", failing: null };
   ctx.actors.push({ id: R.id, role: "ceo", pose: R.pose, x: p.x, y: p.y, z: p.z, yaw: p.r, scale: 0.4, live: { motes: L.motes.map((id) => ({ id, hue: genome(id).hue })), lamp: L.lamp, failing: L.failing } });

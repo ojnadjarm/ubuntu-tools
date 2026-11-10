@@ -43,7 +43,7 @@ const near = (c, lamps) => lamps.filter((l) => l.i > 0 && Math.hypot(Math.max(c.
 export function createRenderer(canvas, opts) {
   if (made.has(canvas)) return made.get(canvas);
   const S = stage(canvas, { still: opts.still }), mesh = chunks(S), fam = creatures(S.scene), fx = effects(S.scene), halo = halos(S), lit = halos(S), built = new Map(), anchors = new Map();
-  let B = opts.build || (opts.chunk && { steps: (...a) => [() => opts.chunk(...a)] }), actors = [], boards = [], jobs = [], raf = 0, cur = null, fit = false, queued = null, tally = { rebuilt: 0, relit: 0, ms: 0 };
+  let B = opts.build || (opts.chunk && { steps: (...a) => [() => opts.chunk(...a)] }), actors = [], boards = [], jobs = [], raf = 0, cur = null, fit = false, queued = null, hot = null, tally = { rebuilt: 0, relit: 0, ms: 0 };
   S.ticker((t, dt) => { fx.step(t); return fam.step(t, dt); });
 
   /* Runs queued jobs for SLICE_MS, then leaves the rest to the next frame. */
@@ -82,7 +82,7 @@ export function createRenderer(canvas, opts) {
       for (let i = 0; i < 3; i++) { lo[i] = Math.min(lo[i], c.lo[i]); hi[i] = Math.max(hi[i], c.hi[i]); }
     }
     for (const a of actors) anchors.set(a.id, [a.x, a.y + (0.8 * a.scale) / 0.36, a.z]);
-    for (const { c } of built.values()) for (const l of c.labels || []) { anchors.set(l.id ?? l.who, l.pos); if (l.quad) boards.push(l); }
+    for (const { c } of built.values()) for (const l of c.labels || []) { anchors.set(l.id ?? l.who, l.pos); if (l.quad) boards.push(l); (l.cap || []).forEach((q, i) => anchors.set(l.id + "/cap" + i, q)); }
     fam.set(actors); halo(lamps); fx.look(opts.theme, M.night);
     if (fit) S.view({ lo, hi, ...plan.home }); else { S.invalidate(); canvas.dispatchEvent(new Event("view")); }
     fit = false;
@@ -111,21 +111,27 @@ export function createRenderer(canvas, opts) {
     apply,
     /* Canvas pixels of the label point of a person or room; ok is false off screen or for an unknown id. */
     project(id) { const p = anchors.get(id); return p ? S.project(p) : { x: 0, y: 0, ok: false }; },
-    /* The id under canvas pixel (x, y): a creature's body, else a room sign, else the nearest creature within TAP_PX (a 44 px target). */
+    /* The id under canvas pixel (x, y): a creature's body, else the name board it lies on, else the nearest creature or board within TAP_PX (a 44 px target). */
     pick(x, y) {
       let best = null, bd = 1e9, body = false;
       for (const a of actors) {
         const feet = S.project([a.x, a.y, a.z]), tip = S.project(anchors.get(a.id)), d = reach({ x, y }, feet, tip), own = Math.hypot(tip.x - feet.x, tip.y - feet.y) * 0.45;
         if (feet.ok && d < Math.max(TAP_PX, own) && d < bd) { bd = d; best = a.id; body = d < own; }
       }
+      hot = null;
       if (body) return best;
-      const b = boards.find((l) => { const Q = l.quad.map(S.project); return Q.every((q) => q.ok) && inside({ x, y }, Q); });
-      return b ? b.id : best;
+      for (const l of boards) {
+        const Q = l.quad.map(S.project);
+        if (!Q.every((q) => q.ok)) continue;
+        const d = inside({ x, y }, Q) ? 0 : Math.min(...Q.map((q, i) => reach({ x, y }, q, Q[(i + 1) % 4])));
+        if (d < TAP_PX && d * 0.5 < bd) { bd = d * 0.5; hot = l; }
+      }
+      return hot ? hot.who || hot.id : best;
     },
-    /* Lights the creature or sign `id` with a soft accent halo (null clears it) and draws one frame. */
+    /* Lights the creature `id`, or the name board the last pick found for it, with a soft accent halo (null clears it) and draws one frame. */
     hover(id) {
-      const a = id && actors.find((x) => x.id === id), b = id && !a && boards.find((l) => l.id === id), col = opts.theme.accent;
-      lit(a ? [{ x: a.x, y: a.y + 0.3 * a.scale / 0.36, z: a.z, col, r: 0.7, halo: 0.9 }] : b ? [{ x: b.pos[0], y: b.pos[1], z: b.pos[2] + 0.1, col, r: b.r, halo: 0.6 }] : []);
+      const b = id && ((hot && (hot.who || hot.id) === id && hot) || boards.find((l) => l.id === id)), a = id && !b && actors.find((x) => x.id === id), col = opts.theme.accent;
+      lit(a ? [{ x: a.x, y: a.y + 0.3 * a.scale / 0.36, z: a.z, col, r: 0.7, halo: 0.9 }] : b ? [{ x: b.pos[0], y: b.pos[1], z: b.pos[2], col, r: b.r, halo: 0.6 }] : []);
       S.invalidate();
     },
     reset: S.reset,

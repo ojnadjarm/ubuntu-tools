@@ -103,14 +103,9 @@ async function shoot(b, base, w, h) {
   assert.deepStrictEqual([c.who, c.heads, c.quiet], ["room-mooblox", ["Members", "Next runs", "Sessions", "Held files", "Sub-agents running"], 4], `${w}: the room card from the line`);
   await p.click("#office-card .cx");
   assert.strictEqual(await card(p), null, `${w}: × closes`);
-  const sign = w > 900 && await onSign(p, "team-operations");
-  /* Below 900 px the sign is a few px wide at the default camera (its size and look are T1601-17c): the team card opens from a member's line. */
-  const team = async () => {
-    if (sign) return p.mouse.click(...sign);
-    await p.mouse.click(...await at(p, "sentinel", 12));
-    await p.click("#office-card .home [data-who]");
-  };
-  if (w > 900) assert.ok(sign, `${w}: the Operations sign is on screen`);
+  const sign = await onSign(p, "team-operations");
+  const team = () => p.mouse.click(...sign);
+  assert.ok(sign, `${w}: the Operations sign is on screen`);
   await team();
   c = await card(p);
   assert.deepStrictEqual([c && c.who, c && c.heads], ["team-operations", ["Members", "Next runs", "Sessions", "Held files", "Sub-agents running"]], `${w}: a click on the sign opens the team's card`);
@@ -120,7 +115,7 @@ async function shoot(b, base, w, h) {
   await team();
   await p.mouse.click(4, 4);
   assert.strictEqual(await card(p), null, `${w}: a click outside closes`);
-  ok(`${w}: ${sign ? "a click on a room's sign" : "a member's room line"} opens the team's card; Esc and a click outside close it`);
+  ok(`${w}: a click on a room's sign opens the team's card; Esc and a click outside close it`);
   assert.deepStrictEqual(errs, []);
   await p.context().close();
 }
