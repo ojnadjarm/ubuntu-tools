@@ -1,8 +1,8 @@
 """HTTP transport: one-write send() with gzip, ETag/304 and TCP_NODELAY; route dispatch; pages and static files."""
-import gzip, hashlib, html, json, os, socket, sys, threading, urllib.parse
+import gzip, hashlib, html, ipaddress, json, os, socket, sys, threading, urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from dash import routes
-from dash.env import BINDS, BRAND, HERE, PORT
+from dash.env import BINDS, BRAND, HERE, HOST, PORT, PUBLIC_HOST
 from dash.routes import route
 from dash.services.files import MIME
 from dash.services.sites import trusted
@@ -10,6 +10,8 @@ from dash.services.sites import trusted
 GZ_MIN = 1024
 STATIC_CACHE = "max-age=60"
 _assets = {}
+NAMES = {n.lower() for n in ("localhost", HOST, HOST + ".local", socket.gethostname(), socket.gethostname() + ".local",
+                             PUBLIC_HOST, PUBLIC_HOST.split(".")[0])}
 
 
 def compressible(ctype):
@@ -92,6 +94,8 @@ class Handler(BaseHTTPRequestHandler):
         self.dispatch("POST")
 
     def dispatch(self, method):
+        if not self.known_host():
+            return self.json({"error": "unknown host"}, 403)
         path = self.path.split("?")[0]
         fn = routes.find(method, path)
         if not fn:
@@ -101,6 +105,19 @@ class Handler(BaseHTTPRequestHandler):
         if method == "POST" and not trusted(self.client_address[0], self.headers.get("X-Forwarded-For")):
             return self.json({"error": "tailnet only"}, 403)
         fn(self, path)
+
+    def known_host(self):
+        """True when Host is absent (never a browser), an IP literal or one of NAMES (a DNS-rebound name is none)."""
+        if not self.headers.get("Host"):
+            return True
+        try:
+            name = (urllib.parse.urlsplit("//" + self.headers.get("Host", "")).hostname or "").rstrip(".")
+        except ValueError:
+            return False
+        try:
+            return bool(ipaddress.ip_address(name))
+        except ValueError:
+            return name in NAMES
 
     def cross_site(self):
         """True when Fetch Metadata says another site sent the request, or its Origin is not this Host."""

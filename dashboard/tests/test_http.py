@@ -131,6 +131,25 @@ class Http(unittest.TestCase):
         r, _ = self.get("/api/nothing", method="POST")
         self.assertEqual((r.status, r.getheader("Cache-Control"), r.getheader("ETag")), (404, "no-store", None))
 
+    def test_foreign_host_get_refused(self):
+        r, body = self.get("/api/ls", Host="evil.example:19998")
+        self.assertEqual((r.status, json.loads(body)), (403, {"error": "unknown host"}))
+
+    def test_foreign_host_post_refused(self):
+        r, body = self.get("/api/nothing", method="POST", Host="evil.example")
+        self.assertEqual((r.status, json.loads(body)), (403, {"error": "unknown host"}))
+
+    def test_foreign_host_ip_literal_passes(self):
+        for host in ("127.0.0.1:19998", "[::1]:19998", "100.64.0.1"):
+            r, _ = self.get("/api/ls", Host=host)
+            self.assertEqual(r.status, 200, host)
+
+    def test_foreign_host_own_names_pass(self):
+        from dash.env import HOST, PUBLIC_HOST
+        for host in (PUBLIC_HOST + ":8498", PUBLIC_HOST.split(".")[0], HOST + ".local:19998", "localhost:19998", socket.gethostname()):
+            r, _ = self.get("/api/ls", Host=host)
+            self.assertEqual(r.status, 200, host)
+
     def test_head_has_no_body(self):
         r, body = self.get("/static/eye.css", method="HEAD", **{"Accept-Encoding": "gzip"})
         self.assertEqual((r.status, body), (200, b""))
@@ -140,7 +159,7 @@ class Http(unittest.TestCase):
 
     def test_head_file_has_no_body(self):
         s = socket.create_connection(self.srv.server_address, timeout=0.5)
-        s.sendall(b"HEAD /files/blob.bin HTTP/1.1\r\nHost: x\r\n\r\n")
+        s.sendall(b"HEAD /files/blob.bin HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
         data = b""
         try:
             while chunk := s.recv(65536):
