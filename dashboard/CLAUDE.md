@@ -11,7 +11,7 @@ dash/env.py          machine constants, run() for CLIs
 dash/http.py         Handler: route lookup, one-write send() (TCP_NODELAY, gzip ≥ 1 KB, ETag/304), pages, /static
 dash/routes.py       @route(method, path, prefix=False) registry
 dash/cache.py        cached() TTL memo; swr() stale-while-revalidate, blocks refreshed in parallel
-dash/services/       system, sites, files, thumbs, voice, state, agents, projects, runners, todo, reports, org, chat — each registers its own routes
+dash/services/       system, sites, files, thumbs, voice, state, agents, projects, runners, todo, reports, org, office, chat — each registers its own routes
 index.html           classic shell, served at /classic; loads static/js/app.js (module)
 static/eye.css       the one design system: tokens, chrome, @component blocks, responsive
 static/css/          machine.css, files.css, org.css, chat.css

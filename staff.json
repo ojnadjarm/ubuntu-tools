@@ -1,0 +1,23 @@
+{
+  "teams": [
+    {"id": "operations", "name": "Operations", "members": [
+      {"id": "sentinel-digest", "name": "Cinder", "rank": "Watch Reporter"},
+      {"id": "maintenance", "name": "Briar", "rank": "Caretaker"},
+      {"id": "moodle-keeper", "name": "Wren", "rank": "Moodle Keeper"},
+      {"id": "fleet-backup", "name": "Yarrow", "rank": "Archivist", "unit": "fleet-backup.timer"},
+      {"id": "sentinel", "name": "Ember", "rank": "Sentinel"},
+      {"id": "discord-liaison", "name": "Sorrel", "rank": "Liaison"}
+    ]},
+    {"id": "quality", "name": "Quality", "members": [
+      {"id": "code-review", "name": "Tarn", "rank": "Code Reviewer"},
+      {"id": "fleet-ci-daily", "name": "Pebble", "rank": "Fleet Tester", "unit": "fleet-ci-daily.timer"},
+      {"id": "ailearning-ci", "name": "Sable", "rank": "Lesson Tester", "unit": "ailearning-ci-daily.timer"},
+      {"id": "ci-fix", "name": "Flint", "rank": "CI Fixer"}
+    ]},
+    {"id": "improvement", "name": "Improvement", "members": [
+      {"id": "toolsmith", "name": "Soot", "rank": "Toolsmith"},
+      {"id": "improve-meter", "name": "Dusk", "rank": "Meter Reader", "unit": "improve-meter.timer"}
+    ]}
+  ],
+  "hidden": ["hello"]
+}
