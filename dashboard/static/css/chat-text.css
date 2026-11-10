@@ -1,0 +1,11 @@
+/* Chat message text (T1545-B, chat-text.js): links, fenced code blocks with Copy; eye.css tokens only. */
+.tx { overflow-wrap: anywhere; }
+.tx a { color: var(--g); text-decoration: underline; text-decoration-color: var(--line3); text-underline-offset: 3px; }
+.tx a:hover { color: var(--g2); text-decoration-color: var(--g); }
+.tx a:focus-visible { outline: 1px solid var(--g); outline-offset: 2px; }
+.tx .cb { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; margin: .35rem 0; min-width: 0; max-width: 100%; border: 1px solid var(--line2); background: var(--bg1); }
+.tx .cb .lang { padding: 0 .7rem; color: var(--mute); font-size: var(--fs-label); letter-spacing: var(--ls-label); text-transform: uppercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tx .cb .btn { min-height: 32px; min-width: 32px; border-width: 0 0 0 1px; }
+.tx .cb pre { grid-column: 1 / -1; margin: 0; padding: .5rem .7rem; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; border-top: 1px solid var(--line); font: inherit; white-space: pre; overflow-wrap: normal; color: var(--txt); }
+.tx .cb pre code { padding: 0; background: none; color: inherit; font-size: inherit; }
+@media (pointer: coarse) { .tx .cb .btn { min-height: 44px; min-width: 44px; } }
