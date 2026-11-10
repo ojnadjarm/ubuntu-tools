@@ -3,7 +3,7 @@ import { esc, p2 } from "/static/js/core/fmt.js";
 import { getJSON, postJSON } from "/static/js/core/api.js";
 import { cur, go } from "/static/js/core/router.js";
 import { familiar } from "../familiars/alive.js";
-import { heard, watch as onTalk } from "../familiars/talk.js";
+import { heard, talking, watch as onTalk } from "../familiars/talk.js";
 import { dust } from "../shapes.js";
 import { fitEye } from "../gl/cam.js";
 import { sync } from "../ui/sync.js";
@@ -14,6 +14,7 @@ import { attachments } from "./chat-files.js";
 import { store } from "../store.js";
 import { note, seed, lastIn, byActivity, peek, when } from "./chat-list.js";
 import { box, bindSearch, mark, words, fill, focusBox } from "./chat-search.js";
+import { actions, grouped, opened, bindActions } from "./chat-actions.js";
 
 export const own = true;
 const POLL_MS = 3000, ORG_MS = 20000, QUOTE = 44;
@@ -196,6 +197,8 @@ function stateOf(id) {
 }
 
 const time = (m) => { const d = new Date(m.ts); return p2(d.getHours()) + ":" + p2(d.getMinutes()); };
+/* The <time> of m: its hours and minutes, the full local date and time as its title. */
+const stamp = (m, cls = "") => `<time${cls ? ` class="${cls}"` : ""} datetime="${esc(m.ts)}" title="${esc(new Date(m.ts).toLocaleString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }))}">${time(m)}</time>`;
 function day(m) {
   const d = new Date(m.ts), now = new Date(), y = new Date(now - 864e5);
   if (d.toDateString() === now.toDateString()) return "Today";
@@ -209,13 +212,17 @@ let rich = text;
 import("./chat-text.js").then((m) => { rich = m.rich; paint(); }, () => {});
 const clip = (t) => (t.length > QUOTE ? t.slice(0, QUOTE).trimEnd() + "…" : t);
 
-function msg(m, byId, N, fmt = rich) {
+/* One row: a group's first row carries the Familiar and header (talking when mid is being said), a grouped row a gutter time; both the actions. */
+function msg(m, byId, N, fmt = rich, grp = false, mid = m.id) {
   if (m.kind === "system") return `<li class="csys">${fmt(m.text)}</li>`;
   const him = m.from === "owner", r = m.re != null ? byId[m.re] : null;
-  const av = him ? `<i class="dia"></i>` : familiar(m.from, stateOf(m.from), roleOf(m.from), m.id);
+  const li = `<li class="msg${him ? " him" : ""}${grp ? " grp" : ""}${opened(m) ? " open" : ""}" data-mch="${esc(m.ch)}" data-mid="${esc(String(m.id))}">`;
+  const body = `${m.text ? `<div class="tx">${fmt(m.text)}</div>` : ""}${attachments(m.files)}`, acts = actions(m, !!ch && !q);
+  if (grp) return `${li}${stamp(m, "gt")}<div>${body}</div>${acts}</li>`;
+  const av = him ? `<i class="dia"></i>` : familiar(m.from, stateOf(m.from), roleOf(m.from), mid);
   const re = m.re == null ? "" : `<p class="re">${r ? esc(nameOf(r.from, N) + " " + time(r) + ": " + clip(r.text)) : "a reply to an earlier message"}</p>`;
   const where = ch ? "" : `<a class="chtag" href="#chat?ch=${esc(m.ch)}" data-ch="${esc(m.ch)}">${esc(label(m.ch, N))}</a>`;
-  return `<li class="msg${him ? " him" : ""}"><span class="av" aria-hidden="true">${av}</span><div><p class="who"><b>${esc(nameOf(m.from, N))}</b>${where}${TAG[m.kind] || ""}<time datetime="${esc(m.ts)}">${time(m)}</time></p>${re}${m.text ? `<div class="tx">${fmt(m.text)}</div>` : ""}${attachments(m.files)}</div></li>`;
+  return `${li}<span class="av" aria-hidden="true">${av}</span><div><p class="who"><b>${esc(nameOf(m.from, N))}</b>${where}${TAG[m.kind] || ""}${stamp(m)}</p>${re}${body}</div>${acts}</li>`;
 }
 /* "<seat> is thinking" (or "woken, starting") for an agent woken from channel c and still running. */
 const busyLine = (t, N) => esc(nameOf(t.seat, N)) + (t.state === "thinking" ? " is thinking" : " woken, starting");
@@ -225,15 +232,17 @@ function thinking(N) {
     return `<li class="thinking"><span class="av" aria-hidden="true">${familiar(t.seat, "working", roleOf(t.seat))}</span><p><b>${busyLine(t, N)}</b><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>${where}</p></li>`;
   }).join("");
 }
-/* Rows of list with a day line before each new day; fmt turns text to HTML. */
+/* Rows of list with a day line before each new day, one sender's run grouped under its first row; fmt turns text to HTML. */
 function rows(list, N, fmt) {
-  const byId = Object.fromEntries(list.map((m) => [m.id, m]));
+  const byId = Object.fromEntries(list.map((m) => [m.id, m])), g = list.map((m, i) => grouped(list[i - 1], m));
   let last = "", out = "";
-  for (const m of list) {
+  list.forEach((m, i) => {
     const d = day(m);
     if (d !== last) { out += `<li class="cday">${esc(d)}</li>`; last = d; }
-    out += msg(m, byId, N, fmt);
-  }
+    let mid = m.id;
+    for (let j = i + 1; !g[i] && j < list.length && g[j]; j++) if (talking(m.from, list[j].id)) mid = list[j].id;
+    out += msg(m, byId, N, fmt, g[i], mid);
+  });
   return out;
 }
 /* The search view's rows: Recent's rows with each word marked, or why there are none. */
@@ -258,8 +267,9 @@ function chanLink(c, N) {
   const pv = `<span class="pv">${m ? esc(peek(m, (id) => nameOf(id, N), dm)) : !c.ch ? "Every channel, newest first" : C.some((x) => x.ch === c.ch) ? "" : "No messages yet"}</span>${m ? `<time class="tm" datetime="${esc(m.ts)}">${esc(when(m))}</time>` : ""}`;
   return `<a href="#chat${c.ch ? "?ch=" + esc(c.ch) : "?recent=1"}" data-ch="${esc(c.ch)}"${c.ch === ch && !q ? ` class="on" aria-current="page"` : ""}>${who ? familiar(who, st, roleOf(who)) : glyph}<span class="cn">${esc(label(c.ch, N))}</span>${pv}${think}${tail}</a>`;
 }
+/* Who is in the open view: the direct message's pair, else the senders of its messages (of the results in a search). */
 function members(N) {
-  const ids = ch.startsWith("dm-") ? pair(ch) : [...new Set(msgs.filter((m) => m.kind !== "system").map((m) => m.from))];
+  const ids = ch.startsWith("dm-") ? pair(ch) : [...new Set((q ? hits || [] : msgs).filter((m) => m.kind !== "system").map((m) => m.from))];
   const rows = ids.filter((id) => id !== "owner").map((id) => {
     const st = stateOf(id);
     return `<div class="mem"><span class="av" aria-hidden="true">${familiar(id, st, roleOf(id))}</span><div><b>${esc(nameOf(id, N))}</b><span>${esc(LINE[st] || "not a seat of the org")}</span></div></div>`;
@@ -292,6 +302,7 @@ export function render() {
   if (!C) return `<div class="nxs skel" aria-busy="true"><p class="sm pad">${err ? "chat unreadable · " + esc(err) : "reading the chat…"}</p></div>`;
   bind(paintNow, (id) => nameOf(id, names()), paint);
   bindSearch(seek, () => { if (q) leave(); });
+  bindActions((c, id) => { const m = (q ? hits || [] : msgs).find((x) => x.id === id && x.ch === c); return m ? { ch: m.ch, id: m.id, name: nameOf(m.from, names()), text: m.text } : null; });
   if (q && q.trim() !== asked) look();
   shown = ch + "|" + listing + "|" + q;
   const N = names(), L = listed(), rooms = byActivity(L.rooms), dms = byActivity(L.dms);
@@ -302,7 +313,7 @@ export function render() {
   const body = `<section class="pane stream" aria-label="Messages">${head(N)}<ol class="msgs" aria-live="polite">${q ? found(N) : stream(N)}</ol><button type="button" class="btn newer" data-newer${fresh && !q ? "" : " hidden"}>${plural(fresh, "new message")} ↓</button>${ch ? composer(ch, label(ch, N)) : ""}</section>`;
   return `<div class="nxs chat ${listing && !ch ? "list" : "conv"}"><section class="band" aria-label="Chat summary"><div class="perch" id="perch" aria-hidden="true"></div><div class="bt"><p class="kin" data-dec>Chat</p>` +
     `<p class="bsum">${sum}${err ? ` · stale: ${esc(err)}` : ""}</p></div></section><div class="cgrid">${nav}${body}` +
-    `<aside class="pane cside" aria-label="In this channel"><h2><span data-dec>in this channel</span></h2>${members(N)}${wakes(N)}</aside></div></div>`;
+    `<aside class="pane cside" aria-label="In ${q ? "these results" : "this channel"}"><h2><span data-dec>in ${q ? "these results" : "this channel"}</span></h2>${members(N)}${wakes(N)}</aside></div></div>`;
 }
 
 /* Paints the view the state names and reads it at once; back on the phone list, at the scroll he left it. */

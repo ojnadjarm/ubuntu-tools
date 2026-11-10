@@ -1,4 +1,4 @@
-/* Agents › Chat: channel list, message stream, composer, who is in the channel, who is thinking, wakes today, attachments and Recent (T1515-P9, P10, P33, P38); below 900 px a messenger list and a full-screen conversation (P39); from 900 px messenger rows in a list column sized to its names (T1545-A); the search box and results (T1545-D); eye.css tokens only. */
+/* Agents › Chat: channel list, message stream, composer, who is in the channel, who is thinking, wakes today, attachments and Recent (T1515-P9, P10, P33, P38); below 900 px a messenger list and a full-screen conversation (P39); from 900 px messenger rows in a list column sized to its names (T1545-A); the search box and results (T1545-D); per-message Reply/Copy and grouped runs of one sender (T1545-F); eye.css tokens only. */
 .chat { display: grid; gap: 1rem; }
 .chat .cgrid { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr); align-items: start; }
 .chat .pill.off { color: var(--mute); border-color: var(--line); border-style: dashed; }
@@ -30,6 +30,17 @@
 .chat .msg.him { background: linear-gradient(90deg, var(--gold-w), transparent 70%); margin: 0 -1.1rem; padding: .6rem 1.1rem; border-left: 2px solid var(--gold); }
 .chat .msg.him .who b { color: var(--gold); }
 .chat .msg.him .tx { color: var(--hi); }
+.chat .msg { position: relative; }
+.chat .msg:has(+ .grp) { padding-bottom: .1rem; }
+.chat .msg.grp { padding-top: .1rem; }
+.chat .msg .gt { visibility: hidden; justify-self: center; padding-top: .2rem; color: var(--mute); font-size: max(11px, .68rem); font-variant-numeric: tabular-nums; }
+.chat .msg .act { position: absolute; top: .2rem; right: 0; z-index: 1; display: flex; gap: .25rem; padding: .2rem; border: 1px solid var(--line3); background: var(--bg2); opacity: 0; pointer-events: none; }
+.chat .msg.him .act { right: .4rem; }
+.chat .msg .act .btn { min-width: 32px; min-height: 32px; padding: 0 .6rem; }
+.chat .msg:has(:focus-visible) .act, .chat .msg.open .act { opacity: 1; pointer-events: auto; }
+.chat .msg:hover .gt, .chat .msg:has(:focus-visible) .gt, .chat .msg.open .gt { visibility: visible; }
+@media (min-width: 900px) and (hover: hover) { .chat .msg:hover .act { opacity: 1; pointer-events: auto; } }
+@media (max-width: 899px), (pointer: coarse) { .chat .msg .act .btn { min-width: 44px; min-height: 44px; } }
 .chat .dia { display: block; width: 1.3rem; height: 1.3rem; margin: .5rem; border: 1.5px solid var(--gold); transform: rotate(45deg); background: var(--gold-w); }
 .chat .ctag { font-size: max(11px, .68rem); letter-spacing: .14em; text-transform: uppercase; padding: 0 .35rem; border: 1px solid var(--line3); color: var(--g2); }
 .chat .ctag.ans { color: var(--bg); background: var(--g); border-color: var(--g); }
