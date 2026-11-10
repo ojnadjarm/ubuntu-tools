@@ -29,6 +29,7 @@ cat >"$SB/agents/bin/claude" <<'EOS'
 #!/usr/bin/env bash
 # Canned stream stub: no model, no network. Records its flags for the test.
 printf '%s\n' "$*" >>"$HOME/claude-args.log"
+env | grep '^X_TOKEN=' >>"$HOME/claude-env.log"
 [ -e /proc/$$/fd/8 ] && echo fd8 >>"$HOME/fd.log"
 [ -e "$HOME/sleep-mode" ] && exec sleep 47471
 [ -e "$HOME/fail-mode" ] && exit 3
@@ -111,6 +112,11 @@ chmod +x "$SB/agents/bin/wrapstub"
 printf 'AGENT_WRAP="wrapstub --"\n' >"$SB/agents/demo/agent.env"; : >"$SB/claude-args.log"
 run_agent claude; rm -f "$SB/agents/demo/agent.env"; sed -i '$d' "$idx"
 { grep -q '^wrap -- claude -p ' "$SB/wrap.log" && [ -s "$SB/claude-args.log" ]; } && ok || no "$(cat "$SB/wrap.log" 2>&1)"
+
+t "T1546-G1: AGENT_ENV_KEEP in agent.env keeps its secret names"
+printf 'export X_TOKEN=kept\nAGENT_ENV_KEEP=X_TOKEN\n' >"$SB/agents/demo/agent.env"; : >"$SB/claude-env.log"
+run_agent claude; rm -f "$SB/agents/demo/agent.env"; sed -i '$d' "$idx"
+grep -qx 'X_TOKEN=kept' "$SB/claude-env.log" && ok || no "$(cat "$SB/claude-env.log")"
 
 t "no new money column: cost_usd stays the only one"
 [ "$(head -1 "$idx" | tr '\t' '\n' | grep -ciE 'cost|usd|price|spend')" = 1 ] \
