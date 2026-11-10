@@ -39,3 +39,4 @@ Project ledgers: `$AGENT_WORK/decisions/<project>.md` (ailearning, portfolio, va
 - 2026-11-10 · Git holds the code of the tools only; plans, proposals and reviews stay in ~/agent-work · "We upload to git only the code we do for the ubuntu tools no plans or proporsals"
 - 2026-11-10 · On Org and Chat the orchestrator seat is named DarkSaddler (the brand) with rank CEO; every staff agent shows a name and a rank · "DarkSaddle is your Name, CEO is your rank" … "Yes DarkSaddler with the R"
 - 2026-11-10 · Discord: the owner's ✅ in a project thread no longer starts the old bot worker; it reaches the project's manager as his approval (T1546-M2); a manager's relayed reply sets `done` (M3, he picked b) · "yeah implement it."
+- 2026-11-10 · No hop limit between agents: every agent-to-agent turn is delivered (T1576); pause and the 95 % plan stop stay · "Already answered that not limit to comunication between agents"

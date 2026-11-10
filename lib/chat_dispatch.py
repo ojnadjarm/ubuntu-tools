@@ -108,7 +108,7 @@ def parsed(f):
 
 def drain(seats=None):
     """[(seat, outcome)] of re-sending each parked wake once after a sweep of dead-timer batches; none while paused;
-    hop parks dropped, others re-park; a row that raises is dead-lettered; rows not reached on an abort are parked
+    old hop parks re-sent too; a row that raises is dead-lettered; rows not reached on an abort are parked
     again."""
     if paused():
         return []
@@ -128,7 +128,7 @@ def drain(seats=None):
         try:
             while rows:
                 r = rows[0]
-                if r["id"] not in done and r["why"] != "hop":
+                if r["id"] not in done:
                     done.add(r["id"])
                     try:
                         got = chat_store.read(r["ch"], after=r["id"] - 1, limit=1)

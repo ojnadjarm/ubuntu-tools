@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # T1515-P11: lib/chat_route.wakes (pure): direct messages, @names, the owner in a seat's own channel, harness asks;
-# no daily limit per seat (P38), hop 4, pause, plan >= 95 %. Fixture org only; the module does no I/O.
+# no daily limit per seat (P38), no hop limit (T1576), pause, plan >= 95 %. Fixture org only; the module does no I/O.
 set -uo pipefail
 AG=$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)
 . "$AG/bin/tests/lib/assert.sh"
@@ -58,15 +58,14 @@ o = r.wakes(msg("dm-moo--owner", "owner"), ORG)
 check("owner's message goes, not counted", o == [{"seat": "moo", "reason": "dm", "queue": None, "count": False}], o)
 check("no cap left in the router", not hasattr(r, "CAP"))
 
-# Hop: ping-pong between two product owners parks at hop 4; the owner's message resets it.
+# Hop: no limit (T1576); ping-pong between two product owners delivers every turn, the 5th and the 9th included.
 hop, frm, trail = 0, "moo", []
-for _ in range(8):
+for _ in range(9):
     (x,) = r.wakes(msg("dm-disc--moo", frm, hop=hop), ORG)
     trail.append((hop, x["queue"]))
-    if x["queue"]:
-        break
     frm, hop = ("disc" if frm == "moo" else "moo"), r.next_hop(frm, {"from": frm, "hop": hop})
-check("ping-pong stops at hop 4", trail == [(0, None), (1, None), (2, None), (3, None), (4, "hop")], trail)
+check("ping-pong: 9 turns, none parks", trail == [(h, None) for h in range(9)], trail)
+check("no hop limit left in the router", not hasattr(r, "HOP_LIMIT"))
 check("owner message ignores hop", r.wakes(msg("moo", "owner", hop=9), ORG)[0]["queue"] is None)
 check("next_hop: a reply to the owner starts at 1", r.next_hop("moo", {"from": "owner", "hop": 0}) == 1)
 check("next_hop: the owner always 0", r.next_hop("owner", {"from": "moo", "hop": 3}) == 0)
