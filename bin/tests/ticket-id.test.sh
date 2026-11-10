@@ -29,8 +29,8 @@ is "next: nothing written without --reserve" "$(ls "$B" | grep -c '^T12[1-9]')" 
 out=$(tid check T11); rc=$?
 is "check double: rc 1" "$rc" 1
 grep -qE '^backlog +T5#2 ' <<<"$out" && ok "check lists the backlog item" || nok "check lists the backlog item" "$out"
-grep -qE '^brief +brief +~?.*T11-client\.md$' <<<"$out" && ok "check lists the brief" || nok "check lists the brief" "$out"
-is "check double: summary" "$(tail -1 <<<"$out")" "T11: 2 uses, double use (2 owners: T5#2, brief)"
+grep -qE '^brief +brief:client +~?.*T11-client\.md$' <<<"$out" && ok "check lists the brief" || nok "check lists the brief" "$out"
+is "check double: summary" "$(tail -1 <<<"$out")" "T11: 2 uses, double use (2 owners: T5#2, brief:client)"
 
 out=$(tid check T10); rc=$?
 is "check one owner: rc 0" "$rc" 0
@@ -40,7 +40,14 @@ out=$(tid check T12); is "w3 #3 short tag maps too" "$(tail -1 <<<"$out")" "T12:
 out=$(tid check T61); is "an unmapped report beside a mapped brief counts as a second owner" "$?:$(tail -1 <<<"$out")" "1:T61: 2 uses, double use (2 owners: T60#1, brief)"
 out=$(tid check T41); is "dot heading: planner:T<n> owner" "$(tail -1 <<<"$out")" "T41: 1 uses, one owner (T40:T41)"
 out=$(tid check 999); is "unused id: rc 0" "$?:$(tail -1 <<<"$out")" "0:T999: 0 uses, unused"
-is "dups lists only the double uses" "$(tid dups | sed -E 's/ +/ /g' | tr '\n' '|')" "T11 T5#2, brief|T61 T60#1, brief|"
+for s in auto-hire-discord-manager tiny-epic-narrator-cara reserved; do echo "# T47 — $s" >"$B/T47-$s.md"; done
+echo "# T47 — reserved by ticket-id: reserved (2026-11-10)" >"$B/T47-reserved.md"
+out=$(tid check T47); is "two briefs, two jobs, one id: rc 1" "$?:$(tail -1 <<<"$out")" "1:T47: 3 uses, double use (2 owners: brief:auto, brief:tiny)"
+for s in G1 G5 P21a tools-whole-review report t3-verdict common; do echo "# T48 — $s" >"$B/T48-$s.md"; done
+out=$(tid check T48); is "lane, report and part briefs beside one job: one owner" "$?:$(tail -1 <<<"$out")" "0:T48: 7 uses, one owner (brief:tools)"
+for s in mooblox mooblox-phase-A; do echo "# T49 — $s" >"$B/T49-$s.md"; done
+out=$(tid check T49); is "same first slug word: one owner" "$?:$(tail -1 <<<"$out")" "0:T49: 2 uses, one owner (brief:mooblox)"
+is "dups lists only the double uses" "$(tid dups | sed -E 's/ +/ /g' | tr '\n' '|')" "T11 T5#2, brief:client|T47 brief:auto, brief:tiny|T61 T60#1, brief|"
 
 r=$(tid next -n 2 --reserve wave9 | tr '\n' ' ')
 is "reserve: prints the ids" "$r" "T121 T122 "
@@ -57,7 +64,7 @@ is "parallel reserves: T123..T140" "$(sort -V <<<"$all" | sed -n '1p;$p' | tr '\
 is "plain next warns on stderr" "$(tid next 2>&1 >/dev/null)" "ticket-id: not reserved; parallel planners use --reserve SLUG"
 echo "- 2026-10-20 T141 typo T14100 in a line" >>"$AW/history.md"
 is "next: a typo jump > 100 is skipped" "$(tid next 2>/dev/null)" "T142"
-tid next 2>&1 >/dev/null | grep -q 'skipped T14100' && ok "next: names the skipped typo" || nok "next: names the skipped typo" "$(tid next 2>&1)"
+tid next 2>&1 >/dev/null | grep 'skipped T14100' >/dev/null && ok "next: names the skipped typo" || nok "next: names the skipped typo" "$(tid next 2>&1)"
 echo "- 2026-10-20 T150 real" >>"$AW/history.md"; is "next: a small gap still counts" "$(tid next 2>/dev/null)" "T151"
 f139=$(ls "$B" | grep '^T139-'); f140=$(ls "$B" | grep '^T140-')
 echo "real brief" >>"$B/$f139"

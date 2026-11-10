@@ -1,6 +1,6 @@
 # Next ticket number: allocate a free T-id and find ids used twice
 
-Ticket: T741 · Last verified: 2026-11-10 by `bin/tests/ticket-id.test.sh` (45 ok, bare `--reserve`, T1545-J); 2026-10-20 by `ticket-id --help` and code read (T846); earlier by `bin/tests/ticket-id.test.sh` (40 ok) and a live run (`next` T761, 3 double uses: T716, T717, T718; 0.08 s)
+Ticket: T741 · Last verified: 2026-11-10 by `bin/tests/ticket-id.test.sh` (48 ok, two jobs on one id, T1546-G5) and a live run (`check T1547` rc 1, 62 dups); 2026-11-10 (45 ok, bare `--reserve`, T1545-J); 2026-10-20 by `ticket-id --help` and code read (T846); earlier by `bin/tests/ticket-id.test.sh` (40 ok) and a live run (`next` T761, 3 double uses: T716, T717, T718; 0.08 s)
 
 ## When to use
 Before writing a brief or a backlog: take the id from `ticket-id next` (planners: `--reserve`), never by hand.
@@ -11,7 +11,9 @@ Not for which wave item shipped: that is `fleet-survey --shipped`.
   and wave 18 #1/#2; T718 to MIRASMANT-5 (report) and wave 18 #3. Chosen: one read-only Python CLI over the files.
 - Model: a **use** is a brief file, a history line whose subject is the id, an evidence or research dir, a backlog
   heading. An **owner** is a backlog item (`## k. T<n>` heading, brief header `#k (from …/T<p>/BACKLOG.md)`, history
-  `(wave N #k)`/`(wN #k)` tag) or `brief` (a brief or report mapped to no item). Evidence, research, other history
+  `(wave N #k)`/`(wN #k)` tag) or `brief:<word>` (a brief mapped to no item, keyed by its slug's first word). A part
+  (report, repro, review, plan, spec, analysis, implement, common, a lane like `G5`/`P21a`/`t3`, a sub-id `T344b`)
+  is `brief` and joins the named brief of its id. Evidence, research, other history
   lines and reserved stubs own nothing. Two owners = double use.
 - `next`: max over all uses plus every `T<n>` in history.md (so `T748..T759` ranges block ids), +1, stopping below the
   first jump > 100 (`GAP`; a typo like T7410 is named on stderr, never allocated above). Live ids have no jump > 20.
@@ -38,6 +40,10 @@ bash ~/agents/bin/tests/ticket-id.test.sh
   stays (release exits 1).
 - A reserved stub's first line is `# T<n> — reserved by ticket-id: <slug> (<date>)`; keep it or overwrite the file
   with the real brief. A second brief with another slug and no `#k (from …BACKLOG.md)` header is a second owner.
+- Two unmapped briefs of one id with different first slug words are two owners (T1546-G5): `T1547-auto-hire-…` and
+  `T1547-tiny-epic-…` (2026-11-10, 4 min apart) passed as one `brief` before. Live: dups 21 → 62, the new ones real
+  double uses (T27x-T35x Vass + fleet, T1493, T1547-T1551) except T48 (`loop-ticket` + `self-improvement-loop-plan`).
+  Same job under two first words (`gamelyn-x` and `tiny-epic-gamelyn-x`) also reads as two: rename or add a header.
 - A report alone (`T718-report.md`, MIRASMANT-5, 2026-10-20 08:55) counts as a brief: the Vass session never wrote
   a brief. Live 2026-10-20: 3 double uses over 817 brief files, none of them a false alarm.
 - History lines without a leading `- ` (T720, line 903) were missed by fleet-survey until T778; dated dash-less lines now count as shipped.

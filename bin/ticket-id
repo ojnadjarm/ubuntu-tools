@@ -10,8 +10,10 @@
 
 Sources (AGENT_WORK, else ~/agent-work): briefs/T<n>*, every T<n> in history.md, evidence/T<n>*, research/*/T<n>*,
 `## k. T<n>` / `## T<n>` headings of research/*/T*/BACKLOG.md.
-An owner is a backlog item (heading, brief header `#k (from …/T<p>/BACKLOG.md)`, history `(wave N #k)` tag) or `brief`
-(a brief file mapped to no item); evidence, research, other history lines and reserved stubs carry no owner.
+An owner is a backlog item (heading, brief header `#k (from …/T<p>/BACKLOG.md)`, history `(wave N #k)` tag) or
+`brief:<word>` (a brief file mapped to no item, by the first word of its slug); a part (report, review, plan,
+common, a lane like G5/P21a/t3, no slug) is `brief` and joins a named brief of its id; evidence, research, other
+history lines and reserved stubs carry no owner.
 A double use = 2 or more owners. An id more than GAP above the next lower one (a typo like T7410) is skipped by next.
 Exit 0; check 1 on a double use; release 1 when an id has no unused stub; 2 on usage.
 """
@@ -22,6 +24,8 @@ TID = re.compile(r'\bT(\d+)\b')
 HEAD = re.compile(r'^## (?:(\d+)\. )?T(\d+)\b', re.M)
 BRIEF_HEAD = re.compile(r'# T\d+ — .*?#(\d+) \(from \S*/(T\d+)/BACKLOG\.md\)')
 WAVE_TAG = re.compile(r'\bT(\d+)\**\s*\((?:wave|w)\s*(\d+) #(\d+)\)')
+PART_WORDS = {'report', 'repro', 'review', 'plan', 'spec', 'analysis', 'implement', 'common'}
+PART_LANE = re.compile(r'[A-Z]+\d*[a-z]?|[a-z]\d+\w*')
 SUBJECT = re.compile(r'-\s+(?:\d{4}-\d\d-\d\d\s+)?(?:\d\d:\d\d\s+)?\**T(\d+)\b')
 RESERVED = 'reserved by ticket-id'
 GAP = 100
@@ -37,6 +41,12 @@ def _first_line(path):
             return fh.readline()
     except OSError:
         return ''
+
+
+def _brief_owner(rest):
+    """`brief:<first slug word>` for a job brief, `brief` for a part (report, lane, sub-id, no slug)."""
+    word = rest[1:].split('.')[0].split('-')[0] if rest.startswith('-') else ''
+    return 'brief' if not word or word.lower() in PART_WORDS or PART_LANE.fullmatch(word) else f'brief:{word.lower()}'
 
 
 def backlogs():
@@ -62,7 +72,8 @@ def collect():
             continue
         line = _first_line(p) if os.path.isfile(p) else ''
         h = BRIEF_HEAD.match(line)
-        kind, owner = ('reserved', None) if RESERVED in line else ('brief', f'{h.group(2)}#{h.group(1)}' if h else 'brief')
+        owner = f'{h.group(2)}#{h.group(1)}' if h else _brief_owner(os.path.basename(p)[m.end():])
+        kind, owner = ('reserved', None) if RESERVED in line else ('brief', owner)
         add(m.group(1), kind, _short(p), owner)
     hist = os.path.join(AW, 'history.md')
     if os.path.isfile(hist):
@@ -104,7 +115,8 @@ def highest():
 
 
 def owners(us):
-    return sorted({o for _, _, o in us if o})
+    own = {o for _, _, o in us if o}
+    return sorted(own - {'brief'} if any(o.startswith('brief:') for o in own) else own)
 
 
 def cmd_next(a):
