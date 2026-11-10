@@ -117,7 +117,9 @@ def post(a, seat, seats):
         print(f"chat: held ({rule}): nothing was posted", file=sys.stderr)
         return HELD
     files = [chat_files.save(data, name) for data, name in blobs]
-    msg = {"ch": ch, "from": seat, "to": to, "text": text, **({"files": files} if files else {})}
+    parent = next((r for r in reversed(chat_store.read(ch, limit=20)) if r["from"] != seat), None)
+    msg = {"ch": ch, "from": seat, "to": to, "text": text, "hop": chat_route.next_hop(seat, parent),
+           **({"files": files} if files else {})}
     try:
         mid = chat_store.post(msg)
     except ValueError:
@@ -125,7 +127,7 @@ def post(a, seat, seats):
             chat_files.drop(f["id"])
         raise
     print(mid)
-    chat_dispatch.dispatch({**msg, "id": mid, "kind": "msg", "hop": 0}, seats)
+    chat_dispatch.dispatch({**msg, "id": mid, "kind": "msg"}, seats)
     chat_notify.alert({**msg, "id": mid}, seats)
     return 0
 

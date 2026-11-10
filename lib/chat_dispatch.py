@@ -86,7 +86,7 @@ def new_day():
 
 
 def drain(seats=None):
-    """[(seat, outcome)] of re-sending each parked wake once; none while paused, still-held ones park again."""
+    """[(seat, outcome)] of re-sending each parked wake once; none while paused; hop parks dropped, others re-park."""
     if paused():
         return []
     seats = org.seats() if seats is None else seats
@@ -100,7 +100,7 @@ def drain(seats=None):
             f.truncate()
         done = set()
         for r in rows:
-            if r["id"] in done:
+            if r["id"] in done or r["why"] == "hop":
                 continue
             done.add(r["id"])
             got = chat_store.read(r["ch"], after=r["id"] - 1, limit=1)
