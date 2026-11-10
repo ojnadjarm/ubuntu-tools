@@ -1,4 +1,4 @@
-"""GET /api/org (tailnet only): the org seats (the ceo seat named ORCH_NAME, ranked ORCH_RANK), the live Claude sessions with their seat, how many registry rows are hidden, and error when the last read failed."""
+"""GET /api/org (tailnet only): the org seats with their rank (the ceo seat named ORCH_NAME, ranked ORCH_RANK), the live Claude sessions with their seat, how many registry rows are hidden, and error when the last read failed."""
 import glob, os, sys
 from dash.cache import cache_meta, cached
 from dash.env import HOME, ORCH_NAME, ORCH_RANK
@@ -23,8 +23,10 @@ def org_payload():
     for s in live:
         if "cwd" in s:
             s["cwd"] = tilde(s["cwd"])
+        if "pid" in s and not s.get("seat"):
+            s["rank"] = org.rank("worker")
     total = len(glob.glob(os.path.join(sessions.registry_dir(), "*.json")))
-    seats = [{**s, "name": ORCH_NAME, "rank": ORCH_RANK} if s["role"] == "ceo" else s for s in org.seats()]
+    seats = [{**s, "rank": org.rank(s["role"])} | ({"name": ORCH_NAME, "rank": ORCH_RANK} if s["role"] == "ceo" else {}) for s in org.seats()]
     return {"seats": seats, "sessions": live, "hidden": max(0, total - len(live))}
 
 

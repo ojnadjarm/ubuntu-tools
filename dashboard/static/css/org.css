@@ -21,6 +21,7 @@
 .org .seat h3 { font-size: 1.05rem; color: var(--hi); font-weight: 600; display: flex; flex-wrap: wrap; gap: .3rem .6rem; align-items: center; }
 .org .seat.him { border-color: var(--gold-w); max-width: 34rem; }
 .org .seat.him h3 { color: var(--gold); }
+.org .seat h3 .rk { color: var(--mute); font-weight: 400; font-size: max(var(--fs-min), .8rem); }
 .org .dia i { display: block; width: 2.2rem; height: 2.2rem; margin: .6rem; border: 2px solid var(--gold); transform: rotate(45deg); background: var(--gold-w); }
 .org .otree > li + li::before, .org .pos > li::before, .org .pos > li::after { content: ""; position: absolute; border: 0 solid var(--line3); }
 .org .otree > li + li { position: relative; }

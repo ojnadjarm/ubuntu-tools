@@ -3,17 +3,18 @@
 // P35: a card shows avatar, name, state dot and a message icon; the state and description lines live in the avatar's tooltip.
 // V3: every creature is a moving Familiar; a new message makes its sender talk for about 2 s, the owner never.
 // T1553: the ceo seat's tooltip leads with "DarkSaddler · CEO" (name and rank from the API).
+// T1554: every seat's tooltip leads with "Name · Rank" and names its area; a worker row is titled "name · Worker".
 // Run: node tests/test_org_screen.js   (fixture API only; POSTs never leave this file's server)
 "use strict";
 const assert = require("assert");
 const { chromium, serveStatic } = require("./lib/browser");
 const STATUS = { host: "fixture", sites: [], units: [], timers: [], docker: [], plans: [], drop: { files: [] }, verdict: { ok: true, problems: [], needs: [] } };
 const seat = (id, name, role, parent, wake) => ({ id, name, role, parent, wake, match: null });
-const work = (pid, name, parent, state) => ({ seat: null, state, since: 1794262000, pid, parent, name, cwd: "~/w" + pid, started_by: parent });
+const work = (pid, name, parent, state) => ({ seat: null, state, since: 1794262000, pid, parent, name, cwd: "~/w" + pid, started_by: parent, rank: "Worker" });
 const ORG = { seats: [
   seat("owner", "You", "owner", null, null), { ...seat("orchestrator", "DarkSaddler", "ceo", "owner", "channel"), rank: "CEO" },
   seat("mooblox", "Mooblox", "po", "orchestrator", "po-inbox"), seat("discord", "Discord", "po", "orchestrator", "po-inbox"),
-  seat("mosaico", "Mosaico manager", "manager", "discord", "po-inbox")],
+  { ...seat("mosaico", "Speckle", "manager", "discord", "po-inbox"), rank: "Manager", area: "Mosaico" }],
 sessions: [
   { seat: "orchestrator", state: "working", since: 1794262000, pid: 1, parent: "owner", name: "center", cwd: "~", started_by: "owner" },
   work(11, "w-a", "orchestrator", "idle"), work(12, "w-b", "orchestrator", "working"), work(13, "w-c", "orchestrator", "idle"),
@@ -68,6 +69,10 @@ const srv = serveStatic((u, res) => {
     assert.strictEqual(await shown(), true, "keyboard focus opens it");
     await p.evaluate(() => document.activeElement.blur());
 
+    const mos = '.org .seat[data-seat="mosaico"]';
+    assert.deepStrictEqual(await p.$eval(mos, (c) => [c.querySelector(".tip b").textContent, [...c.querySelectorAll(".tip span")].some((e) => e.textContent === "Mosaico"), c.querySelector("h3").firstChild.textContent.trim(), c.querySelector("h3 .rk").textContent]),
+      ["Speckle · Manager", true, "Speckle", "Manager"], "T1554: the tooltip leads with name · rank and names the area, the card shows name and rank");
+    assert.strictEqual(await p.$eval(mos + " .crew > li", (l) => l.title), "m-a · Worker", "T1554: a worker row says its rank");
     const crew = (id) => p.$$eval(`.org .seat[data-seat="${id}"] .crew > li`, (l) => l.map((x) => x.querySelector("b").textContent));
     assert.deepStrictEqual(await crew("orchestrator"), ["w-b", "w-d", "w-a"], "working first, 3 shown under the seat that started them");
     assert.deepStrictEqual(await crew("mosaico"), ["m-a"], "a manager's worker hangs under the manager");

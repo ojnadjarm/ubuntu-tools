@@ -277,7 +277,7 @@ function members(N) {
   const ids = ch.startsWith("dm-") ? pair(ch) : [...new Set((q ? hits || [] : msgs).filter((m) => m.kind !== "system").map((m) => m.from))];
   const rows = ids.filter((id) => id !== "owner").map((id) => {
     const st = stateOf(id);
-    return `<div class="mem"><span class="av" aria-hidden="true">${familiar(id, st, roleOf(id))}</span><div><b>${esc(nameOf(id, N))}</b><span>${esc(LINE[st] || "not a seat of the org")}</span></div></div>`;
+    return `<div class="mem"><span class="av" aria-hidden="true">${familiar(id, st, roleOf(id))}</span><div><b>${esc(ranked(id, N))}</b><span>${esc(LINE[st] || "not a seat of the org")}</span></div></div>`;
   });
   return rows.join("") || `<p class="none">Nobody has written here yet.</p>`;
 }
@@ -296,7 +296,8 @@ function head(N) {
   if (q) return `<header class="find">${back}${box(q, "cq2")}<h2>${esc(serr ? "Search failed" : hits ? plural(hits.length, "result") + " for " + q.trim() : "Searching for " + q.trim() + "…")}</h2></header>`;
   if (!ch) return `<header>${back}<span class="hav"><span class="glyph" aria-hidden="true">◆</span></span><h2>Recent</h2><p class="desc">The newest messages of every channel, newest at the bottom. Open a channel to write.</p><p class="st">Every channel, read only</p></header>`;
   const dm = ch.startsWith("dm-"), who = dm ? pair(ch).find((s) => s !== "owner") || "" : "", st = who ? stateOf(who) : "";
-  const desc = dm ? "Direct messages between " + pair(ch).map((s) => nameOf(s, N)).join(" and ") + "." : DESC[ch] || (N[ch] ? N[ch] + "'s channel." : "");
+  const area = who && (((O && O.seats) || []).find((s) => s.id === who) || {}).area;
+  const desc = dm ? "Direct messages between " + pair(ch).map((s) => nameOf(s, N)).join(" and ") + "." + (area ? " " + nameOf(who, N) + " works on " + area + "." : "") : DESC[ch] || (N[ch] ? N[ch] + "'s channel." : "");
   const busyNow = T.filter((t) => t.ch === ch), av = who ? familiar(who, st, roleOf(who)) : `<span class="glyph" aria-hidden="true">#</span>`;
   const line = busyNow.length ? busyNow.map((t) => busyLine(t, N)).join(", ") + `<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>` : esc(who ? LINE[st] || "" : desc);
   return `<header>${back}<span class="hav" aria-hidden="true">${av}</span><h2>${esc(label(ch, N))}</h2>${desc ? `<p class="desc">${esc(desc)}</p>` : ""}<p class="st">${line}</p></header>`;

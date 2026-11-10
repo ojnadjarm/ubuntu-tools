@@ -4,6 +4,7 @@
 // V3: Familiars in rows, the channel box and the direct list; a new message makes its sender talk for about 2 s.
 // T1545-A: from 900 px the list rows show full names, preview and time, ordered by activity; the stream box >= 430 px at 1366x768; text through chat-text.js's rich when it exists.
 // T1553: the ceo seat shows the name and rank the API gives ("DarkSaddler · CEO" as his direct message's title).
+// T1554: a seat's direct message is titled "Name · Rank" in the list and the header, which also names its area.
 // Run: node tests/test_chat_screen.js   (fixture API only: every POST lands in this file's server, nothing reaches the real store)
 "use strict";
 const assert = require("assert");
@@ -23,9 +24,9 @@ const STORE = {
 };
 /* T1545-A's fixture: long seat names, an agent-to-agent direct message, each channel's last message. */
 const ORG2 = { seats: [ORG.seats[0], ORG.seats[1],
-  { id: "discord", name: "Discord product owner", role: "po", parent: "orchestrator", wake: "po-inbox", match: null },
-  { id: "tiny", name: "Tiny Epic Narrator manager", role: "manager", parent: "orchestrator", wake: "channel", match: null },
-  { id: "spidey", name: "Spidey PR Dashboard manager", role: "manager", parent: "orchestrator", wake: "channel", match: null }], sessions: [], hidden: 0 };
+  { id: "discord", name: "Cobalt", rank: "Product Owner", area: "Discord", role: "po", parent: "orchestrator", wake: "po-inbox", match: null },
+  { id: "tiny", name: "Bramble", rank: "Manager", area: "Tiny Epic Narrator", role: "manager", parent: "orchestrator", wake: "channel", match: null },
+  { id: "spidey", name: "Gloam", rank: "Manager", area: "Spidey PR Dashboard", role: "manager", parent: "orchestrator", wake: "channel", match: null }], sessions: [], hidden: 0 };
 const T1 = T0 + 60000, STORE2 = {
   harness: [row(T1, "harness", "orchestrator", "the oldest room line")],
   org: [row(T1 + 4000, "org", "discord", "a room line newer than harness")],
@@ -166,7 +167,7 @@ srv.on("request", (req, res) => {
       await q.waitForFunction(() => document.querySelectorAll('.chat .chans a .tm').length >= 4, null, { timeout: 15000 });
       await q.waitForTimeout(300);
       assert.deepStrictEqual(await q.$$eval(".chat .cn", (l) => l.filter((e) => e.scrollWidth > e.clientWidth).map((e) => e.textContent)), [], `${w}: no channel name is cut`);
-      assert.ok(await q.$$eval(".chat .cn", (l) => l.some((e) => e.textContent === "Discord product owner · DarkSaddler")), "the agents' direct message is listed");
+      assert.ok(await q.$$eval(".chat .cn", (l) => l.some((e) => e.textContent === "Cobalt · DarkSaddler")), "the agents' direct message is listed");
       assert.ok(await q.$$eval(".chat .cn", (l) => l.some((e) => e.textContent === "DarkSaddler · CEO")), "T1553: his direct message with the ceo seat is titled name · rank");
       assert.deepStrictEqual(await q.$$eval(".chat .cn, .chat .who b", (l) => l.filter((e) => /Orchestrator/.test(e.textContent)).length), 0, "T1553: no rendered seat name says Orchestrator");
       const rows = await q.$$eval(".chat .chans a", (l) => l.map((a) => { const v = (s) => { const e = a.querySelector(s); return e && e.offsetWidth > 0 ? e.textContent : ""; }; return [a.dataset.ch, v(".pv"), v(".tm")]; }));
@@ -179,6 +180,8 @@ srv.on("request", (req, res) => {
       assert.strictEqual(await q.textContent('.chat [data-ch="dm-owner--spidey"] .unread'), "3", "unread count on the row");
       await q.click('.chat [data-ch="dm-owner--spidey"]');
       await q.waitForFunction(() => document.querySelectorAll(".chat .msg .tx").length === 20, null, { timeout: 6000 });
+      assert.deepStrictEqual(await q.$eval(".chat .stream header", (h) => [h.querySelector("h2").textContent, /Spidey PR Dashboard/.test(h.querySelector(".desc").textContent)]), ["Gloam · Manager", true], "T1554: the header is name · rank and names the area");
+      assert.ok(await q.$$eval(".chat .cside .mem b", (l) => l.some((e) => e.textContent === "Gloam · Manager")), "T1554: the member line says name · rank");
       const tx = await q.$$eval(".chat .msg .tx", (l) => l.map((e) => [e.tagName, e.textContent, !!e.querySelector("b"), !!e.querySelector(".rx")]));
       assert.ok(tx.every((t) => t[0] === "DIV" && /^line \d+ of a long conversation with `?code`? & <b>no markup<\/b>$/.test(t[1]) && !t[2] && t[3] === hasRich), `${w}: text renders ${hasRich ? "through rich" : "through text() (chat-text.js absent)"}, escaped, in div.tx`);
       if (w === 1366) {

@@ -2,7 +2,7 @@
    Up/Down move, Enter, Tab or a tap insert `@<id> `, Esc closes. Pure helpers, the list's state and markup, one binder. */
 import { esc } from "/static/js/core/fmt.js";
 import { getJSON } from "/static/js/core/api.js";
-import { seatState } from "./org.js";
+import { seatState, titled } from "./org.js";
 
 const MENTION = /(?<![\w@.-])@([a-z0-9][a-z0-9-]*)/g;
 const LIST = "mention-list", ORG_MS = 20000;
@@ -19,8 +19,8 @@ export function token(text, caret) {
   return m ? { start: caret - m[1].length - 1, q: m[1].toLowerCase() } : null;
 }
 
-/* Seats whose id or name holds q. */
-export const filter = (seats, q) => seats.filter((s) => s.id.includes(q) || (s.name || "").toLowerCase().includes(q));
+/* Seats whose id, name, rank or area holds q. */
+export const filter = (seats, q) => seats.filter((s) => s.id.includes(q) || [s.name, s.rank, s.area].some((t) => (t || "").toLowerCase().includes(q)));
 
 /* text with the token from start to the caret (and its tail) replaced by `@id `; the caret after it. */
 export function insert(text, start, caret, id) {
@@ -40,7 +40,7 @@ export const wakesIn = (text) => mentioned(text || "", wakeable(O));
 const optId = (id) => "mention-" + id;
 function row(s, i) {
   const st = seatState(s, (O && O.sessions) || []);
-  return `<li role="option" id="${esc(optId(s.id))}" data-id="${esc(s.id)}" aria-selected="${i === S.at}"><span class="nm">${esc(s.name || s.id)}</span><span class="id">@${esc(s.id)}</span><span class="pill ${PILL[st] || "idle"}">${esc(st)}</span></li>`;
+  return `<li role="option" id="${esc(optId(s.id))}" data-id="${esc(s.id)}" aria-selected="${i === S.at}"><span class="nm">${esc(s.name ? titled(s) : s.id)}</span><span class="id">@${esc(s.id)}</span><span class="pill ${PILL[st] || "idle"}">${esc(st)}</span></li>`;
 }
 /* The listbox as the state has it (hidden while closed). */
 export const listbox = () => `<ul class="mention" id="${LIST}" role="listbox" aria-label="Agents to wake"${S.open ? "" : " hidden"}>${S.open ? S.items.map(row).join("") : ""}</ul>`;

@@ -15,6 +15,8 @@ from .runlock import run_lock
 from .state import State
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'lib'))
+import org  # noqa: E402
 
 
 def block(p):
@@ -91,12 +93,13 @@ def entry(pid, name, repo, rules, words):
 
 
 def add_seat(path, pid, name, parent):
-    """Append the manager's org seat (one line, file style kept); False when it is there already."""
+    """Append the manager's org seat (one line, file style kept): a proper name, the project as its area; False when there."""
     with open(path) as f:
         text = f.read()
-    if any(s['id'] == pid for s in json.loads(text)['seats']):
+    seats = json.loads(text)['seats']
+    if any(s['id'] == pid for s in seats):
         return False
-    seat = {'id': pid, 'name': f'{name} manager', 'role': 'manager', 'parent': parent, 'wake': 'po-inbox',
+    seat = {'id': pid, 'name': org.proper_name(pid, [s['name'] for s in seats]), 'area': name, 'role': 'manager', 'parent': parent, 'wake': 'po-inbox',
             'match': f'~/agents/po-{pid}'}
     cut = text.rstrip().rfind(']')
     _replace(path, text[:cut].rstrip() + ',\n  ' + json.dumps(seat, ensure_ascii=False) + '\n' + text.rstrip()[cut:] + '\n')

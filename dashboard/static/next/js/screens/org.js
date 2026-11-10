@@ -64,10 +64,13 @@ export function seatState(seat, S) {
   return seat.wake === "channel" ? "off" : "asleep";
 }
 
+/* A seat or worker as "Name · Rank" when the API gives a rank, else its name. */
+export const titled = (s) => (s.rank ? s.name + " · " + s.rank : s.name);
+
 /* The owner's direct message with seat `id`, as Chat names it. */
 export const dmOf = (id) => "dm-" + ["owner", id].sort().join("--");
 
-const worker = (s) => `<li><span class="mini" aria-hidden="true">${familiar("pid" + s.pid, s.state === "working" ? "working" : "idle", "worker")}</span><b>${esc(s.name || "pid " + s.pid)}</b>${dot(s.state)}</li>`;
+const worker = (s) => `<li title="${esc(titled({ ...s, name: s.name || "pid " + s.pid }))}"><span class="mini" aria-hidden="true">${familiar("pid" + s.pid, s.state === "working" ? "working" : "idle", "worker")}</span><b>${esc(s.name || "pid " + s.pid)}</b>${dot(s.state)}</li>`;
 
 /* The sessions a seat started, working first: SHOWN of them, the rest folded behind a "hidden N" line. */
 function crew(H) {
@@ -80,7 +83,7 @@ function crew(H) {
 function seatCard(seat, S) {
   if (seat.role === "owner") return `<div class="seat him">${av(seat.id, seat.name, "<i></i>", ["Read every channel, write anywhere, message anyone.", "Only your words change what an agent may do."], " dia")}<h3>${esc(seat.name)}</h3></div>`;
   const st = seatState(seat, S), helpers = S.filter((s) => !s.seat && s.parent === seat.id), msg = "Message " + seat.name;
-  return `<div class="seat" data-seat="${esc(seat.id)}">${av(seat.id, seat.name, familiar(seat.id, st, seat.role), [seat.rank && seat.name + " · " + seat.rank, ROLE[seat.role], WAKE[seat.wake], "Now " + st + "."])}<h3>${esc(seat.name)} ${dot(st)}</h3>` +
+  return `<div class="seat" data-seat="${esc(seat.id)}">${av(seat.id, seat.name, familiar(seat.id, st, seat.role), [titled(seat), seat.area, ROLE[seat.role], WAKE[seat.wake], "Now " + st + "."])}<h3>${esc(seat.name)} ${seat.rank ? `<span class="rk">${esc(seat.rank)}</span>` : ""}${dot(st)}</h3>` +
     `${crew(helpers)}<a class="btn msg" href="#chat?ch=${esc(dmOf(seat.id))}" aria-label="${esc(msg)}" title="${esc(msg)}">${BUBBLE}</a></div>`;
 }
 
@@ -104,7 +107,7 @@ export function render() {
   pull();
   listen(() => cur === "org");
   if (!O) return `<div class="nxs skel" aria-busy="true"><p class="sm pad">${err ? "org unreadable · " + esc(err) : "reading the org…"}</p></div>`;
-  const S = O.sessions || [], seats = O.seats || [], names = Object.fromEntries(seats.map((s) => [s.id, s.name]));
+  const S = O.sessions || [], seats = O.seats || [], names = Object.fromEntries(seats.map((s) => [s.id, titled(s)]));
   const work = S.filter((s) => s.state === "working").length;
   return `<div class="nxs org"><section class="band" aria-label="Org summary"><div class="perch" id="perch" aria-hidden="true"></div><div class="bt"><p class="kin" data-dec>Org</p>` +
     `<p class="bsum"><b>${plural(S.length, "Claude session")} on this laptop</b>, ${work} working${err ? ` · stale: ${esc(err)}` : ""}</p></div></section><div class="ocols">` +

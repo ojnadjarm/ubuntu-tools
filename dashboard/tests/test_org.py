@@ -81,6 +81,7 @@ class Org(unittest.TestCase):
         self.assertEqual((ceo["seat"], ceo["state"], ceo["cwd"], ceo["since"]), ("ceo", "working", "~", 1794261588))
         job = rows["agent-fx-job"]
         self.assertEqual((job["seat"], job["parent"], job["state"], job["cwd"], job["started_by"]), (None, "ceo", "idle", "~/agents/job", "fx-job"))
+        self.assertEqual((job["rank"], "rank" in ceo), ("Worker", False), "T1554: a worker session is ranked Worker, a seat's own session is not")
 
     def test_ceo_wears_the_brand_name(self):
         self.old_name, svc.ORCH_NAME = svc.ORCH_NAME, "Nova"
@@ -89,7 +90,7 @@ class Org(unittest.TestCase):
         finally:
             svc.ORCH_NAME = self.old_name
         self.assertEqual((seats["ceo"]["name"], seats["ceo"]["rank"]), ("Nova", "CEO"), "the ceo seat: brand name, rank CEO")
-        self.assertEqual((seats["fx"]["name"], "rank" in seats["fx"]), ("Fx owner", False), "other seats keep their org.json name")
+        self.assertEqual((seats["fx"]["name"], seats["fx"]["rank"]), ("Fx owner", "Product Owner"), "T1554: other seats keep their org.json name and get their rank")
 
     def test_live_org_shows_no_orchestrator(self):
         os.environ["ORG_FILE"] = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "org.json")

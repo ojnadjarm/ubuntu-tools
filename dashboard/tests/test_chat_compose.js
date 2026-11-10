@@ -11,9 +11,9 @@ const { chromium, serveStatic } = require("./lib/browser");
 const STATUS = { host: "fixture", sites: [], units: [], timers: [], docker: [], plans: [], drop: { files: [] }, verdict: { ok: true, problems: [], needs: [] } };
 const ORG = { seats: [
   { id: "owner", name: "You", role: "owner", parent: null, wake: null, match: null },
-  { id: "orchestrator", name: "Orchestrator", role: "ceo", parent: "owner", wake: "channel", match: "~" },
-  { id: "discord-po", name: "Discord product owner", role: "po", parent: "orchestrator", wake: "po-inbox", match: "~/agents/po-discord" },
-  { id: "tiny-epic-narrator", name: "Tiny Epic Narrator manager", role: "manager", parent: "orchestrator", wake: "po-inbox", match: "~/projects/x" },
+  { id: "orchestrator", name: "DarkSaddler", rank: "CEO", role: "ceo", parent: "owner", wake: "channel", match: "~" },
+  { id: "discord-po", name: "Cobalt", rank: "Product Owner", area: "Discord", role: "po", parent: "orchestrator", wake: "po-inbox", match: "~/agents/po-discord" },
+  { id: "tiny-epic-narrator", name: "Bramble", rank: "Manager", area: "Tiny Epic Narrator", role: "manager", parent: "orchestrator", wake: "po-inbox", match: "~/projects/x" },
   { id: "vass", name: "Vass", role: "po", parent: "orchestrator", wake: "pull", match: "~/vass" }],
   sessions: [{ seat: "orchestrator", pid: 11, state: "working" }], hidden: 0 };
 const T0 = Date.UTC(2026, 10, 10, 9, 0);
@@ -75,7 +75,7 @@ const BOX = ".chat .compose textarea", LIST = ".chat .compose [role=listbox]";
     assert.ok(await open(), "@ at a word start opens the list");
     assert.deepStrictEqual(await ids(), ["orchestrator", "discord-po", "tiny-epic-narrator"], "every seat he can wake, not the owner, not a pull seat");
     const row = await p.$eval(LIST + " [role=option]", (o) => ({ name: o.querySelector(".nm").textContent, id: o.querySelector(".id").textContent, st: o.querySelector(".pill").textContent }));
-    assert.deepStrictEqual(row, { name: "Orchestrator", id: "@orchestrator", st: "working" }, "a row: name, id, state");
+    assert.deepStrictEqual(row, { name: "DarkSaddler · CEO", id: "@orchestrator", st: "working" }, "a row: name · rank (T1554), id, state");
     const aria = await p.$eval(BOX, (t) => ({ exp: t.getAttribute("aria-expanded"), act: t.getAttribute("aria-activedescendant"), ctl: t.getAttribute("aria-controls") }));
     const first = await p.$eval(LIST + " [role=option]", (o) => ({ id: o.id, sel: o.getAttribute("aria-selected") }));
     assert.deepStrictEqual(aria, { exp: "true", act: first.id, ctl: await p.$eval(LIST, (l) => l.id) }, "the box is expanded, points at the active row and the list");
@@ -86,7 +86,9 @@ const BOX = ".chat .compose textarea", LIST = ".chat .compose [role=listbox]";
     assert.deepStrictEqual(await ids(), ["orchestrator", "discord-po", "tiny-epic-narrator"], "same rows after the repaint");
 
     await typeIn("@product");
-    assert.deepStrictEqual(await ids(), ["discord-po"], "filters by name");
+    assert.deepStrictEqual(await ids(), ["discord-po"], "filters by name or rank");
+    await typeIn("@manag");
+    assert.deepStrictEqual(await ids(), ["tiny-epic-narrator"], "T1554: filters by rank");
     await typeIn("@epic-n");
     assert.deepStrictEqual(await ids(), ["tiny-epic-narrator"], "filters by id");
     await typeIn("@vas");
@@ -125,18 +127,18 @@ const BOX = ".chat .compose textarea", LIST = ".chat .compose [role=listbox]";
 
     const hint = () => p.$eval(".chat .compose .hint", (h) => h.textContent);
     await typeIn("@discord-po @orchestrator @vass @nobody hi");
-    assert.strictEqual(await hint(), "Wakes Discord product owner, Orchestrator.", "the hint names who a send wakes");
+    assert.strictEqual(await hint(), "Wakes Cobalt, DarkSaddler.", "the hint names who a send wakes");
     await p.waitForTimeout(3200);
-    assert.strictEqual(await hint(), "Wakes Discord product owner, Orchestrator.", "the hint survives the repaint");
+    assert.strictEqual(await hint(), "Wakes Cobalt, DarkSaddler.", "the hint survives the repaint");
     await typeIn("plain");
     assert.ok(/^Put @ and a name/.test(await hint()), "no mention: the usual hint");
 
     await p.goto(base + "/#chat?ch=dm-discord-po--owner", { waitUntil: "load" });
     await p.waitForSelector(BOX, { timeout: 15000 });
     await p.waitForTimeout(600);
-    assert.strictEqual(await hint(), "A direct message wakes Discord product owner now.", "the direct-message hint stays");
+    assert.strictEqual(await hint(), "A direct message wakes Cobalt now.", "the direct-message hint stays");
     await typeIn("ask @orchestrator");
-    assert.strictEqual(await hint(), "A direct message wakes Discord product owner now. Also wakes Orchestrator.", "a mention in a direct message adds to it");
+    assert.strictEqual(await hint(), "A direct message wakes Cobalt now. Also wakes DarkSaddler.", "a mention in a direct message adds to it");
 
     await p.setViewportSize({ width: 400, height: 850 });
     await p.waitForTimeout(400);

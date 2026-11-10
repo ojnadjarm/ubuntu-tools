@@ -89,6 +89,8 @@ class TestHire(unittest.TestCase):
         self.assertIn('PARENT=r', open(os.path.join(self.home, 'po-new-one', 'agent.env')).read())
         seat = [s for s in org.seats(self.org) if s['id'] == 'new-one']
         self.assertEqual((seat[0]['role'], seat[0]['parent'], seat[0]['match']), ('manager', 'r', '~/agents/po-new-one'))
+        self.assertEqual((seat[0]['name'], seat[0]['area']), (org.proper_name('new-one', ['You', 'O', 'Router']), 'Narrador Interactivo IA'))
+        self.assertNotIn('manager', seat[0]['name'].lower())
         self.assertEqual(State(os.path.join(self.env['LIAISON_HOME'], 'state')).thread('555')['project'], 'new-one')
         self.assertEqual(r.dispatch({'content': 'hola', 'channel': 'foro'}, 'new-one'), 'po-new-one')
         calls = self.calls()

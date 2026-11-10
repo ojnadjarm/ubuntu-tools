@@ -1,10 +1,15 @@
-"""Agent org seats from org.json (T1515): load, validate, parent, may_assign, seat_at."""
+"""Agent org seats from org.json (T1515): load, validate, parent, may_assign, seat_at, rank, proper_name."""
 import json
 import os
+import zlib
 
 ROLES = ("owner", "ceo", "po", "manager")
 WAKES = ("po-inbox", "channel", "pull")
 KEYS = ("id", "name", "role", "parent", "wake", "match")
+RANKS = {"owner": "Owner", "ceo": "CEO", "po": "Product Owner", "manager": "Manager", "worker": "Worker", "crew": "Crew"}
+NAMES = ("Bramble", "Cinder", "Gloam", "Thistle", "Murmur", "Speckle", "Mossfang", "Cobalt", "Wick", "Ember", "Nettle",
+         "Flint", "Hollow", "Quill", "Sable", "Tansy", "Umber", "Vesper", "Wren", "Yarrow", "Fennel", "Briar", "Lumen",
+         "Pebble", "Soot", "Moth", "Dusk", "Rune", "Sorrel", "Tarn")
 
 
 def path():
@@ -61,6 +66,19 @@ def seat_at(cwd, seat_list):
     held = [(len(f), s["id"]) for s in seat_list if s["match"] and s["match"] != "~"
             for f in [os.path.normpath(os.path.expanduser(s["match"]))] if cwd == f or cwd.startswith(f + "/")]
     return max(held)[1] if held else None
+
+
+def rank(role):
+    """The rank label of a role (CEO, Product Owner, Manager, Worker, Crew); an unknown role is a Worker."""
+    return RANKS.get(role, "Worker")
+
+
+def proper_name(seat_id, taken):
+    """A one-word proper name for a new seat: the same for the same id, never one of taken."""
+    free = [n for n in NAMES if n not in set(taken)]
+    if not free:
+        return seat_id.split("-")[0].capitalize()
+    return free[zlib.crc32(seat_id.encode()) % len(free)]
 
 
 def _seat(seat_id, p=None):
