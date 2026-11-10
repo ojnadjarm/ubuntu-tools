@@ -242,7 +242,7 @@ run_one() {
   cpu=$(awk -v c="${cpu:-0}" 'BEGIN{printf "%.1f", c}')
   if [[ -e $logs/${rel//\//__}.oom ]]; then echo "FAIL $rel $s oom"
   elif ((rc != 0 && rc != 124 && rc != 137)) && head -n 5 "$path" | grep -qE '^(#|//) owner-data'; then
-    { grep -E '\bFAIL|Error|Traceback' "$logs/${rel//\//__}.log" | head -n 3 | grep . || echo "rc $rc"; } | sed "s|^|OWNER $rel: |"
+    { grep -E '\bFAIL|^not ok|Error|Traceback' "$logs/${rel//\//__}.log" | head -n 3 | grep . || echo "rc $rc"; } | sed "s|^|OWNER $rel: |"
     touch "$logs/${rel//\//__}.ok"; echo "$rel" >>"$logs/ownerdata"
   elif ((rc == 0)); then echo "ok $rel $s"; touch "$logs/${rel//\//__}.ok"
   elif ((rc == 124 || rc == 137)); then echo "FAIL $rel $s timeout"
@@ -387,7 +387,7 @@ owner=$(cat "$logs/ownerdata" 2>/dev/null | wc -l)
 for f in "${all[@]}"; do
   [[ -e "$logs/${f//\//__}.ok" ]] && continue
   echo "--- $f (failure lines, then the last 8)"
-  ex=$({ grep -E '\bFAIL|Error|Traceback' "$logs/${f//\//__}.log" | head -n 10; tail -n 8 "$logs/${f//\//__}.log"; } | awk '!seen[$0]++' | head -n 40)
+  ex=$({ grep -E '\bFAIL|^not ok|Error|Traceback' "$logs/${f//\//__}.log" | head -n 10; tail -n 8 "$logs/${f//\//__}.log"; } | awk '!seen[$0]++' | head -n 40)
   [[ -n $ex ]] && sed 's/^/  | /' <<<"$ex"
   [[ -f $logs/${f//\//__}.log ]] && save_fail "$f" "$ex"
 done

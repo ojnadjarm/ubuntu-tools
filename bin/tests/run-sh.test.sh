@@ -388,6 +388,10 @@ touch -d '31 days ago' "$R/state/test-fails/bin__tests__gone.test.sh.txt"
 RUN_TESTS_ROOT="$R" bash "$RUN" >/dev/null 2>&1
 is  'fails: 21 reds -> 20 records kept, the oldest seed dropped' "$(grep -c '^## ' "$F") $(grep -c 'FAIL seed 01$' "$F")" '20 0'
 is  'fails: a file untouched for > 30 days is deleted' "$(ls "$R/state/test-fails")" bin__tests__red.test.sh.txt
+R="$W/tap"; mkdir -p "$R/bin/tests"
+printf 'echo "not ok - x"; for i in 1 2 3 4 5 6 7 8 9; do echo "ok - $i"; done; exit 1\n' >"$R/bin/tests/tap.test.sh"
+RUN_TESTS_ROOT="$R" bash "$RUN" >/dev/null 2>&1
+is  'fails: a TAP `not ok` line is kept in the record' "$(grep -c '^  | not ok - x$' "$R/state/test-fails/bin__tests__tap.test.sh.txt" 2>/dev/null)" 1
 
 # TSP-058: a red `# owner-data` file prints OWNER lines, counts as ok and leaves rc alone.
 O=$(mktemp -d "$W/od.XXXX"); mkdir -p "$O/bin/tests"; printf 'echo fine\n' >"$O/bin/tests/pass.test.sh"
