@@ -102,9 +102,10 @@ t "O06 a loop that ran fails";                 eq ran "$(o6 '{"type":"tool_resul
 t "O06 a loop that ran and errored fails";     eq rne "$(o6 '{"type":"tool_result","tool_use_id":"a","is_error":true,"content":"Exit code 124"}')" '[0,null] 0'
 t "TSP-057 selftest: bench/runs untouched";    eq br "$(stat -c %Y "$HOME/agents/bench/runs" 2>/dev/null)" "$RUNS0"
 rm -rf "$O6"
-# TSP-050: an active CI unit reads as present (stub pc and systemctl; no real unit is read).
+# TSP-050: an active CI unit reads as present (stub pc, systemctl and claude; no real unit or session is read).
 AW=$(mktemp -d); printf '#!/bin/sh\necho %s\n' "'"'{"sections":{"desktop":{"lock":{"value":"locked"}},"power":{"lid":{"value":"closed"}}}}'"'" > "$AW/pc"
 printf '#!/bin/sh\necho "$*" >>"%s/calls"\n[ "$3" = "${AW_ACTIVE:-none}" ] && echo activating || echo inactive\n' "$AW" > "$AW/systemctl"; chmod +x "$AW/pc" "$AW/systemctl"
+printf '#!/bin/sh\necho "[]"\n' > "$AW/claude"; chmod +x "$AW/claude"
 aw() { env -u CI_UNITS "$@" PATH="$AW:$PATH" "$PB" away --json | jq -c '[.present,.reasons]'; }
 t "away: no CI unit active is away";           eq aw0 "$(aw)" '[false,[]]'
 t "away: fleet-ci-daily active is present";    eq aw1 "$(aw AW_ACTIVE=fleet-ci-daily.service)" '[true,["ci unit active: fleet-ci-daily.service"]]'

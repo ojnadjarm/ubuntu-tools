@@ -208,7 +208,7 @@ read-only without `--apply`; the ledger, `pc undo` and the guard exits are in
 - Other helpers in `~/agents/bin`: `boot-check.sh` (post-boot OK/FAIL), `lockcheck.sh` (always-on desktop),
   `baseline.sh` (config tarball before changing user config), `maintenance-run`, `moodle-keep`,
   `pcbench-weekly` (Sunday 02:00 A/B run, gated on `pcbench away` — never starts while the owner
-  is at the machine; `pcbench-weekly --dry-run` prints the verdict),
+  is at the machine, a `claude agents` session is busy or load is >= 0.5 per CPU; `pcbench-weekly --dry-run` prints the verdict),
   `compose-services <project>` (services `up -d` starts, profile-aware; the one rule pc-status uses),
   `moodle-envs` (list Moodle envs), `moodle-login-check`, `power-profile-auto`, `sentinel-check`,
   `sentinel-runaway` (runaway-process killer, called by `sentinel-check`; `--dry-run` to preview),

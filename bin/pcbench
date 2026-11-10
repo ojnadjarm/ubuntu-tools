@@ -486,14 +486,15 @@ def needs_met(need, owner_go=None):
 
 
 AWAY_IDLE_S = float(os.environ.get("PCBENCH_AWAY_IDLE_S", 1800))
+AWAY_LOAD = float(os.environ.get("PCBENCH_AWAY_LOAD", 0.5))
 CI_UNITS = ["fleet-ci-daily.service", "ailearning-ci-daily.service", "ailearning-ci-weekly.service"]
 
 
 def owner_presence():
     """Is the owner at the machine? -> (present, reasons).
 
-    One source: `pc status --json --fresh`, whose desktop/power sections already carry lock,
-    lid, idle (PB09), players (PB09) and seat_logins (PB09). A missing field is read as absent,
+    `pc status --json --fresh` (lock, lid, idle, players, seat_logins, load per CPU) and
+    `claude agents --json` (a busy session: the owner works remotely or the fleet is busy, T1574). A missing field is read as absent,
     never as present, so a broken probe never blocks a run silently — it is listed in reasons.
     """
     rc, out = sh("pc status --json --fresh 2>/dev/null")
@@ -521,6 +522,15 @@ def owner_presence():
     seats = v("desktop", "seat_logins")
     if seats.isdigit() and int(seats) > 0:
         reasons.append("%s interactive login(s) on the seat" % seats)
+    load = v("host", "load").split()
+    nproc = int(os.environ.get("PC_NPROC") or os.cpu_count() or 1)
+    if load and float(load[0]) / nproc >= AWAY_LOAD:
+        reasons.append("fleet busy: load %s on %d CPUs (>= %.2f per CPU)" % (load[0], nproc, AWAY_LOAD))
+    try:
+        sessions = json.loads(sh("claude agents --json 2>/dev/null")[1] or "[]")
+    except ValueError:
+        sessions = []
+    reasons += ["agent session busy: " + (a.get("name") or a.get("cwd") or "?") for a in sessions if a.get("status") == "busy"]
     units = os.environ["CI_UNITS"].split() if "CI_UNITS" in os.environ else CI_UNITS
     for u in units:
         if u != "pcbench-weekly.service" and sh("systemctl --user is-active %s 2>/dev/null" % u)[1] in ("active", "activating"):

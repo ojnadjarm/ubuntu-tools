@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Fake `claude` for the PB09 gate test: `claude agents --json` prints $PCFAKE_AGENTS (default: no sessions).
+case "$1 $2" in
+  "agents --json") if [ -n "${PCFAKE_AGENTS:-}" ]; then cat "$PCFAKE_AGENTS"; else echo '[]'; fi;;
+  *) echo "fake claude: refusing $*" >&2; exit 2;;
+esac

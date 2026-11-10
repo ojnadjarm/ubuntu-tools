@@ -29,10 +29,10 @@ case "$cal" in
 esac
 
 # --- 2. the gate, against fixture JSON only --------------------------------
-gate() {  # gate <fixture> -> the `pcbench away --json` object
-  PATH="$FIX:$PATH" PCFAKE_STATUS="$FIX/$1.json" "$BIN/pcbench" away --json 2>/dev/null
+gate() {  # gate <fixture> -> the `pcbench away --json` object (stub pc and claude, 16 CPUs)
+  PATH="$FIX:$PATH" PC_NPROC=16 PCFAKE_STATUS="$FIX/$1.json" "$BIN/pcbench" away --json 2>/dev/null
 }
-for f in present-idle present-lid present-player present-seat; do
+for f in present-idle present-lid present-player present-seat present-load; do
   t "gate: $f -> present"
   j=$(gate "$f")
   case $(echo "$j" | jq -r '.present') in
@@ -44,6 +44,14 @@ done
 t "gate: away -> away, no reasons"
 j=$(gate away)
 [ "$(echo "$j" | jq -c '[.away,.present,(.reasons|length)]')" = '[true,false,0]' ] && ok || no "$j"
+
+t "gate: busy orchestrator session -> present"
+j=$(PCFAKE_AGENTS="$FIX/agents-busy.json" gate away)
+[ "$(echo "$j" | jq -c '[.present,.reasons]')" = '[true,["agent session busy: command center"]]' ] && ok || no "$j"
+
+t "gate: idle sessions, quiet load -> away"
+j=$(PCFAKE_AGENTS="$FIX/agents-idle.json" PC_NPROC=16 gate away)
+[ "$(echo "$j" | jq -c '.present')" = false ] && ok || no "$j"
 
 t "gate: unreadable pc status is read as present"
 j=$(PATH="$FIX:$PATH" PCFAKE_STATUS=/nonexistent "$BIN/pcbench" away --json 2>/dev/null)
