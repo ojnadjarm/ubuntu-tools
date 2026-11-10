@@ -787,6 +787,10 @@ chat_wake.woke('orchestrator', [{'id': 5, 'ch': 'harness'}]); print(int(time.tim
   is 'thinking: orchestrator idle since before the line: starting' "$(think)" 'orchestrator:harness:starting'
   status busy $((at + 100))
   is 'thinking: orchestrator busy after the line: thinking' "$(think)" 'orchestrator:harness:thinking'
+  python3 -c "import json; p = '$ST/woke/orchestrator.json'; w = json.load(open(p)); w['harness']['at'] -= 31 * 60000
+json.dump(w, open(p, 'w'))"
+  is 'thinking: busy, wake older than 30 min: gone' "$(think)" none
+  is 'thinking: an expired wake is dropped from disk' "$(woke orchestrator harness)" False
   status idle $((at + 9000))
   is 'thinking: orchestrator idle again: gone' "$(think)" none
   status busy $((at + 9500)); kill "$spid"; wait "$spid" 2>/dev/null
@@ -914,9 +918,14 @@ print([r['outcome'] for r in map(json.loads, open('$ST/audit.jsonl')) if r.get('
   a=$(plan 'after the crash'); printf '{"id": 5, "ch": "../x", "why": "plan"}\n' >"$ST/queue/fx.jsonl"
   printf '{"id": %s, "ch": "dm-fx--gx", "why": "plan"}\n' "$a" >>"$ST/queue/fx.jsonl"; newday
   out=$(CHAT_SEAT=fx chat post harness 'day start 3' 2>&1); rc=$?
-  is 'drain (A9): a drain that raises: the post exits 0 and says the wake failed' "$rc $(grep -c '^chat: stored [0-9]*, wake failed: ' <<<"$out")" '0 1'
-  is 'drain (A9): the rows not sent are parked again' "$(python3 -c "import json; print([json.loads(l)['id'] for l in open('$ST/queue/fx.jsonl')])")" \
-     "[5, $a]"
+  is 'drain (X6): a row that raises: the post exits 0 with one warning naming dead.jsonl' \
+     "$rc $(grep -vc '^[0-9]*$' <<<"$out") $(grep -c '^chat: queue row fx 5 moved to queue/dead.jsonl: ' <<<"$out")" '0 1 1'
+  is 'drain (X6): the row is dead-lettered, the next row re-sent, queue empty' \
+     "$(python3 -c "import json; print([(r['seat'], r['id']) for r in map(json.loads, open('$ST/queue/dead.jsonl'))])") $(last "$a") $(queued)" \
+     "[('fx', 5)] queued 0"
+  newday; out=$(CHAT_SEAT=fx chat post harness 'day start 4' 2>&1)
+  is 'drain (X6): the next day: dead.jsonl is no seat queue, no warning, kept' \
+     "$(grep -vc '^[0-9]*$' <<<"$out") $(wc -l <"$ST/queue/dead.jsonl")" '0 1'
 }
 
 [ $# -gt 0 ] || set -- post read wake-ceo wake-po ask answer notify pause vass files prune history manager thinking search hop drain

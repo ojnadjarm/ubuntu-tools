@@ -5,6 +5,7 @@ import glob
 import json
 import os
 import subprocess
+import sys
 import time
 
 import chat_route
@@ -73,6 +74,14 @@ def park(seat, msg, why):
         f.write(json.dumps({"id": msg["id"], "ch": msg["ch"], "why": why}) + "\n")
 
 
+def dead(seat, row, err):
+    """Move a parked row that made the drain raise to state/chat/queue/dead.jsonl and warn once on stderr."""
+    with open(os.path.join(chat_store.root(), "queue", "dead.jsonl"), "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        f.write(json.dumps({"seat": seat, **row, "error": str(err)}) + "\n")
+    print(f"chat: queue row {seat} {row['id']} moved to queue/dead.jsonl: {err}", file=sys.stderr)
+
+
 def new_day():
     """True for the one call that creates today's drain marker counters/<day>.drained: a new day has started."""
     folder = os.path.join(chat_store.root(), "counters")
@@ -99,13 +108,16 @@ def parsed(f):
 
 def drain(seats=None):
     """[(seat, outcome)] of re-sending each parked wake once after a sweep of dead-timer batches; none while paused;
-    hop parks dropped, others re-park; rows not reached when it raises are parked again."""
+    hop parks dropped, others re-park; a row that raises is dead-lettered; rows not reached on an abort are parked
+    again."""
     if paused():
         return []
     chat_wake.sweep()
     seats = org.seats() if seats is None else seats
     out = []
     for path in sorted(glob.glob(os.path.join(chat_store.root(), "queue", "*.jsonl"))):
+        if os.path.basename(path) == "dead.jsonl":
+            continue
         seat = os.path.basename(path)[:-len(".jsonl")]
         with open(path, "r+") as f:
             fcntl.flock(f, fcntl.LOCK_EX)
@@ -118,9 +130,12 @@ def drain(seats=None):
                 r = rows[0]
                 if r["id"] not in done and r["why"] != "hop":
                     done.add(r["id"])
-                    got = chat_store.read(r["ch"], after=r["id"] - 1, limit=1)
-                    if got and got[0]["id"] == r["id"]:
-                        out += dispatch(got[0], seats, only=seat)
+                    try:
+                        got = chat_store.read(r["ch"], after=r["id"] - 1, limit=1)
+                        if got and got[0]["id"] == r["id"]:
+                            out += dispatch(got[0], seats, only=seat)
+                    except Exception as e:
+                        dead(seat, r, e)
                 rows.pop(0)
         finally:
             for r in rows:

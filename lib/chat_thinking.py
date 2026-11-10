@@ -2,13 +2,17 @@
 
 PoInbox: starting while the wake sits in the 20 s batch or the inbox; thinking while its request is in current/ and
 po-run holds the PO's lock (/proc/locks). Channel: thinking while the seat's live session is busy; starting while it has
-been idle since before the line. Gone when the run ends or the seat posts in that channel after the wake."""
+been idle since before the line. Gone when the run ends, the seat posts in that channel after the wake, or a busy seat's
+wake is older than MAX_BUSY_MS."""
 import functools
 import os
+import time
 
 import chat_store
 import chat_wake
 import org
+
+MAX_BUSY_MS = 30 * 60 * 1000
 
 
 def _locks():
@@ -46,7 +50,7 @@ def _channel(seat, rec, seats):
     if reg is None:
         return None
     if reg.get("status") == "busy":
-        return "thinking"
+        return "thinking" if time.time() * 1000 - rec["at"] < MAX_BUSY_MS else None
     return "starting" if int(reg.get("statusUpdatedAt") or 0) < rec["at"] else None
 
 
