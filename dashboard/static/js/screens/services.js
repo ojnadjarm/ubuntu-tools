@@ -18,8 +18,8 @@ export function render(grid,d){D=d;
   var next=mine.filter(function(t){return t.next;})[0],strayN=sites.filter(function(s){return s.state==="stray";}).length;
   return cell("two3","ports","<s>"+sites.filter(function(s){return !s.group&&s.state!=="stray";}).length+" listeners</s>",table([["service"],["state"],["what","w"],["port","p"],["unit","u"],["up","a"]],ports),0)
     +cell("third","strays",(strays?pill("stray"):pill("ok","none"))+"<s>"+strayN+(strayN===1?" stray":" strays")+"</s>",table([["port","p"],["proc"],["state"],["unit","w"],["age","a"]],strays,"<b>none.</b> every listener has a roster owner")+'<div class="empty">a stray is a listener with no roster owner — usually a dev server left running</div>',1)
-    +cell("half","services","<s>"+(units.length-desk)+" running · "+desk+" desktop</s>",us,2)
-    +cell("half","timers","<s>"+mine.length+" timers"+(next?" · next "+esc(when(next.next)):"")+"</s>",tm,3);
+    +cell("half tap","services","<s>"+(units.length-desk)+" running · "+desk+" desktop</s>",us,2)
+    +cell("half tap","timers","<s>"+mine.length+" timers"+(next?" · next "+esc(when(next.next)):"")+"</s>",tm,3);
 }
 export function click(e){
   if(e.target.closest("[data-desk]")){showDesk=!showDesk;go("services",true);return true;}

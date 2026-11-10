@@ -52,11 +52,11 @@ export function render(){
   var comps=CSS.comps.map(function(c){var key=c.sel.split(/\s+/)[0],demo=DEMOS[key];
     return '<div class="sg-comp"><code>'+esc(c.sel)+'<em>'+esc(c.what)+'</em></code><div class="demo">'+(demo||'<span class="k">chrome · look at this page</span>')+'</div></div>';}).join("");
   var rules='<div class="sg-rules">'+CSS.rules.map(function(r){return '<div><b>'+esc(r.name)+'</b>'+esc(r.text).replace(/No amber\. No red\./,'<u>No amber. No red.</u>')+'</div>';}).join("")+'</div>';
-  return cell("wide","style · the living style guide","<s>generated from /static/eye.css</s>",'<div class="empty">Tokens, type, spacing and every component rendered from the same CSS that draws this board, with its class beside it. Source of truth for every agent and every personal web project.</div><div class="btns"><a class="btn" href="/static/eye.css" target="_blank" rel="noopener">eye.css ↗</a><button class="btn gold" data-copy-css>copy tokens as css</button></div>',0)
+  return cell("wide tap","style · the living style guide","<s>generated from /static/eye.css</s>",'<div class="empty">Tokens, type, spacing and every component rendered from the same CSS that draws this board, with its class beside it. Source of truth for every agent and every personal web project.</div><div class="btns"><a class="btn" href="/static/eye.css" target="_blank" rel="noopener">eye.css ↗</a><button class="btn gold" data-copy-css>copy tokens as css</button></div>',0)
     +cell("wide","tokens","<s>"+colors.length+" colours · "+others.length+" more</s>",sw+oth,1)
     +cell("two3","type scale","<s>one family</s>",ty,2)
     +cell("third","spacing","<s>px</s>",sp,3)
-    +cell("wide","components","<s>"+CSS.comps.length+" · rendered live · class beside</s>",comps,4)
+    +cell("wide tap","components","<s>"+CSS.comps.length+" · rendered live · class beside</s>",comps,4)
     +cell("wide","rules","<s>the aesthetic in "+CSS.rules.length+" lines</s>",rules,5);
 }
 export function enter(){
