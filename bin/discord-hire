@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# usage: discord-hire <id> "<name>" --thread <tid> [--repo <owner/name>] [--rule key=value]… [--match <word>]…
+# po-discord's command for a new Discord project (T1547): projects.json entry (no repo yet = null), manager po-<id>
+# (po-new --parent), org seat, thread route, po@<id>.path + discord-liaison-relay@<id>.path via `pc units enable --apply`,
+# one line to the owner's chat DM. Each step runs once: a re-run is a no-op (`--repo` later fills a null repo).
+# Exit 0 hired or already hired, 1 a step failed (says which), 2 refused. Then: po-ask <id> --from router … the request.
+help() { awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; }
+case "${1:-}" in -h|--help) help; exit 0 ;; '') help >&2; exit 2 ;; esac
+. "$HOME/agents/bin/env.sh"
+D="$HOME/agents/discord-liaison"; B="$HOME/agents/discord-bot"
+export PYTHONPATH="$D:$B"
+exec "$B/.venv/bin/python" -m liaison.managers hire "$@"

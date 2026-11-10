@@ -145,9 +145,9 @@ class TestRealRegistry(unittest.TestCase):
             self.assertEqual(seats[p['id']]['role'], 'manager', p['id'])
             with open(os.path.join(agents, f'po-{p["id"]}', 'BRIEF.md')) as f:
                 brief = f.read()
-            self.assertIn(p['clone'], brief)
+            self.assertIn(p['clone'] or 'no repo yet', brief)
             for q in reg['projects']:
-                if q is not p:
+                if q is not p and q['clone']:
                     self.assertNotIn(q['clone'], brief, f'po-{p["id"]} names {q["id"]}')
 
     def test_chat_mention_wakes_every_manager_without_a_daily_limit(self):

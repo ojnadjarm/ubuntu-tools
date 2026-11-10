@@ -1,6 +1,7 @@
 # Product-owner agents: one PO per busy project (po-ask, po-run, po-status, po-push, deploy-lock)
 
-Ticket: T1412 (plan T1410), T1515 P31 (managers), P32 (images), P36 (reply images) · Last verified: 2026-11-10 by `po.test.sh` (71 ok) and
+Ticket: T1412 (plan T1410), T1515 P31 (managers), P32 (images), P36 (reply images), T1547 (discord-hire) · Last verified: 2026-11-10 by
+`discord-liaison/tests` (85, `test_hire.py` 4) and a live hire of po-narrador-interactivo-ia; before: `po.test.sh` (71 ok) and
 `discord-liaison/tests` (77, `test_managers.py`); before: 2026-10-27 by `bin/tests/po.test.sh` (52 ok), pulse test (30 ok), liaison suite
 (40 tests) and two live po-mooblox runs (dry run 54 s, budget stop 18 s)
 
@@ -38,6 +39,12 @@ orchestrator relays with `po-ask`. Not for fleet tooling, work repos (Vass) or r
 - Wakes (Q4, no limit since P38): `po-ask --from router|manager` counts one of the target seat's wakes today in chat's
   counters (`lib/po_count.py`, shown in Agents › Chat "Wakes today"); chat mentions of a manager count there too.
   Liaison handoffs (Discord members) are not counted.
+- New project, new manager (owner 2026-11-10, T1547): po-discord runs `discord-hire <id> "<name>" --thread <tid>
+  [--repo o/n] [--rule k=v]… [--match w]…` (`managers.hire`): projects.json entry (no repo = `repo`/`clone` null, block
+  says "no repo yet"), `make()`, org seat (manager under the router), thread route (`State.put_thread` under
+  `state.lock`), `pc units enable` both path units `--apply` (skipped when `systemctl --user is-enabled`), one
+  `chat post @owner` line. Each step checks first, so a re-run is a no-op; `--repo` later fills a null repo and
+  re-renders the block. Then `po-ask <id> --from router` the request. ARCH: `$AGENT_WORK/research/2026-11-10/T1547/ARCH.md`.
 - Context map (who reads what): `~/agent-work/research/2026-11-09/T1515/P31-architecture.md`. A manager reads its BRIEF,
   inbox, state and ledger only; `test_managers.py` proves a request for project A never reaches manager B.
 - `deploy-lock <env> --version '<cmd>' -- <cmd>`: one deployer per live env, second one waits and gets `DEPLOY_LIVE_BEFORE`.
@@ -46,6 +53,7 @@ orchestrator relays with `po-ask`. Not for fleet tooling, work repos (Vass) or r
 ```bash
 po-new <p> "<Name>"                     # from ~/agents/po-template; then fill the "## Project" block of BRIEF.md
 discord-liaison manager <project-id>    # a Discord project's manager (po-new --parent discord + its block + ledger)
+discord-hire <id> "<Name>" --thread <tid> [--repo o/n] [--rule k=v]   # new project end to end (router's command)
 pc units enable po@<p>.path --user --now --apply
 po-ask <p> --from owner --copy "<his words>"      # or --intent; prints the inbox file
 po-ask <p> --image <png|jpg|gif|webp> … "<text>"  # copies each into po-<p>/state/images/, `images:` line (P32)
@@ -70,10 +78,16 @@ bash ~/agents/bin/tests/po.test.sh      # fixture: bwrap no-net, fake ntfy, fake
   (`test_liaison` puts the bot on sys.path).
 - At the P31 switch po-discord held 3 project requests (1 running, 2 queued): its next loop reads the router brief and
   forwards them with `po-ask <id> --from router`, so the first wakes of each manager count against its 12.
+- A match word of one project inside another's name breaks routing: `named()` sends every message naming it to the
+  router. Measured T1547: tiny-epic-narrator's title word "narrador" mapped the «Narrador Interactivo IA» thread to Tiny
+  Epic and would have sent the new project's messages to po-discord; dropped it. `discord-hire` prints `warning:` on it.
+- `discord-hire`'s owner note posts from `$CHAT_SEAT`, else the router seat: run by hand from the orchestrator it lands
+  in the orchestrator's DM with the owner.
+- A request handled before the hire stays in the old manager's `done/`: re-file it with `po-ask <id> --from router`.
 - The pulse lets only a *new* Discord escalation through between 80 and 95 % of the plan, as an escalation-only turn.
 
 ## Links
-- Code: `~/agents/bin/po-{ask,run,new,status,push,picks}`, `bin/polib.sh`, `lib/po_cap.py`, `discord-liaison/liaison/managers.py`, `bin/deploy-lock`, `units/po@.{path,service}`,
+- Code: `~/agents/bin/po-{ask,run,new,status,push,picks}`, `bin/polib.sh`, `lib/po_cap.py`, `discord-liaison/liaison/managers.py`, `bin/discord-hire`, `bin/deploy-lock`, `units/po@.{path,service}`,
   `units/po-picks.service`, `po-template/` (`MANAGER.tmpl.md`), `discord-liaison/liaison/po.py`
-- Tests: `bin/tests/po.test.sh`, `discord-liaison/tests/test_po.py` (`bin/tests/discord-liaison.test.sh`), `bin/tests/orchestrator-pulse.test.sh`
+- Tests: `bin/tests/po.test.sh`, `discord-liaison/tests/test_po.py`, `test_hire.py` (`bin/tests/discord-liaison.test.sh`), `bin/tests/orchestrator-pulse.test.sh`
 - Design: `~/agent-work/research/2026-10-27/T1410/PLAN.md`; pilot `~/agents/po-mooblox/`

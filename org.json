@@ -6,5 +6,6 @@
   {"id": "discord", "name": "Discord product owner", "role": "po", "parent": "orchestrator", "wake": "po-inbox", "match": "~/agents/po-discord"},
   {"id": "tiny-epic-narrator", "name": "Tiny Epic Narrator manager", "role": "manager", "parent": "discord", "wake": "po-inbox", "match": "~/agents/po-tiny-epic-narrator"},
   {"id": "spidey-pr-dashboard", "name": "Spidey PR Dashboard manager", "role": "manager", "parent": "discord", "wake": "po-inbox", "match": "~/agents/po-spidey-pr-dashboard"},
-  {"id": "mosaico", "name": "Mosaico manager", "role": "manager", "parent": "discord", "wake": "po-inbox", "match": "~/agents/po-mosaico"}
+  {"id": "mosaico", "name": "Mosaico manager", "role": "manager", "parent": "discord", "wake": "po-inbox", "match": "~/agents/po-mosaico"},
+  {"id": "narrador-interactivo-ia", "name": "Narrador Interactivo IA manager", "role": "manager", "parent": "discord", "wake": "po-inbox", "match": "~/agents/po-narrador-interactivo-ia"}
 ]}
