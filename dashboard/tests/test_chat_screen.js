@@ -3,6 +3,7 @@
 // P39: below 900 px the list and the conversation are two views; the back arrow returns to the list.
 // V3: Familiars in rows, the channel box and the direct list; a new message makes its sender talk for about 2 s.
 // T1545-A: from 900 px the list rows show full names, preview and time, ordered by activity; the stream box >= 430 px at 1366x768; text through chat-text.js's rich when it exists.
+// T1553: the ceo seat shows the name and rank the API gives ("DarkSaddler · CEO" as his direct message's title).
 // Run: node tests/test_chat_screen.js   (fixture API only: every POST lands in this file's server, nothing reaches the real store)
 "use strict";
 const assert = require("assert");
@@ -10,7 +11,7 @@ const { chromium, serveStatic } = require("./lib/browser");
 const STATUS = { host: "fixture", sites: [], units: [], timers: [], docker: [], plans: [], drop: { files: [] }, verdict: { ok: true, problems: [], needs: [] } };
 const ORG = { seats: [
   { id: "owner", name: "You", role: "owner", parent: null, wake: null, match: null },
-  { id: "orchestrator", name: "Orchestrator", role: "ceo", parent: "owner", wake: "channel", match: "~" },
+  { id: "orchestrator", name: "DarkSaddler", rank: "CEO", role: "ceo", parent: "owner", wake: "channel", match: "~" },
   { id: "mooblox", name: "Mooblox", role: "po", parent: "orchestrator", wake: "po-inbox", match: "~/agents/po-mooblox" },
   { id: "discord", name: "Discord", role: "po", parent: "orchestrator", wake: "po-inbox", match: "~/agents/po-discord" },
   { id: "vass", name: "Vass seat", role: "po", parent: "orchestrator", wake: "pull", match: null }], sessions: [], hidden: 0 };
@@ -120,7 +121,7 @@ srv.on("request", (req, res) => {
     await p.setViewportSize({ width: 1366, height: 768 });
     await p.waitForSelector(".chat .wakes .wk", { state: "visible", timeout: 5000 });
     const wk = await p.$$eval(".chat .wakes .wk", (r) => r.map((x) => x.querySelector("span").textContent + " " + x.querySelector("b").textContent));
-    assert.deepStrictEqual(wk, ["Orchestrator 5", "Mooblox 13", "Discord 0"], "wakes today per seat as plain numbers (no limit, P38); the pull seat vass is never woken");
+    assert.deepStrictEqual(wk, ["DarkSaddler 5", "Mooblox 13", "Discord 0"], "wakes today per seat as plain numbers (no limit, P38); the pull seat vass is never woken");
     assert.strictEqual(await p.$$eval(".chat .wakes progress", (l) => l.length), 0, "no bar to a limit");
     const fixed = await p.evaluate(() => getComputedStyle(document.querySelector(".chat .compose")).position);
     assert.notStrictEqual(fixed, "fixed", "from 900 px the composer sits under the stream");
@@ -165,7 +166,9 @@ srv.on("request", (req, res) => {
       await q.waitForFunction(() => document.querySelectorAll('.chat .chans a .tm').length >= 4, null, { timeout: 15000 });
       await q.waitForTimeout(300);
       assert.deepStrictEqual(await q.$$eval(".chat .cn", (l) => l.filter((e) => e.scrollWidth > e.clientWidth).map((e) => e.textContent)), [], `${w}: no channel name is cut`);
-      assert.ok(await q.$$eval(".chat .cn", (l) => l.some((e) => e.textContent === "Discord product owner · Orchestrator")), "the agents' direct message is listed");
+      assert.ok(await q.$$eval(".chat .cn", (l) => l.some((e) => e.textContent === "Discord product owner · DarkSaddler")), "the agents' direct message is listed");
+      assert.ok(await q.$$eval(".chat .cn", (l) => l.some((e) => e.textContent === "DarkSaddler · CEO")), "T1553: his direct message with the ceo seat is titled name · rank");
+      assert.deepStrictEqual(await q.$$eval(".chat .cn, .chat .who b", (l) => l.filter((e) => /Orchestrator/.test(e.textContent)).length), 0, "T1553: no rendered seat name says Orchestrator");
       const rows = await q.$$eval(".chat .chans a", (l) => l.map((a) => { const v = (s) => { const e = a.querySelector(s); return e && e.offsetWidth > 0 ? e.textContent : ""; }; return [a.dataset.ch, v(".pv"), v(".tm")]; }));
       for (const c of Object.keys(STORE2)) {
         const r = rows.find((x) => x[0] === c);

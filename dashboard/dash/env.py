@@ -7,6 +7,7 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOST = os.environ.get("HARNESS_HOST") or socket.gethostname()
 BRAND = os.environ.get("HARNESS_BRAND", "")
 ORCH_NAME = BRAND.split(" ")[0] or HOST
+ORCH_RANK = "CEO"
 PUBLIC_HOST = os.environ.get("HARNESS_TAILNET_FQDN") or HOST
 PORT = 19998
 BINDS = ["0.0.0.0", "::"]

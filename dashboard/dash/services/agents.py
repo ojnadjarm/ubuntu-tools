@@ -1,7 +1,7 @@
 """/api/agents: the orchestrator's live and recent sub-agents, the persistent agents, the orbiter feed and the claims board, read-only."""
 import glob, json, os, re, sys, threading, time
 from dash.cache import cached, swr
-from dash.env import HOME, ORCH_NAME, run
+from dash.env import HOME, ORCH_NAME, ORCH_RANK, run
 from dash.routes import route
 from dash.services import system
 
@@ -327,7 +327,7 @@ def collect():
     reg = live_sessions()
     subs = shown(job_rows(reg, {r["name"] for r in roster}) + subs)
     roster, orch = cached("agents_persist", 5, lambda: persistent(roster, session, reg), (roster, "idle"))
-    return {"orchestrator": {"name": ORCH_NAME, "role": "ceo", "session": session[:8], "state": orch}, "subagents": subs, "orbiters": orb,
+    return {"orchestrator": {"name": ORCH_NAME, "role": "ceo", "rank": ORCH_RANK, "session": session[:8], "state": orch}, "subagents": subs, "orbiters": orb,
             "roster": roster, "claims": claims()}
 
 

@@ -1,7 +1,7 @@
-"""GET /api/org (tailnet only): the org seats, the live Claude sessions with their seat, how many registry rows are hidden, and error when the last read failed."""
+"""GET /api/org (tailnet only): the org seats (the ceo seat named ORCH_NAME, ranked ORCH_RANK), the live Claude sessions with their seat, how many registry rows are hidden, and error when the last read failed."""
 import glob, os, sys
 from dash.cache import cache_meta, cached
-from dash.env import HOME
+from dash.env import HOME, ORCH_NAME, ORCH_RANK
 from dash.routes import route
 from dash.services.sites import trusted
 
@@ -24,7 +24,8 @@ def org_payload():
         if "cwd" in s:
             s["cwd"] = tilde(s["cwd"])
     total = len(glob.glob(os.path.join(sessions.registry_dir(), "*.json")))
-    return {"seats": org.seats(), "sessions": live, "hidden": max(0, total - len(live))}
+    seats = [{**s, "name": ORCH_NAME, "rank": ORCH_RANK} if s["role"] == "ceo" else s for s in org.seats()]
+    return {"seats": seats, "sessions": live, "hidden": max(0, total - len(live))}
 
 
 @route("GET", "/api/org")

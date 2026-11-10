@@ -208,7 +208,7 @@ class Live(unittest.TestCase):
         jl(os.path.join(self.proj, "newer999-z.jsonl"), [{}])
         agents.ORCH_NAME = "Nova"
         d = agents.collect()
-        self.assertEqual(d["orchestrator"], {"name": "Nova", "role": "ceo", "session": "newer999", "state": "running"})
+        self.assertEqual(d["orchestrator"], {"name": "Nova", "role": "ceo", "rank": "CEO", "session": "newer999", "state": "running"})
 
     def test_roster_roles_from_org(self):
         org = os.path.join(self.tmp.name, "org.json")

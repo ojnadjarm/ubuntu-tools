@@ -80,7 +80,7 @@ function crew(H) {
 function seatCard(seat, S) {
   if (seat.role === "owner") return `<div class="seat him">${av(seat.id, seat.name, "<i></i>", ["Read every channel, write anywhere, message anyone.", "Only your words change what an agent may do."], " dia")}<h3>${esc(seat.name)}</h3></div>`;
   const st = seatState(seat, S), helpers = S.filter((s) => !s.seat && s.parent === seat.id), msg = "Message " + seat.name;
-  return `<div class="seat" data-seat="${esc(seat.id)}">${av(seat.id, seat.name, familiar(seat.id, st, seat.role), [ROLE[seat.role], WAKE[seat.wake], "Now " + st + "."])}<h3>${esc(seat.name)} ${dot(st)}</h3>` +
+  return `<div class="seat" data-seat="${esc(seat.id)}">${av(seat.id, seat.name, familiar(seat.id, st, seat.role), [seat.rank && seat.name + " · " + seat.rank, ROLE[seat.role], WAKE[seat.wake], "Now " + st + "."])}<h3>${esc(seat.name)} ${dot(st)}</h3>` +
     `${crew(helpers)}<a class="btn msg" href="#chat?ch=${esc(dmOf(seat.id))}" aria-label="${esc(msg)}" title="${esc(msg)}">${BUBBLE}</a></div>`;
 }
 

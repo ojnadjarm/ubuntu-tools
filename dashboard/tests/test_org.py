@@ -7,7 +7,7 @@ from dash.services import org as svc
 
 SEATS = {"seats": [
     {"id": "owner", "name": "You", "role": "owner", "parent": None, "wake": None, "match": None},
-    {"id": "ceo", "name": "Orchestrator", "role": "ceo", "parent": "owner", "wake": "channel", "match": "~"},
+    {"id": "ceo", "name": "CEO", "role": "ceo", "parent": "owner", "wake": "channel", "match": "~"},
     {"id": "fx", "name": "Fx owner", "role": "po", "parent": "ceo", "wake": "po-inbox", "match": "~/agents/po-fx"},
 ]}
 ENV = ("HOME", "ORG_FILE", "CLAUDE_SESSIONS_DIR", "HARNESS_CONFIG", "PROTECTED_PROJECTS", "WORK_REPO_ROOTS", "HARNESS_ENV_LOADED")
@@ -81,6 +81,26 @@ class Org(unittest.TestCase):
         self.assertEqual((ceo["seat"], ceo["state"], ceo["cwd"], ceo["since"]), ("ceo", "working", "~", 1794261588))
         job = rows["agent-fx-job"]
         self.assertEqual((job["seat"], job["parent"], job["state"], job["cwd"], job["started_by"]), (None, "ceo", "idle", "~/agents/job", "fx-job"))
+
+    def test_ceo_wears_the_brand_name(self):
+        self.old_name, svc.ORCH_NAME = svc.ORCH_NAME, "Nova"
+        try:
+            seats = {s["id"]: s for s in self.call("127.0.0.1")[1]["seats"]}
+        finally:
+            svc.ORCH_NAME = self.old_name
+        self.assertEqual((seats["ceo"]["name"], seats["ceo"]["rank"]), ("Nova", "CEO"), "the ceo seat: brand name, rank CEO")
+        self.assertEqual((seats["fx"]["name"], "rank" in seats["fx"]), ("Fx owner", False), "other seats keep their org.json name")
+
+    def test_live_org_shows_no_orchestrator(self):
+        os.environ["ORG_FILE"] = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "org.json")
+        self.old_name, svc.ORCH_NAME = svc.ORCH_NAME, "Nova"
+        try:
+            seats = self.call("127.0.0.1")[1]["seats"]
+        finally:
+            svc.ORCH_NAME = self.old_name
+        ceo = next(s for s in seats if s["role"] == "ceo")
+        self.assertEqual((ceo["id"], ceo["name"], ceo["rank"]), ("orchestrator", "Nova", "CEO"), "the real org.json: seat id kept, brand name shown")
+        self.assertNotIn("Orchestrator", [s["name"] for s in seats], "no seat is named Orchestrator")
 
     def test_protected_is_on_off_only(self):
         body = self.call("127.0.0.1")[1]

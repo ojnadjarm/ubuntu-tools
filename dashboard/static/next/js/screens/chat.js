@@ -186,12 +186,15 @@ function listed() {
   const mine = seats.map((s) => have(dmOf(s.id)));
   return { rooms, dms: [...mine, ...C.filter((c) => c.ch.startsWith("dm-") && !mine.some((m) => m.ch === c.ch))] };
 }
-function label(c, N) {
+function label(c, N, bare) {
   if (!c) return "Recent";
   if (!c.startsWith("dm-")) return "# " + c;
   const [a, b] = pair(c);
-  return a === "owner" ? nameOf(b, N) : b === "owner" ? nameOf(a, N) : nameOf(a, N) + " · " + nameOf(b, N);
+  const one = bare ? nameOf : ranked;
+  return a === "owner" ? one(b, N) : b === "owner" ? one(a, N) : nameOf(a, N) + " · " + nameOf(b, N);
 }
+/* A seat's name, then its rank when the API gives one ("DarkSaddler · CEO"). */
+const ranked = (id, N) => { const r = (((O && O.seats) || []).find((s) => s.id === id) || {}).rank; return nameOf(id, N) + (r ? " · " + r : ""); };
 const roleOf = (id) => (((O && O.seats) || []).find((s) => s.id === id) || {}).role || "worker";
 function stateOf(id) {
   const seat = ((O && O.seats) || []).find((s) => s.id === id);
@@ -312,7 +315,7 @@ export function render() {
   const sum = (q ? `<b>Search</b>${hits ? ", " + plural(hits.length, "result") : ""}` : `<b>${esc(label(ch, N))}</b>, ${plural(n, "message")}`) + (unread.length ? ` · <span class="gold">${unread.map((c) => `${c.unread} new in ${esc(label(c.ch, N))}`).join(", ")}</span>` : "");
   const nav = `<nav class="chans" aria-label="Channels">${box(q, "cq")}${chanLink({ ch: "", unread: 0 }, N)}<h3>Channels</h3>${rooms.map((c) => chanLink(c, N)).join("")}` +
     (dms.length ? `<h3>Direct</h3>${dms.map((c) => chanLink(c, N)).join("")}` : "") + `</nav>`;
-  const body = `<section class="pane stream" aria-label="Messages">${head(N)}<ol class="msgs" aria-live="polite">${q ? found(N) : stream(N)}</ol><button type="button" class="btn newer" data-newer${fresh && !q ? "" : " hidden"}>${plural(fresh, "new message")} ↓</button>${ch ? composer(ch, label(ch, N)) : ""}</section>`;
+  const body = `<section class="pane stream" aria-label="Messages">${head(N)}<ol class="msgs" aria-live="polite">${q ? found(N) : stream(N)}</ol><button type="button" class="btn newer" data-newer${fresh && !q ? "" : " hidden"}>${plural(fresh, "new message")} ↓</button>${ch ? composer(ch, label(ch, N, true)) : ""}</section>`;
   return `<div class="nxs chat ${listing && !ch ? "list" : "conv"}"><section class="band" aria-label="Chat summary"><div class="perch" id="perch" aria-hidden="true"></div><div class="bt"><p class="kin" data-dec>Chat</p>` +
     `<p class="bsum">${sum}${err ? ` · stale: ${esc(err)}` : ""}</p></div></section><div class="cgrid">${nav}${body}` +
     `<aside class="pane cside" aria-label="In ${q ? "these results" : "this channel"}"><h2><span data-dec>in ${q ? "these results" : "this channel"}</span></h2>${members(N)}${wakes(N)}</aside></div></div>`;

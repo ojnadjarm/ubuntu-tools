@@ -2,6 +2,7 @@
 // started them (3 shown, the rest folded behind a "hidden N" line), managers wear their own gear, no sideways scroll.
 // P35: a card shows avatar, name, state dot and a message icon; the state and description lines live in the avatar's tooltip.
 // V3: every creature is a moving Familiar; a new message makes its sender talk for about 2 s, the owner never.
+// T1553: the ceo seat's tooltip leads with "DarkSaddler · CEO" (name and rank from the API).
 // Run: node tests/test_org_screen.js   (fixture API only; POSTs never leave this file's server)
 "use strict";
 const assert = require("assert");
@@ -10,7 +11,7 @@ const STATUS = { host: "fixture", sites: [], units: [], timers: [], docker: [], 
 const seat = (id, name, role, parent, wake) => ({ id, name, role, parent, wake, match: null });
 const work = (pid, name, parent, state) => ({ seat: null, state, since: 1794262000, pid, parent, name, cwd: "~/w" + pid, started_by: parent });
 const ORG = { seats: [
-  seat("owner", "You", "owner", null, null), seat("orchestrator", "Orchestrator", "ceo", "owner", "channel"),
+  seat("owner", "You", "owner", null, null), { ...seat("orchestrator", "DarkSaddler", "ceo", "owner", "channel"), rank: "CEO" },
   seat("mooblox", "Mooblox", "po", "orchestrator", "po-inbox"), seat("discord", "Discord", "po", "orchestrator", "po-inbox"),
   seat("mosaico", "Mosaico manager", "manager", "discord", "po-inbox")],
 sessions: [
@@ -50,11 +51,13 @@ const srv = serveStatic((u, res) => {
     const orch = '.org .seat[data-seat="orchestrator"]';
     assert.strictEqual(await p.$$eval(".org .seat > p", (l) => l.length), 0, "no description line on any card");
     const msg = await p.$eval(orch + " a.msg", (a) => { const r = a.getBoundingClientRect(); return [a.textContent.trim(), a.getAttribute("aria-label"), a.title, !!a.querySelector("svg"), r.width >= 32 && r.height >= 32]; });
-    assert.deepStrictEqual(msg, ["", "Message Orchestrator", "Message Orchestrator", true, true], "the message button is an icon, named, 32 px or more");
+    assert.deepStrictEqual(msg, ["", "Message DarkSaddler", "Message DarkSaddler", true, true], "the message button is an icon, named, 32 px or more");
     const dot = await p.$eval(orch + " h3 .pill", (d) => [d.textContent.trim() === d.querySelector(".sr-only").textContent.trim(), d.textContent.trim(), d.getBoundingClientRect().width < 20]);
     assert.deepStrictEqual(dot, [true, "working", true], "the state is a dot, its name only for screen readers");
     const tip = await p.$eval(orch + " .avb", (b) => { const t = document.getElementById(b.getAttribute("aria-describedby")); return t && [t.getAttribute("role"), t.textContent]; });
     assert.ok(tip && tip[0] === "tooltip" && /working/.test(tip[1]) && /Runs the fleet/.test(tip[1]) && /Always on/.test(tip[1]), "the avatar describes itself by its tooltip: state and both lines");
+    assert.deepStrictEqual(await p.$eval(orch, (c) => [c.querySelector(".tip b").textContent, c.querySelector("h3").firstChild.textContent.trim()]), ["DarkSaddler · CEO", "DarkSaddler"], "T1553: the tooltip leads with name · rank, the card shows the name only");
+    assert.deepStrictEqual(await p.$$eval(".org .seat h3", (l) => l.filter((e) => /Orchestrator/.test(e.textContent)).length), 0, "T1553: no seat card says Orchestrator");
     const shown = () => p.$eval(orch + " .tip", (t) => getComputedStyle(t).display !== "none");
     assert.strictEqual(await shown(), false, "the tooltip is closed at rest");
     await p.hover(orch + " .avb");
