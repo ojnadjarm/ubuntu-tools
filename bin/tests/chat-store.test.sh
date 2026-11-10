@@ -130,12 +130,16 @@ for i in range(10):
     for j in range(2000):
         s._append(os.path.join(s.root(), f"load{i}.2026-11.jsonl"), {"id": j, "ts": "x", "from": "fx", "text": "y" * 200})
 import time
+scanned, tails, real_rows, real_tail = [], [], s._rows, s._tail
+s._rows = lambda p: (scanned.append(p), real_rows(p))[1]
+s._tail = lambda p: (tails.append(p), real_tail(p))[1]
 t = time.perf_counter()
 for c in s.visible("owner"):
     s._last(s._files()[c])
 ms = (time.perf_counter() - t) * 1000
+s._rows, s._tail = real_rows, real_tail
 print(f"info last of {len(s.visible('owner'))} channels: {ms:.1f} ms")
-check("channels: last of 12 channels of 2000 rows under 20 ms", ms < 20, ms)
+check("channels: last of 12 channels of 2000 rows reads 1 tail each, no full scan", (len(tails), scanned) == (12, []), (len(tails), scanned))
 sys.exit(bad)
 PY
 [ $? = 0 ] || bad=1
@@ -206,12 +210,15 @@ os.environ["HARNESS_HOME"] = f"{work}/h6"
 for i in range(500):
     s._now_ms = lambda: 1793491300000 - (0 if i >= 250 else 86400000 * 3)
     s.post({"ch": f"c{i % 5}", "from": "fx", "text": f"message {i} about the dashboard " + "x" * 300})
+opened, parsed, real_rows = [], [], s._rows
+s._rows = lambda p: (opened.append(p), (parsed.append(r) or r for r in real_rows(p)))[1]
 t = time.perf_counter()
 got = s.search("owner", "DASHBOARD 499")
 ms = (time.perf_counter() - t) * 1000
+s._rows = real_rows
 print(f"info search of 500 messages: {ms:.1f} ms")
 check("search: 500 messages, one hit", ids(got) and got[0]["text"].startswith("message 499 "), got)
-check("search: 500 messages under 20 ms", ms < 20, ms)
+check("search: 500 messages, each of 10 files opened once, each row parsed once", (len(opened), len(set(opened)), len(parsed)) == (10, 10, 500), (len(opened), len(parsed)))
 os.environ["HARNESS_HOME"] = f"{work}/h7"
 month = {}
 for m, t in (("09", 1788220800000), ("10", 1790812800000), ("11", 1793491200000)):   # 2026-09-01 .. 2026-11-01 UTC

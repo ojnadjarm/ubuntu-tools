@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # T483: no shell test asserts a wall time against a bare literal; live timings go through lib/budget.sh.
-# T491: the same for Python tests (bin/tests, hooks): a time.time/monotonic/perf_counter difference, or a name
-# assigned from one, capped with a literal (`< 0.35`, `<= 100`); live timings go through lib/budget.py.
+# T491: the same for Python tests (bin/tests, hooks; T1574: Python in *.test.sh): a time.time/monotonic/perf_counter
+# difference, or a name assigned from one, capped with a literal (`< 0.35`, `<= 100`); live timings go through lib/budget.py.
 # A line is flagged when it reads a timing (EPOCHREALTIME, date +%s.%N, /usr/bin/time, a *_s value or a variable
 # assigned from one) and caps it with a literal (`-le 300`, `<= 0.8`, `<2`). Fixtures in fixtures/timing-lint.
 set -uo pipefail
@@ -55,12 +55,13 @@ is 'bad fixture: the 4 bare wall asserts' "$(lint "$FIX/bad.sh" | cut -d: -f2 | 
 is 'budgeted fixture: 0 findings' "$(lint "$FIX/good.sh")" ''
 is 'bad Python fixture: the 4 bare wall asserts' "$(lint_py "$FIX/bad.py" | cut -d: -f2 | tr '\n' ' ')" '5 7 9 11 '
 is 'budgeted Python fixture: 0 findings' "$(lint_py "$FIX/good.py")" ''
+is 'Python in a shell heredoc: the 1 bare wall assert' "$(lint_py "$FIX/embedded.sh" | cut -d: -f2)" '7'
 # 3. the live tree.
 live=()
 for f in "$DIR"/*.test.sh; do [[ " $EXEMPT " == *" ${f##*/} "* ]] || live+=("$f"); done
 found=$(lint "${live[@]}")
 is "live tree: 0 bare wall asserts in ${#live[@]} files" "$found" ''
-py=("$DIR"/*.test.py "$DIR"/../../hooks/*.test.py)
+py=("$DIR"/*.test.py "$DIR"/../../hooks/*.test.py "${live[@]}")
 is "live Python tree: 0 bare wall asserts in ${#py[@]} files" "$(lint_py "${py[@]}")" ''
 
 [ $bad = 0 ] && echo 'PASS timing-lint' || echo 'FAIL timing-lint'
