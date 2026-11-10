@@ -1,7 +1,7 @@
 // Office card fields (T1601-07, PLAN 2.1 O4-O8): the seat, worker and CEO cards carry every Org field in the old
 // tooltip's order (Name · Rank, area, about, role line, wake line, state and since) plus workers, folder, started by,
 // last active and Message; a protected seat names no folder or starter. Staff cards (T1601-08, PLAN 2.1 R4-R7, C7) carry every
-// Roster field for the 5 runner kinds; a PO or manager seat's card adds its runner's 4 rows. Pure: runs under node on the shared fixture.
+// Roster field for the 5 runner kinds; a PO or manager seat's card adds its runner's 4 rows. Agent and CEO cards (T1601-10, C1, C5). Pure: runs under node on the shared fixture.
 // Run: node tests/test_office_fields.js
 "use strict";
 process.env.TZ = "UTC";
@@ -138,6 +138,22 @@ const ok = (name, fn) => { fn(); n++; console.log("ok " + n + " " + name); };
       if ("lines" in c) assert.ok(Array.isArray(c.lines) && c.lines.every((l) => typeof l === "string" && l), id);
       assert.ok(c.rows.every((r) => r.length >= 2 && r.length <= 3 && r[1] !== "" && r[1] != null), id);
     }
+  });
+
+  ok("C1 agent card, ended: type, when it ended, its report; a stopped run with no report names its last step (T1601-10)", () => {
+    const Q = JSON.parse(JSON.stringify(P)), S = NOW / 1000;
+    Q.agents.subagents.push({ id: "pid1004", label: "T9004", type: "session", started: "2026-11-10T14:00:00Z", last: S - 600, state: "stale", doing: "Bash", report: "" });
+    const a = Mo.build(Q, { now: NOW }).who.pid1004, c = F.card(a, NOW);
+    assert.deepStrictEqual([a.room, c.title, c.rank, c.state.text], ["tiny-epic-narrator", "T9004", "session", "Now stopped"]);
+    assert.deepStrictEqual(c.rows.slice(0, 4), [["Type", "session"], ["Ended", "14:50 · 10 min ago"], ["Report", "no report · last step · Bash"], ["Session", "pid 1004"]]);
+  });
+
+  ok("C5 CEO card in the error pose: stuck on an error, the failed agent's ticket and when, gold (T1601-10)", () => {
+    const Q = JSON.parse(JSON.stringify(P));
+    Q.agents.subagents.push({ id: "e1", label: "T9006 broken", type: "worker", started: "2026-11-10T14:00:00Z", last: NOW / 1000 - 300, state: "error", doing: "", report: "red" });
+    const c = F.card(Mo.build(Q, { now: NOW }).who.orchestrator, NOW);
+    assert.deepStrictEqual([c.state.pose, c.state.text], ["error", "Now stuck on an error · " + T.ago(1794320000, NOW)]);
+    assert.deepStrictEqual(c.rows.slice(0, 3), [["Agents working", "2"], ["At the desk pool", "2"], ["Failed", "T9006 · 5 min ago", "bad"]]);
   });
 
   ok("pure and small: no DOM, under 12 KB", () => {

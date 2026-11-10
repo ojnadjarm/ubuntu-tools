@@ -3,9 +3,9 @@ import { hash, genome } from "../../familiars/genome.js";
 import { mul, glow, lamp, rack, grow, holo, cable, sign } from "./props.js";
 
 export const SEAT = 0.28, SCALE = 0.36;
-const CREAM = [0.6, 0.66, 0.62], OFF = [0.12, 0.14, 0.14];
+const CREAM = [0.6, 0.66, 0.62], OFF = [0.12, 0.14, 0.14], STANDBY = [0.16, 0.32, 0.36];
 
-/* One desk place with its seat at the origin, facing +z: the desk strip, the holo screen and the light pool carry the occupant's state. */
+/* One desk place with its seat at the origin, facing +z: the desk strip, the holo screen and the light pool carry the occupant's state; one asleep but on shows a standby light, one off stays dark. */
 export function station(ctx, who, tint, lead) {
   const { B, th } = ctx, col = th.state[who.pose], on = who.pose === "working" || who.pose === "talking", err = who.pose === "error";
   B.cyl(0, 0, 0, 0.2, 0.17, SEAT, th.seat, { foot: true }); B.cyl(0, SEAT - 0.03, 0, 0.19, 0.19, 0.02, mul(tint, 0.9), { seg: 14 });
@@ -13,6 +13,7 @@ export function station(ctx, who, tint, lead) {
   B.box(0, 0.384, 0.545, 0.7, 0.022, 0.03, col || OFF, { glow: glow(ctx, [...(col ? mul(col, on || err ? 1 : 0.55) : OFF), 1]) });
   if (on || err) { holo(ctx, [-0.24, 0.46, 0.5], [0.48, 0, 0], [0, 0.3, 0], col); lamp(ctx, 0, 0.6, 0.42, lead ? 0.95 : 0.8, 0.7, { col, halo: 0.5 }); lamp(ctx, 0, 0.05, 0.75, 0.3, 0.5, { col }); }
   else if (col) { holo(ctx, [-0.13, 0.46, 0.5], [0.26, 0, 0], [0, 0.17, 0], col, 0.45); lamp(ctx, 0, 0.5, 0.45, 0.16, 0.5, { col, halo: 0.1 }); }
+  else if (who.on) { B.box(0, 0.4, 0.5, 0.3, 0.17, 0.012, STANDBY, { glow: glow(ctx, [...STANDBY, 1]) }); B.box(0.2, 0.396, 0.53, 0.04, 0.014, 0.04, th.second, { glow: glow(ctx, [...th.second, 1]) }); }
   if (th.warm) { B.model(lead ? "lampRoundTable" : "lampSquareTable", { x: 0.29, y: 0.384, z: 0.42, glow: { lamp: col ? glow(ctx, [1, 0.86, 0.52, 1]) : 0 } }); if (col) lamp(ctx, 0.29, 0.7, 0.42, on ? 0.4 : 0.3, 0.55, { halo: 0.22 }); }
   B.cyl(-0.27, 0.384, 0.42, 0.026, 0.03, 0.055, CREAM, { seg: 8 });
   if (lead) B.model("plantSmall" + (1 + hash(who.id) % 3), { x: -0.14, y: 0.384, z: 0.47, s: 1.3 });
@@ -113,7 +114,7 @@ export function pool(ctx, R) {
   ctx.labels.push({ id: R.id, pos: [p.x, 1.42, p.z] });
 }
 
-/* The CEO's place: a neon ring on the deck, a wide desk under three holo screens and the Conductor standing on the floor, one mote per working agent. */
+/* The CEO's place: a neon ring on the deck, a wide desk under three holo screens and the Conductor standing on the floor with the model's motes, lamp and failing agent. */
 export function ceoSpot(ctx, R) {
   const { B, th } = ctx, on = R.pose === "working" || R.pose === "talking", col = th.state[R.pose] || th.accent, k = on ? 1 : R.pose === "sleep" ? 0.15 : 0.5;
   B.model("rugRound", { s: [2.6, 1, 2.6], tint: { carpet: [0.1, 0.13, 0.26], carpetDarker: [0.5, 0.28, 0.2], carpetWhite: mul(CREAM, 0.8) } });
@@ -124,7 +125,7 @@ export function ceoSpot(ctx, R) {
   grow(ctx, 1.25, -0.6, -0.5, { w: 0.6 }); rack(ctx, -1.3, -0.75, 0.4, { seed: "ceo", h: 0.9, live: on });
   B.model("lampRoundFloor", { x: -0.9, z: -0.2, glow: { lamp: glow(ctx, [1, 0.82, 0.5, 1]) } }); lamp(ctx, -0.9, 0.95, -0.1, ctx.night ? 0.8 : 0.5, 1.3, { halo: 0.3 });
   lamp(ctx, 0, 0.7, -0.6, on ? 0.8 : 0.3, 0.9, { col, halo: on ? 0.4 : 0.15 });
-  const p = B.at(0, 0, 0), motes = Object.values(ctx.M.who).filter((w) => w.kind === "agent" && w.pose === "working").map((w) => ({ id: w.id, hue: genome(w.id, w.role).hue }));
-  ctx.actors.push({ id: R.id, role: "ceo", pose: R.pose, x: p.x, y: p.y, z: p.z, yaw: p.r, scale: 0.4, live: { motes, lamp: "ok" } });
+  const p = B.at(0, 0, 0), L = R.live || { motes: [], lamp: "ok", failing: null };
+  ctx.actors.push({ id: R.id, role: "ceo", pose: R.pose, x: p.x, y: p.y, z: p.z, yaw: p.r, scale: 0.4, live: { motes: L.motes.map((id) => ({ id, hue: genome(id).hue })), lamp: L.lamp, failing: L.failing } });
   ctx.labels.push({ id: R.id, pos: [p.x, p.y + 1.12, p.z] });
 }

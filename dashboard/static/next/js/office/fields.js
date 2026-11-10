@@ -5,7 +5,7 @@ import { ago, until, progress, took } from "./time.js";
 
 const ROLE = { ceo: "Runs the fleet and answers questions about the harness.", po: "Product owner.", manager: "Project manager. Never posts." };
 const WAKE = { channel: "Always on; woken through its chat channel.", "po-inbox": "Asleep until someone writes to its inbox.", pull: "Reads its messages when it next runs." };
-const SAY = { working: "working", talking: "talking", error: "stuck on an error", idle: "idle", asleep: "asleep", off: "off", yours: "yours" };
+const SAY = { working: "working", talking: "talking", error: "stuck on an error", idle: "idle", asleep: "asleep", off: "off", yours: "yours", done: "done", stale: "stopped" };
 const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
 const keep = (rows) => rows.filter((r) => r[1] != null && r[1] !== "");
 
@@ -20,10 +20,11 @@ const lines = (r) => [r.about, ROLE[r.role], WAKE[r.wake]].filter(Boolean);
 const where = (s, t) => (!s ? [] : !("pid" in s) ? [["Folder", "protected project"], ["Last active", ago(s.since, t) + " ago"]]
   : keep([["Folder", s.cwd], ["Started by", s.started_by], ["Last active", s.since ? ago(s.since, t) + " ago" : ""]]));
 
-/* The CEO: about, role and wake lines, how many agents work at the desk pool, its session, a message button. */
+/* The CEO: about, role and wake lines, how many agents work at the desk pool, the agent that just failed, its session, a message button. */
 function ceo(p, t) {
-  const r = p.raw, c = r.crew || { n: 0, on: 0 };
-  return { ...base(p, t, r.area), lines: lines(r), rows: [["Agents working", String(c.on)], ["At the desk pool", String(c.n)], ...where(r.session, t)], actions: message(p) };
+  const r = p.raw, c = r.crew || { n: 0, on: 0 }, f = r.failing;
+  return { ...base(p, t, r.area), lines: lines(r), rows: [["Agents working", String(c.on)], ["At the desk pool", String(c.n)],
+    ...(f ? [["Failed", f.ticket + " · " + ago(f.last, t) + " ago", "bad"]] : []), ...where(r.session, t)], actions: message(p) };
 }
 
 /* A product owner or manager seat: area, about, role and wake lines, workers, its session, its runner's 4 rows, a message button. */
@@ -38,10 +39,12 @@ function worker(p, t) {
   return { ...base(p, t, "Works for " + p.raw.boss), rows: where(p.raw, t) };
 }
 
-/* An agent the CEO runs: its ticket, what it is doing now and since when, or how it ended. */
+/* An agent the CEO runs: its ticket, label, type, what it is doing now and since when (or how it ended), the session it runs in. */
 function agent(p, t) {
-  const a = p.raw, run = a.state === "working";
-  return { ...base(p, t, rest(a.label)), rows: keep(run ? [["Running for", ago(a.started, t)], ["Now", a.doing]] : [["Ended", ago(a.last, t) + " ago"], ["Report", a.report]]) };
+  const a = p.raw, s = a.session, run = a.state === "working";
+  const rows = run ? [["Running since", when(a.started, t)], ["Now", a.doing || "starting"]]
+    : [["Ended", when(a.last, t)], ["Report", a.report || (a.state === "stale" ? "no report · last step · " + (a.doing || "—") : "")]];
+  return { ...base(p, t, rest(a.label)), rows: keep([["Type", a.type], ...rows, ...(s ? [["Session", "pid " + s.pid], ...where(s, t)] : [])]) };
 }
 
 const DAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

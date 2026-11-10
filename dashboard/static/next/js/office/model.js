@@ -1,12 +1,14 @@
 /* Office model: one /api/office payload becomes the CEO, a room per seat in team order, the desk pool, the staff teams, the boards' rows; diff names what changed. */
 import { seatState, titled } from "../seats.js";
 import { claimRow } from "../claims.js";
+import { store } from "../store.js";
+import { verdict } from "../verdict.js";
 
 export const SLOTS = 6;
 const SESSION = { working: "working", idle: "idle" };
 const AGENT = { working: "working", error: "error" };
 const STATE = { working: "working", talking: "talking", error: "error", idle: "idle", sleep: "asleep" };
-const RECENT = 10;
+const RECENT = 10, FAIL_MS = 10 * 60e3;
 
 /* A label's ticket ("T1601-04"), else its first word. */
 export const ticket = (l) => (/^[A-Za-z]{1,3}\d+[\w-]*(\s+[A-Za-z]{1,3}\d+\b)?/.exec(l) || [l.split(" ")[0]])[0];
@@ -14,6 +16,8 @@ export const ticket = (l) => (/^[A-Za-z]{1,3}\d+[\w-]*(\s+[A-Za-z]{1,3}\d+\b)?/.
 export const rest = (l) => l.slice(ticket(l).length).trim();
 
 const pidOf = (a) => a.pid ?? (/^pid(\d+)$/.exec(a.id) || [])[1] * 1;
+/* An epoch in seconds or a date string as ms. */
+const ms = (t) => (typeof t === "number" || /^\d+$/.test(t) ? t * 1000 : Date.parse(t));
 const workingFirst = (L) => [...L.filter((p) => p.pose === "working"), ...L.filter((p) => p.pose !== "working")];
 
 /* A room around its people: busy counts the working, awake is anyone not asleep; a lead's pose is the room's. */
@@ -33,8 +37,11 @@ function seatPose(seat, state, mine) {
 
 /* A member of a staff team: running is working, a bad health is an error, anything else sleeps. */
 const staffPose = (m) => (m.state === "running" ? "working" : m.health === "bad" ? "error" : "sleep");
+/* A stopped run with no report names its last step, as Court did. */
+const ended = (a) => a.report || (a.state === "stale" ? "no report · last step · " + (a.doing || "—") : "");
 
-export function build(P) {
+/* build(P, {now, needs}) → Model; needs (the CEO's lamp) defaults to the status verdict in the store. */
+export function build(P, { now = Date.now(), needs = verdict(store.D).bad } = {}) {
   const S = P.sessions || [], A = P.agents || {}, seats = (P.seats || []).filter((s) => s.role !== "owner"), subs = A.subagents || [];
   const who = {}, put = (p) => (who[p.id] = p), byId = Object.fromEntries(seats.map((s) => [s.id, s]));
   const top = seats.find((s) => s.role === "ceo"), under = (id) => seats.filter((s) => s.parent === id);
@@ -66,17 +73,23 @@ export function build(P) {
   const poolPeople = workingFirst([...loose.map((s) => worker(s, "pool")), ...subs.filter((a) => a.state === "working" && !placed.has(a.id) && !who[a.id]).map((a) => agent(a, "pool"))]);
   const pool = room("pool", "pool", "Desk pool", "Agents", "", -1, poolPeople);
   rooms.push(pool);
-  if (ceo) ceo.people[0].raw.crew = { n: poolPeople.length, on: pool.busy };
+  const live = subs.filter((a) => a.state === "working"), bad = subs.find((a) => a.state === "error" && now - ms(a.last) < FAIL_MS);
+  if (ceo) {
+    const c = ceo.people[0];
+    c.raw.crew = { n: poolPeople.length, on: pool.busy };
+    if (bad) { Object.assign(c, { pose: "error", state: "error" }); Object.assign(ceo, { pose: "error", state: "error", awake: true }); c.raw.failing = { ticket: ticket(bad.label), last: bad.last }; }
+    ceo.live = { motes: live.map((a) => a.id), lamp: needs ? "needs" : "ok", failing: bad ? bad.id : null };
+  }
 
   const staff = (P.staff || []).map((t, k) => {
     const id = "team-" + t.id, members = (t.members || []).map((m) => put({ id: m.id, kind: "staff", name: m.name, rank: m.rank, role: "crew", pose: staffPose(m),
-      state: m.state, since: (m.last || {}).end, room: id, raw: { ...m, team: t.name } }));
+      on: !!m.on, state: m.state, since: (m.last || {}).end, room: id, raw: { ...m, team: t.name } }));
     return room("team", id, t.name, "Team", t.name, heads.length + k, members);
   });
   [pool, ...staff].forEach((r) => (who[r.id] = r));
 
   const all = [ceo, ...rooms, ...staff].filter(Boolean), night = !all.some((r) => r.awake);
-  all.forEach((r) => (r.key = JSON.stringify([r.kind, r.name, r.area, r.team, r.people.map((p) => [p.id, p.pose]), r.busy, r.awake, r.more, night])));
+  all.forEach((r) => (r.key = JSON.stringify([r.kind, r.name, r.area, r.team, r.people.map((p) => [p.id, p.pose, !!p.on]), r.busy, r.awake, r.more, r.live || 0, night])));
 
   const members = staff.flatMap((r) => r.people.map((p) => p.raw)), on = members.filter((m) => m.on);
   const next = on.filter((m) => m.next).sort((a, b) => Date.parse(a.next) - Date.parse(b.next));
@@ -86,8 +99,8 @@ export function build(P) {
     line: { sessions: S.length, working: S.filter((s) => s.state === "working").length, on: on.length, of: members.length, soon: next.length ? { name: next[0].name, next: next[0].next } : null },
     panels: {
       next: next.map((m) => ({ id: m.id, name: m.name, next: m.next, last: (m.last || {}).end || "", bad: m.health === "bad" })),
-      running: subs.filter((a) => a.state === "working").map((a) => ({ id: a.id, ticket: ticket(a.label), label: rest(a.label), type: a.type, started: a.started, doing: a.doing || "" })),
-      recent: subs.filter((a) => a.state !== "working").slice(0, RECENT).map((a) => ({ id: a.id, ticket: ticket(a.label), label: rest(a.label), state: a.state, report: a.report || "", last: a.last })),
+      running: live.map((a) => ({ id: a.id, ticket: ticket(a.label), label: rest(a.label), type: a.type, started: a.started, doing: a.doing || "" })),
+      recent: subs.filter((a) => a.state !== "working").slice(0, RECENT).map((a) => ({ id: a.id, ticket: ticket(a.label), label: rest(a.label), type: a.type, state: a.state, report: ended(a), last: a.last })),
       sessions: S.map((s) => (!("pid" in s)
         ? { id: s.seat, protected: true, session: "protected project", seat: names[s.seat] || "—", folder: "hidden", state: s.state === "working" ? "working" : "idle", by: "—", since: s.since }
         : { id: "pid" + s.pid, protected: false, session: s.name || "pid " + s.pid, seat: s.seat ? names[s.seat] || s.seat : s.parent ? "under " + (names[s.parent] || s.parent) : "—",
