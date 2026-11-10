@@ -278,17 +278,17 @@ protected_ere() {
 # User units the fleet owns by name (AGENTS.md §5): an enabled one is judged even off a roster.
 PC_FLEET_GLOBS='dark-eye*.service sentinel*.service agent@*.service'
 # Repo unit files: an enabled one is fleet too, minus UNITS_OFF; template instances count via their wants/ links.
-PC_UNITS_DIR=${PC_UNITS_DIR:-$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")/units}
 PC_FLEET_INSTANCES='po@*.path discord-liaison-relay@*.path'
 pc_fleet_enabled() {
   local u g wants=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
+  local units=${PC_UNITS_DIR:-$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")/units}
   {
     pc_cmd systemctl --user list-unit-files --state=enabled --no-legend 2>/dev/null | awk '{print $1}' | while read -r u; do
       for g in $PC_FLEET_GLOBS; do
         # shellcheck disable=SC2254  # deliberate: $g is a fleet glob
         case $u in $g) echo "$u"; continue 2;; esac
       done
-      [ -e "$PC_UNITS_DIR/$u" ] && [[ " ${UNITS_OFF:-} " != *" $u "* ]] && echo "$u"
+      [ -e "$units/$u" ] && [[ " ${UNITS_OFF:-} " != *" $u "* ]] && echo "$u"
     done
     for g in $PC_FLEET_INSTANCES; do
       # shellcheck disable=SC2231  # deliberate: $g is an instance glob
