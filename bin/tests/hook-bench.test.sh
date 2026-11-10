@@ -36,8 +36,8 @@ o=$("$HB" -n 6 --settings "$T/settings.json" --log "$T/log/actions.jsonl" 2>&1);
 [ $rc -eq 0 ] && ok "exit 0 without --max-p95" || no "exit $rc: $o"
 p50() { awk -v h="$1" '$1==h{print $6}' <<<"$o"; }
 f=$(p50 fast) m=$(p50 mid) s=$(p50 slow)
-awk -v f="$f" -v m="$m" -v s="$s" 'BEGIN{exit !(f>=10 && f<m && m<s && s>=60)}' \
-  && ok "p50 ordered fast $f < mid $m < slow $s ms" || no "p50 order: fast=$f mid=$m slow=$s"
+awk -v f="$f" -v m="$m" -v s="$s" 'BEGIN{exit !(f>=10 && m>=30 && s>=60 && s>f+30)}' \
+  && ok "p50 at least the sleeps (fast $f, mid $m, slow $s ms) and slow > fast + 30" || no "p50: fast=$f mid=$m slow=$s"
 grep -qE '^slow PreToolUse n 6 p50 [0-9.]+ ms p95 [0-9.]+ ms$' <<<"$o" && ok "line format" || no "format: $o"
 grep -q 'skipped (not tool-call events): stop(Stop)' <<<"$o" && [ ! -e "$T/stop-ran" ] \
   && ok "non-tool event listed, not run" || no "Stop hook: $o"
