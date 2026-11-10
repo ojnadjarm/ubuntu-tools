@@ -1,4 +1,4 @@
-/* Agents › Chat composer: the @ list of seats to wake, above the box (T1545-E); eye.css tokens only. */
+/* Agents › Chat composer: the @ list of seats to wake, above the box (T1545-E); the reply chip over the box (T1545-G); eye.css tokens only. */
 .chat .compose { position: relative; }
 .chat .compose .mention { position: absolute; z-index: 5; left: 1.1rem; bottom: calc(100% - 1px); width: min(36rem, calc(100% - 2.2rem)); max-height: min(18rem, 45vh); overflow-y: auto; overscroll-behavior: contain;
   margin: 0; padding: .25rem 0; list-style: none; border: 1px solid var(--gold-w); background: var(--bg1); }
@@ -9,8 +9,15 @@
 .chat .compose .mention .nm, .chat .compose .mention .id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat .compose .mention .id { color: var(--mute); font-family: var(--mono); font-size: max(11px, .8rem); }
 .chat .compose .mention .pill { justify-self: end; }
+.chat .compose .reply { grid-column: 1 / -1; display: flex; align-items: center; gap: .5rem; min-width: 0; padding-left: .7rem; border-left: 2px solid var(--gold); background: var(--w04); }
+.chat .compose .reply[hidden] { display: none; }
+.chat .compose .reply .q { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--txt); font-size: max(11px, .82rem); }
+.chat .compose .reply .q b { color: var(--hi); font-weight: 600; }
+.chat .compose .reply button { display: inline-flex; align-items: center; justify-content: center; flex: none; min-width: 32px; min-height: 32px; padding: 0; border: 0; background: none; color: var(--mid); font: inherit; font-size: 1.1rem; cursor: pointer; }
+.chat .compose .reply button:hover { color: var(--hi); }
 @media (max-width: 899px), (pointer: coarse) {
   .chat .compose .mention [role=option] { min-height: 44px; }
+  .chat .compose .reply button { min-width: 44px; min-height: 44px; }
 }
 @media (max-width: 899px) {
   .chat .compose .mention { left: var(--gut); width: calc(100% - 2 * var(--gut)); }
