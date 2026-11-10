@@ -136,6 +136,18 @@ api.on("request", (req, res) => {
     assert.deepStrictEqual(posts, [{ ch: "harness", text: "look", files: ["0000000000000001", "0000000000000002"] }], "then one post carries the file ids");
     assert.deepStrictEqual(await chips(), [], "a sent message clears the chips");
 
+    await p.fill(".chat .compose textarea", "half a sentence");
+    await p.$eval(".chat .compose textarea", (t) => { t.focus(); t.kept = 1; });
+    const kept = () => p.evaluate(() => { const t = document.querySelector(".chat .compose textarea"); return [t.value, t.kept === 1, document.activeElement === t]; });
+    await p.setInputFiles(".chat .compose input[type=file]", { name: "late.txt", mimeType: "text/plain", buffer: Buffer.from("x") });
+    await p.waitForFunction(() => document.querySelectorAll(".chat .compose .chip").length === 1, null, { timeout: 3000 });
+    assert.deepStrictEqual(await kept(), ["half a sentence", true, true], "attaching keeps the typed text, the same box and its focus");
+    await p.click('.chat .compose .chip button[aria-label^="Remove"]');
+    await p.waitForFunction(() => document.querySelectorAll(".chat .compose .chip").length === 0, null, { timeout: 3000 });
+    assert.deepStrictEqual((await kept()).slice(0, 2), ["half a sentence", true], "removing the last chip keeps the typed text and the same box");
+    assert.strictEqual(await p.$eval(".chat .compose .chips", (u) => getComputedStyle(u).display), "none", "no files: the chips list takes no space");
+    await p.fill(".chat .compose textarea", "");
+
     await p.setViewportSize({ width: 400, height: 850 });
     await p.waitForTimeout(500);
     const lay = await p.evaluate(() => { const a = document.querySelector(".chat .compose .attach").getBoundingClientRect(); return { sw: document.documentElement.scrollWidth, left: a.left >= 0, right: a.right <= innerWidth, h: Math.round(a.height) }; });

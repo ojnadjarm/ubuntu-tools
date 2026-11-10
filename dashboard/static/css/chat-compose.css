@@ -11,6 +11,7 @@
 .chat .compose .mention .pill { justify-self: end; }
 .chat .compose .reply { grid-column: 1 / -1; display: flex; align-items: center; gap: .5rem; min-width: 0; padding-left: .7rem; border-left: 2px solid var(--gold); background: var(--w04); }
 .chat .compose .reply[hidden] { display: none; }
+.chat .compose .chips[hidden] { display: none; }
 .chat .compose .reply .q { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--txt); font-size: max(11px, .82rem); }
 .chat .compose .reply .q b { color: var(--hi); font-weight: 600; }
 .chat .compose .reply button { display: inline-flex; align-items: center; justify-content: center; flex: none; min-width: 32px; min-height: 32px; padding: 0; border: 0; background: none; color: var(--mid); font: inherit; font-size: 1.1rem; cursor: pointer; }

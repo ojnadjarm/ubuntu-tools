@@ -55,7 +55,7 @@ export function composer(ch, label) {
   }
   const hint = hintOf(ch, label);
   label0 = label;
-  return `<form class="compose" data-to="${esc(ch)}">${quote()}${pend.length ? `<ul class="chips" aria-label="Files to send">${pend.map(chip).join("")}</ul>` : ""}` +
+  return `<form class="compose" data-to="${esc(ch)}">${quote()}<ul class="chips" aria-label="Files to send"${pend.length ? "" : " hidden"}>${pend.map(chip).join("")}</ul>` +
     `<label class="btn attach" title="Attach files (paste or drop works too)"><input type="file" multiple hidden><span aria-hidden="true">+</span><span class="sr-only">Attach files</span></label>` +
     `<textarea id="say" name="text" rows="1" maxlength="2000" placeholder="Write to ${esc(label)}" aria-label="Write to ${esc(label)}"${boxAttrs()}>\n${esc(typed)}</textarea>` +
     `<button class="btn gold" type="submit"${sending ? " disabled" : ""}>Send</button><p class="hint" role="status">${esc(hint)}</p>${listbox()}</form>`;
