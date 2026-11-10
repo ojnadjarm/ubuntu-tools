@@ -100,7 +100,7 @@ void camera(out vec2 uv, out vec3 ro, out vec3 rd){
 }
 `;
 
-/* Data rings in the plane with normal uRingN: up to 8 rings (radius, value 0..1, kind, flash); kind 0 gauge, 1 gold gauge, 2 orbit, 3 countdown. */
+/* Data rings in the plane with normal uRingN: up to 8 rings (radius, value 0..1, kind, flash); kind 0 gauge, 1 gold gauge. */
 export const RINGS = `
 vec3 rings(vec3 ro, vec3 rd, out float tR){
   tR = 1e9;
@@ -124,12 +124,7 @@ vec3 rings(vec3 ro, vec3 rd, out float tR){
     float d = abs(rr - R.x), kind = R.z;
     if (d > 0.12) continue;
     float line = smoothstep(px * 1.3, 0.0, d);
-    if (kind > 1.5 && kind < 2.5) {
-      float dash = step(0.55, fract(a * 72.0 - uSpin * 11.46));
-      c += MINT * line * (0.05 + 0.1 * dash) * (0.6 + 0.6 * uAct);
-      continue;
-    }
-    vec3 hue = kind > 0.5 && kind < 1.5 ? GOLD : kind > 2.5 ? mix(MINT, ICE, 0.35) : MINT;
+    vec3 hue = kind > 0.5 ? GOLD : MINT;
     float v = clamp(R.y, 0.0, 1.0);
     float lit = step(a, v);
     float trail = lit * mix(0.2, 1.0, pow(clamp(a / max(v, 1e-3), 0.0, 1.0), 2.2));
@@ -165,7 +160,7 @@ mat3 basis(vec3 g){ vec3 r = normalize(cross(vec3(0.0, 1.0, 0.0), g)); return ma
 /* Everything an eye shader starts with: the shared uniforms, palette, noise, studio, glyphs, camera, rings, lids and gaze basis. */
 export const HEAD = `precision highp float;
 uniform vec2 uRes; uniform vec3 uEye; uniform vec2 uCam; uniform vec3 uGaze; uniform vec4 uLid; uniform vec4 uFlash;
-uniform float uPupil, uTime, uAct, uQ, uSpin, uRingK, uSleep, uHalo; uniform sampler2D uAtlas; uniform vec3 uRingN; uniform vec4 uRing[8];
+uniform float uPupil, uTime, uAct, uQ, uRingK, uSleep, uHalo; uniform sampler2D uAtlas; uniform vec3 uRingN; uniform vec4 uRing[8];
 out vec4 oCol;
 ${PAL}
 ${NOISE}

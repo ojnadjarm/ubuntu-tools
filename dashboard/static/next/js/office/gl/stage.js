@@ -48,7 +48,20 @@ export function stage(canvas, { still = false } = {}) {
     let d0 = 2, d1 = 400;
     for (let i = 0; i < 22; i++) { const m = (d0 + d1) / 2; if (inside(m)) d1 = m; else d0 = m; }
     inside(d1);
-    ctl.target.set(c[0], c[1], c[2]); ctl.minDistance = d1 * 0.15; ctl.maxDistance = d1 * 1.6; ctl.update(); moved = true;
+    const t = centre(c, [home.lo[0], home.lo[1], home.lo[2]], [home.hi[0], hi[1], home.hi[2]], d1);
+    ctl.target.set(t[0], t[1], t[2]); ctl.minDistance = d1 * 0.15; ctl.maxDistance = d1 * 1.6; ctl.update(); moved = true;
+  }
+  /* Slides the camera sideways until the box lo..hi has equal room left and right; returns the look-at point. */
+  function centre(c, lo, hi, d) {
+    const t = [...c], r = new T.Vector3().setFromMatrixColumn(cam.matrixWorld, 0), half = d * Math.tan((cam.fov * Math.PI) / 360) * cam.aspect;
+    for (let n = 0; n < 4; n++) {
+      let a = Infinity, b = -Infinity;
+      for (let i = 0; i < 8; i++) { v.set(i & 1 ? hi[0] : lo[0], i & 2 ? hi[1] : lo[1], i & 4 ? hi[2] : lo[2]).project(cam); a = Math.min(a, v.x); b = Math.max(b, v.x); }
+      const s = ((a + b) / 2) * half;
+      for (let i = 0; i < 3; i++) t[i] += r.getComponent(i) * s;
+      cam.position.addScaledVector(r, s); cam.lookAt(t[0], t[1], t[2]); cam.updateMatrixWorld();
+    }
+    return t;
   }
   /* home = {lo, hi, az, el, azTall?, top?, shrink?, pad?}. */
   S.view = (h) => { home = h; S.reset(); };

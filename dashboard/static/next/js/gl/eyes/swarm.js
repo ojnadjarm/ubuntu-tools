@@ -5,7 +5,7 @@ const vs = `precision highp float;
 in vec3 position;
 in vec4 meta;
 uniform vec3 uEye; uniform vec2 uCam; uniform vec3 uGaze; uniform vec4 uLid; uniform vec4 uFlash; uniform vec2 uPx;
-uniform float uPupil, uTime, uAct, uForm, uSleep, uHalo, uSpin, uRingK; uniform vec3 uRingN; uniform vec4 uRing[8];
+uniform float uPupil, uTime, uAct, uForm, uSleep, uHalo, uRingK; uniform vec3 uRingN; uniform vec4 uRing[8];
 out vec3 vCol; out vec2 vCell; out float vSharp;
 ${PAL}
 const float D = 7.0, RL = 1.085, IR = 0.52, DI = 0.8, PI2 = 6.2831853;
@@ -27,19 +27,17 @@ void main(){
   } else if (kind > 6.5) {
     int i = int(position.x + 0.5);
     vec4 R = uRing[i];
-    float rk = R.z, v = clamp(R.y, 0.0, 1.0), at = position.y, orbit = step(1.5, rk) * step(rk, 2.5);
-    float ta = at + orbit * uSpin / PI2;
+    float rk = R.z, v = clamp(R.y, 0.0, 1.0), at = position.y;
     vec3 n = uRingN, ax = normalize(vec3(n.y + 1e-5, -n.x, 0.0)), ay = cross(n, ax);
-    float th = PI2 * 0.25 - ta * PI2;
+    float th = PI2 * 0.25 - at * PI2;
     p = (ax * cos(th) + ay * sin(th)) * (R.x + position.z);
-    vec3 hue = rk > 0.5 && rk < 1.5 ? GOLD : rk > 2.5 ? mix(MINT, ICE, 0.35) : MINT;
+    vec3 hue = rk > 0.5 ? GOLD : MINT;
     float lit = step(at, v) * step(0.004, v), trail = lit * mix(0.25, 1.0, pow(clamp(at / max(v, 1e-3), 0.0, 1.0), 2.2));
     float head = lit * smoothstep(0.02, 0.0, v - at);
     float fl = 1.0 + 2.5 * R.w;
-    col = orbit > 0.5 ? MINT * (0.1 + 0.16 * step(0.55, fract(at * 36.0))) * (0.6 + 0.6 * uAct)
-        : hue * (0.03 + 1.1 * trail) * fl + mix(hue, vec3(1.0), 0.55) * head * 2.2;
-    size *= (orbit > 0.5 ? 0.85 : mix(0.6, 1.2, lit) + 1.1 * head) * (1.0 + 0.15 * R.w) * step(float(i) + 0.5, uRingK);
-    size *= orbit > 0.5 || lit > 0.5 ? 1.0 : step(0.6, h11(seed * 2.0));
+    col = hue * (0.03 + 1.1 * trail) * fl + mix(hue, vec3(1.0), 0.55) * head * 2.2;
+    size *= (mix(0.6, 1.2, lit) + 1.1 * head) * (1.0 + 0.15 * R.w) * step(float(i) + 0.5, uRingK);
+    size *= lit > 0.5 ? 1.0 : step(0.6, h11(seed * 2.0));
     flick = max(flick, lit);
     dof = 0.2;
   } else if (kind < 0.5 || kind > 4.5) {

@@ -1,14 +1,13 @@
-/* The stage: the director over the engine — the eye at its anchor, the living field, the glyph mass, the creatures, the eye's life and the frame rhythm. */
+/* The stage: the director over the engine — the eye at its anchor, the living field, the glyph mass, the eye's life and the frame rhythm. */
 import { createEngine, still, phone } from "./gl/engine.js";
 import { createLife } from "./gl/life.js";
 import { EYE, FACE, project, ringPoint } from "./gl/eye.js";
 import { createField } from "./gl/field.js";
 import { createMass } from "./gl/mass.js";
-import { createCreatures } from "./gl/creatures.js";
 import { atlas } from "./gl/glyphs.js";
 
 export { still };
-const MORPH_MS = 1100, FORM_MS = 2200, ORBIT_FPS = 6, ORBIT_S = 180, LIFE_FPS = 12, WARM_FPS = 30, GRACE_S = 30, EASE_S = 5;
+const MORPH_MS = 1100, FORM_MS = 2200, LIFE_FPS = 12, WARM_FPS = 30, GRACE_S = 30, EASE_S = 5;
 const LIFE_RATE = [0, LIFE_FPS, WARM_FPS, 60], MASS_RATE = [0, WARM_FPS, 60];
 const COL = { mint: [0.074, 1, 0.35], gold: [1, 0.637, 0.133], vio: [0.434, 0.074, 1], ice: [0.347, 0.807, 1] };
 const smooth = (x) => x * x * (3 - 2 * x);
@@ -28,12 +27,12 @@ function fitOf(sc) {
 /* Builds the stage in input-yielding slices (engine, recorded passes, atlas upload, program compiles, tier probe); resolves once the first visible frame needs no GPU setup. */
 export async function createStage(canvas) {
   const life = createLife({ seed: 7, still: () => still.matches });
-  let eng, field, mass, eye, U, tex, crowd;
+  let eng, field, mass, eye, U, tex;
   const E = { x: innerWidth / 2, y: innerHeight * 0.4, r: 0, vx: 0, vy: 0, vr: 0, set: false, calm: false, vis: true };
   const rings = { n: 0, cur: new Float32Array(32), goal: new Float32Array(32), flash: new Float32Array(8) };
   const par = { x: 0, y: 0, tx: 0, ty: 0 }, rip = { i: 0, list: [0, 1, 2, 3].map(() => [0, 0, -9, 0]) };
-  let live = false, probing = false, sc = null, fitFrom = null, fitNow = null, morphT0 = 0, drift = 0, lastNow = 0, scrollT = 0, spin = 0, ft = 0, bootT0 = 0, viaT0 = 0, aliveT = 0, tempo = 1;
-  const st = { life, E, sc: null, spin: 0, hooks: new Set() };
+  let live = false, probing = false, sc = null, fitFrom = null, fitNow = null, morphT0 = 0, drift = 0, lastNow = 0, scrollT = 0, ft = 0, bootT0 = 0, viaT0 = 0, aliveT = 0, tempo = 1;
+  const st = { life, E, sc: null };
 
   const director = {
     nextAt: Infinity,
@@ -44,14 +43,12 @@ export async function createStage(canvas) {
       mass = createMass(ctx, tex, phone() ? 3200 : 6400);
       U = { uRes: { value: new T.Vector2() }, uEye: { value: new T.Vector3() }, uCam: { value: new T.Vector2() }, uGaze: { value: new T.Vector3(0, 0, 1) },
         uLid: { value: new T.Vector4(0.4, 0.3, 1, 0) }, uFlash: { value: new T.Vector4() }, uPupil: { value: 0.3 }, uTime: { value: 0 }, uAct: { value: 0.3 },
-        uQ: { value: 2 }, uSpin: { value: 0 }, uRingK: { value: 0 }, uSleep: { value: 0 }, uHalo: { value: 1 }, uAtlas: { value: tex },
+        uQ: { value: 2 }, uRingK: { value: 0 }, uSleep: { value: 0 }, uHalo: { value: 1 }, uAtlas: { value: tex },
         uRingN: { value: new T.Vector3(...FACE) }, uRing: { value: Array.from({ length: 8 }, () => new T.Vector4()) }, uForm: { value: 1 }, uPx: { value: new T.Vector2() } };
       eye = EYE.create(ctx, U);
       st.ctx = ctx;
-      crowd = createCreatures(ctx, tex, st);
-      st.hooks.add(crowd);
     },
-    /* The wanted frame rate: 60 for input, travel, screen morphs and the alive grace, 30 while data settles, the orbit and idle life slower, else 0 until life.nextAt. */
+    /* The wanted frame rate: 60 for input, travel, screen morphs and the alive grace, 30 while data settles, idle life slower, else 0 until life.nextAt. */
     step(t, dt, full) {
       if (!live) return 0;
       const now = performance.now(), fdt = lastNow ? Math.min(0.1, (now - lastNow) / 1000) : dt;
@@ -75,12 +72,6 @@ export async function createStage(canvas) {
       par.x += (par.tx - par.x) * Math.min(1, fdt * 6); par.y += (par.ty - par.y) * Math.min(1, fdt * 6);
       if (now - scrollT < 160) want(60);
       drift += dt * tempo * (0.5 + 1.5 * life.load);
-      const orbit = sc && sc.orbit && !still.matches;
-      if (orbit) spin += fdt * ((Math.PI * 2) / ORBIT_S);
-      st.spin = spin;
-      for (const h of st.hooks) if (h.step && h.step(t, fdt)) want(WARM_FPS);
-      for (const id of crowd.cheers()) { const q = crowd.at(id); if (q) st.event("done", q.x, q.y); }
-      if (orbit && E.vis) want(ORBIT_FPS);
       director.nextAt = E.vis ? life.nextAt : Infinity;
       return fps;
     },
@@ -97,9 +88,7 @@ export async function createStage(canvas) {
       placeMass(S);
       mass.U.uSide.value = 0;
       r.render(mass.scene, mass.cam);
-      for (const h of st.hooks) if (h.back) h.back(S);
       if (E.vis && E.r > 1) drawEye(S);
-      for (const h of st.hooks) if (h.front) h.front(S);
       if (mass.transit()) { mass.U.uSide.value = 1; r.render(mass.scene, mass.cam); }
       if (sc && sc.frame) sc.frame(st);
     },
@@ -167,7 +156,7 @@ export async function createStage(canvas) {
     U.uRes.value.set(hdr.width, hdr.height); U.uEye.value.set(E.x * k, (H - E.y) * k, E.r * k);
     U.uGaze.value.set(...v.gaze); U.uLid.value.set(...v.lid); U.uFlash.value.set(...v.flash);
     U.uCam.value.set(v.cam[0], v.cam[1]); U.uPupil.value = v.pupil; U.uAct.value = v.act; U.uTime.value = ft; U.uQ.value = S.q;
-    U.uSleep.value = v.sleep; U.uSpin.value = spin; U.uRingK.value = rings.n;
+    U.uSleep.value = v.sleep; U.uRingK.value = rings.n;
     for (let i = 0; i < 8; i++) U.uRing.value[i].set(rings.cur[i + 8], rings.cur[i], rings.cur[i + 16], rings.flash[i]);
     const ext = eyeExtent();
     const x0 = Math.max(0, Math.floor((E.x - ext[0]) * k)), x1 = Math.min(hdr.width, Math.ceil((E.x + ext[1]) * k));
@@ -214,7 +203,7 @@ export async function createStage(canvas) {
   const touch = () => { aliveT = performance.now(); };
   document.addEventListener("visibilitychange", () => { if (!document.hidden) touch(); });
 
-  /* A scene: {pts, box, span, tilt, ar, eyeEl, eyeFit(rect), rings:[{r, v, kind}], ringN, halo, sleep, orbit, creatures, frame(st), pulse (kind, or false)}.
+  /* A scene: {pts, box, span, tilt, ar, eyeEl, eyeFit(rect), rings:[{r, v, kind}], ringN, halo, sleep, frame(st), pulse (kind, or false)}.
      via = the screen changed (the mass flows through the pupil), data = same screen with new data, keep = same shape, fresh DOM. */
   st.show = (next, { via = false, data = false, keep = false } = {}) => {
     const first = !sc, same = keep || data;
@@ -231,7 +220,6 @@ export async function createStage(canvas) {
       rings.goal[i] = v; rings.cur[i + 8] = rings.goal[i + 8] = g.r; rings.cur[i + 16] = rings.goal[i + 16] = g.kind || 0;
     });
     life.setData({ sleep: +next.sleep || 0 });
-    crowd.set(next.creatures || [], { normal: next.ringN || FACE, turn: !!next.orbit, fresh: !same });
     if (keep) { eng.wake(0); return; }
     if (!data) touch();
     const animate = !first && !still.matches;

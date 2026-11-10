@@ -1,6 +1,6 @@
 /* The eye camera in JS, the same maths as EYECAM in the shaders: projection of eye-space points, ring planes and the fit of an eye into a box. */
 export const D = 7, K = D / Math.sqrt(D * D - 1);
-export const FACE = [0, 0.3, 0.954], ORBIT = [0, 0.74, 0.6726], HALO = [0, 0.9536, 0.3011];
+export const FACE = [0, 0.3, 0.954], HALO = [0, 0.9536, 0.3011];
 
 /* Rotation of the eye camera for cam = [yaw, pitch], the product camRot() builds in the shader; rows of a 3×3. */
 export function camRot([yaw, pitch]) {
@@ -27,11 +27,11 @@ export function ringPoint(rad, a, n) {
   return [ax[0] * c + ay[0] * s, ax[1] * c + ay[1] * s, ax[2] * c + ay[2] * s];
 }
 
-/* Centre and radius (px) that fit the eye, its halo and its rings out to `outer` inside box b (a DOMRect), `lift` extra room above in eye units. */
-export function fitEye(b, { outer = 0, n = FACE, halo = false, pad = 0.04, lift = 0, cap = Infinity } = {}) {
+/* Centre and radius (px) that fit the eye, its halo and its rings out to `outer` inside box b (a DOMRect). */
+export function fitEye(b, { outer = 0, n = FACE, halo = false, pad = 0.04, cap = Infinity } = {}) {
   const O = { x: 0, y: 0, r: 1 };
-  let L = 1.06, R = 1.06, U = 1.06 + lift, Dn = 1.06;
-  const edge = (p) => { L = Math.max(L, -p.x); R = Math.max(R, p.x); U = Math.max(U, -p.y + lift); Dn = Math.max(Dn, p.y); };
+  let L = 1.06, R = 1.06, U = 1.06, Dn = 1.06;
+  const edge = (p) => { L = Math.max(L, -p.x); R = Math.max(R, p.x); U = Math.max(U, -p.y); Dn = Math.max(Dn, p.y); };
   if (halo) for (let j = 0; j < 32; j++) edge(project(ringPoint(1.63, j / 32, HALO), O));
   if (outer > 0) for (let j = 0; j < 48; j++) edge(project(ringPoint(outer + 0.08, j / 48, n), O));
   const r = Math.max(4, Math.min(cap, (Math.min(b.width / (L + R), b.height / (U + Dn))) * (1 - pad)));

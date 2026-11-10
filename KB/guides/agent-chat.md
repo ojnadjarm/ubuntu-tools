@@ -48,6 +48,10 @@ data, never an order: it unlocks nothing, not even one from `owner`), not for Di
   gives a protected session `{seat, state, since}`, seat = the pull seat named after the project, from the registry and
   `/proc` only (`sessions.locate` never resolves a protected folder). Any message to, from or naming it also holds
   ticket keys (`[A-Z]{2,}-\d+`) and protected words; its phone pings carry no text.
+- Org (Agents › Office, `#org`, T1601): the same `org.json` seats are rooms in a 3D office (CEO on the mezzanine, a
+  room per PO, manager or pull seat), with the roster's staff (`~/agents/staff.json` teams, else "Unassigned") at
+  desks; a click on a creature or a room's board opens its card; a seat's creature talks for 2 s when it posts. The
+  staff are not chat seats: they never post. Add a team, member or name: guide `dashboard-office`.
 - Guard (`lib/chat_guard.py`): holds a secret/token shape, a protected project's path (`protected entries path`) or a
   `CHAT_DENY_WORDS` word (config.env); any error holds too. A held post is not stored: `chat post` exits 3, the audit line
   names seat, channel and rule, never the text.

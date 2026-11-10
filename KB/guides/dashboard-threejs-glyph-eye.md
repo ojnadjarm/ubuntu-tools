@@ -18,8 +18,9 @@ Ticket: T52–T56 · Last verified: 2026-10-20 by T846 audit (`test -e` on every
   `create(ctx, U)` → `{draw, probe}`. The lab (`static/next/lab/eye.html?v=a|b|c`, `lab/ui.html`) was deleted in
   `~/agents` commit f36c714 (2026-10-19); read it back with `git -C ~/agents show f36c714^:dashboard/static/next/lab/eye.html`.
 - Render on demand (`static/next/js/stage.js` + `gl/engine.js`): `director.step` returns the wanted fps — 60 for input,
-  travel and morphs, 30 while data settles, 12 idle life (blinks, saccades), 6 for the Court orbit (180 s a turn), else 0
-  until `life.nextAt`. `wake(ms)` keeps rAF alive; hidden tab 0 frames; `prefers-reduced-motion` draws one still.
+  travel and morphs, 30 while data settles, 12 idle life (blinks, saccades), else 0 until `life.nextAt`.
+  The Court orbit (6 fps, 180 s a turn) and its ring creatures (`gl/creatures.js`) went with the Court tab (T1601-15/16):
+  agents live in the 3D office now (guide `dashboard-office`); data rings are kind 0 gauge and 1 gold gauge only. `wake(ms)` keeps rAF alive; hidden tab 0 frames; `prefers-reduced-motion` draws one still.
 - Alive grace (T56a): any input, screen change or data pulse keeps ambient motion at 60 fps for `GRACE_S` 30 s, then eases
   1 → 0 over `EASE_S` 5 s (smoothstep on a `tempo` that scales every clock), so the downshift is invisible.
 - Registry: a new screen is one line in `static/next/js/screens.js`. Rules for the tree: `~/agents/dashboard/CLAUDE.md`.
@@ -37,6 +38,7 @@ systemctl --user restart agents-dashboard && curl -sI http://127.0.0.1:19998/ | 
 
 ## Pitfalls (measured)
 - Court orbit drawing every frame cost 31–36 % (T52b), 40–45 % (T53a) of a core; capped at 6 fps / 180 s a turn: 3.7 % (T53b).
+  Removed with the Court tab (T1601-16); the lesson holds for the office: it draws only while a creature acts (8 fps).
 - Idle budget met: visible idle 1.0–1.4 % of a core, grace 19.6 % (1920) / 18.2 % (400), hidden 0 frames (T53b, T54, T56a).
 - On this Iris Xe the cost scales with the frame rate only: resolution, bloom passes and GL calls (180 → 118) barely move
   it (T56b: 20.1 → 19.6 %). Cut frames, not pixels.
@@ -53,7 +55,7 @@ systemctl --user restart agents-dashboard && curl -sI http://127.0.0.1:19998/ | 
 - Brand truncated at 400 px: a stacked lockup by container query below 23rem, never ellipsis (T54).
 
 ## Links
-- Code: `~/agents/dashboard/static/next/` (`js/stage.js`, `js/gl/{engine,eye,life,creatures}.js`, `js/gl/eyes/swarm.js`, `vendor/three.sub.js`)
+- Code: `~/agents/dashboard/static/next/` (`js/stage.js`, `js/gl/{engine,eye,life}.js`, `js/gl/eyes/swarm.js`, `vendor/three.sub.js`)
 - Tests: `~/agents/dashboard/tests/{test_next.py,test_next.js,test_needs.py}`
 - Design / results: `~/agent-work/research/2026-09-22/T52/spec.md`, `research/2026-09-23/T53/art-direction.md`, scripts in
   `research/2026-09-2{2,3}/T5{2,3,4,6}/build/`, history lines in `~/agents/dashboard/CLAUDE.md` · briefs `~/agent-work/briefs/T5{2,3,4,6}-*.md`
