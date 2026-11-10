@@ -1,6 +1,7 @@
 """### creative gamedev: perf-cpp.csv GPU ms, cpp-ci stages and the newest non-scratch cpp-ci run."""
 import csv, json, os, re
 
+from agent_work import gamedev_perf_dir
 from .common import AG, age, epoch, short
 from .creative import stack_rows
 
@@ -8,8 +9,8 @@ PASS_COL = re.compile(r'gpu_ms_p50_(\w+)|(post)_ms_p50')
 
 
 def _gpu_ms():
-    """Last row of state/gamedev-perf/perf-cpp.csv: gpu_ms_p50, per pass and status."""
-    f = os.path.join(AG, 'state', 'gamedev-perf', 'perf-cpp.csv')
+    """Last row of $GAMEDEV_PERF_DIR/perf-cpp.csv: gpu_ms_p50, per pass and status."""
+    f = os.path.join(gamedev_perf_dir(), 'perf-cpp.csv')
     if not os.path.isfile(f):
         return f'gpu_ms_p50 none: no {short(f)}'
     with open(f) as fh:

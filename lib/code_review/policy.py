@@ -2,7 +2,10 @@
 import glob
 import os
 
-from .common import AW_REL, BK_REL, HOME, SKILLS, TS_REL, rel, absp
+from .common import AW_REL, BK_REL, CR_REL, HOME, SKILLS, TS_REL, rel, absp
+from agent_work import asr_corpus
+
+ASR_REL = os.path.relpath(asr_corpus(), os.path.expanduser('~'))
 
 REVIEW_ONLY_ROOTS = ['the-dark-eye', 'moodle-harness', 'moodle-envs', 'projects']
 # The swarm's own containment and evidence: never edited by a lane (the sandbox mounts them read-only too).
@@ -11,14 +14,14 @@ CONTAINMENT = ['agents/bin/code-review', 'agents/lib/code_review', 'agents/bin/c
                'agents/bin/guards', 'agents/bin/agent-exec', 'agents/bin/agent-run', 'agents/bin/fleetlib.sh',
                'agents/adapters/claude', 'agents/code-review/BRIEF.md', 'agents/code-review/LANES.md',
                'agents/code-review/swarm.js', 'agents/code-review/agent.env', 'agents/code-review/selftest',
-               'agents/code-review/state', 'agents/bin/tests/code-review.test.sh', 'agents/bin/tests/fixtures/code-review',
+               'agents/code-review/state', CR_REL, 'agents/bin/tests/code-review.test.sh', 'agents/bin/tests/fixtures/code-review',
                'agents/log', 'agents/FILE-CLAIMS.md', 'agents/.git']
 # What toolsmith's BRIEF reserves for an owner go (units, hooks, installer, protected-project guards): lanes review only.
 OWNER_GO = ['agents/units', 'agents/hooks', 'agents/install.sh', 'agents/uninstall.sh', 'agents/git-guard',
             'agents/bin/work-repo-guard', 'agents/bin/protected', 'agents/bin/protectedlib.py', 'agents/toolsmith/BRIEF.md']
-WRITTEN_BY_CLI = ('agents/code-review/state', 'agents/log', 'agents/FILE-CLAIMS.md')  # forbidden to lanes, written by the CLI/hooks
+WRITTEN_BY_CLI = ('agents/code-review/state', CR_REL, 'agents/log', 'agents/FILE-CLAIMS.md')  # forbidden to lanes, written by the CLI/hooks
 FORBIDDEN = [BK_REL, 'agents/backups',  # agents/backups: fallback guard while DB dumps remain
-             'agents/secrets', 'agents/asr-corpus', f'{AW_REL}/research', f'{AW_REL}/owner', 'agents/AGENTS.md',
+             'agents/secrets', ASR_REL, f'{AW_REL}/research', f'{AW_REL}/owner', 'agents/AGENTS.md',
              'agents/ORCHESTRATOR.md', 'agents/FLEET.md', '.claude/CLAUDE.md', '.claude/settings.json', 'CLAUDE.md'] + CONTAINMENT
 
 

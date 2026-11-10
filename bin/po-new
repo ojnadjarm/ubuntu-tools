@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # usage: po-new <p> "<Project name>" [--parent <seat>] — make the product-owner agent ~/agents/po-<p> from ~/agents/po-template:
-# BRIEF.md (fill its "## Project" block next), agent.env, inbox/ current/ done/ outbox/discord/, state/PROJECT|BACKLOG|RUNS|HISTORY.md.
+# BRIEF.md (fill its "## Project" block next), agent.env, inbox/ current/ outbox/discord/, $PO_PAPERS/<p>/done/,, state/PROJECT|BACKLOG|RUNS|HISTORY.md.
 # --parent: a manager under that PO seat (MANAGER.tmpl.md, PARENT=<seat> in agent.env; `{{PROJECT}}` left to fill, T1515 P31).
 # Refuses (exit 3) when po-<p> exists. Prints the unit command that wakes it on a request.
 help() { awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; }
@@ -17,7 +17,7 @@ brief="$tpl/BRIEF.tmpl.md"; [ -z "$parent" ] || brief="$tpl/MANAGER.tmpl.md"
 [ -r "$brief" ] || { echo "po-new: no template at $tpl" >&2; exit 1; }
 [ ! -e "$dir" ] || { echo "po-new: $dir exists" >&2; exit 3; }
 fill() { sed -e "s|{{P}}|$p|g" -e "s|{{NAME}}|$name|g" -e "s|{{PARENT}}|po-$parent|g" "$1"; }
-mkdir -p "$dir/inbox" "$dir/current" "$dir/done" "$dir/outbox/discord" "$dir/state/picks" "$dir/logs"
+mkdir -p "$dir/inbox" "$dir/current" "$(po_done "$p")" "$dir/outbox/discord" "$dir/state/picks" "$dir/logs"
 fill "$brief" >"$dir/BRIEF.md"
 cp "$tpl/agent.env" "$dir/agent.env"
 [ -z "$parent" ] || printf 'PARENT=%s        # manager: ESCALATE lines go to po-%s (po-run), no chat seat\n' "$parent" "$parent" >>"$dir/agent.env"

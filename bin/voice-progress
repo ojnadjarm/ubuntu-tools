@@ -9,7 +9,7 @@ from datetime import date
 
 USAGE = """usage: voice-progress [--json]
 
-Reads every take in ~/agents/asr-corpus/*.json, keeps the drill prompts (d01-d30) from
+Reads every take in $ASR_CORPUS/*.json, keeps the drill prompts (d01-d30) from
 ~/agents/dashboard/voice_prompts.json and reports, per pronunciation pattern, how many
 target words the recogniser missed — as errors per 100 target words, overall and by drill
 day, so a trend is visible. The week-0 baseline from Q6-his-voice.md is printed alongside
@@ -18,7 +18,9 @@ so today is comparable to the start. Read-only: nothing is written.
 Paths can be overridden with VOICE_CORPUS, VOICE_PROMPTS and VOICE_STATE (used by the test)."""
 
 HOME = os.path.expanduser("~")
-CORPUS = os.environ.get("VOICE_CORPUS", HOME + "/agents/asr-corpus")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
+from agent_work import asr_corpus  # noqa: E402
+CORPUS = os.environ.get("VOICE_CORPUS", asr_corpus())
 PROMPTS = os.environ.get("VOICE_PROMPTS", HOME + "/agents/dashboard/voice_prompts.json")
 STATE = os.environ.get("VOICE_STATE", HOME + "/agents/dashboard/state/pronunciation.json")
 

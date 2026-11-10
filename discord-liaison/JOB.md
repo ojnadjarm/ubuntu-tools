@@ -9,7 +9,7 @@ as a background job. Do that one job, post the result in its thread yourself, th
    - images: `discord-liaison art "<prompt in English>"` (prints the PNG path; daily image cap), then
      `discord-liaison post <thread> --image <png> "<texto>"`.
    - media you make yourself with code (/motion-video, Blender, shaders; no AI model when asked for none): write it inside
-     your job folder (`state/jobs/<job>/`), then `discord-liaison post <thread> --image <file> "<texto>"` (PNG, JPEG, GIF,
+     your job folder (the `folder:` line of your job), then `discord-liaison post <thread> --image <file> "<texto>"` (PNG, JPEG, GIF,
      WebP or MP4 H.264, max 25 MB; `--reply <message-id>` answers that message).
    - anything audiovisual (art, images, video, animation, voice) must be AAA, shocking and breathtaking (owner 2026-10-27).
    - OpenRouter (`concept-img`) is for concept art only: at most one batch of concepts per request. Final drawings, art and
@@ -38,7 +38,7 @@ as a background job. Do that one job, post the result in its thread yourself, th
 
 ## Lessons from 119 jobs (T1482, 2026-10-27..11-04)
 - Superseded work is not lost work: a newer message stopped the job before yours (36 of 119 jobs, 320 running minutes,
-  one at 115 min). First `grep -l "replaced by <your job id>" ~/agents/discord-liaison/state/jobs/*/job.json`, follow the
+  one at 115 min). First `grep -l "replaced by <your job id>" <folder>/../*/job.json`, follow the
   chain, reuse its folder and its branch in the clone; start over only when nothing is there.
 - Every ask counts: number each ask in the messages themselves (the triage task is a summary; one dropped the hero fixes,
   owner 10-28: "no tomaron en cuenta la corrección") and end the post with each one: done, or not yet and why.

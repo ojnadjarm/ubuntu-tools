@@ -6,6 +6,8 @@ from html.parser import HTMLParser
 from urllib.parse import unquote, urlsplit
 
 HOME = os.path.expanduser("~")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
+from agent_work import gamedev_perf_dir  # noqa: E402
 SCRATCH = re.compile(r"^(demo|scratch|test|tmp)", re.I)
 CPP_REPORT = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "skills", "gamedev", "scripts", "cpp-report")
 
@@ -294,7 +296,7 @@ def main():
     ap.add_argument("--drop", default=os.path.join(HOME, "drop"))
     ap.add_argument("--motion", default=os.path.join(HOME, "agent-work/motion"), help="film projects: <dir>/*/out/build.json")
     ap.add_argument("--games", default=os.path.join(HOME, "agent-work/games"), help="game projects: <dir>/*/ci/summary.json")
-    ap.add_argument("--perf", default=os.path.join(HOME, "agents/state/gamedev-perf/perf-cpp.csv"))
+    ap.add_argument("--perf", default=os.path.join(gamedev_perf_dir(), "perf-cpp.csv"))
     ap.add_argument("--followups", help="FOLLOWUPS.md (default: newest under ~/agent-work/research)")
     ap.add_argument("--now", type=float, help="epoch seconds for ages (tests)")
     a = ap.parse_args()

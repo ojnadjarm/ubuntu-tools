@@ -14,7 +14,7 @@ orchestrator relays with `po-ask`. Not for fleet tooling, work repos (Vass) or r
 - A PO is a normal `agent-run` agent `~/agents/po-<p>/` (survey in T1410 §0: fleet persistent agents, CrewAI/MetaGPT
   manager roles; file state chosen over subagent `memory:` because it works headless and survives `agents-stop`).
 - Wake: `po@<p>.path` (`DirectoryNotEmpty=inbox/`) starts `po@<p>.service` = `po-run <p>`: inbox → `current/`, one
-  `agent-run`, leftovers → `done/` with an outcome line, loop while the inbox refills; a second po-run exits 0. 0 tokens idle.
+  `agent-run`, leftovers → `$PO_PAPERS/<p>/done/` (`~/agent-work/po/<p>/done`, T1603; `po_done` in polib.sh) with an outcome line, loop while the inbox refills; a second po-run exits 0. 0 tokens idle.
 - Clean context every run: BRIEF + `state/PROJECT.md` (≤ 80 lines, 6 KB), `BACKLOG.md`, `RUNS.md`, the ledger
   `~/agent-work/decisions/<p>.md`. Requests keep his words verbatim (`quote: copy|intent`).
 - Budget: po-run passes `PO_BUDGET=stop` when `plan-usage --check 95` exits 1; the PO then spawns nothing and writes

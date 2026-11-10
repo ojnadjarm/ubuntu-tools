@@ -33,6 +33,8 @@ from .watch import CDN, MAX_ATTACHMENT, Watcher, lost
 
 GENERAL = '#general'
 ME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(ME), 'lib'))
+from agent_work import liaison_papers  # noqa: E402
 USAGE = ('usage: discord-liaison tick [--dry-run]|wake|check|inbox|done|post <thread> [--image <file>] [--reply <message>] <text…>|'
          'react <thread> <message> <emoji>|art <prompt…>|escalate <message> <blocker> <what…>|map <thread> <project>|pr <project>|'
          'job <message> [--project <id>] <task…>|job-run <id>|status')
@@ -96,6 +98,8 @@ class App:
     def __init__(self, env, rest):
         self.env, self.rest = env, rest
         self.home = env.get('LIAISON_HOME', ME)
+        # Jobs, art, escalations, work: LIAISON_PAPERS; a LIAISON_HOME (a fixture) keeps them in its own state/.
+        self.papers = os.path.join(self.home, 'state') if 'LIAISON_HOME' in env else liaison_papers()
         self.forum, self.guild = env.get('DISCORD_FORUM_ID', ''), env.get('DISCORD_GUILD_ID', '')
         self.general = env.get('DISCORD_GENERAL_ID', '')
         self.owner = env.get('DISCORD_OWNER_ID', '')
@@ -105,10 +109,10 @@ class App:
         self.caps = Caps(os.path.join(self.home, 'state', 'caps.json'), os.path.join(self.home, 'logs', 'caps.log'),
                          {'run': int(env.get('LIAISON_RUNS_PER_DAY', '30')), 'pr': int(env.get('LIAISON_PRS_PER_DAY', '3')),
                           'img': int(env.get('LIAISON_IMAGES_PER_DAY', '5'))})
-        self.art_dir = os.path.join(self.home, 'state', 'art')
-        self.work = os.path.join(self.home, 'state', 'work')
+        self.art_dir = os.path.join(self.papers, 'art')
+        self.work = os.path.join(self.papers, 'work')
         self.cdn = tuple(env.get('LIAISON_CDN_PREFIXES', ' '.join(CDN)).split())
-        self.jobs = JobQueue(os.path.join(self.home, 'state', 'jobs'))
+        self.jobs = JobQueue(os.path.join(self.papers, 'jobs'))
         self.media_roots = ()
         self.job_cap = int(env.get('LIAISON_JOBS_MAX', '3'))
         self.nudge_file = env.get('LIAISON_NUDGE', os.path.join(os.path.dirname(ME), 'discord-bot', 'state', 'liaison.nudge'))
@@ -313,7 +317,7 @@ class App:
         for conv in batch(shown):
             self.jobs.seen(key(conv[-1]), conv[-1]['id'])
         kept = {x['id'] for j in self.jobs.list() for x in j.get('messages', [j['message']])}
-        esc = os.path.join(self.home, 'state', 'escalations')
+        esc = os.path.join(self.papers, 'escalations')
         for m in shown:
             if m['bot'] or m['id'] in kept or glob.glob(os.path.join(glob.escape(esc), f'*-{m["id"]}.md')):
                 continue
@@ -469,7 +473,7 @@ class App:
 
     def nudge(self):
         """Pulse again while an open escalation is missing from the pulse's last-fire snapshot (it skips when busy)."""
-        open_ = set(glob.glob(os.path.join(glob.escape(self.home), 'state', 'escalations', '*.md')))
+        open_ = set(glob.glob(os.path.join(glob.escape(self.papers), 'escalations', '*.md')))
         snap = self.env.get('PULSE_QUEUE', os.path.expanduser('~/agents/log/pulse-queue.json'))
         try:
             with open(snap) as f:
@@ -504,7 +508,7 @@ class App:
 
     def write_escalation(self, m, blocker, tried):
         """Write the escalation file and pulse; None when this message was escalated before."""
-        d = os.path.join(self.home, 'state', 'escalations')
+        d = os.path.join(self.papers, 'escalations')
         if glob.glob(os.path.join(glob.escape(d), f'*-{m["id"]}.md')) + glob.glob(
                 os.path.join(glob.escape(d), 'done', f'*-{m["id"]}.md')):
             return None
@@ -624,7 +628,7 @@ class App:
                       f'{", ".join(homes(self.state.threads, job["projects"])) or "(none mapped: this one)"}; the request\'s '
                       f'thread gets at most a one-line link note\n')
         text = (f'{head}\n{rules}\n## Your job\n\njob: {job["id"]}\nattempt: {job.get("attempt", 1)} of {MAX_ATTEMPTS}\n{target}'
-                f'task (from the triage run): {job["task"]}\nrequest: the <message newest="true"> below, verbatim; the '
+                f'folder: {d}\ntask (from the triage run): {job["task"]}\nrequest: the <message newest="true"> below, verbatim; the '
                 f'messages before it are the same conversation, oldest first: the newest wins, a correction replaces '
                 f'what it corrects\nmust: reply in Spanish only; anything audiovisual is AAA, shocking and breathtaking; '
                 f'post the result and react ✅ yourself\n\n{context}' + ''.join(msgs))

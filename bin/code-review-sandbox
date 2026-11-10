@@ -3,7 +3,7 @@
 # (bwrap): the whole home read-only, writable only where the swarm may write; no network except the Claude API (through
 # code-review-netproxy); no D-Bus, systemd, docker, ssh-agent or tmux sockets; secrets and the voice corpus hidden; its own
 # pid namespace, so nothing outlives it. Real mode: ~/agents writable except .git and the swarm's own
-# containment; $AGENT_WORK read-only but $FLEET_BACKUPS_DIR/{code-review,retired} and $TOOLSMITH_PAPERS. Fixture mode: only the fixture home and the audit log are writable.
+# containment; $AGENT_WORK read-only but $FLEET_BACKUPS_DIR/{code-review,retired}, $TOOLSMITH_PAPERS and $IMPROVE_PAPERS/queue. Fixture mode: only the fixture home and the audit log are writable.
 # --post: after the session, also on timeout, drop stale claims, restore unverified backups and deliver the report outside.
 # --selftest proves every read-only, hidden and blocked path before anything runs.
 set -uo pipefail
@@ -61,10 +61,10 @@ else
 fi
 rw_after=("$H/.claude/projects/$slug")
 if [ -z "$fixture" ]; then
-  mkdir -p "$FLEET_BACKUPS_DIR/code-review" "$FLEET_BACKUPS_DIR/retired" "$TOOLSMITH_PAPERS"
-  rw_after+=("$FLEET_BACKUPS_DIR/code-review" "$FLEET_BACKUPS_DIR/retired" "$TOOLSMITH_PAPERS")
+  mkdir -p "$FLEET_BACKUPS_DIR/code-review" "$FLEET_BACKUPS_DIR/retired" "$TOOLSMITH_PAPERS" "$IMPROVE_PAPERS/queue"
+  rw_after+=("$FLEET_BACKUPS_DIR/code-review" "$FLEET_BACKUPS_DIR/retired" "$TOOLSMITH_PAPERS" "$IMPROVE_PAPERS/queue")
 fi
-hide_dirs=("$A/secrets" "$A/asr-corpus" "$H/.ssh" "$H/.gnupg" "$H/.config/gh" "$H/.local/share/keyrings" "/run/user/$U")
+hide_dirs=("$A/secrets" "$ASR_CORPUS" "$H/.ssh" "$H/.gnupg" "$H/.config/gh" "$H/.local/share/keyrings" "/run/user/$U")
 hide_files=(/run/dbus/system_bus_socket /run/docker.sock /run/containerd/containerd.sock "$H/.git-credentials" "$H/.netrc")
 
 # Shims over the binaries themselves, so they hold whatever PATH a lane's shell has.
@@ -113,7 +113,7 @@ if [ "$selftest" = 1 ]; then
   [ -n "$fixture" ] && wr+=("$A" "$H/.claude/skills")
   probe='bad=0; say() { echo "$1"; bad=1; }
   for p in "$@"; do [ -e "$p" ] || continue; [ -w "$p" ] && say "WRITABLE $p"; done
-  for p in "$A/secrets" "$A/asr-corpus" "$H/.ssh"; do [ -d "$p" ] && [ -n "$(ls -A "$p" 2>/dev/null)" ] && say "VISIBLE $p"; done
+  for p in "$A/secrets" "$ASR_CORPUS" "$H/.ssh"; do [ -d "$p" ] && [ -n "$(ls -A "$p" 2>/dev/null)" ] && say "VISIBLE $p"; done
   [ -e "/tmp/tmux-$U" ] && say "VISIBLE tmux socket"
   [ -S "/run/user/$U/bus" ] && say "VISIBLE user bus"
   curl -s --unix-socket /run/docker.sock -m 3 http://d/_ping >/dev/null 2>&1 && say "REACHABLE docker"

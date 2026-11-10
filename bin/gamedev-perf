@@ -13,7 +13,7 @@ gate=${GAMEDEV_PERFGATE:-$S/scripts/godot-perfgate.sh}
 slice=${GAMEDEV_SLICE:-$S/templates/godot-slice}
 cppci=${GAMEDEV_CPPCI:-$S/scripts/cpp-ci}
 tpl=${GAMEDEV_CPP_TEMPLATE:-$S/templates/cpp-vulkan}
-dir=${GAMEDEV_PERF_DIR:-$HOME/agents/state/gamedev-perf}
+dir=${GAMEDEV_PERF_DIR:-$(. "$(dirname "$(readlink -f "$0")")/env.sh"; printf %s "$GAMEDEV_PERF_DIR")}
 loadavg=${GAMEDEV_LOADAVG:-/proc/loadavg} every=${GAMEDEV_LOAD_EVERY:-2}
 # CPU PSI some avg10 at which budget.sh doubles a budget, the weight of this run's 0.5 load per CPU cap
 psi=${GAMEDEV_PSI:-/proc/pressure/cpu} maxpsi=20

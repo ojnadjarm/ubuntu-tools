@@ -1,11 +1,12 @@
-"""### perf cv: avg_fps spread of state/gamedev-perf/perf.csv."""
+"""### perf cv: avg_fps spread of $GAMEDEV_PERF_DIR/perf.csv."""
 import csv, os, statistics
 
-from .common import AG, NA
+from agent_work import gamedev_perf_dir
+from .common import NA
 
 
 def rows(ctx):
-    f = os.path.join(AG, 'state', 'gamedev-perf', 'perf.csv')
+    f = os.path.join(gamedev_perf_dir(), 'perf.csv')
     if not os.path.isfile(f):
         raise NA(f'no {f}')
     with open(f) as fh:

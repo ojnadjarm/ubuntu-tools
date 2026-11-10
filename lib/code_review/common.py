@@ -6,7 +6,7 @@ import re
 import sys
 import time
 
-from agent_work import agent_work, backups_dir, toolsmith_papers
+from agent_work import agent_work, backups_dir, code_review_papers, improve_papers, toolsmith_papers
 
 REAL_HOME = os.path.expanduser('~')
 HOME = os.path.abspath(os.environ.get('CR_HOME') or REAL_HOME)
@@ -15,14 +15,17 @@ AGENTS = os.path.join(HOME, 'agents')
 AW_REL = os.path.relpath(agent_work(), REAL_HOME)
 BK_REL = os.path.relpath(backups_dir(), REAL_HOME)
 TS_REL = os.path.relpath(toolsmith_papers(), REAL_HOME)
+IM_REL = os.path.relpath(improve_papers(), REAL_HOME)
+CR_REL = os.path.relpath(code_review_papers(), REAL_HOME)
 TOOLSMITH = os.path.join(HOME, TS_REL)
 SKILLS = os.path.join(HOME, '.claude', 'skills')
 ME = os.path.join(AGENTS, 'code-review')
 STATE = os.path.join(ME, 'state')
+RUNS = os.path.join(HOME, CR_REL, 'runs')
 BACKUPS = os.path.join(HOME, BK_REL, 'code-review')
 RETIRED = os.path.join(HOME, BK_REL, 'retired')
 CLAIMS = os.path.join(AGENTS, 'FILE-CLAIMS.md')
-QUEUE = os.path.join(AGENTS, 'improve', 'queue')
+QUEUE = os.path.join(HOME, IM_REL, 'queue')
 AUDIT = os.path.join(AGENTS, 'log', 'actions.jsonl')
 SWARM = os.path.join(REAL_HOME, 'agents', 'code-review', 'swarm.js')
 RULES = os.path.join(REAL_HOME, 'agents', 'code-review', 'LANES.md')
@@ -74,7 +77,7 @@ def current_run():
 
 
 def run_dir(run=None):
-    return os.path.join(STATE, 'runs', run or current_run())
+    return os.path.join(RUNS, run or current_run())
 
 
 def test_exists(t):

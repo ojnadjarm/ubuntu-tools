@@ -37,6 +37,10 @@ mkdir -p "$H"/{finance,invoices,.config/pc-harness,moodle-envs/secretproj} "$H/a
 head -c 200000 /dev/urandom >"$H/finance/a.bin"; echo inv >"$H/invoices/i.txt"; echo hist >"$H/agent-work/history.md"
 echo brief >"$H/agent-work/briefs/b.md"; echo note >"$H/agent-work/research/2026-11-01/T1/n.md"; echo ev >"$H/agent-work/evidence/E1/e.txt"
 head -c 5000000 /dev/urandom >"$H/agent-work/big/huge.bin"; echo junk >"$H/agent-work/tmp/j"
+# T1603: liaison jobs ($LIAISON_PAPERS/jobs) are one tier-2 entry each, so one 14 G job folder skips alone.
+mkdir -p "$H/agent-work/discord-liaison/jobs"/{j1,j2} "$H/agent-work/discord-liaison/escalations"
+echo job >"$H/agent-work/discord-liaison/jobs/j1/job.json"; head -c 5000000 /dev/urandom >"$H/agent-work/discord-liaison/jobs/j2/big.bin"
+echo esc >"$H/agent-work/discord-liaison/escalations/e.md"
 echo mem >"$H/.claude/projects/-p1/memory/m.md"; echo '{}' >"$H/.claude/projects/-p1/s1.jsonl"; echo '{}' >"$H/.claude/settings.json"
 echo SECRET >"$H/moodle-envs/secretproj/x"; echo SECRET >"$H/.claude/projects/${H//[\/.]/-}-moodle-envs-secretproj/s.jsonl"
 # T1597: dumps in $FLEET_BACKUPS_DIR, older ones still in the old folder (fallback read until the owner clears it).
@@ -87,6 +91,7 @@ ok "tier1: finance, memory, newest dump, settings" 'grep -q "/finance/a.bin$" "$
 ok "tier1: an env only in the old backups folder still gets its newest dump (fallback)" 'grep -q "/agents/backups/moodle/4.1/2026-10-30.sql.gz$" "$WORK/ls"'
 ok "tier1: claims snapshots from \$CLAIMS_SNAP" 'grep -q "/agent-work/claims-snap/T9/manifest.tsv$" "$WORK/ls"'
 ok "tier2: research ticket and transcript in" 'grep -q "/T1/n.md$" "$WORK/ls" && grep -q "/-p1/s1.jsonl$" "$WORK/ls"'
+ok "tier2: liaison jobs one entry each (small job in, big job skipped alone)" 'grep -q "/discord-liaison/jobs/j1/job.json$" "$WORK/ls" && grep -q "/discord-liaison/escalations/e.md$" "$WORK/ls" && grep -qx "$H/agent-work/discord-liaison/jobs/j2" "$H/agents/state/fleet-backup/last-skipped.txt"'
 ok "budget: 5 MB tier-2 file skipped and listed" '! grep -q "huge.bin" "$WORK/ls" && grep -q "/agent-work/big$" "$H/agents/state/fleet-backup/last-skipped.txt"'
 ok "mirrors: tier-2 sibling kept, both mirrors out" 'grep -q "/T9/copy/ok.txt$" "$WORK/ls" && ! grep -qi "moodle-envs/secretproj\|secretproj-dump" "$WORK/ls"'
 ok "excluded: tmp and protected never in the snapshot" '! grep -qiE "secretproj|sp45|/agent-work/tmp" "$WORK/ls"'

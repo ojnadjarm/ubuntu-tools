@@ -13,7 +13,7 @@ fi
 . "$BIN/tests/lib/assert.sh"
 
 WORK=$(mktemp -d); trap 'kill "${SRV:-0}" 2>/dev/null; rm -rf "$WORK"' EXIT
-export HARNESS_ENV_LOADED=1 HARNESS_HOME="$WORK/agents" AGENT_WORK="$WORK/agent-work" HARNESS_CONFIG=/dev/null
+export HARNESS_ENV_LOADED=1 HARNESS_HOME="$WORK/agents" AGENT_WORK="$WORK/agent-work" HARNESS_CONFIG=/dev/null PO_PAPERS="$WORK/agent-work/po"
 mkdir -p "$HARNESS_HOME" "$AGENT_WORK/decisions" "$WORK/stubs"
 cp -r "$BIN/../po-template" "$HARNESS_HOME/po-template"
 
@@ -26,7 +26,8 @@ echo "start $(ls "$d/current" | wc -l)" >>"$WORK/runs.log"; echo "$PO_BUDGET" >>
 [ -e "$WORK/drop" ] && { rm -f "$WORK/drop"; po-ask fx "arrived mid-run" >/dev/null; }
 [ -e "$WORK/hold" ] && while [ -e "$WORK/hold" ]; do sleep 0.05; done
 if [ ! -e "$WORK/leave" ]; then
-  for f in "$d"/current/*.md; do [ -e "$f" ] || continue; echo "outcome: answered" >>"$f"; mv "$f" "$d/done/"; done
+  dn="$PO_PAPERS/${1#po-}/done"; mkdir -p "$dn"
+  for f in "$d"/current/*.md; do [ -e "$f" ] || continue; echo "outcome: answered" >>"$f"; mv "$f" "$dn/"; done
 fi
 cat "$WORK/report" 2>/dev/null >"$d/REPORT.md" || echo "ESCALATE: fx decision" >"$d/REPORT.md"
 rmdir "$WORK/running"; echo end >>"$WORK/runs.log"
@@ -117,9 +118,9 @@ rm -f "$WORK/hold"; wait "$R"; is 'po-run: exit 0' "$?" 0
 is 'po-run: the run gets CHAT_SEAT=<p> (T1515-P12)' "$(cat "$WORK/seat.log")" fx
 is 'po-run: two runs, first with 4 requests, second with the mid-run one' "$(paste -sd' ' "$WORK/runs.log")" 'start 4 end start 1 end'
 is 'po-run: inbox empty' "$(ls "$P/inbox" | wc -l)" 0
-is 'po-run: 5 requests in done/' "$(ls "$P/done" | wc -l)" 5
+is 'po-run: 5 requests in done/' "$(ls "$PO_PAPERS/fx/done" | wc -l)" 5
 touch "$WORK/leave"; po-ask fx "unfiled" >/dev/null; po-run fx >/dev/null 2>&1; rm -f "$WORK/leave"
-ev 'po-run: a request the run left gets an outcome line' 'grep -l unfiled "$P"/done/*.md | xargs grep -q "^outcome: left in current/"'
+ev 'po-run: a request the run left gets an outcome line' 'grep -l unfiled "$PO_PAPERS"/fx/done/*.md | xargs grep -q "^outcome: left in current/"'
 is 'po-run: current/ empty after' "$(ls "$P/current" | wc -l)" 0
 # review focus 4: week >= 95 % -> the run gets PO_BUDGET=stop (the brief then spawns no worker)
 is 'po-run: PO_BUDGET=ok under 95 %' "$(sort -u "$WORK/budget.log")" ok
@@ -223,7 +224,7 @@ mkdir -p "$WORK/edit/bin" "$WORK/edit/stubs"; cp "$BIN/po-run" "$BIN/polib.sh" "
 cat >"$WORK/edit/stubs/agent-run" <<'STUB'
 #!/usr/bin/env bash
 python3 -c 'import sys; p = sys.argv[1]; t = open(p).read(); open(p, "w").write("#" * 200 + "\n" + t)' "$WORK/edit/bin/po-run"
-d="$HARNESS_HOME/$1"; for r in "$d"/current/*.md; do mv "$r" "$d/done/"; done
+d="$HARNESS_HOME/$1"; for r in "$d"/current/*.md; do mv "$r" "$PO_PAPERS/${1#po-}/done/"; done
 STUB
 chmod +x "$WORK/edit/stubs/agent-run"
 po-ask fx "edited mid-run" >/dev/null

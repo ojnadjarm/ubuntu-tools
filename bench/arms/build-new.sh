@@ -4,7 +4,7 @@
 set -euo pipefail
 SRC="${PCBENCH_SRC:-$HOME/agents}"
 SRC_SKILL="${PCBENCH_SRC_SKILL:-$HOME/.claude/skills/desktop}"
-ARM="${1:-$SRC/bench/arms/new}"
+ARM="${1:?usage: build-new.sh <arm dir> (pcbench arm build --arm new passes it)}"
 rm -rf "$ARM"; mkdir -p "$ARM/bin" "$ARM/KB" "$ARM/skills"
 cp -a "$SRC/bin"/. "$ARM/bin/"; rm -rf "$ARM/bin/__pycache__"
 cp -a "$SRC/KB"/.  "$ARM/KB/"

@@ -119,7 +119,7 @@ discord-liaison escalate <message-id> <permission|owner|secret|attempts> "<asked
 discord-liaison map <thread> <project> | pr <project>   # pr = registry + route + daily PR cap gate
 discord-liaison job <message-id> "<task>"   # triage: hand a work request to a background worker (queued over the cap)
 discord-liaison job-run <id>                # the worker's runner (started by the transient unit; not by hand)
-journalctl --user -u 'discord-liaison-job-*' -n 20; ls ~/agents/discord-liaison/state/jobs/
+journalctl --user -u 'discord-liaison-job-*' -n 20; ls ~/agent-work/discord-liaison/jobs/        # $LIAISON_PAPERS (T1603): jobs, art, escalations, work
 discord-liaison manager <project-id> # po-<id> manager for a registered project (T1515 P31)
 discord-liaison test                # fixture tests (also bin/tests/discord-liaison.test.sh)
 journalctl --user -u discord-liaison-check -n 20; tail ~/agents/discord-liaison/logs/caps.log

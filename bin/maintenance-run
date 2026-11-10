@@ -63,12 +63,13 @@ old() { find "$@" -mtime +60 $del -print 2>/dev/null | wc -l; }  # <dir> <find t
 seats=0; nd=0; ns=0; nl=0; ni=0
 for s in "$HOME"/agents/po-*/ "$HOME/agents/discord-liaison/"; do
   [ -d "$s" ] || continue; s=${s%/}; seats=$((seats + 1))
+  dn=; case ${s##*/} in po-*) dn="$PO_PAPERS/${s##*/po-}/done" ;; esac
   for f in "$s"/state/images/*; do  # <request>-<n>.<ext>: gone 7 days after its request reached done/
-    r="$s/done/$(basename "${f%-*}").md"
+    r="$dn/$(basename "${f%-*}").md"
     [ -f "$f" ] && [ -n "$(find "$r" -mtime +6 2>/dev/null)" ] || continue
     ni=$((ni + 1)); [ "$dry" = 1 ] || rm -f "$f"
   done
-  nd=$((nd + $(old "$s/done" -maxdepth 1 -type f)))
+  [ -z "$dn" ] || nd=$((nd + $(old "$dn" -maxdepth 1 -type f)))
   ns=$((ns + $(old "$s/outbox/discord/sent" -maxdepth 1 -type f)))
   nl=$((nl + $(old "$s/logs" -maxdepth 1 -type f \( -name '*.log' -o -name '*.json' \))))
 done

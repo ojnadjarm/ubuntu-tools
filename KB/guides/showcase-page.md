@@ -14,7 +14,7 @@ flaws. Not for a single render's QC (use `mv-report`) or the dashboard.
   by content (size + byte compare), so a renamed drop copy (`T694/hero-film.mp4`) still links. Shows cpu_s, top 3
   steps_cpu with share, review, VMAF/size per aspect.
 - Gamedev: newest `~/drop/*/play.mp4` (+ `contact-sheet.jpg`), newest `~/agent-work/games/*/ci/summary.json`
-  (cpp-ci stages), last row of `~/agents/state/gamedev-perf/perf-cpp.csv` (nightly template, per-pass p50).
+  (cpp-ci stages), last row of `$GAMEDEV_PERF_DIR/perf-cpp.csv` (nightly template, per-pass p50).
 - Follow-ups: open `- ` lines (no `~~`, no `(done`) of the newest `research/*/*/FOLLOWUPS.md` that name the drop's
   ticket, the project name (`-` or space) or, for gamedev, `perf-cpp.csv`.
 - Every table row has an Age column: from the summary `date` / csv `date` when present, else file mtime.

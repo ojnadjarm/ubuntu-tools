@@ -6,10 +6,10 @@ set -uo pipefail
 FS="$HOME/agents/bin/fleet-survey"
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 FH="$W/home"; A="$FH/agents"; E="$FH/agent-work/evidence"; CALLS="$W/calls"
-mkdir -p "$A/bin/tests" "$A/log/fleet-ci" "$A/state/gamedev-perf" "$A/skills/sk/scripts" "$A/skills/sk/tests" \
+mkdir -p "$A/bin/tests" "$A/log/fleet-ci" "$A/state" "$FH/agent-work/gamedev-perf" "$A/skills/sk/scripts" "$A/skills/sk/tests" \
   "$FH/.claude/skills/own/scripts" "$E/T1" "$E/T2" "$E/T3" "$E/T4"
 unjudged() { local l; read -r l _ </proc/loadavg; [ $((10#${l/./} * 2)) -gt $(($(nproc) * 100)) ] && echo ", unjudged at load $l"; }
-survey() { env -u HARNESS_HOME -u AGENT_WORK HOME="$FH" CALLS="$CALLS" "$FS" "$@"; }
+survey() { env -u HARNESS_HOME -u AGENT_WORK -u GAMEDEV_PERF_DIR HOME="$FH" CALLS="$CALLS" "$FS" "$@"; }
 
 stub() { printf '#!/bin/sh\necho "%s $*" >>"$CALLS"\n%s\n' "$1" "$2" >"$A/bin/$1"; chmod +x "$A/bin/$1"; }
 stub pc 'case "$1" in failures) echo "unit   x.service 3";; doctor) sleep 0.2; echo "pc doctor end" >>"$CALLS"; echo "WARN usage slow"; echo "PASS 17/19"; exit 1;; esac'
@@ -31,7 +31,7 @@ printf 'noise\nFAIL bin/tests/a.test.sh 3.0\nFAIL bin/tests/b.test.sh 0.5\nFAIL 
 printf 'PASS 114/114 files\n' >"$A/log/fleet-ci/2026-10-18.txt"; touch -d '2 days ago' "$A/log/fleet-ci/2026-10-18.txt"
 printf 'a.test.sh\t1.0\t0\nb.test.sh\t9.5\t0\nc.test.sh\t3\t0\nd.test.sh\t7\t0\ne.test.sh\t2\t0\nf.test.sh\t8\t0\nbad\tx\t0\n' \
   >"$A/state/test-timings.tsv"
-printf 'date,project,seconds,avg_fps\nd,w,6,90\nd,w,6,110\nd,w,6,\nd,w,6,100\n' >"$A/state/gamedev-perf/perf.csv"
+printf 'date,project,seconds,avg_fps\nd,w,6,90\nd,w,6,110\nd,w,6,\nd,w,6,100\n' >"$FH/agent-work/gamedev-perf/perf.csv"
 echo '{"ticket":"T1","rc":0,"ok":true,"check":"true"}' >"$E/T1/check.json"
 echo '{"ticket":"T2","rc":1,"ok":false,"check":"false-now","verdict":"drift"}' >"$E/T2/check.json"
 echo '{"ticket":"T3","rc":1,"ok":false,"check":"false-old"}' >"$E/T3/check.json"; touch -d '3 days ago' "$E/T3/check.json"
@@ -178,7 +178,7 @@ echo '{"cpu_s":1.0,"steps_cpu":{"x":1.0}}' >"$MO/old/out/build.json"; touch -d '
 echo '{"cpu_s":7304.8,"steps_cpu":{"beats":1.8,"composite":1263.2,"hdr10":1239.8,"plate0":1143.8}}' >"$MO/new/out/build.json"
 touch -d '5 hours ago' "$MO/new/out/build.json"
 printf 'date,project,gpu_ms_p50,status,post_ms_p50,gpu_ms_p50_shadow,gpu_ms_p50_scene\n2026-10-01T00:00:00+02:00,cpp,9.9,pass,1,1,1\n%s,cpp,1.1190,pass,0.4449,0.0668,0.6018\n' \
-  "$(iso '2 hours ago')" >"$A/state/gamedev-perf/perf-cpp.csv"
+  "$(iso '2 hours ago')" >"$FH/agent-work/gamedev-perf/perf-cpp.csv"
 CC="$A/log/creative-ci"; mkdir -p "$CC" "$W/scratch/game"; export CI_SCRATCH_ROOTS="$W/scratch"
 echo "{\"project\":\"$FH/proj/cpp\",\"stages\":{\"configure\":{\"status\":\"pass\"},\"perf\":{\"status\":\"pass\"}}}" >"$CC/real.json"
 echo "{\"project\":\"$W/scratch/game\",\"stages\":{\"golden\":{\"status\":\"fail\"}}}" >"$CC/scratch.json"
@@ -211,7 +211,7 @@ is "mv: newest 3 drops of its briefs (top text only)" "$(grep '^drop' <<<"$m" | 
   "~/drop/T52/v.mp4 ~/drop/T53/a.png ~/drop/T51-x/a.png "
 is "gd: counts" "$(head -1 <<<"$g")" "1 scripts, 1 tests  ~/agents/skills/gamedev"
 is "gd: last perf-cpp.csv row, per pass, aged" "$(sed -n 2p <<<"$g")" \
-  "gpu_ms_p50 1.1190 (post=0.4449 shadow=0.0668 scene=0.6018) pass  ~/agents/state/gamedev-perf/perf-cpp.csv, 2 h old"
+  "gpu_ms_p50 1.1190 (post=0.4449 shadow=0.0668 scene=0.6018) pass  ~/agent-work/gamedev-perf/perf-cpp.csv, 2 h old"
 is "gd: cpp-ci stages" "$(sed -n 3p <<<"$g")" "cpp-ci stages configure build golden"
 is "gd: newest non-scratch cpp-ci ledger row, stages, aged" "$(sed -n 4p <<<"$g")" \
   "cpp-ci last cpp configure:pass perf:pass  ~/agents/log/creative-ci/real.json, 4 h old"

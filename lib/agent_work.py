@@ -39,3 +39,38 @@ def toolsmith_papers():
 def dash_plans_dir():
     """Pages plan-publish writes and the dashboard serves at /plans/: DASH_PLANS_DIR, default $AGENT_WORK/research/dashboard/plans."""
     return _key("DASH_PLANS_DIR") or os.path.join(agent_work(), "research", "dashboard", "plans")
+
+
+def liaison_papers():
+    """Discord liaison jobs, art, escalations, work: LIAISON_PAPERS, default $AGENT_WORK/discord-liaison."""
+    return _key("LIAISON_PAPERS") or os.path.join(agent_work(), "discord-liaison")
+
+
+def bench_papers():
+    """pcbench runs, built arms (new/, old/), state: BENCH_PAPERS, default $AGENT_WORK/bench."""
+    return _key("BENCH_PAPERS") or os.path.join(agent_work(), "bench")
+
+
+def po_papers():
+    """Product-owner finished requests, <project>/done: PO_PAPERS, default $AGENT_WORK/po."""
+    return _key("PO_PAPERS") or os.path.join(agent_work(), "po")
+
+
+def asr_corpus():
+    """The owner's recorded voice clips (owner data): ASR_CORPUS, default $AGENT_WORK/owner/asr-corpus."""
+    return _key("ASR_CORPUS") or os.path.join(agent_work(), "owner", "asr-corpus")
+
+
+def improve_papers():
+    """Improvement queue, saved/ restores, metrics.tsv: IMPROVE_PAPERS, default $AGENT_WORK/improve."""
+    return _key("IMPROVE_PAPERS") or os.path.join(agent_work(), "improve")
+
+
+def code_review_papers():
+    """Code-review swarm runs, reports, seen findings: CODE_REVIEW_PAPERS, default $AGENT_WORK/code-review."""
+    return _key("CODE_REVIEW_PAPERS") or os.path.join(agent_work(), "code-review")
+
+
+def gamedev_perf_dir():
+    """gamedev-perf runs, CSVs, skips: GAMEDEV_PERF_DIR, default $AGENT_WORK/gamedev-perf."""
+    return _key("GAMEDEV_PERF_DIR") or os.path.join(agent_work(), "gamedev-perf")

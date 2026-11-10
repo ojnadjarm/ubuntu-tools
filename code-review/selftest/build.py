@@ -13,7 +13,7 @@ home = os.path.abspath(sys.argv[1])
 if os.path.exists(home):
     sys.exit(f'build.py: {home} exists')
 shutil.copytree(os.path.join(here, 'template'), home, symlinks=True)
-for d in ('agents/log', 'agent-work/backups', 'agents/improve/queue', 'agents/code-review/state'):
+for d in ('agents/log', 'agent-work/backups', 'agent-work/improve/queue', 'agents/code-review/state'):
     os.makedirs(os.path.join(home, d), exist_ok=True)
 rng = random.Random(74)
 now = dt.datetime.now().astimezone()

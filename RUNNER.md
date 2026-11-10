@@ -46,7 +46,7 @@ stops them by name; `agents-start` re-enables them from the roster row's unit na
 `pcbench report --baseline`. It never starts while the owner is at the machine: `pcbench away`
 reads `pc status --json` (lock + idle, lid, MPRIS players, seat logins) and both the runner and
 `pcbench run --require-away` refuse on a hit. A skip is logged to
-`~/agents/log/pcbench-weekly.log`, counted in `bench/state/weekly-skips`, and pushes the owner
+`~/agents/log/pcbench-weekly.log`, counted in `$BENCH_PAPERS/state/weekly-skips`, and pushes the owner
 once at three in a row. `pcbench-weekly --dry-run` prints the verdict and the command.
 
 ## Adding an agent

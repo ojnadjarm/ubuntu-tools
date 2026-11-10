@@ -13,7 +13,7 @@ sessions (Vass, liaison jobs) and not for the auto-updater itself.
   launcher link. Equal → `noop`.
 - Safe gates (else `wait`, retried next run): registry `~/.claude/sessions/<pid>.json` status idle, pane not in copy mode,
   no `esc to interrupt`/`Waiting for … background`, no `◯` agent row under the input box, no subagent/workflow file of
-  the session touched in 10 min, empty input line, no `discord-liaison/state/escalations/*.md`, outside 08-01 unless the
+  the session touched in 10 min, empty input line, no `$LIAISON_PAPERS/escalations/*.md`, outside 08-01 unless the
   new version is 24 h old.
 - A non-empty input line logs `input line not empty: len=<chars> sgr=<SGR codes on the prompt line>` (never the text).
 - Stuck: the 3rd identical `wait` in a row (dry runs aside, text after `:` ignored) is one `notify-owner` line; the log

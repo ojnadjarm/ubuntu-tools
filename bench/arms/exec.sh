@@ -19,7 +19,8 @@ fi
 
 arm="${1:?usage: exec.sh <old|new> -- cmd… | exec.sh --selftest [arm]}"; shift
 [ "${1:-}" = -- ] && shift
-A="$BENCH/arms/$arm"
+[ -n "${PCBENCH_ARMS:-}" ] || PCBENCH_ARMS="$(. "$HOME/agents/bin/env.sh"; printf %s "$BENCH_PAPERS")/arms"
+A="$PCBENCH_ARMS/$arm"
 [ -d "$A/bin" ] || { echo "exec.sh: no arm at $A (run build-$arm.sh)" >&2; exit 2; }
 
 bash "$FIXTURE" ensure || { echo "exec.sh: could not build the dark-eye fixture" >&2; exit 2; }

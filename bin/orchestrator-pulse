@@ -16,7 +16,7 @@ SETTLE=${PULSE_SETTLE:-3}
 FLOOR_H=${PULSE_FLOOR_H:-6}
 CLAUDE_DIR=${PULSE_CLAUDE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}
 MARK=${PULSE_ORCH_MARK:-ORCHESTRATOR.md}
-ESC_DIR=${PULSE_ESCALATIONS:-$HOME/agents/discord-liaison/state/escalations}
+ESC_DIR=${PULSE_ESCALATIONS:-$LIAISON_PAPERS/escalations}
 TURN=${PULSE_TURN:-'Pulse: run plan-usage, then continue the standing queue (see ~/agents/KB/orchestrator.md "Pulse") or report nothing.'}
 tm() { if [ -n "${PULSE_TMUX_SOCKET:-}" ]; then tmux -L "$PULSE_TMUX_SOCKET" "$@"; else tmux "$@"; fi; }
 log() { mkdir -p "$(dirname "$LOG")"; printf '%s %s session=%s %s\n' "$(date -Is)" "$1" "$SESSION" "$2" >>"$LOG"; echo "orchestrator-pulse: $1 $2"; }

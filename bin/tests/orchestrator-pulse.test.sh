@@ -33,7 +33,7 @@ W=$1; shift; [ "$1" = --append-system-prompt-file ] && shift 2
 printf "────\n❯\302\240$1\n────\n\033[2A\033[3G"; sleep 30
 FAKE
 chmod +x "$WORK/bin/claude"
-fx() { env -u TMUX -u PULSE_TMUX_SOCKET -u PULSE_FLOOR_H TMUX_TMPDIR="$TMX" HOME="$WORK" PULSE_SESSION="$FXS" \
+fx() { env -u TMUX -u PULSE_TMUX_SOCKET -u PULSE_FLOOR_H -u LIAISON_PAPERS TMUX_TMPDIR="$TMX" HOME="$WORK" PULSE_SESSION="$FXS" \
        PULSE_LOG="$WORK/pulse.log" PULSE_SETTLE=0 AGENT_WORK="$WORK/agent-work" WORK="$WORK" \
        PATH="$WORK/stubs:$PATH" "$@"; }
 cleanup() { fx tmux kill-server 2>/dev/null; rm -rf "$WORK" "$TMX"; }
@@ -111,8 +111,8 @@ out=$(PC_NOT_OURS='^fx-foreign' SEED=$recent run_case failed-foreign '\033[7m \0
 case "$out" in *"skip"*"queue unchanged (needs 0, failed 2"*) ok "foreign failed unit stays out of the queue";; *) nok "foreign failed unit stays out of the queue" "$out";; esac
 rm -f "$WORK/failed.txt"
 
-# T1411: an open Discord escalation (discord-liaison/state/escalations/*.md) fires once and is named in the turn.
-ESC="$WORK/agents/discord-liaison/state/escalations"; mkdir -p "$ESC/done"
+# T1411: an open Discord escalation ($LIAISON_PAPERS/escalations/*.md) fires once and is named in the turn.
+ESC="$WORK/agent-work/discord-liaison/escalations"; mkdir -p "$ESC/done"
 echo fx >"$ESC/20261027T090000Z-111.md"
 out=$(SEED=$recent run_case escalation-new '\033[7m \033[27m')
 case "$out" in *" fired session="*"escalations 1"*"new: escalation $ESC/20261027T090000Z-111.md"*) ok "new escalation fires, line names it";;

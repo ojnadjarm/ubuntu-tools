@@ -1,6 +1,6 @@
 # Back up the laptop to the USB stick, restore it, turn it off (fleet-backup)
 
-Ticket: T1580, T1597 · Last verified: 2026-11-10 by bin/tests/fleet-backup.test.sh (23/23) and one real run + restore
+Ticket: T1580, T1597, T1603 · Last verified: 2026-11-10 by bin/tests/fleet-backup.test.sh (24/24) and one real run + restore
 
 ## When to use
 Restore a file or the whole fleet state from the USB stick, check the nightly backup, change what it keeps.
@@ -62,6 +62,10 @@ copy (owner-todo, T1580). Lose both and the stick is unreadable.
   in env.sh / lib/agent_work.py). Both dirs are skipped as tier-2 candidates (backups would eat the budget; claims
   snapshots are tier 1). A fixture test that inherits the session's `AGENT_WORK` writes into the real dirs: tests
   set a fake `AGENT_WORK` too (moodle-keep and work-repo-guard tests leaked 2 dumps + 1 file before that).
+- T1603: more material left `~/agents` (`LIAISON_PAPERS`, `BENCH_PAPERS`, `PO_PAPERS`, `ASR_CORPUS` under `owner/` = tier 1,
+  `IMPROVE_PAPERS`, `CODE_REVIEW_PAPERS`, `GAMEDEV_PERF_DIR`). `$LIAISON_PAPERS/jobs` is one tier-2 entry per job (one
+  job folder is 9.7 G of rebuildable `target/`: it skips alone instead of taking the whole 14 G folder with it);
+  gamedev-perf left tier 1 (`agents/state`) for tier 2.
 - The single-file restore lands under the full path: `restore latest <abs path> /tmp/r` gives `/tmp/r<abs path>`.
 
 ## Links

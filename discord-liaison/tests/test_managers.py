@@ -54,7 +54,8 @@ class TestManagers(Base):
         self.fake.channels['460'] = dict(self.fake.channels['450'], id='460', name='Hola a todos')
         self.ran = os.path.join(self.tmp.name, 'ran')
         sh = dict(os.environ, HARNESS_HOME=self.home, HARNESS_ENV_LOADED='1', HARNESS_CONFIG='/dev/null',
-                  PATH=f'{BIN}:{os.environ["PATH"]}', AGENT_WORK=os.path.join(self.tmp.name, 'work'))
+                  PATH=f'{BIN}:{os.environ["PATH"]}', AGENT_WORK=os.path.join(self.tmp.name, 'work'),
+                  PO_PAPERS=os.path.join(self.tmp.name, 'work', 'po'))
         self.env.update(LIAISON_REGISTRY=reg, LIAISON_PO_HOME=self.home, LIAISON_AGENT_CMD=f'touch {self.ran}',
                         DISCORD_GENERAL_ID='999', LIAISON_PO_ASK=f'env HARNESS_HOME={self.home} HARNESS_ENV_LOADED=1 '
                                                                 f'HARNESS_CONFIG=/dev/null {BIN}/po-ask')

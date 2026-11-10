@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # usage: po-run <p> — the po@<p>.service body (no LLM): move the inbox to current/, run `agent-run po-<p>` once, file any
-# request the run left in current/ to done/ with an outcome line; repeat while the inbox refills (at most PO_MAX_LOOPS,
+# request the run left in current/ to $PO_PAPERS/<p>/done/ with an outcome line; repeat while the inbox refills (at most PO_MAX_LOOPS,
 # default 5; the path unit starts it again after that). One po-run per PO at a time: a second call exits 0 at once.
 # Each run gets PO_BUDGET=stop when `plan-usage --check 95` exits 1 (the PO then spawns no worker), else ok;
 # CHAT_SEAT=<p> lets the run post with `chat` (a manager only in its direct message with the owner, T1515 P34). For a
@@ -32,7 +32,8 @@ context() {
   { grep -v '^context: ' "$r" 2>/dev/null; po-context check "$1" 2>&1 | sed -n "s/^miss: $1: /context: /p"; } >"$r.tmp"
   mv "$r.tmp" "$r"
 }
-mkdir -p "$dir/current" "$dir/done"
+done_dir=$(po_done "$1")
+mkdir -p "$dir/current" "$done_dir"
 exec 9>"$dir/.po-run.lock"
 flock -n 9 || { echo "po-run: $name is already running; that run picks up new requests"; exit 0; }
 shopt -s nullglob
@@ -47,7 +48,7 @@ for _ in $(seq "${PO_MAX_LOOPS:-5}"); do
   [ -z "$parent" ] || { escalate; context "$1"; }
   for f in "$dir"/current/*.md; do
     printf '\noutcome: left in current/ by the run (agent-run exit %s); see REPORT.md\n' "$rc" >>"$f"
-    mv -n "$f" "$dir/done/"
+    mv -n "$f" "$done_dir/"
   done
 done
 exit "$rc"

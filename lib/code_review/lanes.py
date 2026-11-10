@@ -7,7 +7,7 @@ import os
 import re
 
 from .claims import claimed_by_others
-from .common import AREAS, AUDIT, BACKUPS, DATE, FIXTURE, HOME, QUEUE, RULES, STATE, SWARM, TOOLSMITH, rel, run_dir, test_exists
+from .common import AREAS, AUDIT, BACKUPS, DATE, FIXTURE, HOME, QUEUE, RULES, RUNS, STATE, SWARM, TOOLSMITH, rel, run_dir, test_exists
 from .evidence import usage
 from .policy import policy_rules
 from .report import SKIP_VERDICTS
@@ -109,7 +109,7 @@ def area_files(paths):
 def completed_runs():
     """Earlier runs whose swarm returned, oldest first: (prep time = args.json mtime, was it a full sweep)."""
     out = []
-    for d in glob.glob(os.path.join(STATE, 'runs', '*')):
+    for d in glob.glob(os.path.join(RUNS, '*')):
         try:
             res = json.load(open(os.path.join(d, 'result.json')))
             args = json.load(open(os.path.join(d, 'args.json')))

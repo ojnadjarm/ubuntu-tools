@@ -36,7 +36,7 @@ cp "$HOME/agents/maintenance/state/last-summary.txt" "$WORK.summary" 2>/dev/null
 run_mr() { # <switch value> <flags…>
   local v="$1"; shift
   printf 'HARNESS_HOST=fixture\nMAINT_AUTO_REBOOT=%s\n' "$v" >"$WORK/config.env"
-  HOME="$FH" HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" --assume-reboot --dry-run "$@" 2>&1
+  env -u PO_PAPERS -u LIAISON_PAPERS HOME="$FH" AGENT_WORK="$FH/agent-work" HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" --assume-reboot --dry-run "$@" 2>&1
 }
 
 # 1. MAINT_AUTO_REBOOT=0: refused first, by the owner switch, exit 3, push text names the hand reboot.
@@ -61,7 +61,7 @@ grep -q 'shutdown' "$CALLS" && nok 'switch=1 dry-run never calls shutdown' "$(ca
 
 # 2b. T347-10: the pending reboot itself never blocks the reboot; any other pc status FAIL does.
 gate_mr() { printf 'HARNESS_HOST=fixture\nMAINT_AUTO_REBOOT=1\n' >"$WORK/config.env"
-  HOME="$FH" HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" --assume-reboot --dry-run --dry-run-ignore-window 2>&1; }
+  env -u PO_PAPERS -u LIAISON_PAPERS HOME="$FH" AGENT_WORK="$FH/agent-work" HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" --assume-reboot --dry-run --dry-run-ignore-window 2>&1; }
 pcstub 'FAIL host.reboot_required: 11 d (linux-image)' 1
 out=$(gate_mr)
 { grep -q 'REBOOT REFUSED' <<<"$out" && ! grep -q 'pc-status-check' <<<"$out"; } \
@@ -191,12 +191,12 @@ pcstub 'OK fixture' 0
 # T1515-P30: uploads never posted are pruned through `chat prune --apply`, its line in the summary; a failure logs its rc.
 printf '#!/bin/sh\necho "chat $*" >>"%s"\ncase "$*" in "prune --apply") echo "chat: dropped 2 uploads never posted (10 bytes)" ;; esac\n' "$CALLS" >"$WORK/stub/chat"
 : >"$CALLS"
-HOME="$FH" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" >/dev/null 2>&1
+env -u PO_PAPERS -u LIAISON_PAPERS HOME="$FH" AGENT_WORK="$FH/agent-work" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" >/dev/null 2>&1
 has 'chat prune runs with --apply' "$(cat "$CALLS")" 'chat prune --apply'
 has 'chat prune line in the summary' "$(cat "$FH/agents/maintenance/state/last-summary.txt")" 'chat: dropped 2 uploads never posted (10 bytes)'
 has 'dry run only prints the chat prune' "$(run_mr 0)" 'would run: chat prune --apply'
 cp "$WORK/stub/chat" "$WORK/chat.ok"; printf '#!/bin/sh\nexit 5\n' >"$WORK/stub/chat"
-HOME="$FH" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" >/dev/null 2>&1
+env -u PO_PAPERS -u LIAISON_PAPERS HOME="$FH" AGENT_WORK="$FH/agent-work" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" >/dev/null 2>&1
 has 'chat prune failure logs its rc' "$(cat "$FH/agents/maintenance/state/last-summary.txt")" 'chat prune failed rc 5'
 mv "$WORK/chat.ok" "$WORK/stub/chat"
 
@@ -232,43 +232,43 @@ has 'uv busy: skipped in the summary' "$(cat "$FH/agents/maintenance/state/last-
 grep -q 'uv cache prune' "$CALLS" && nok 'uv busy: never prunes' "$(cat "$CALLS")" || ok 'uv busy: never prunes'
 printf '#!/bin/sh\nexit 1\n' >"$WORK/stub/pgrep"
 printf '#!/bin/sh\ncase "$*" in "cache dir") echo "%s/uvcache" ;; "cache prune"*) exit 2 ;; esac\nexit 0\n' "$WORK" >"$WORK/stub/uv"
-HOME="$FH" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" >/dev/null 2>&1
+env -u PO_PAPERS -u LIAISON_PAPERS HOME="$FH" AGENT_WORK="$FH/agent-work" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" >/dev/null 2>&1
 has 'uv prune failure logs its rc' "$(cat "$FH/agents/maintenance/state/last-summary.txt")" 'uv cache prune FAILED rc 2'
 rm -f "$WORK/stub/uv"
-HOME="$FH" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" >/dev/null 2>&1
+env -u PO_PAPERS -u LIAISON_PAPERS HOME="$FH" AGENT_WORK="$FH/agent-work" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" >/dev/null 2>&1
 has 'uv missing: skipped in the summary' "$(cat "$FH/agents/maintenance/state/last-summary.txt")" 'uv cache: skip: uv not on PATH'
 mv "$WORK/pgrep.ok" "$WORK/stub/pgrep"; mv "$WORK/uv.ok" "$WORK/stub/uv"; mv "$WORK/du.ok" "$WORK/stub/du"
 
 # 4g. T1546-G2: stale claims expire; seats (po-*, discord-liaison) drop done/, sent/, logs over 60 days and request images 7 days after done.
 printf '#!/bin/sh\necho "claims $*" >>"%s"\ncase "$*" in "expire --apply") echo "dropped: - T1 · x · 2026-01-01 00:00" ;; esac\n' "$CALLS" >"$WORK/stub/claims"
-S="$FH/agents/po-fix"; L="$FH/agents/discord-liaison"
-mkdir -p "$S/done" "$S/current" "$S/outbox/discord/sent" "$S/logs" "$S/state/images" "$L/logs"
+S="$FH/agents/po-fix"; L="$FH/agents/discord-liaison"; D="$FH/agent-work/po/fix/done"
+mkdir -p "$D" "$S/current" "$S/outbox/discord/sent" "$S/logs" "$S/state/images" "$L/logs"
 mk() { : >"$1"; touch -d "$2 days ago" "$1"; }
-mk "$S/done/r70.md" 70; mk "$S/state/images/r70-0.png" 70
-mk "$S/done/r10.md" 10; mk "$S/state/images/r10-0.png" 10; mk "$S/state/images/r10-1.jpg" 10
-mk "$S/done/r2.md" 2; mk "$S/state/images/r2-0.png" 9
+mk "$D/r70.md" 70; mk "$S/state/images/r70-0.png" 70
+mk "$D/r10.md" 10; mk "$S/state/images/r10-0.png" 10; mk "$S/state/images/r10-1.jpg" 10
+mk "$D/r2.md" 2; mk "$S/state/images/r2-0.png" 9
 mk "$S/current/rc.md" 20; mk "$S/state/images/rc-0.png" 20
 mk "$S/outbox/discord/sent/old.md" 61; mk "$S/outbox/discord/sent/new.md" 59
 mk "$S/logs/a.log" 70; mk "$S/logs/a.json" 70; mk "$S/logs/a.meta.json" 70; mk "$S/logs/index.tsv" 70; mk "$S/logs/b.log" 1
 mk "$L/logs/c.json" 90
-seatfiles() { (cd "$FH/agents" && find po-fix discord-liaison -type f | sort | tr '\n' ' '); }
+seatfiles() { (cd "$FH" && find agents/po-fix agents/discord-liaison agent-work/po -type f | LC_ALL=C sort | tr '\n' ' '); }
 before=$(seatfiles); : >"$CALLS"
 out=$(run_mr 0)
 has 'dry run only prints the claims expire' "$out" 'would run: claims expire --apply'
 has 'dry run counts what it would prune' "$out" 'seats 2: would prune 1 done, 1 sent, 4 logs, 3 images'
 is 'dry run deletes nothing in the seats' "$(seatfiles)" "$before"
 grep -q '^claims' "$CALLS" && nok 'dry run never calls claims' "$(cat "$CALLS")" || ok 'dry run never calls claims'
-HOME="$FH" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" >/dev/null 2>&1
+env -u PO_PAPERS -u LIAISON_PAPERS HOME="$FH" AGENT_WORK="$FH/agent-work" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" >/dev/null 2>&1
 sum=$(cat "$FH/agents/maintenance/state/last-summary.txt")
 has 'claims expire runs with --apply' "$(cat "$CALLS")" 'claims expire --apply'
 has 'claims count in the summary' "$sum" 'claims: expired 1'
 has 'seat counts in the summary' "$sum" 'seats 2: pruned 1 done, 1 sent, 4 logs, 3 images'
 is 'seat prune keeps the recent, the open and index.tsv' "$(seatfiles)" \
-  'po-fix/current/rc.md po-fix/done/r10.md po-fix/done/r2.md po-fix/logs/b.log po-fix/logs/index.tsv po-fix/outbox/discord/sent/new.md po-fix/state/images/r2-0.png po-fix/state/images/rc-0.png '
+  'agent-work/po/fix/done/r10.md agent-work/po/fix/done/r2.md agents/po-fix/current/rc.md agents/po-fix/logs/b.log agents/po-fix/logs/index.tsv agents/po-fix/outbox/discord/sent/new.md agents/po-fix/state/images/r2-0.png agents/po-fix/state/images/rc-0.png '
 printf '#!/bin/sh\nexit 6\n' >"$WORK/stub/claims"
-HOME="$FH" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" >/dev/null 2>&1
+env -u PO_PAPERS -u LIAISON_PAPERS HOME="$FH" AGENT_WORK="$FH/agent-work" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" >/dev/null 2>&1
 has 'claims expire failure logs its rc' "$(cat "$FH/agents/maintenance/state/last-summary.txt")" 'claims expire failed rc 6'
-rm -rf "$S" "$L"
+rm -rf "$S" "$L" "$FH/agent-work"
 
 # 5-6. The unit's chain (T116): env -i with agent@.service's environment, a parent that sources
 # fleetlib.sh like agent-run, then maintenance-run as a child, not dry, with a reboot pending.
@@ -307,7 +307,7 @@ ARGV="$WORK/notify.argv"
 printf '#!/bin/sh\nfor a; do printf "<%%s>" "$a"; done >>"%s"; echo >>"%s"\nexit 0\n' "$ARGV" "$ARGV" >"$WORK/stub/notify-owner"
 argv() { cat "$ARGV" 2>/dev/null; : >"$ARGV"; }
 printf '#!/bin/sh\necho "sudo $*" >>"%s"\ncase "$*" in *apt-get*) exit 100 ;; esac\nexit 0\n' "$CALLS" >"$WORK/stub/sudo"
-HOME="$FH" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" >/dev/null 2>&1
+env -u PO_PAPERS -u LIAISON_PAPERS HOME="$FH" AGENT_WORK="$FH/agent-work" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" >/dev/null 2>&1
 is 'site apt-failure: argv' "$(argv)" '<-t><maintenance><apt FAILED (rc 100) on fixture: see last-apt.log>'
 printf '#!/bin/sh\necho "sudo $*" >>"%s"\nexit 0\n' "$CALLS" >"$WORK/stub/sudo"
 unit_mr $'HARNESS_HOST=fixture\nMAINT_AUTO_REBOOT=0\n' bash "$BIN/maintenance-run" >/dev/null

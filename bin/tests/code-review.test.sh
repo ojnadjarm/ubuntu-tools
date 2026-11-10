@@ -75,7 +75,7 @@ fcr() { CR_HOME="$FH" cr "$@"; }
 T0=$(( $(date +%s) - 86400 ))
 done_run() { printf '{"found":0,"items":[]}\n' >"$(dirname "$1")/result.json"; touch -d "@$T0" "$1"; }
 fa="$(fcr prep)"; s0="$(jq -c '[.areas[].sweep] | unique' "$fa")"; done_run "$fa"
-find "$FH/agents" "$FH/.claude" -type f -exec touch -d "@$((T0 - 100))" {} +
+find "$FH/agents" "$FH/.claude" "$FH/agent-work/code-review" -type f -exec touch -d "@$((T0 - 100))" {} +
 touch -d "@$((T0 + 100))" "$FH/agents/bin/log-size"
 all="$(cd "$FH" && jq -r '.areas[].paths[]' "$fa" | sed "s|^$FH/||" | xargs find | while read -r p; do [ -f "$p" ] && [ ! -L "$p" ] && echo "$FH/$p"; done | sort)"
 reads=""; sw=""; rot=""
@@ -394,7 +394,7 @@ t "swarm: fix lanes inside one area never overlap"
 
 t "finish: an unverified 'fixed' is restored and deferred; 5 report lines; deliver pushes once"
 : >"$H/agents/code-review/REPORT.md"
-RD="$H/agents/code-review/state/runs/$RUN"; BR="$H/agent-work/backups/code-review/$RUN"
+RD="$H/agent-work/code-review/runs/$RUN"; BR="$H/agent-work/backups/code-review/$RUN"
 id() { jq -r --arg t "$1" '.items[] | select(.title == $t and (.merged_into|not)) | .id' <<<"$res"; }
 for t_ in 'label read before meta lands' '--json documented'; do mkdir -p "$BR/$(id "$t_")"; : >"$BR/$(id "$t_")/VERIFIED"; done
 D="$(id 'human_size copied')"; cr backup "$D" "$H/agents/bin/log-size" >/dev/null; echo '# unverified edit' >>"$H/agents/bin/log-size"
@@ -423,12 +423,12 @@ rm -f "$H/agent-work/backups/code-review/$RUN2/F03/VERIFIED"
 out="$(cr cleanup)"
 { ! grep -q '^- code-review-' "$H/agents/FILE-CLAIMS.md" && ! grep -q 'half-applied' "$H/agents/bin/orbit-lite" &&
   [ "$rv" = 0 ] && [ ! -e "$H/agents/bin/old-sweeper" ] &&
-  grep -q '2 unverified backup(s) restored' <<<"$out" && grep -q 'timeout or crash' "$H/agents/code-review/state/runs/$RUN2/findings.md"; } && ok || no "rv=$rv $vt / $out"
+  grep -q '2 unverified backup(s) restored' <<<"$out" && grep -q 'timeout or crash' "$H/agent-work/code-review/runs/$RUN2/findings.md"; } && ok || no "rv=$rv $vt / $out"
 
 t "redact: tokens and secret-looking values are masked in findings.md"
-printf '%s\n' '{"found":1,"items":[{"id":"F01","key":"k","file":"x","kind":"bug","title":"leak","verdict":"confirmed","status":"left","note":"token=abcdef123456 and sk-ant-api03-XXXXYYYYZZZZ"}]}' >"$H/agents/code-review/state/runs/$RUN2/result.json"  # push-ready: test vector
+printf '%s\n' '{"found":1,"items":[{"id":"F01","key":"k","file":"x","kind":"bug","title":"leak","verdict":"confirmed","status":"left","note":"token=abcdef123456 and sk-ant-api03-XXXXYYYYZZZZ"}]}' >"$H/agent-work/code-review/runs/$RUN2/result.json"  # push-ready: test vector
 cr finish >/dev/null
-f="$H/agents/code-review/state/runs/$RUN2/findings.md"
+f="$H/agent-work/code-review/runs/$RUN2/findings.md"
 ! grep -q 'abcdef123456\|sk-ant-api03' "$f" && grep -q 'redacted' "$f" && ok || no "$(grep leak -A2 "$f")"
 
 # T455: code-review reads the audit log through auditlib and redacts with the audit core; same fixture, same answer.
@@ -461,7 +461,7 @@ PY
 [ "$got" = "$want" ] && [ "$(jq '.[0]' <<<"$got")" = 3 ] && ok || no "code-review $got / auditlib $want"
 
 t "redact: findings.md masks 3 token shapes exactly as hooks/audit-log redact()"
-printf '{"found":1,"items":[{"id":"F01","key":"k","file":"x","kind":"bug","title":"leak","verdict":"confirmed","status":"left","note":"%s"}]}\n' "$TOK" >"$H/agents/code-review/state/runs/$RUN2/result.json"
+printf '{"found":1,"items":[{"id":"F01","key":"k","file":"x","kind":"bug","title":"leak","verdict":"confirmed","status":"left","note":"%s"}]}\n' "$TOK" >"$H/agent-work/code-review/runs/$RUN2/result.json"
 cr finish >/dev/null
 want="$(python3 - "$ROOT/hooks/audit-log.py" "$TOK" <<'PY'
 import importlib.util, sys
@@ -502,12 +502,12 @@ tsb() { cr backup "TSP-$1" "$TS/proposals/TSP-$1.md" "$TS/BACKLOG.md" >/dev/null
 tsb 103; printf '\n## Result\nlanded\n' >>"$TS/proposals/TSP-103.md"; sed -i 's/| auto-ok | proposed | x → y | 1 | 6 |/| auto-ok | measuring | x → y | 1 | 6 |/' "$TS/BACKLOG.md"
 tsb 101; sed -i 's/^- metric: m$/- metric: rewritten/' "$TS/proposals/TSP-101.md"
 jq -c '{found: 2, items: [.res.items[] | select(.id == "TSP-103")] + [.res.items[] | select(.id == "TSP-103") | .id = "TSP-101" | .key = "toolsmith|tsp-101"]}' \
-  <<<"$tmock" >"$H/agents/code-review/state/runs/$RUN3/result.json"
+  <<<"$tmock" >"$H/agent-work/code-review/runs/$RUN3/result.json"
 cr finish >/dev/null
 { grep -q '^## Result' "$TS/proposals/TSP-103.md" && grep -q '| TSP-103 | open and scoped | auto-ok | measuring |' "$TS/BACKLOG.md" &&
   grep -q '^- metric: m$' "$TS/proposals/TSP-101.md" && [ -f "$BR3/TSP-101/RESTORED" ] && [ ! -f "$BR3/TSP-103/RESTORED" ] &&
-  grep -q 'earlier lines of the proposal changed' "$H/agents/code-review/state/runs/$RUN3/findings.md"; } && ok ||
-  no "$(grep -A1 TSP-10 "$H/agents/code-review/state/runs/$RUN3/findings.md" | head -c 400)"
+  grep -q 'earlier lines of the proposal changed' "$H/agent-work/code-review/runs/$RUN3/findings.md"; } && ok ||
+  no "$(grep -A1 TSP-10 "$H/agent-work/code-review/runs/$RUN3/findings.md" | head -c 400)"
 
 t "snapshot/snapdiff: equal trees rc 0, one changed byte rc 1"
 cr snapshot "$WORK/a.json" "$H/agents/bin" >/dev/null; cr snapshot "$WORK/b.json" "$H/agents/bin" >/dev/null
@@ -528,12 +528,12 @@ t "swarm: null votes retried once (25 verify calls); 0 answers → unverified"
 
 t "finish: an unverified finding is recorded unverified, not refuted, and is not skipped"
 cr prep >/dev/null; RUN4="$(cat "$H/agents/code-review/state/current-run")"
-printf '%s\n' "$res" >"$H/agents/code-review/state/runs/$RUN4/result.json"
+printf '%s\n' "$res" >"$H/agent-work/code-review/runs/$RUN4/result.json"
 cr finish >/dev/null
 wk="$(jq -r '.items[] | select(.title == "walk is slow") | .key' <<<"$res")"
 { [ "$(jq -r --arg k "$wk" --arg r "$RUN4" 'select(.key == $k and .run == $r) | .verdict' "$H/agents/code-review/state/seen.jsonl")" = unverified ] &&
   [ "$(jq '.skip_verdicts | index("unverified")' "$(cr prep)")" = null ] &&
-  grep -q '^## Unverified' "$H/agents/code-review/state/runs/$RUN4/findings.md"; } && ok ||
+  grep -q '^## Unverified' "$H/agent-work/code-review/runs/$RUN4/findings.md"; } && ok ||
   no "$(grep -F "$wk" "$H/agents/code-review/state/seen.jsonl" | tail -1)"
 
 join focus_checks

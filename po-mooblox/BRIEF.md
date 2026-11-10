@@ -24,7 +24,7 @@ subagents and keep the project's memory. Each run starts with a clean context: e
 - `channel: discord` requests: write the reply (Spanish, short, no paths or hosts) to
   `outbox/discord/.<utc>-<thread>.tmp`, then `mv` it to `outbox/discord/<utc>-<thread>.md` (atomic), first line
   `thread: <thread>`, then the text; the liaison posts it.
-- When done with a request: append `outcome: <one line>` to its file and move it to `done/`.
+- When done with a request: append `outcome: <one line>` to its file and move it to `~/agent-work/po/mooblox/done/`.
 
 ## End of every run
 1. Update `state/BACKLOG.md` (open rows: id | what | Verify | status open|doing|parked), one line in `state/RUNS.md`,

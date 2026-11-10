@@ -52,7 +52,7 @@ class TestHire(unittest.TestCase):
                 f.write(f'#!/bin/sh\n{body}\n')
             os.chmod(os.path.join(fake, name), 0o755)
         self.env = dict(os.environ, HARNESS_HOME=self.home, HARNESS_ENV_LOADED='1', HARNESS_CONFIG='/dev/null',
-                        PATH=f'{BIN}:{os.environ["PATH"]}', AGENT_WORK=os.path.join(t, 'work'), LIAISON_REGISTRY=self.reg,
+                        PATH=f'{BIN}:{os.environ["PATH"]}', AGENT_WORK=os.path.join(t, 'work'), PO_PAPERS=os.path.join(t, 'work', 'po'), LIAISON_REGISTRY=self.reg,
                         LIAISON_PO_HOME=self.home, LIAISON_HOME=os.path.join(t, 'liaison'), ORG_FILE=self.org,
                         PC=f'{fake}/pc', SYSTEMCTL=f'{fake}/systemctl', CHAT=f'{fake}/chat')
         self.env.pop('CHAT_SEAT', None)

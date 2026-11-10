@@ -9,14 +9,14 @@ Not for per-turn voice latency (use `eye-latency`).
 
 ## The path we took
 `bin/improve-meter` is a read-only Python script: it prints a header and one TSV row over the last 24 h.
-`--append` writes that row to `~/agents/improve/metrics.tsv`, replacing a row of the same date.
+`--append` writes that row to `$IMPROVE_PAPERS/metrics.tsv` (~/agent-work/improve, T1603), replacing a row of the same date.
 `improve-meter.timer` runs `improve-meter.service` (`improve-meter --append`) daily at 06:45 (`Persistent=true`), enabled since 2026-10-13 (CR-004); units in `~/.config/systemd/user/`.
 
 ## Exact commands
 ```bash
 improve-meter                     # print header + today's row
 improve-meter --idle off          # skip the 60 s `pc idle` sample
-improve-meter --append            # store the row in improve/metrics.tsv
+improve-meter --append            # store the row in $IMPROVE_PAPERS/metrics.tsv
 bash ~/agents/bin/tests/improve-meter.test.sh
 ```
 

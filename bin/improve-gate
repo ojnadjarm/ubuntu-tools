@@ -2,7 +2,7 @@
 """Class gate for the improve queue: derive a proposal's class, validate queue items, import toolsmith TSPs."""
 import argparse, os, re, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), 'lib'))
-from agent_work import toolsmith_papers  # noqa: E402
+from agent_work import improve_papers, toolsmith_papers  # noqa: E402
 
 HOME = os.path.expanduser('~')
 AGENTS = os.environ.get('AGENTS_HOME', os.path.join(HOME, 'agents'))
@@ -141,8 +141,8 @@ def check(path):
 def rollback_for(cls, paths):
     files = ', '.join(p for p in paths if not p.startswith(PATH_IGNORE)) or 'the touched files'
     if cls == 'owner-reboot':
-        return f'boot the stock GRUB entry; restore improve/saved/<id>/ over {files}; update-initramfs -u if modprobe.d changed'
-    base = f'restore improve/saved/<id>/ over {files}; delete files the change created'
+        return f'boot the stock GRUB entry; restore $IMPROVE_PAPERS/saved/<id>/ over {files}; update-initramfs -u if modprobe.d changed'
+    base = f'restore $IMPROVE_PAPERS/saved/<id>/ over {files}; delete files the change created'
     return base + ('; disable and remove any unit it added' if cls == 'owner-go' else '')
 
 
@@ -183,15 +183,15 @@ def main():
     i = sub.add_parser('import', help='import open toolsmith TSPs into the queue')
     i.add_argument('--from', dest='src', default=os.path.join(toolsmith_papers(), 'proposals'))
     i.add_argument('--backlog', default=os.path.join(toolsmith_papers(), 'BACKLOG.md'))
-    i.add_argument('--to', dest='dest', default=os.path.join(AGENTS, 'improve/queue'))
+    i.add_argument('--to', dest='dest', default=os.path.join(improve_papers(), 'queue'))
     a = ap.parse_args()
     if a.cmd == 'class':
         for f in a.files:
             cls, why = classify(open(f).read())
             print(f'{f}\t{cls}\t{"; ".join(why)}')
     elif a.cmd == 'check':
-        files = a.files or sorted(os.path.join(AGENTS, 'improve/queue', f)
-                                  for f in os.listdir(os.path.join(AGENTS, 'improve/queue')) if f.endswith('.md'))
+        queue = os.path.join(improve_papers(), 'queue')
+        files = a.files or sorted(os.path.join(queue, f) for f in os.listdir(queue) if f.endswith('.md'))
         bad = 0
         for f in files:
             errs = check(f)

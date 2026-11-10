@@ -21,17 +21,19 @@ Prints the header and one row, all numbers read over the last 24 h:
   corpus_wer_pct  pooled word error of the ASR corpus after the Eye's corrector (%)
   idle_psys_w     median psys watts of `pc idle --seconds 60`; auto = only when
                   `pcbench away` says the owner is away, else '-'
---append writes the row to improve/metrics.tsv, replacing a row of the same date.
+--append writes the row to $IMPROVE_PAPERS/metrics.tsv, replacing a row of the same date.
 Read-only apart from --append. Paths and commands can be overridden with IMPROVE_* (see the test)."""
 
 HOME = os.path.expanduser("~")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
+from agent_work import asr_corpus, improve_papers  # noqa: E402
 AGENTS = os.environ.get("IMPROVE_AGENTS", HOME + "/agents")
 PROJECTS = os.environ.get("IMPROVE_PROJECTS", HOME + "/.claude/projects")
 ORCH = os.path.join(PROJECTS, HOME.replace("/", "-"))
-CORPUS = os.environ.get("IMPROVE_CORPUS", AGENTS + "/asr-corpus")
+CORPUS = os.environ.get("IMPROVE_CORPUS", asr_corpus())
 CORRECTOR = os.environ.get("IMPROVE_CORRECTOR", HOME + "/the-dark-eye/body/src/correct.js")
 DASHBOARD = os.environ.get("IMPROVE_DASHBOARD", HOME + "/agents/dashboard")
-METRICS = os.environ.get("IMPROVE_METRICS", AGENTS + "/improve/metrics.tsv")
+METRICS = os.environ.get("IMPROVE_METRICS", os.path.join(improve_papers(), "metrics.tsv"))
 PC = os.environ.get("IMPROVE_PC", "pc")
 PCBENCH = os.environ.get("IMPROVE_PCBENCH", "pcbench")
 NOW = float(os.environ.get("IMPROVE_NOW") or time.time())

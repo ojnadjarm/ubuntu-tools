@@ -6,7 +6,8 @@ BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FIX="$BIN/tests/fixtures/pcbench"
 PB="$BIN/pcbench"
 fail=0
-for d in "$HOME/agents/bench/arms/new" "$HOME/agents/bench/arms/old"; do
+BP=$(. "$BIN/env.sh"; printf %s "$BENCH_PAPERS")
+for d in "$BP/arms/new" "$BP/arms/old"; do
   [ -d "$d" ] || { echo "pcbench.test.sh: SKIP owner data absent: $d (bench/arms/build-*.sh)"; exit 0; }
 done
 # Two suites at once (parallel agents) would race on bench/.lock and the shared fixture root.
@@ -96,11 +97,11 @@ o6() { # o6 <tool_result of the loop call, JSON>
     } > "$O6/s.jsonl"; echo '{"passed":21,"failed":1}' > "$O6/a.json"
     printf '%s %s' "$(bash check.sh "$O6/a.json" "$O6/s.jsonl" | jq -c '[.pass,.score]')" "$("$PB" parse "$O6/s.jsonl" --arm new | jq -c .hook_denied)"; rm -rf "$STATE" )
 }
-O6=$(mktemp -d); mkdir -p "$O6/run"; RUNS0=$(stat -c %Y "$HOME/agents/bench/runs" 2>/dev/null)
+O6=$(mktemp -d); mkdir -p "$O6/run"; RUNS0=$(stat -c %Y "$BP/runs" 2>/dev/null)
 t "O06 denied loop then wait-for: 0.5 pass";   eq den "$(o6 '{"type":"tool_result","tool_use_id":"a","is_error":true,"content":"PreToolUse:Bash hook error: sleep-loop-block: hand-written wait loop denied"}')" '[1,0.5] 1'
 t "O06 a loop that ran fails";                 eq ran "$(o6 '{"type":"tool_result","tool_use_id":"a","content":"done"}')" '[0,null] 0'
 t "O06 a loop that ran and errored fails";     eq rne "$(o6 '{"type":"tool_result","tool_use_id":"a","is_error":true,"content":"Exit code 124"}')" '[0,null] 0'
-t "TSP-057 selftest: bench/runs untouched";    eq br "$(stat -c %Y "$HOME/agents/bench/runs" 2>/dev/null)" "$RUNS0"
+t "TSP-057 selftest: bench/runs untouched";    eq br "$(stat -c %Y "$BP/runs" 2>/dev/null)" "$RUNS0"
 rm -rf "$O6"
 # TSP-050: an active CI unit reads as present (stub pc, systemctl and claude; no real unit or session is read).
 AW=$(mktemp -d); printf '#!/bin/sh\necho %s\n' "'"'{"sections":{"desktop":{"lock":{"value":"locked"}},"power":{"lid":{"value":"closed"}}}}'"'" > "$AW/pc"

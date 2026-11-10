@@ -4,8 +4,10 @@ from datetime import datetime
 from dash.cache import lock
 from dash.env import HERE, HOME
 from dash.routes import route
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "lib"))
+from agent_work import asr_corpus  # noqa: E402
 
-CORPUS = os.path.join(HOME, "agents", "asr-corpus")
+CORPUS = asr_corpus()
 PROMPTS_FILE = os.path.join(HERE, "voice_prompts.json")
 CLIP_ID = re.compile(r"^\d{8}-\d{6}-[a-z0-9]{4}$")
 CLIP_MAX = 32 << 20

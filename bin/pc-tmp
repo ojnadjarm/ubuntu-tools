@@ -16,7 +16,7 @@ Lists KIND PATH MB AGE REASON for what is safe to delete from $PC_TMP_ROOT (defa
   build     remotion-webpack-bundle-* and cc*.ltrans* idle > 24 h
   daemon    watchman whose TMPDIR is a dir under the root, gone or idle > 1 h (PATH = that TMPDIR,
             MB = RSS); --apply sends TERM, the git fsmonitor hook starts one again on demand
-  job       in $PC_TMP_JOBS/<id>/ (default ~/agents/discord-liaison/state/jobs, disk) whose job.json is
+  job       in $PC_TMP_JOBS/<id>/ (default $LIAISON_PAPERS/jobs, disk) whose job.json is
             done|superseded|failed|stale and ended > 48 h ago: node_modules, .venv (pyvenv.cfg) and
             target (CACHEDIR.TAG) directories
   job-frames  same jobs: a subdirectory holding >= 50 png/jpg/jpeg/wav files; --apply deletes those
@@ -29,7 +29,7 @@ a path still present after rm -rf is named on stderr and exits 1; nothing to rol
 PC_SUB='pc tmp'; PC_EXTRA_FLAGS=(--if-over:)
 pc_opt "$@"
 # A fixture root never reads the real job store.
-[ -n "${PC_TMP_ROOT-}" ] || : "${PC_TMP_JOBS=$HOME/agents/discord-liaison/state/jobs}"
+[ -n "${PC_TMP_ROOT-}" ] || : "${PC_TMP_JOBS=$LIAISON_PAPERS/jobs}"
 : "${PC_TMP_ROOT:=/tmp}" "${PC_TMP_HISTORY:=$HOME/agent-work/history.md}" "${PC_TMP_CLAIMS:=$HOME/agents/FILE-CLAIMS.md}"
 ROOT=$(readlink -f -- "$PC_TMP_ROOT")
 case $ROOT in /tmp|/tmp/*) ;; *) echo "pc tmp: refused, PC_TMP_ROOT must be under /tmp ($ROOT)" >&2; exit 2;; esac

@@ -11,10 +11,12 @@ from datetime import datetime, timezone
 
 HOME = os.path.expanduser("~")
 BENCH = os.path.join(HOME, "agents", "bench")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
+from agent_work import bench_papers  # noqa: E402
 TASKS = os.path.join(BENCH, "tasks")
-ARMS = os.environ.get("PCBENCH_ARMS", os.path.join(BENCH, "arms"))
+ARMS = os.environ.get("PCBENCH_ARMS", os.path.join(bench_papers(), "arms"))
 ARM_SCRIPTS = os.path.join(BENCH, "arms")   # build-*.sh / exec.sh live with the bench, not the arm
-RUNS = os.path.join(BENCH, "runs")
+RUNS = os.path.join(bench_papers(), "runs")
 HELPERS = os.path.join(HOME, "agents", "bin", "pcbench.d")
 LOCK = os.environ.get("PCBENCH_LOCK", os.path.join(BENCH, ".lock"))
 PREAMBLE = os.path.join(BENCH, "TRIAL-PREAMBLE.md")

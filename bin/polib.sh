@@ -2,8 +2,9 @@
 # polib.sh — shared helpers for the po-* CLIs (product-owner agents, T1412). Source it, never execute it.
 #   po_dir <cli> <p>   print ~/agents/po-<p> (HARNESS_HOME); exit 2 with a message unless it is a PO folder
 #   po_list            print every PO name, one per line
+#   po_done <p>        print $PO_PAPERS/<p>/done, where finished requests go (T1603)
 # shellcheck source=/dev/null
-[ -n "${HARNESS_ENV_LOADED:-}" ] || . "$(dirname "${BASH_SOURCE[0]}")/env.sh"
+[ -n "${HARNESS_ENV_LOADED:-}" ] && [ -n "${PO_PAPERS:-}" ] || . "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 : "${HARNESS_HOME:=$HOME/agents}"
 
 po_dir() {
@@ -20,3 +21,5 @@ po_list() {
     [ -r "$d/BRIEF.md" ] && [ -d "$d/inbox" ] && basename "$d" | sed 's/^po-//'
   done
 }
+
+po_done() { printf '%s\n' "$PO_PAPERS/$1/done"; }

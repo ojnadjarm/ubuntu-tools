@@ -7,7 +7,7 @@ export LC_ALL=C
 . "$HOME/agents/bin/env.sh"
 
 BENCH="${PCBENCH_WEEKLY_BENCH:-$HOME/agents/bench}"
-STATE="${PCBENCH_WEEKLY_STATE:-$BENCH/state}"
+STATE="${PCBENCH_WEEKLY_STATE:-$BENCH_PAPERS/state}"
 STREAK="$STATE/weekly-skips"
 LOG="${PCBENCH_WEEKLY_LOG:-$HOME/agents/log/pcbench-weekly.log}"
 TRIALS="${PCBENCH_WEEKLY_N:-3}"
@@ -28,7 +28,7 @@ bench/BASELINE-PCBENCH.md and bench/LAST.json.
 
 Env: PCBENCH_WEEKLY_N, PCBENCH_WEEKLY_MODEL, PCBENCH_AWAY_IDLE_S,
      PCBENCH_WEEKLY_STATE, PCBENCH_WEEKLY_LOG, PCBENCH_WEEKLY_BENCH.
-Log: ~/agents/log/pcbench-weekly.log · skip streak: bench/state/weekly-skips
+Log: ~/agents/log/pcbench-weekly.log · skip streak: $BENCH_PAPERS/state/weekly-skips
 USAGE
     exit 0;;
 esac

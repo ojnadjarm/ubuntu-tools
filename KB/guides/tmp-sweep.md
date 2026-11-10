@@ -21,7 +21,7 @@ systemctl --user list-timers pc-tmp.timer   # next scheduled sweep
 pc-tmp.timer/pc-tmp.service run `pc tmp --apply` daily at 03:30 and `pc tmp --apply --if-over 2G` hourly
 outside 03:xx; maintenance-run also calls `pc tmp --apply` each run (weekly, Sun 04:00).
 
-Kinds `job` and `job-frames` (T1499, TSP-059) reach outside /tmp: `~/agents/discord-liaison/state/jobs/<id>` whose
+Kinds `job` and `job-frames` (T1499, TSP-059) reach outside /tmp: `$LIAISON_PAPERS/jobs/<id>` whose
 job.json is done, superseded, failed or stale, ended > 48 h ago, with no open fd. `job` removes `node_modules`,
 `.venv` and Cargo `target` dirs; `job-frames` deletes the png/jpg/jpeg/wav files of a subdirectory holding >= 50
 of them (never the job root, never mp4 or sources). `PC_TMP_JOBS=<dir>` overrides the store.

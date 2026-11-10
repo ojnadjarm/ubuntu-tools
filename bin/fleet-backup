@@ -98,7 +98,9 @@ newest_dumps() {
 tier2_candidates() {
   local e d
   [ -d "$AGENT_WORK" ] && kids "$AGENT_WORK" | while read -r e; do
-    case "$e" in "$CLAIMS_SNAP"|"$FLEET_BACKUPS_DIR") continue ;; esac
+    case "$e" in "$CLAIMS_SNAP"|"$FLEET_BACKUPS_DIR") continue ;;
+      "$LIAISON_PAPERS") kids "$e" | while read -r d; do [ "$d" = "$e/jobs" ] && kids "$d" || printf '%s\n' "$d"; done; continue ;;
+    esac
     case "${e##*/}" in history.md|README.md|briefs|decisions|owner|tmp|scratch) ;;
       research) kids "$e" | while read -r d; do kids "$d"; done ;;
       evidence|archive) kids "$e" ;;

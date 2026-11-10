@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Build the OLD arm (2026-09-06 evening, reconstructed) under ~/agents/bench/arms/old/.
+# Build the OLD arm (2026-09-06 evening, reconstructed) in the dir pcbench passes ($BENCH_PAPERS/arms/old).
 # bin: a copy of `pc` + symlinks to the 22 pre-PT02 subcommands and their helpers; every
 # pc-* created by PT02-PT16 is absent. KB/skills: the live docs with the PT-era sections
-# stripped (PLAN-PCBENCH 2.7). Nothing outside ~/agents/bench/ is written.
+# stripped (PLAN-PCBENCH 2.7). Nothing outside that dir is written.
 set -euo pipefail
 SRC="${PCBENCH_SRC:-$HOME/agents}"
 SRC_BIN="$SRC/bin"; SRC_KB="$SRC/KB"
 SRC_SKILL="${PCBENCH_SRC_SKILL:-$HOME/.claude/skills/desktop}"
 SRC_RD="$SRC/README-pc-control.md"
-ARM="${1:-$SRC/bench/arms/old}"
+ARM="${1:?usage: build-old.sh <arm dir> (pcbench arm build --arm old passes it)}"
 
 OLD_SUBS=(a11y-click click click-text clip drag find key mode move notify open scroll see
           selftest shot spotify status tree type wait wait-for win)
