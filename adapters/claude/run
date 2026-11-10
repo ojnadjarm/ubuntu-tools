@@ -6,6 +6,10 @@ set -uo pipefail
 # TSP-013: headless runs load no MCP servers, no auto-memory, only $AGENT_TOOLS, and skip the
 # orchestrator's ~/CLAUDE.md; the fleet contract arrives once, through $SYSTEM_FILE.
 export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
+# E3: no PASSWORD/TOKEN/SECRET variable reaches the model unless AGENT_ENV_KEEP (agent.env) names it.
+for v in $(compgen -e); do
+  [[ $v =~ PASSWORD|TOKEN|SECRET && " ${AGENT_ENV_KEEP:-} " != *" $v "* ]] && unset "$v"
+done
 cmd=(claude -p "$(cat "$PROMPT_FILE")" --model "$MODEL" --permission-mode bypassPermissions
      --strict-mcp-config --tools "${AGENT_TOOLS:-Bash,Read,Edit,Write}"
      --settings "{\"claudeMdExcludes\":[\"$HOME/CLAUDE.md\"]}")

@@ -102,5 +102,20 @@ is "gemini/audit-from-stream rows" "$(jq -c '[.tool,.op,.summary,.cwd,.session,.
 '["Bash","ls -la","ls -la /tmp","/work/g","gemini-s","t588"]
 ["Grep","Grep TODO","TODO","/env/cwd","envsess1","t588"]'
 
+# claude/run (T1546-G1): a stub `claude` sees no PASSWORD/TOKEN/SECRET name unless AGENT_ENV_KEEP lists it.
+mkdir -p "$tmp/bin"
+printf '#!/usr/bin/env bash\nenv | cut -d= -f1 | sort >"%s"\necho %s\n' "$tmp/stub.env" \
+  "'{\"type\":\"result\",\"result\":\"done\"}'" >"$tmp/bin/claude"
+chmod +x "$tmp/bin/claude"
+echo hi >"$tmp/prompt"
+stub_run() { env PATH="$tmp/bin:$PATH" PROMPT_FILE="$tmp/prompt" MODEL=stub RAW_OUT="$tmp/raw" META_OUT="$tmp/meta" \
+  X_PASSWORD=1 X_TOKEN=1 MY_SECRET_KEY=1 X_PLAIN=1 "$@" "$A/claude/run"; }
+is "claude/run with the stub prints the result" "$(stub_run)" done
+is "claude/run drops PASSWORD/TOKEN/SECRET names" "$(grep -cE 'PASSWORD|TOKEN|SECRET' "$tmp/stub.env")" 0
+grep -qx X_PLAIN "$tmp/stub.env" && ok "claude/run keeps other names" || nok "claude/run keeps other names" "X_PLAIN missing"
+stub_run AGENT_ENV_KEEP="X_PASSWORD MY_SECRET_KEY" >/dev/null
+is "claude/run keeps the names in AGENT_ENV_KEEP" "$(grep -E 'PASSWORD|TOKEN|SECRET' "$tmp/stub.env" | tr '\n' ' ')" \
+  "MY_SECRET_KEY X_PASSWORD "
+
 is "the real ~/.claude/settings.json is untouched" "$(real_sha)" "$real_before"
 exit $bad
