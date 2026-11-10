@@ -1,4 +1,4 @@
-"""Agent org seats from org.json (T1515): load, validate, parent, may_assign."""
+"""Agent org seats from org.json (T1515): load, validate, parent, may_assign, seat_at."""
 import json
 import os
 
@@ -53,6 +53,14 @@ def seats(p=None):
         out = json.load(f)["seats"]
     _validate(out)
     return out
+
+
+def seat_at(cwd, seat_list):
+    """The seat whose folder holds cwd (deepest wins; the ~ catch-all never), by string only: nothing is stat'd."""
+    cwd = os.path.normpath(cwd)
+    held = [(len(f), s["id"]) for s in seat_list if s["match"] and s["match"] != "~"
+            for f in [os.path.normpath(os.path.expanduser(s["match"]))] if cwd == f or cwd.startswith(f + "/")]
+    return max(held)[1] if held else None
 
 
 def _seat(seat_id, p=None):

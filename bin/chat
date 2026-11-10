@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""chat — the fleet chat for agents: post, read, ask and answer harness questions; the seat is $CHAT_SEAT."""
+"""chat — the fleet chat for agents: post, read, ask and answer harness questions; the seat is $CHAT_SEAT or the cwd's seat folder."""
 import argparse
 import os
 import re
@@ -30,11 +30,11 @@ SEEN = re.compile(r"\n\(guides seen: [^)\n]*\)$")
 ALL = 10 ** 6
 
 
-def seat_of(seats):
-    """The posting seat from $CHAT_SEAT: an org seat that is not the owner."""
-    seat = os.environ.get("CHAT_SEAT", "")
+def seat_of(seats, cwd):
+    """The posting seat: $CHAT_SEAT, else the seat whose folder holds cwd; never the owner."""
+    seat = os.environ.get("CHAT_SEAT") or org.seat_at(cwd, seats)
     if not seat:
-        raise ValueError("CHAT_SEAT is not set")
+        raise ValueError("CHAT_SEAT is not set and no seat folder holds the cwd")
     if seat == "owner":
         raise ValueError("the owner writes from the panel, not as CHAT_SEAT=owner")
     if seat not in {s["id"] for s in seats}:
@@ -352,13 +352,18 @@ def main():
     s.add_argument("--days", type=float, default=2, help="minimum age in days (default 2)")
     s.add_argument("--apply", action="store_true", help="delete them")
     a = p.parse_args()
+    cwd = os.readlink("/proc/self/cwd")
+    if getattr(a, "file", None):
+        a.file = [os.path.join(cwd, f) for f in a.file]
+    os.chdir("/")
+    os.environ["PWD"] = "/"
     try:
         if a.cmd in ("pause", "resume"):
             return switch(a)
         if a.cmd == "prune":
             return prune(a)
         seats = org.seats()
-        return {"post": post, "read": read, "search": search, "ask": ask, "answer": answer}[a.cmd](a, seat_of(seats), seats)
+        return {"post": post, "read": read, "search": search, "ask": ask, "answer": answer}[a.cmd](a, seat_of(seats, cwd), seats)
     except ValueError as e:
         print(f"chat: {e}", file=sys.stderr)
         return 2

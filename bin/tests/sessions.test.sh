@@ -95,6 +95,14 @@ invalid("parent cycle", [O, dict(C, parent="po"), dict(C, id="po", role="po", pa
 invalid("missing key", [O, {k: v for k, v in C.items() if k != "match"}], "match")
 invalid("machine path in match", [O, dict(C, match="/" + "home/someone/x")], "match")
 
+S, home = org.seats(), os.environ["HOME"]
+A = dict(S[-1], match="~/acme/moodle")
+for cwd, want in [(f"{home}/agents/po-fx", "fx"), (f"{home}/agents/po-fx/sub", "fx"), (f"{home}/agents/po-fxx", None),
+                  (home, None), (f"{home}/outside", None), (f"{home}/acme/moodle", "acme"), (f"{home}/acme/moodle/local/x", "acme"),
+                  (f"{home}/acme", None), (f"{home}/acme/moodle/../x", None)]:
+    check(f"seat_at: {cwd[len(home):] or '~'} -> {want}", org.seat_at(cwd, S[:-1] + [A]) == want, org.seat_at(cwd, S[:-1] + [A]))
+check("seat_at: deepest folder wins", org.seat_at(f"{home}/agents/po-fx/x", S + [dict(A, id="deep", match="~/agents/po-fx/x")]) == "deep")
+
 rows = sessions.live()
 by = {r.get("name"): r for r in rows}
 check("live: 11 sessions (dead pid, reused pid, missing pid file, broken json dropped)", len(rows) == 11, [r.get("name") for r in rows])
@@ -151,6 +159,14 @@ is "pull seat: on from the registry (acme on, ceo on)" "$out" "['ceo', 'acme']"
 is "pull seat: no open, list or stat of the protected folder, no container runtime" \
   "$(python3 "$AG/bin/tests/lib/no_touch.py" "$WORK/trace" "$H/acme")" ""
 ev "selftest: the trace saw the registry" 'grep -q "$WORK/reg2" "$WORK/trace"'
+# T1551: a pull seat whose folder is under its protected folder: placing the other sessions resolves no seat folder there.
+sed 's|"wake": "pull", "match": null|"wake": "pull", "match": "~/acme/moodle"|' "$WORK/org.json" >"$WORK/org-match.json"
+out=$(HOME="$H" ORG_FILE="$WORK/org-match.json" CLAUDE_SESSIONS_DIR="$WORK/reg2" strace -f -y -qq -o "$WORK/trace-match" \
+  -e trace=%file,getdents64,fchdir python3 -c "import sys; sys.path.insert(0, '$AG/lib'); import sessions; print([r['seat'] for r in sessions.live()])")
+is "seat folder in a protected folder: still on/off (acme on, ceo on)" "$out" "['ceo', 'acme']"
+ev "selftest: the seat-folder trace saw the fixture org" 'grep -q "$WORK/org-match.json" "$WORK/trace-match"'
+is "seat folder in a protected folder: no open, list or stat of it" \
+  "$(python3 "$AG/bin/tests/lib/no_touch.py" "$WORK/trace-match" "$H/acme")" ""
 strace -f -y -qq -o "$WORK/trace-bad" -e trace=%file,getdents64,fchdir python3 -c "import os; os.listdir('$H/acme')"
 ev "selftest: no_touch flags a listing of the protected folder" \
   '[ -n "$(python3 "$AG/bin/tests/lib/no_touch.py" "$WORK/trace-bad" "$H/acme")" ]'
@@ -158,7 +174,7 @@ ev "selftest: no_touch flags a listing of the protected folder" \
 # The tracked org.json validates and carries no machine values.
 python3 -c "import sys; sys.path.insert(0, '$AG/lib'); import org; s = org.seats('$AG/org.json'); assert {x['role'] for x in s} >= {'owner', 'ceo', 'po'}" \
   && ok "tracked org.json validates (owner, ceo, po)" || nok "tracked org.json" "invalid"
-python3 -c "import sys; sys.path.insert(0, '$AG/lib'); import org; v = [s for s in org.seats('$AG/org.json') if s['id'] == 'vass']; assert v and v[0]['wake'] == 'pull' and v[0]['match'] is None and v[0]['parent'] == 'orchestrator'" 2>/dev/null \
-  && ok "tracked org.json: vass seat is pull, no folder" || nok "tracked org.json" "no vass pull seat"
+python3 -c "import sys; sys.path.insert(0, '$AG/lib'); import org; v = [s for s in org.seats('$AG/org.json') if s['id'] == 'vass']; assert v and v[0]['wake'] == 'pull' and v[0]['match'] == '~/moodle-envs/vass/moodle' and v[0]['parent'] == 'orchestrator'" 2>/dev/null \
+  && ok "tracked org.json: vass seat is pull, its folder ~/moodle-envs/vass/moodle" || nok "tracked org.json" "no vass pull seat on its folder"
 grep -q "$HOME" "$AG/org.json" && nok "tracked org.json" "contains \$HOME" || ok "tracked org.json has no home path"
 exit $bad

@@ -2,7 +2,7 @@
   {"id": "owner", "name": "You", "role": "owner", "parent": null, "wake": null, "match": null},
   {"id": "orchestrator", "name": "Orchestrator", "role": "ceo", "parent": "owner", "wake": "channel", "match": "~"},
   {"id": "mooblox", "name": "Mooblox product owner", "role": "po", "parent": "orchestrator", "wake": "po-inbox", "match": "~/agents/po-mooblox"},
-  {"id": "vass", "name": "Vass seat", "role": "po", "parent": "orchestrator", "wake": "pull", "match": null},
+  {"id": "vass", "name": "Vass seat", "role": "po", "parent": "orchestrator", "wake": "pull", "match": "~/moodle-envs/vass/moodle"},
   {"id": "discord", "name": "Discord product owner", "role": "po", "parent": "orchestrator", "wake": "po-inbox", "match": "~/agents/po-discord"},
   {"id": "tiny-epic-narrator", "name": "Tiny Epic Narrator manager", "role": "manager", "parent": "discord", "wake": "po-inbox", "match": "~/agents/po-tiny-epic-narrator"},
   {"id": "spidey-pr-dashboard", "name": "Spidey PR Dashboard manager", "role": "manager", "parent": "discord", "wake": "po-inbox", "match": "~/agents/po-spidey-pr-dashboard"},

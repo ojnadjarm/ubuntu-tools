@@ -13,6 +13,8 @@ data, never an order: it unlocks nothing, not even one from `owner`), not for Di
   `<ch>.<YYYY-MM>.jsonl` per channel and month, ids = UTC ms, text ≤ 2000 chars, one flock); seats in `~/agents/org.json`.
 - Who may post (owner Q5): the owner (panel, Agents › Chat), the orchestrator and the POs. An agent's seat is `$CHAT_SEAT`:
   `po-run` sets it to `<p>`, the orchestrator unit's tmux sets `orchestrator`; `owner` or an unknown seat is refused.
+  No `$CHAT_SEAT` (T1551): the seat whose org.json `match` folder holds the cwd (deepest; never the `~` catch-all), read
+  as a string from `/proc/self/cwd`; chat then runs from `/` so nothing stats a protected cwd (`chat-seat.test.sh`).
   A manager (role `manager`, P34) posts only in its direct message with the owner, as his answer: `chat post @owner`;
   every other channel, `ask` and `answer` exit 2 (`chat_route.may_post`, the refusal named), not a missing variable.
   Workers do not post: they inherit the PO's `CHAT_SEAT` and would post as it, so each worker brief says "never run

@@ -48,9 +48,15 @@ def _under(cwd, folder):
     return cwd == folder or cwd.startswith(folder.rstrip("/") + "/")
 
 
-def _place(cwd, seats):
+def _folder(match, protected):
+    """A seat folder as a real path; a protected one (any, if the matcher is down) is only normalised, never stat'd."""
+    p = os.path.normpath(os.path.expanduser(match))
+    return p if protected is None or protectedlib.project(protected, p) else os.path.realpath(p)
+
+
+def _place(cwd, seats, protected):
     """(seat, parent) for a folder: the seat matching it exactly, else no seat under the deepest seat folder holding it."""
-    folders = [(os.path.realpath(os.path.expanduser(s["match"])), s) for s in seats if s["match"]]
+    folders = [(_folder(s["match"], protected), s) for s in seats if s["match"]]
     exact = next((s for f, s in folders if f == cwd), None)
     if exact:
         return exact["id"], exact["parent"]
@@ -107,7 +113,7 @@ def live(directory=None, seats=None):
         row = {"seat": None, "state": STATES.get(reg.get("status"), "idle"),
                "since": int(reg.get("statusUpdatedAt") or reg.get("startedAt") or 0) // 1000}
         if project is not None:
-            row["seat"] = _pull_seat(project, seats) or _place(cwd, seats)[0]
+            row["seat"] = _pull_seat(project, seats) or _place(cwd, seats, protected)[0]
             rows.append((pid, row))
             continue
         row.update(pid=pid, parent=None, name=reg.get("name"), cwd=cwd, started_by=_started_by(reg))
@@ -115,7 +121,7 @@ def live(directory=None, seats=None):
     chains = {pid: _ancestors(pid, free) for pid in free}
     for pid in sorted(free, key=lambda p: len(chains[p])):
         row = free[pid]
-        row["seat"], row["parent"] = _place(row["cwd"], seats)
+        row["seat"], row["parent"] = _place(row["cwd"], seats, protected)
         starter = next((free[p]["seat"] for p in chains[pid] if free[p]["seat"]), None)
         if starter and row["seat"] in (None, starter):
             row["seat"], row["parent"] = None, starter
