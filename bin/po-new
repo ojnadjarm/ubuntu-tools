@@ -23,3 +23,4 @@ cp "$tpl/agent.env" "$dir/agent.env"
 [ -z "$parent" ] || printf 'PARENT=%s        # manager: ESCALATE lines go to po-%s (po-run), no chat seat\n' "$parent" "$parent" >>"$dir/agent.env"
 for f in PROJECT BACKLOG RUNS HISTORY; do fill "$tpl/$f.md" >"$dir/state/$f.md"; done
 echo "made $dir; fill the '## Project' block of BRIEF.md, then: pc units enable po@$p.path --user --now --apply"
+[ -n "$parent" ] || echo "then give its org.json seat an \"about\": 1-2 plain sentences on what $name is (the Org pop-up shows it)"

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# usage: discord-hire <id> "<name>" --thread <tid> [--repo <owner/name>] [--rule key=value]… [--match <word>]…
+# usage: discord-hire <id> "<name>" --thread <tid> [--repo <owner/name>] [--rule key=value]… [--match <word>]… [--about "<text>"]
+# --about: 1-2 plain sentences on what the project is (the Org pop-up shows it); without it, a line naming the project.
 # po-discord's command for a new Discord project (T1547): projects.json entry (no repo yet = null), manager po-<id>
 # (po-new --parent), org seat, thread route, po@<id>.path + discord-liaison-relay@<id>.path via `pc units enable --apply`,
 # one line to the owner's chat DM. Each step runs once: a re-run is a no-op (`--repo` later fills a null repo).

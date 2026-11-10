@@ -44,16 +44,45 @@ const pill = (st) => `<span class="pill ${PILL[st] || "idle"}">${esc(st)}</span>
 const dot = (st) => `<span class="pill dot ${PILL[st] || "idle"}" title="${esc(st)}"><span class="sr-only">${esc(st)}</span></span>`;
 const BUBBLE = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H10l-5 4v-4H4z"/></svg>';
 
-/* An avatar button described by its tooltip: lines[0] bold, the rest plain; hover, keyboard focus or a tap shows it. */
+/* An avatar button described by its tooltip (a top-layer popover): lines[0] bold, the rest plain; hover, keyboard focus or a tap shows it. */
 const av = (id, name, art, lines, cls = "") => `<span class="av${cls}"><button type="button" class="avb" aria-label="About ${esc(name)}" aria-describedby="tip-${esc(id)}">${art}</button>` +
-  `<span class="tip" role="tooltip" id="tip-${esc(id)}">${lines.filter(Boolean).map((l, i) => i ? `<span>${esc(l)}</span>` : `<b>${esc(l)}</b>`).join("")}</span></span>`;
+  `<span class="tip" role="tooltip" popover="manual" id="tip-${esc(id)}">${lines.filter(Boolean).map((l, i) => i ? `<span>${esc(l)}</span>` : `<b>${esc(l)}</b>`).join("")}</span></span>`;
 
-/* A tap on an avatar toggles its tooltip; a tap anywhere else closes any open one. */
+/* Puts an open tooltip under its avatar, else above it, else beside it, always whole inside the viewport. */
+function place(a) {
+  const t = a.querySelector(".tip"), r = a.querySelector(".avb").getBoundingClientRect(), W = document.documentElement.clientWidth, H = innerHeight;
+  const w = t.offsetWidth, h = t.offsetHeight, m = 8, g = 4;
+  let top = r.bottom + g, left = r.left + r.width / 2 - w / 2;
+  if (top + h > H - m) top = r.top - g - h;
+  if (top < m) { top = Math.min(r.top, H - m - h); left = W - r.right >= r.left ? r.right + g : r.left - g - w; }
+  t.style.left = Math.round(Math.max(m, Math.min(W - m - w, left))) + "px";
+  t.style.top = Math.round(Math.max(m, top)) + "px";
+}
+
+const why = new WeakMap();
+/* Adds or drops one reason (hover, focus, tap) an avatar's tooltip is open; open while any is left. */
+function tip(a, reason, on) {
+  const s = why.get(a) || new Set(), t = a.querySelector(".tip");
+  on ? s.add(reason) : s.delete(reason);
+  why.set(a, s);
+  if (s.size && !t.matches(":popover-open")) { t.showPopover(); place(a); } else if (!s.size && t.matches(":popover-open")) t.hidePopover();
+}
+
+const avOf = (e) => e.target.closest && e.target.closest(".org .av");
+/* A tap on an avatar toggles its tooltip; a tap anywhere else closes any tapped-open one. */
 document.addEventListener("click", (e) => {
-  const a = e.target.closest(".org .av");
-  document.querySelectorAll(".org .av.open").forEach((x) => x !== a && x.classList.remove("open"));
-  if (a) a.classList.toggle("open");
+  const a = avOf(e);
+  document.querySelectorAll(".org .av").forEach((x) => x !== a && why.get(x)?.has("tap") && tip(x, "tap", false));
+  if (a) tip(a, "tap", !why.get(a)?.has("tap"));
 });
+document.addEventListener("pointerover", (e) => { const a = avOf(e); if (e.pointerType === "mouse" && a && !a.contains(e.relatedTarget)) tip(a, "hover", true); });
+document.addEventListener("pointerout", (e) => { const a = avOf(e); if (e.pointerType === "mouse" && a && !a.contains(e.relatedTarget)) tip(a, "hover", false); });
+document.addEventListener("focusin", (e) => { const a = avOf(e); if (a && e.target.matches(":focus-visible")) tip(a, "focus", true); });
+document.addEventListener("focusout", (e) => { const a = avOf(e); if (a) tip(a, "focus", false); });
+/* An open tooltip follows its avatar through a scroll or a resize. */
+const follow = () => document.querySelectorAll(".org .tip:popover-open").forEach((t) => place(t.parentElement));
+addEventListener("scroll", follow, { capture: true, passive: true });
+addEventListener("resize", follow);
 
 /* A seat's state from its own sessions: working, idle, yours (a protected session), else asleep (or off for the always-on seat). */
 export function seatState(seat, S) {
@@ -83,7 +112,7 @@ function crew(H) {
 function seatCard(seat, S) {
   if (seat.role === "owner") return `<div class="seat him">${av(seat.id, seat.name, "<i></i>", ["Read every channel, write anywhere, message anyone.", "Only your words change what an agent may do."], " dia")}<h3>${esc(seat.name)}</h3></div>`;
   const st = seatState(seat, S), helpers = S.filter((s) => !s.seat && s.parent === seat.id), msg = "Message " + seat.name;
-  return `<div class="seat" data-seat="${esc(seat.id)}">${av(seat.id, seat.name, familiar(seat.id, st, seat.role), [titled(seat), seat.area, ROLE[seat.role], WAKE[seat.wake], "Now " + st + "."])}<h3>${esc(seat.name)} ${seat.rank ? `<span class="rk">${esc(seat.rank)}</span>` : ""}${dot(st)}</h3>` +
+  return `<div class="seat" data-seat="${esc(seat.id)}">${av(seat.id, seat.name, familiar(seat.id, st, seat.role), [titled(seat), seat.area, seat.about, ROLE[seat.role], WAKE[seat.wake], "Now " + st + "."])}<h3>${esc(seat.name)} ${seat.rank ? `<span class="rk">${esc(seat.rank)}</span>` : ""}${dot(st)}</h3>` +
     `${crew(helpers)}<a class="btn msg" href="#chat?ch=${esc(dmOf(seat.id))}" aria-label="${esc(msg)}" title="${esc(msg)}">${BUBBLE}</a></div>`;
 }
 

@@ -1,9 +1,9 @@
 {"seats": [
   {"id": "owner", "name": "You", "area": null, "role": "owner", "parent": null, "wake": null, "match": null},
   {"id": "orchestrator", "name": "Orchestrator", "area": null, "role": "ceo", "parent": "owner", "wake": "channel", "match": "~"},
-  {"id": "mooblox", "name": "Mossfang", "area": "Mooblox", "role": "po", "parent": "orchestrator", "wake": "po-inbox", "match": "~/agents/po-mooblox"},
-  {"id": "vass", "name": "Thistle", "area": "Vass", "role": "po", "parent": "orchestrator", "wake": "pull", "match": "~/moodle-envs/vass/moodle"},
-  {"id": "discord", "name": "Cobalt", "area": "Discord", "role": "po", "parent": "orchestrator", "wake": "po-inbox", "match": "~/agents/po-discord"},
+  {"id": "mooblox", "name": "Mossfang", "area": "Mooblox", "about": "A Roblox-look 3D island in the browser where children aged 8 to 12 do their Moodle course: one zone per course section, one prop per activity.", "role": "po", "parent": "orchestrator", "wake": "po-inbox", "match": "~/agents/po-mooblox"},
+  {"id": "vass", "name": "Thistle", "area": "Vass", "about": "A client's Moodle site: paid work, kept private.", "role": "po", "parent": "orchestrator", "wake": "pull", "match": "~/moodle-envs/vass/moodle"},
+  {"id": "discord", "name": "Cobalt", "area": "Discord", "about": "The Discord forum's front desk: it sends each project thread to that project's manager and hires a new manager when a new project turns up.", "role": "po", "parent": "orchestrator", "wake": "po-inbox", "match": "~/agents/po-discord"},
   {"id": "tiny-epic-narrator", "name": "Bramble", "area": "Tiny Epic Narrator", "role": "manager", "parent": "discord", "wake": "po-inbox", "match": "~/agents/po-tiny-epic-narrator"},
   {"id": "spidey-pr-dashboard", "name": "Gloam", "area": "Spidey PR Dashboard", "role": "manager", "parent": "discord", "wake": "po-inbox", "match": "~/agents/po-spidey-pr-dashboard"},
   {"id": "mosaico", "name": "Speckle", "area": "Mosaico", "role": "manager", "parent": "discord", "wake": "po-inbox", "match": "~/agents/po-mosaico"},

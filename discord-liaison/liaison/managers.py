@@ -82,9 +82,9 @@ def dump(data):
     return '{\n' + head + ' "projects": [\n' + ',\n'.join(ents) + '\n ]\n}\n'
 
 
-def entry(pid, name, repo, rules, words):
-    """A new projects.json entry; no repo yet = repo and clone null."""
-    return {'id': pid, 'name': name, 'repo': repo, 'clone': f'~/projects/collab/{repo.split("/")[1]}' if repo else None,
+def entry(pid, name, repo, rules, words, about=None):
+    """A new projects.json entry; no repo yet = repo and clone null; no about = a line naming the project."""
+    return {'id': pid, 'name': name, 'about': about or f'{name}, a project from the Discord forum.', 'repo': repo, 'clone': f'~/projects/collab/{repo.split("/")[1]}' if repo else None,
             'match': {'tags': [name.lower()], 'title': [name.lower()] + list(words)},
             'rules': {'language': 'es: every forum post in Spanish',
                       'pr_flow': 'feature branch, push over SSH, gh pr create, link in the thread; never push main, never merge',
@@ -120,7 +120,7 @@ def enable_units(pid, env):
     return changed, None
 
 
-def hire(pid, name, thread, repo=None, rules=None, words=(), env=None):
+def hire(pid, name, thread, repo=None, rules=None, words=(), env=None, about=None):
     """Make a new Discord project's manager end to end; each step runs once, so a re-run is a no-op. 0, 1 failed, 2 refused."""
     env = dict(os.environ) if env is None else env
     if (not re.fullmatch(r'[a-z0-9][a-z0-9-]*', pid) or not thread.isdigit() or not name.strip()
@@ -133,7 +133,7 @@ def hire(pid, name, thread, repo=None, rules=None, words=(), env=None):
         data = json.load(f)
     p = next((x for x in data['projects'] if x['id'] == pid), None)
     if p is None:
-        p = entry(pid, name, repo, rules or {}, words)
+        p = entry(pid, name, repo, rules or {}, words, about)
         for o in data['projects']:
             hit = [w for k in ('tags', 'title') for w in o.get('match', {}).get(k, []) if w.lower() in name.lower()]
             if hit:
@@ -190,11 +190,12 @@ def main(argv):
         a.add_argument('--repo')
         a.add_argument('--rule', action='append', default=[], metavar='KEY=VALUE')
         a.add_argument('--match', action='append', default=[], metavar='WORD')
+        a.add_argument('--about', help='1-2 plain sentences on what the project is (the Org pop-up shows it)')
         ns = a.parse_args(argv[1:])
         if not all('=' in r for r in ns.rule):
             a.error('--rule takes KEY=VALUE')
         rules = dict(r.split('=', 1) for r in ns.rule)
-        return hire(ns.id, ns.name, ns.thread, ns.repo, rules, [w.lower() for w in ns.match])
+        return hire(ns.id, ns.name, ns.thread, ns.repo, rules, [w.lower() for w in ns.match], about=ns.about)
     if len(argv) != 2 or argv[0] != 'new':
         sys.exit('usage: python -m liaison.managers new <project-id> | hire <id> "<name>" --thread <tid> [--repo …]')
     return make(argv[1])

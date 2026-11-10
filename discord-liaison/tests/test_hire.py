@@ -91,6 +91,7 @@ class TestHire(unittest.TestCase):
         self.assertEqual((seat[0]['role'], seat[0]['parent'], seat[0]['match']), ('manager', 'r', '~/agents/po-new-one'))
         self.assertEqual((seat[0]['name'], seat[0]['area']), (org.proper_name('new-one', ['You', 'O', 'Router']), 'Narrador Interactivo IA'))
         self.assertNotIn('manager', seat[0]['name'].lower())
+        self.assertEqual(org.abouts(org.seats(self.org), self.reg)['new-one'], 'Narrador Interactivo IA, a project from the Discord forum.')
         self.assertEqual(State(os.path.join(self.env['LIAISON_HOME'], 'state')).thread('555')['project'], 'new-one')
         self.assertEqual(r.dispatch({'content': 'hola', 'channel': 'foro'}, 'new-one'), 'po-new-one')
         calls = self.calls()
@@ -98,6 +99,10 @@ class TestHire(unittest.TestCase):
                                      'pc units enable discord-liaison-relay@new-one.path --user --now --apply'])
         self.assertEqual(len(calls), 3)
         self.assertTrue(calls[2].startswith('chat r post @owner Hired po-new-one'), calls[2])
+
+    def test_about_is_asked_for(self):
+        self.assertEqual(self.hire(about='An AI narrator for 13th Age.')[0], 0)
+        self.assertEqual(Registry(self.reg).get('new-one')['about'], 'An AI narrator for 13th Age.')
 
     def test_rerun_is_a_no_op(self):
         self.assertEqual(self.hire()[0], 0)

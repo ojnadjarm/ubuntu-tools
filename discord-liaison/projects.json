@@ -4,6 +4,7 @@
   {
    "id": "tiny-epic-narrator",
    "name": "Tiny Epic Narrator",
+   "about": "A private web app for a group of four playing the board game Tiny Epic Dungeons: it reads the Echoes of Aughmoore campaign aloud in Spanish and shows each scene's setup and cards.",
    "repo": "RunarStudio/Tiny_Epic_Narrator",
    "clone": "~/projects/collab/Tiny_Epic_Narrator",
    "match": {"tags": ["tiny epic narrator"], "title": ["tiny epic", "narrator"]},
@@ -19,6 +20,7 @@
   {
    "id": "spidey-pr-dashboard",
    "name": "Spidey PR Dashboard (Watchtower PR)",
+   "about": "Watchtower PR: a one-page HTML dashboard of a team's Bitbucket pull requests and build pipelines, with alerts and a review queue.",
    "repo": "RunarStudio/Spidey_PR_Dashboard",
    "clone": "~/projects/collab/Spidey_PR_Dashboard",
    "match": {"tags": ["spidey", "watchtower"], "title": ["watchtower", "spidey"]},
@@ -32,6 +34,7 @@
   {
    "id": "mosaico",
    "name": "Mosaico (ImgCrypt)",
+   "about": "ImgCrypt (first called Mosaico): a planned Windows desktop app to find, sort and move large photo and video collections between PC, USB drive and phone, all local and private. Plan stage, no code yet.",
    "repo": "RunarStudio/ImgCrypt",
    "clone": "~/projects/collab/ImgCrypt",
    "match": {"tags": ["mosaico", "imgcrypt"], "title": ["mosaico", "imgcrypt"]},
@@ -46,8 +49,9 @@
   {
    "id": "narrador-interactivo-ia",
    "name": "Narrador Interactivo IA",
-   "repo": null,
-   "clone": null,
+   "about": "An AI game master on a Discord server that runs 13th Age tabletop campaigns in Spanish, backed by a rules engine for dice, hit points and spells.",
+   "repo": "Rasalas93/Master_13Th_Age",
+   "clone": "~/projects/collab/Master_13Th_Age",
    "match": {"tags": ["narrador interactivo ia"], "title": ["narrador interactivo ia", "13th age"]},
    "rules": {
     "language": "es: every forum post in Spanish",

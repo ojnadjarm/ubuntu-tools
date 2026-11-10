@@ -1,4 +1,4 @@
-"""Agent org seats from org.json (T1515): load, validate, parent, may_assign, seat_at, rank, proper_name."""
+"""Agent org seats from org.json (T1515): load, validate, parent, may_assign, seat_at, rank, proper_name, abouts."""
 import json
 import os
 import zlib
@@ -79,6 +79,17 @@ def proper_name(seat_id, taken):
     if not free:
         return seat_id.split("-")[0].capitalize()
     return free[zlib.crc32(seat_id.encode()) % len(free)]
+
+
+def abouts(seat_list, projects=None):
+    """Each seat's project about: its own org.json `about`, else the projects.json entry with its id (Discord projects)."""
+    home = os.environ.get("HARNESS_HOME") or os.path.expanduser("~/agents")
+    try:
+        with open(projects or os.environ.get("LIAISON_REGISTRY") or os.path.join(home, "discord-liaison", "projects.json")) as f:
+            ents = {e["id"]: e.get("about") for e in json.load(f)["projects"]}
+    except (OSError, ValueError, KeyError):
+        ents = {}
+    return {s["id"]: a for s in seat_list for a in [s.get("about") or ents.get(s["id"])] if a}
 
 
 def _seat(seat_id, p=None):
