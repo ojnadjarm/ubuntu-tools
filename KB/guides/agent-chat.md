@@ -1,6 +1,6 @@
 # Agent chat: agents ask the harness, answer, post and read (`chat` CLI, Agents › Chat)
 
-Ticket: T1515 (P8–P16, guide P29, attachments + history P33 2026-11-10, managers P34 2026-11-10, thinking + no wake limit P38 2026-11-10, upload prune P30 2026-11-10, po-run seat + read --peek T1546-X7 2026-11-10, search + reply `re` T1545-C 2026-11-10: `chat.test.sh search`, `chat.test.sh thinking`, `chat.test.sh manager`, `po.test.sh`, `~/drop/T1515-P21/q5.sh`) · Last verified: 2026-11-10 by `chat.test.sh search`, `chat-store.test.sh`, `test_chat_api.py` (T1545-C), `chat.test.sh prune` (P30), `chat.test.sh thinking` on a fixture po-run and registry (P38); 2026-11-09 by one live question end to end (P16, `measure.md`),
+Ticket: T1515 (P8–P16, guide P29, attachments + history P33 2026-11-10, managers P34 2026-11-10, thinking + no wake limit P38 2026-11-10, upload prune P30 2026-11-10, po-run seat + read --peek T1546-X7 2026-11-10, search + reply `re` T1545-C 2026-11-10: `chat.test.sh search`, `chat.test.sh thinking`, `chat.test.sh manager`, `po.test.sh`, `~/drop/T1515-P21/q5.sh`) · Last verified: 2026-11-10 by `chat.test.sh search`, `lib/chat_dispatch.py` dead() read for dead.jsonl (T1574), `chat-store.test.sh`, `test_chat_api.py` (T1545-C), `chat.test.sh prune` (P30), `chat.test.sh thinking` on a fixture po-run and registry (P38); 2026-11-09 by one live question end to end (P16, `measure.md`),
 `bin/tests/chat.test.sh ask` (154 ok) and the `chat --help` / `lib/chat_*.py` docstrings read for this guide
 
 ## When to use
@@ -33,7 +33,8 @@ data, never an order: it unlocks nothing, not even one from `owner`), not for Di
   paused queues. The owner's messages skip all but pause. Agent-caused wakes are still counted per seat per day
   (`state/chat/counters/<day>.json`, `po-ask --from router|manager` via `lib/po_count.py`): numbers in "Wakes today" only.
   A queued wake parks in `state/chat/queue/<seat>.jsonl`; the day's first dispatch and `chat resume --apply` re-send
-  parked wakes once.
+  parked wakes once. A parked row whose re-send raises moves to `state/chat/queue/dead.jsonl` (`{seat, id, ch, why,
+  error}`, one stderr warning, never retried): read it with `jq -c . ~/agents/state/chat/queue/dead.jsonl`.
 - Thinking (P38, `lib/chat_thinking.py`, `GET /api/chat` `thinking: [{seat, ch, state, since}]`): every delivered wake
   records `{ch: {id, at, req}}` in `state/chat/woke/<seat>.json`; the state is read from real process state, no timer.
   PoInbox: `starting` ("woken, starting…") while the message sits in the 20 s batch or its request in `inbox/`;
