@@ -1,6 +1,6 @@
 # Discord liaison: the agent that answers the #foro forum and @agents in #general, and turns requests into PRs
 
-Ticket: T1409, T1411, T1413, T1414, T1415, T1416, T1421, T1482, T1515 P31, P32, P36, P40, T1536 · Last verified: 2026-11-10 (T1536: 81 fixture tests, hand-off posts nothing; P40: relay on outbox write; P36: 77 fixture tests, a manager's reply images reach its thread, 8 bad paths refused; P32: 76 fixture tests, an image reaches only its manager; P31: 75 fixture tests,
+Ticket: T1409, T1411, T1413, T1414, T1415, T1416, T1421, T1482, T1515 P31, P32, P36, P40, T1536 · Last verified: 2026-11-10 (T1546 L1-L5: 94 fixture tests, po-asked.json saved per hand-off, a failed image download is skipped; T1536: 81 fixture tests, hand-off posts nothing; P40: relay on outbox write; P36: 77 fixture tests, a manager's reply images reach its thread, 8 bad paths refused; P32: 76 fixture tests, an image reaches only its manager; P31: 75 fixture tests,
 `test_managers.py` 5: code routing to one manager per project); 2026-11-04 (T1482 postmortem of 119 jobs, lessons in `JOB.md`, guarded by `tests/test_lessons.py`); 2026-10-31 (caps re-read from agent.env, F71); 2026-10-27 by 63 liaison fixture tests (T1421: 6 batch/supersede/stale tests) + a live nudge → wake run; before: 57 (T1416: 8 routing tests, job vs escalate); before: 49 (T1415: job media + reply); before: 47 liaison fixture tests (T1414: 7 job tests, a transient-unit probe, a live tick) and eval 57 fixtures on opus (T1413: old brief 45/57 twice, new brief + context 55/57 twice); before: 25 liaison fixture tests + 25 orchestrator-pulse checks + 31 discord-bot tests, live ticks on #foro and #general
 
 ## When to use
@@ -32,6 +32,9 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
   the ack. The manager's first act is a one-line plan reply, then work, then the result. `discord-liaison-relay@<p>.path`
   (PathModified on `po-<p>/outbox/discord`, dot files ignored) runs `discord-liaison relay` on each outbox `mv`; the
   relay holds `state/relay.lock` and loops until the outbox is empty; the 3-min tick still relays as a fallback.
+- Refusals (T1546 L1-L4): a reply that fails (Discord error, a thread its manager does not own, no `thread:`/text) moves to
+  `outbox/discord/refused/` with `<name>.why` and a `refused reply:` line in the agent's REPORT.md; `po-status` prints refused N.
+  An image over `LIAISON_UPLOAD_MAX` (10 MB) refuses the reply; a transient thread-lookup error (not 403/404) leaves it for the next relay.
 - #general (owner, T1411): answer general questions on any topic, in Spanish, and do small creative requests there
   (concept art via `art` + `post --image`, short texts); send people to #foro only for coordination with other agents
   or follow-up on a project; never `map`/`pr` from #general (`BRIEF.md`).

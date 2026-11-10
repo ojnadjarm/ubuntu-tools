@@ -27,7 +27,7 @@ def po_home(env):
 
 
 async def handoff(app, env):
-    """po-ask every inbox message `Registry.dispatch` gives an agent, once (state/po-asked.json), its images copied into
+    """po-ask every inbox message `Registry.dispatch` gives an agent, once (state/po-asked.json, saved after each), its images copied into
     that agent's folder; with a router set the handed message leaves the liaison inbox, so no triage run wakes for it.
     Posts nothing: the agent's first reply is the ack. Returns the number handed off."""
     path = os.path.join(app.home, 'state', 'po-asked.json')
@@ -47,6 +47,7 @@ async def handoff(app, env):
             if m['id'] not in asked:
                 if not await deliver(app, env, to, m, pid):
                     continue
+                save_json(path, sorted(asked | handed | {m['id']}))
             handed.add(m['id'])
         n = len(handed - asked)
         save_json(path, sorted(asked | handed))

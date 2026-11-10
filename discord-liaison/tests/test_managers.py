@@ -1,9 +1,14 @@
 """T1515 P31: one manager per project; tick hands each message by code to its own manager or the router, nothing else."""
+import asyncio
 import json
 import os
 import shutil
+import subprocess
+from unittest import mock
 
-from liaison import managers
+import aiohttp
+
+from liaison import managers, po
 from liaison.registry import Registry
 
 from .test_liaison import PNG, Base
@@ -154,6 +159,46 @@ class TestManagers(Base):
         work = os.path.join(self.tmp.name, 'state', 'work')
         self.assertEqual(os.listdir(work) if os.path.isdir(work) else [], [], 'the liaison keeps no copy')
         self.assertFalse(os.path.exists(self.ran))
+
+    def filed(self, name):
+        d = os.path.join(self.home, name, 'inbox')
+        return sorted(open(os.path.join(d, f)).read().rsplit('): ', 1)[-1] for f in os.listdir(d))
+
+    async def test_image_timeout_files_each_message_asked_once_after_error(self):
+        cdn = str(self.server.make_url('/cdn'))
+        self.env['LIAISON_CDN_PREFIXES'] = cdn + '/'
+        get = aiohttp.ClientSession.get
+
+        def slow(http, url, **kw):
+            if url.endswith('/slow.png'):
+                raise asyncio.TimeoutError()
+            return get(http, url, **kw)
+        await self.run_cli('tick')
+        self.fake.say('400', '2', 'pedido-1')
+        self.fake.say('400', '2', 'pedido-2', attachments=[{'filename': 'slow.png', 'size': 40, 'url': f'{cdn}/slow.png'}])
+        with mock.patch.object(aiohttp.ClientSession, 'get', slow):
+            for _ in range(3):
+                rc, out = await self.run_cli('tick')
+                self.assertEqual(rc, 0, out)
+        self.assertEqual(self.filed('po-ten'), ['pedido-1\n', 'pedido-2\n'])
+        self.assertEqual(self.state().inbox, [])
+
+    async def test_crash_mid_handoff_keeps_message_1_asked_once_after_error(self):
+        call = subprocess.call
+
+        def crash(cmd, **kw):
+            if cmd[-1].endswith('pedido-2'):
+                raise OSError('killed')
+            return call(cmd, **kw)
+        await self.run_cli('tick')
+        self.fake.say('400', '2', 'pedido-1')
+        self.fake.say('400', '2', 'pedido-2')
+        with mock.patch.object(po.subprocess, 'call', crash), self.assertRaises(OSError):
+            await self.run_cli('tick')
+        for _ in range(2):
+            rc, out = await self.run_cli('tick')
+            self.assertEqual(rc, 0, out)
+        self.assertEqual(self.filed('po-ten'), ['pedido-1\n', 'pedido-2\n'])
 
     async def test_owner_flag_marks_only_the_owner_and_a_body_cannot_forge_it(self):
         env = {'DISCORD_OWNER_ID': '1'}

@@ -215,9 +215,10 @@ class App:
             shutil.rmtree(self.work, ignore_errors=True)
 
     async def fetch_images(self, msgs=None):
-        """Download the messages' (default: the inbox's) images into state/work: CDN only, no token, <= 8 MB, magic checked."""
+        """Download the messages' (default: the inbox's) images into state/work: CDN only, no token, <= 8 MB, magic checked;
+        a failed one (60 s total) is skipped."""
         os.makedirs(self.work, exist_ok=True)
-        async with aiohttp.ClientSession() as http:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as http:
             for m in self.state.inbox if msgs is None else msgs:
                 for i, a in enumerate(m.get('attachments', [])):
                     if not a['url'].startswith(self.cdn):
@@ -232,17 +233,17 @@ class App:
                                     data += chunk
                                     if len(data) > MAX_ATTACHMENT:
                                         break
-                    except aiohttp.ClientError:
-                        data = b''
-                    webp = data[:4] == b'RIFF' and data[8:12] == b'WEBP'
-                    if 0 < len(data) <= MAX_ATTACHMENT and (data.startswith(SEEN_MAGIC) or webp):
-                        with open(dest, 'wb') as f:
-                            f.write(data)
-                        if ext in ('.gif', '.webp'):
-                            note = still(dest)
-                            if note:
-                                with open(os.path.splitext(dest)[0] + '.note', 'w') as f:
-                                    f.write(note)
+                        webp = data[:4] == b'RIFF' and data[8:12] == b'WEBP'
+                        if 0 < len(data) <= MAX_ATTACHMENT and (data.startswith(SEEN_MAGIC) or webp):
+                            with open(dest, 'wb') as f:
+                                f.write(data)
+                            if ext in ('.gif', '.webp'):
+                                note = still(dest)
+                                if note:
+                                    with open(os.path.splitext(dest)[0] + '.note', 'w') as f:
+                                        f.write(note)
+                    except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
+                        continue
 
     async def write_context(self):
         """Render the inbox channels' recent turns into state/work/context.txt for this run's `inbox`."""
