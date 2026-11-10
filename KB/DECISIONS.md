@@ -2,7 +2,7 @@
 One line per decision: `- date · decision · "owner's words"`. Fleet briefs name this file; `brief-lint` warns when they do not.
 Project ledgers: `$AGENT_WORK/decisions/<project>.md` (ailearning, portfolio, vass). Code: `lib/decisions.py`.
 
-- 2026-09-07 · Never git commit or push in a user repo · (AGENTS.md §5.1, after the benchmark push incident)
+- 2026-09-07 · Never git commit or push in a user repo · (AGENTS.md §5.1, after the benchmark push incident) (superseded 2026-10-23 for personal repos: see that line; still the rule for protected projects)
 - 2026-09-07 · Tests, benchmarks and experiments run on throwaway fixtures in a sandbox proven by a selftest · (AGENTS.md §5.6)
 - 2026-10-08 · Do only what was asked; offer the next step in one line, never queue it · "I never said create an integration just to create me a sandbox"
 - 2026-09-21 · Replies are 2-3 short lines; briefs cap the report at ~6 lines, numbers only · "just give me really really short sentences"
@@ -17,7 +17,7 @@ Project ledgers: `$AGENT_WORK/decisions/<project>.md` (ailearning, portfolio, va
 - 2026-10-07 · Machine values only via config.env; tracked files use placeholders · "that is for this PC"
 - 2026-10-07 · ~/agents holds fleet tooling only; owner deliverables go to ~/drop or their own repo · "that kind of stuff MUST be on drop"
 - 2026-09-07 · The Dark Eye is standalone; fleet work lives in ~/agents · "the dark eye is a standalone project"
-- 2026-09-23 · Every agent is `worker` (Opus, high); never max unless he asks · (owner, final)
+- 2026-09-23 · Every agent is `worker` (Opus, high); never max unless he asks · (owner, final) (superseded 2026-11-10: planning on `planner`, audiovisual on `worker-max`; see those lines)
 - 2026-09-24 · Every web page is fluid and responsive at 400-2560 (ailearning excepted) · "ALL WEB DEVELOPMENT MUST BE RESPONSIVE WITHOUT EXCEPTIONS"
 - 2026-09-24 · Review material lives on this machine as a local link; no cloud artifacts · "everything should be on our server"
 - 2026-10-16 · Automatic reboots re-enabled inside the gated window · "we can re-enable the autorestart"
@@ -31,3 +31,11 @@ Project ledgers: `$AGENT_WORK/decisions/<project>.md` (ailearning, portfolio, va
 - 2026-10-27 · discord-liaison: one live job per conversation (forum thread, or one author in #general); a new message there stops the live job and starts one with the whole thread; triage decides on the newest message; the bot nudges a path unit, 20 s debounce, 3-min timer as fallback; code reacts 👀 on arrival (T1421) · "cada mensaje que envio crea un nuevo agente… hace una peticion de un mensaje anterior"
 - 2026-10-30 · orchestrator update restart: a nightly 04:30 timer restarts the orchestrator onto a new Claude Code only when idle (no agents, workflows, typed text or open Discord escalation) and outside 08-01 unless the version is 24 h old; graceful /exit + unit start, never a kill; failure notifies once (T1430) · "I authorize T1430: a nightly timer that restarts the orchestrator onto new Claude Code versions"
 - 2026-11-10 · Every service is tailnet-only: bind loopback, publish with `tailscale serve` (https 84xx or tcp on the same port), Docker ports as `127.0.0.1:…`; no 0.0.0.0/LAN listeners; ufw, sshd and the Vass env stay his by hand; `pc net listeners --check` guards it (T1559; reverses 2026-09-05 LAN + Tailscale both) · "not sites, not, db, docker, ssh, all trough the Tailscale service only"
+- 2026-10-23 · Personal repos (~/agents, ~/the-dark-eye, ~/moodle-harness, ~/projects/personal/*): the agent that changed them commits only its claimed files and pushes; protected projects (Vass, Moodle Workplace) never · (AGENTS.md §5.1; the machine is the source of truth)
+- 2026-10-30 · Audiovisual work runs on its own agent type `worker-max` · (AGENTS.md §3)
+- 2026-11-09 · Audiovisual on Fable 5.2 at medium reasoning (was Opus xhigh) · (AGENTS.md §3, ORCHESTRATOR.md "Delegation")
+- 2026-11-09 · No limits on wakes between agents (the 12-a-day cap is gone, T1515 P38) · "delete the limits between agents"
+- 2026-11-10 · Plans, architecture and ticket tables run on `planner` (Fable 5.2, high); implementation and review stay on `worker` (Opus, high) · (ORCHESTRATOR.md "Delegation")
+- 2026-11-10 · Git holds the code of the tools only; plans, proposals and reviews stay in ~/agent-work · "We upload to git only the code we do for the ubuntu tools no plans or proporsals"
+- 2026-11-10 · On Org and Chat the orchestrator seat is named DarkSaddler (the brand) with rank CEO; every staff agent shows a name and a rank · "DarkSaddle is your Name, CEO is your rank" … "Yes DarkSaddler with the R"
+- 2026-11-10 · Discord: the owner's ✅ in a project thread no longer starts the old bot worker; it reaches the project's manager as his approval (T1546-M2); a manager's relayed reply sets `done` (M3, he picked b) · "yeah implement it."
