@@ -41,6 +41,8 @@ head -c 5000000 /dev/urandom >"$H/agent-work/big/huge.bin"; echo junk >"$H/agent
 mkdir -p "$H/agent-work/discord-liaison/jobs"/{j1,j2} "$H/agent-work/discord-liaison/escalations"
 echo job >"$H/agent-work/discord-liaison/jobs/j1/job.json"; head -c 5000000 /dev/urandom >"$H/agent-work/discord-liaison/jobs/j2/big.bin"
 echo esc >"$H/agent-work/discord-liaison/escalations/e.md"
+# T1599-M10: the memory store ($MEMORY_HOME, default ~/memory) whole, its git-ignored private pages included.
+mkdir -p "$H/memory/core" "$H/memory/domains/fin"; echo card >"$H/memory/core/CORE.md"; echo priv >"$H/memory/domains/fin/DOMAIN.md"
 echo mem >"$H/.claude/projects/-p1/memory/m.md"; echo '{}' >"$H/.claude/projects/-p1/s1.jsonl"; echo '{}' >"$H/.claude/settings.json"
 echo SECRET >"$H/moodle-envs/secretproj/x"; echo SECRET >"$H/.claude/projects/${H//[\/.]/-}-moodle-envs-secretproj/s.jsonl"
 # T1597: dumps in $FLEET_BACKUPS_DIR, older ones still in the old folder (fallback read until the owner clears it).
@@ -89,6 +91,7 @@ export RESTIC_PASSWORD_FILE="$H/agents/secrets/fleet-backup.pass" RESTIC_REPOSIT
 restic ls latest >"$WORK/ls" 2>/dev/null
 ok "tier1: finance, memory, newest dump, settings" 'grep -q "/finance/a.bin$" "$WORK/ls" && grep -q "/memory/m.md$" "$WORK/ls" && grep -q "5.2/2026-11-02.sql.gz$" "$WORK/ls" && ! grep -q "2026-11-01.sql.gz$" "$WORK/ls" && grep -q "/.claude/settings.json$" "$WORK/ls"'
 ok "tier1: an env only in the old backups folder still gets its newest dump (fallback)" 'grep -q "/agents/backups/moodle/4.1/2026-10-30.sql.gz$" "$WORK/ls"'
+ok "tier1: the memory store \$MEMORY_HOME, private pages included" 'grep -q "^$H/memory/core/CORE.md$" "$WORK/ls" && grep -q "^$H/memory/domains/fin/DOMAIN.md$" "$WORK/ls"'
 ok "tier1: claims snapshots from \$CLAIMS_SNAP" 'grep -q "/agent-work/claims-snap/T9/manifest.tsv$" "$WORK/ls"'
 ok "tier2: research ticket and transcript in" 'grep -q "/T1/n.md$" "$WORK/ls" && grep -q "/-p1/s1.jsonl$" "$WORK/ls"'
 ok "tier2: liaison jobs one entry each (small job in, big job skipped alone)" 'grep -q "/discord-liaison/jobs/j1/job.json$" "$WORK/ls" && grep -q "/discord-liaison/escalations/e.md$" "$WORK/ls" && grep -qx "$H/agent-work/discord-liaison/jobs/j2" "$H/agents/state/fleet-backup/last-skipped.txt"'

@@ -75,7 +75,8 @@ kids() {
 tier1() {
   local p d f
   for p in "$HOME/finance" "$HOME/invoices" "$HARNESS_HOME/secrets" "$HOME/.config/pc-harness" "$HARNESS_HOME/state" "$CLAIMS_SNAP" \
-           "$AGENT_WORK/history.md" "$AGENT_WORK/README.md" "$AGENT_WORK/briefs" "$AGENT_WORK/decisions" "$AGENT_WORK/owner"; do
+           "$AGENT_WORK/history.md" "$AGENT_WORK/README.md" "$AGENT_WORK/briefs" "$AGENT_WORK/decisions" "$AGENT_WORK/owner" \
+           "$MEMORY_HOME"; do
     [ -e "$p" ] && printf '%s\n' "$p"
   done
   [ -d "$CLAUDE" ] && kids "$CLAUDE" | grep -vxF "$CLAUDE/projects"
