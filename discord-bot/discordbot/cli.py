@@ -91,6 +91,8 @@ async def status(cfg, rest):
     print(f'tags      {", ".join(st.get("tags", [])) or "-"}')
     if st.get('connected_at'):
         print(f'gateway   connected {time.strftime("%Y-%m-%d %H:%M", time.localtime(st["connected_at"]))}')
+    if st.get('last_event_at'):
+        print(f'event     last {int(time.time() - st["last_event_at"])}s ago')
     if st.get('problem'):
         print(f'problem   {st["problem"]}')
     return 0

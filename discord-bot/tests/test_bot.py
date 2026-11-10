@@ -93,6 +93,13 @@ class TestForumBot(Base):
         await self.bot.dispatch('GUILD_CREATE', ev('GUILD_CREATE'))
         self.assertEqual(sum(1 for c in self.fake.calls if c[1] == '/channels/300/threads'), 1)
 
+    async def test_idle_ticks_leave_status_json_untouched(self):
+        p = os.path.join(self.tmp.name, 'status.json')
+        before = os.stat(p).st_ino
+        for _ in range(5):
+            await self.bot.dispatch('TICK', {})
+        self.assertEqual(os.stat(p).st_ino, before)
+
     async def test_missing_permission_hello_untagged_then_tagged(self):
         self.fake.channels['300']['available_tags'] = []
         self.fake.deny_tag_edit = True

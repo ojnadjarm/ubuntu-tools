@@ -38,7 +38,8 @@ class ForumBot:
             log.warning('%s failed: rest %s', t, e.status)
         except Exception:
             log.exception('%s failed', t)
-        self.store.set_status(last_event_at=int(self.clock()))
+        if t != 'TICK':
+            self.store.set_status(last_event_at=int(self.clock()))
 
     async def on_ready(self, d):
         self.me_id = d['user']['id']
