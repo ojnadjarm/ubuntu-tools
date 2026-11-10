@@ -54,6 +54,7 @@
 .office .mem .pill.off::before { background: none; box-shadow: inset 0 0 0 1px currentColor; }
 .ocard { position: fixed; inset: auto; margin: 0; width: min(38rem, calc(100vw - 16px)); max-height: calc(100svh - 16px); overflow: auto; padding: 1rem; gap: 1rem; border: 1px solid var(--line3); background: color-mix(in srgb, var(--bg1) 94%, transparent); color: var(--txt); box-shadow: 0 0 40px -10px var(--g), 0 12px 40px var(--bg); }
 .ocard:popover-open { display: flex; }
+.ocard:focus { outline: none; }
 .ocard .cfig { flex: 0 0 5rem; }
 .ocard .cfig svg { width: 100%; height: auto; display: block; }
 .ocard .cbody { min-width: 0; flex: 1; }

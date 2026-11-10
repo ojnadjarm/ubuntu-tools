@@ -11,8 +11,8 @@ const BUBBLE = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="
 const dot = (st) => `<span class="pill dot ${PILL[st] || "idle"}" title="${esc(st)}"><span class="sr-only">${esc(st)}</span></span>`;
 const who = (id, html) => `<button type="button" class="who" data-who="${esc(id)}">${html}</button>`;
 
-/* An avatar button that opens the card of `id`. */
-const av = (id, name, art) => `<span class="av"><button type="button" class="avb" data-who="${esc(id)}" aria-label="About ${esc(name)}">${art}</button></span>`;
+/* An avatar button that opens the card of `id`; out of the tab order, the name button next to it is the one stop. */
+const av = (id, name, art) => `<span class="av"><button type="button" class="avb" data-who="${esc(id)}" aria-label="About ${esc(name)}" tabindex="-1">${art}</button></span>`;
 
 const worker = (p) => `<li title="${esc(titled(p))}">${who(p.id, `<span class="mini" aria-hidden="true">${familiar(p.id, p.pose === "working" ? "working" : "idle", "worker")}</span><b>${esc(p.name)}</b>${dot(p.state)}`)}</li>`;
 

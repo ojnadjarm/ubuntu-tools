@@ -11,7 +11,7 @@ let M = null, el = null;
 function host() {
   if (el) return el;
   el = document.createElement("div");
-  el.id = "office-card"; el.className = "ocard"; el.popover = "auto";
+  el.id = "office-card"; el.className = "ocard"; el.popover = "auto"; el.tabIndex = -1;
   el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "About");
   document.body.append(el);
   return el;
@@ -33,13 +33,14 @@ function html(p) {
     (c.actions || []).map((a) => `<a class="btn" href="${esc(safe(a.href))}">${esc(a.label)}</a>`).join("") + `</div>`;
 }
 
-/* Opens the card of `id` under the viewport point `anchor` {x, y}, else above it; without an anchor it stays where it is. */
+/* Opens the card of `id` under the viewport point `anchor` {x, y}, else above it, and moves focus into it (closing gives it back); without an anchor it stays where it is. */
 export function open(id, anchor) {
   const p = M && M.who[id], c = host();
   if (!p) return;
   c.innerHTML = html(p); c.dataset.for = id; c.setAttribute("aria-label", "About " + p.name);
   const shown = c.matches(":popover-open");
   if (!shown) c.showPopover();
+  if (!c.contains(document.activeElement)) c.focus({ preventScroll: true });
   if (innerWidth <= 600) { c.style.left = c.style.top = ""; return; }
   if (!anchor && shown) return;
   const a = anchor || { x: innerWidth / 2, y: innerHeight / 3 }, w = c.offsetWidth, h = c.offsetHeight, m = 8, g = 10;
