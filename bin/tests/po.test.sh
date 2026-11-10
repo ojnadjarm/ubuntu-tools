@@ -74,7 +74,7 @@ case "$HARNESS_HOME" in "$WORK"/*) ok 'selftest: HARNESS_HOME is the fixture';; 
 # po-new
 out=$(po-new fx "Fixture Game"); is 'po-new: exit 0' "$?" 0
 P="$HARNESS_HOME/po-fx"
-ev 'po-new: folder contract' '[ -s "$P/BRIEF.md" ] && [ -d "$P/inbox" ] && [ -d "$P/outbox/discord" ] && [ -s "$P/state/BACKLOG.md" ] && [ -s "$P/agent.env" ]'
+ev 'po-new: folder contract' '[ -s "$P/BRIEF.md" ] && [ -d "$P/inbox" ] && [ -d "$P/outbox/discord" ] && [ -s "$P/state/BACKLOG.md" ] && [ -s "$P/state/HISTORY.md" ] && [ -s "$P/agent.env" ]'
 ev 'po-new: placeholders filled' 'grep -q "po-fx, the product owner of Fixture Game" "$P/BRIEF.md" && ! grep -q "{{" "$P/BRIEF.md" "$P"/state/*.md'
 case "$out" in *"po@fx.path"*) ok 'po-new: prints the unit command';; *) nok 'po-new: prints the unit command' "$out";; esac
 po-new fx >/dev/null 2>&1; is 'po-new: existing PO refused' "$?" 3
@@ -177,6 +177,11 @@ po-new mgr "Mgr Game" --parent fx >/dev/null; is 'manager: po-new --parent exit 
 M="$HARNESS_HOME/po-mgr"
 ev 'manager: PARENT in agent.env, manager brief, project block left to fill' 'grep -q "^PARENT=fx " "$M/agent.env" && grep -q "po-mgr, the manager of Mgr Game" "$M/BRIEF.md" && grep -q "goes to po-fx" "$M/BRIEF.md" && grep -qx "{{PROJECT}}" "$M/BRIEF.md"'
 po-new bad "x" --parent 'a b' >/dev/null 2>&1; is 'manager: bad --parent exits 2' "$?" 2
+is 'manager (T1557-C1): PROJECT.md has the 6 sections' "$(grep -c '^## ' "$M/state/PROJECT.md")" 6
+ev 'manager (T1557-C1): People and Where requests come from' 'grep -q "^## People" "$M/state/PROJECT.md" && grep -q "^## Where requests come from" "$M/state/PROJECT.md"'
+ev 'manager (T1557-C1): HISTORY.md copied, filled, with an Archive section' 'grep -q "^# mgr: history" "$M/state/HISTORY.md" && grep -q "^## Archive" "$M/state/HISTORY.md" && ! grep -q "{{" "$M/state/HISTORY.md"'
+is 'manager (T1557-C1): 8 standing rules for Discord work' "$(sed -n '/^## Standing rules for Discord work/,/^## /p' "$M/BRIEF.md" | grep -c '^[1-8]\. ')" 8
+ev 'manager (T1557-C1): reads REPO.md and the ledger tail, HISTORY on demand' 'grep -q "state/REPO.md" "$M/BRIEF.md" && grep -q "last 40 lines of your ledger" "$M/BRIEF.md" && grep -q "only when a request needs them" "$M/BRIEF.md"'
 for i in $(seq 12); do po-ask mgr --from router "routed $i" >/dev/null || nok "manager: routed $i"; done
 po-ask mgr --from router "routed 13" >/dev/null 2>&1; is 'manager: no daily limit (P38): the 13th router wake today exits 0' "$?" 0
 is 'manager: all 13 filed' "$(ls "$M/inbox" | wc -l)" 13

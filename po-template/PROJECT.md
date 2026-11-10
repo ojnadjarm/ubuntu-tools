@@ -1,6 +1,10 @@
-# {{P}}: project memory (the PO keeps it at most 200 lines)
+# {{P}}: project memory (at most 80 lines, 6 KB; the past goes to HISTORY.md)
 
 ## What it is
+
+## People (handle, role, what they decide)
+
+## Where requests come from (thread id, title, purpose)
 
 ## Owner taste and standing rules (his words, dated)
 
