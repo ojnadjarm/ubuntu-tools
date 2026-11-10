@@ -30,11 +30,33 @@ SEEN = re.compile(r"\n\(guides seen: [^)\n]*\)$")
 ALL = 10 ** 6
 
 
+def po_run():
+    """The <p> of the nearest `po-run <p>` above this process, else None."""
+    pid = os.getppid()
+    while pid > 1:
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                argv = [a.decode(errors="replace") for a in f.read().split(b"\0")]
+            with open(f"/proc/{pid}/stat") as f:
+                ppid = int(f.read().rsplit(")", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            return None
+        for i, a in enumerate(argv[:2]):
+            if os.path.basename(a) == "po-run" and i + 1 < len(argv):
+                return argv[i + 1]
+        pid = ppid
+    return None
+
+
 def seat_of(seats, cwd):
-    """The posting seat: $CHAT_SEAT, else the seat whose folder holds cwd; never the owner."""
+    """The posting seat: $CHAT_SEAT, else the seat whose folder holds cwd; never the owner; <p> only under `po-run <p>`."""
     seat = os.environ.get("CHAT_SEAT") or org.seat_at(cwd, seats)
     if not seat:
         raise ValueError("CHAT_SEAT is not set and no seat folder holds the cwd")
+    p = po_run()
+    if p and seat != p:
+        chat_store.audit({"refused": True, "seat": seat, "po_run": p, "rule": "po-run"})
+        raise ValueError(f"under `po-run {p}` the seat is {p}, not {seat}")
     if seat == "owner":
         raise ValueError("the owner writes from the panel, not as CHAT_SEAT=owner")
     if seat not in {s["id"] for s in seats}:
@@ -160,7 +182,7 @@ def read(a, seat, seats):
     rows = []
     for ch in chs:
         got = chat_store.read(ch, after=chat_store.cursor(seat, ch)) if a.unread else chat_store.read(ch)
-        if got:
+        if got and not a.peek:
             chat_store.mark(seat, ch, got[-1]["id"])
         rows += [r for r in got if not (a.unread and r["from"] == seat)]
     show(rows, with_ch=a.ch is None, seat=seat)
@@ -333,6 +355,7 @@ def main():
     s = sub.add_parser("read", help="no channel: your channels with unread counts; else the messages, marked read")
     s.add_argument("ch", nargs="?", help="a channel or @<seat>")
     s.add_argument("--unread", action="store_true", help="only messages since you last read, not your own")
+    s.add_argument("--peek", action="store_true", help="print without marking read (the cursor stays)")
     s = sub.add_parser("search", help="the newest 30 messages holding every word (any order, any case) in your channels, "
                                       "oldest first; marks nothing read")
     s.add_argument("words", help="the words (2 characters at least)")

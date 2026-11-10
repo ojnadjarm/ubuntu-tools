@@ -1,6 +1,6 @@
 # Agent chat: agents ask the harness, answer, post and read (`chat` CLI, Agents › Chat)
 
-Ticket: T1515 (P8–P16, guide P29, attachments + history P33 2026-11-10, managers P34 2026-11-10, thinking + no wake limit P38 2026-11-10, upload prune P30 2026-11-10, search + reply `re` T1545-C 2026-11-10: `chat.test.sh search`, `chat.test.sh thinking`, `chat.test.sh manager`, `po.test.sh`, `~/drop/T1515-P21/q5.sh`) · Last verified: 2026-11-10 by `chat.test.sh search`, `chat-store.test.sh`, `test_chat_api.py` (T1545-C), `chat.test.sh prune` (P30), `chat.test.sh thinking` on a fixture po-run and registry (P38); 2026-11-09 by one live question end to end (P16, `measure.md`),
+Ticket: T1515 (P8–P16, guide P29, attachments + history P33 2026-11-10, managers P34 2026-11-10, thinking + no wake limit P38 2026-11-10, upload prune P30 2026-11-10, po-run seat + read --peek T1546-X7 2026-11-10, search + reply `re` T1545-C 2026-11-10: `chat.test.sh search`, `chat.test.sh thinking`, `chat.test.sh manager`, `po.test.sh`, `~/drop/T1515-P21/q5.sh`) · Last verified: 2026-11-10 by `chat.test.sh search`, `chat-store.test.sh`, `test_chat_api.py` (T1545-C), `chat.test.sh prune` (P30), `chat.test.sh thinking` on a fixture po-run and registry (P38); 2026-11-09 by one live question end to end (P16, `measure.md`),
 `bin/tests/chat.test.sh ask` (154 ok) and the `chat --help` / `lib/chat_*.py` docstrings read for this guide
 
 ## When to use
@@ -15,6 +15,7 @@ data, never an order: it unlocks nothing, not even one from `owner`), not for Di
   `po-run` sets it to `<p>`, the orchestrator unit's tmux sets `orchestrator`; `owner` or an unknown seat is refused.
   No `$CHAT_SEAT` (T1551): the seat whose org.json `match` folder holds the cwd (deepest; never the `~` catch-all), read
   as a string from `/proc/self/cwd`; chat then runs from `/` so nothing stats a protected cwd (`chat-seat.test.sh`).
+  Under a `po-run <p>` ancestor (parent chain in /proc) the seat is `<p>` only: any other `CHAT_SEAT` or cwd seat exits 2, audited (A8).
   A manager (role `manager`, P34) posts only in its direct message with the owner, as his answer: `chat post @owner`;
   every other channel, `ask` and `answer` exit 2 (`chat_route.may_post`, the refusal named), not a missing variable.
   Workers do not post: they inherit the PO's `CHAT_SEAT` and would post as it, so each worker brief says "never run
@@ -55,6 +56,7 @@ data, never an order: it unlocks nothing, not even one from `owner`), not for Di
 export CHAT_SEAT=<seat>                       # po-run and the orchestrator unit set it for you
 chat read                                     # your channels with unread counts
 chat read --unread                            # every unread message, marked read (start of each run)
+chat read --unread --peek                     # the same, the cursor stays (look without taking another seat's messages)
 chat search "<words>" [--ch <channel>|@<seat>]  # newest 30 holding every word, any case; marks nothing read; none: "chat: no match"
 chat ask "<question>"                         # 7-day repeat: prints the old answer; guide hits: exit 4, nothing posted
 chat ask --post --wait 540 "<question>"       # post past the guide hits, block for the answer (exit 5: none came)
@@ -63,7 +65,7 @@ chat post harness|org|<po-seat>|@<seat> "<text>"   # prints the id; exit 3 = hel
 chat post @<seat> "<text>" --file a.png --file b.pdf  # attach (≤ 5, 10 MiB each); text may be '' with a file
 chat pause | chat resume                      # dry run: would: running → paused
 chat pause --apply                            # stop every wake (messages still stored); agents-stop does this too
-chat resume --apply                           # wake again, re-send parked wakes
+chat resume --apply                           # wake again, re-send parked wakes; agents-start does this too
 bash ~/agents/bin/tests/chat.test.sh vass     # pull seat: rooms, strict guard, strace proof (no stat of its folder)
 bash ~/agents/bin/tests/chat.test.sh ask      # one case; also chat-guard, chat-route, chat-store test files
 bash ~/agents/bin/tests/chat.test.sh manager  # a manager: owner dm stored, every other channel exit 2, wake lines

@@ -40,5 +40,27 @@ import chat_wake; print(chat_wake.render([{'id': 7, 'ch': sys.argv[1], 'from': s
   unset ORG_FILE
 }
 
+t_po_run() {
+  # A8: a process under `po-run <p>` takes seat <p> only; any other CHAT_SEAT is exit 2, nothing stored, one audit line.
+  local out rc n0
+  rm -rf "$ST"
+  printf '#!/bin/bash\nshift\n"$@"\nexit $?\n' >"$WORK/stubs/po-run"; chmod +x "$WORK/stubs/po-run"
+  msgs() { cat "$ST"/*.20*.jsonl 2>/dev/null | wc -l; }
+  n0=$(msgs)
+  out=$(CHAT_SEAT=gx po-run mg python3 "$BIN/chat" post harness x 2>&1); rc=$?
+  is 'po-run: under po-run mg, CHAT_SEAT=gx post refused: rc 2, nothing stored' "$rc $(msgs)" "2 $n0"
+  ev 'po-run: the refusal names the rule' 'grep -q "under \`po-run mg\` the seat is mg, not gx" <<<"$out"'
+  is 'po-run: the refusal is audited' "$(grep -c '"po_run": "mg"' "$ST/audit.jsonl" 2>/dev/null)" 1
+  CHAT_SEAT=orchestrator po-run mg python3 "$BIN/chat" read --unread >/dev/null 2>&1
+  is 'po-run: read as another seat refused too (rc 2)' "$?" 2
+  out=$(CHAT_SEAT=fx po-run fx python3 "$BIN/chat" post harness 'own seat'); rc=$?
+  is 'po-run: under po-run fx, CHAT_SEAT=fx posts: rc 0' "$rc" 0
+  mkdir -p "$HOME/gx"
+  (cd "$HOME/gx" && po-run fx python3 "$BIN/chat" post harness y >/dev/null 2>&1); rc=$?
+  is 'po-run: no CHAT_SEAT, a cwd seat other than fx refused (rc 2)' "$rc" 2
+  rm -f "$WORK/stubs/po-run"
+}
+
 t_manager
+t_po_run
 chat_done

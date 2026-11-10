@@ -28,6 +28,13 @@ t_read() {
   is 'read --unread: everything marked' "$(CHAT_SEAT=fx chat read)" "$(printf 'dm-fx--orchestrator 0 unread\nharness 0 unread')"
   is 'read @seat: the dm' "$(CHAT_SEAT=fx chat read @orchestrator | grep -c private)" 1
 
+  CHAT_SEAT=gx chat post harness 'peeked' >/dev/null
+  out=$(CHAT_SEAT=fx chat read --unread --peek)
+  ev 'read --peek: prints the unread message' 'grep -q "#harness gx: peeked" <<<"$out"'
+  is 'read --peek: the cursor does not move' "$(CHAT_SEAT=fx chat read | grep harness)" 'harness 1 unread'
+  is 'read ch --peek: the cursor does not move' "$(CHAT_SEAT=fx chat read harness --peek >/dev/null; CHAT_SEAT=fx chat read | grep harness)" 'harness 1 unread'
+  CHAT_SEAT=fx chat read harness >/dev/null
+
   CHAT_SEAT=fx chat read dm-gx--orchestrator >/dev/null 2>&1
   is "read: another seat's dm refused (rc 2)" "$?" 2
   CHAT_SEAT=owner chat read >/dev/null 2>&1
