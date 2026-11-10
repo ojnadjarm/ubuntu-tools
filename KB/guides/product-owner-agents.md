@@ -1,6 +1,7 @@
 # Product-owner agents: one PO per busy project (po-ask, po-run, po-status, po-push, deploy-lock)
 
-Ticket: T1412 (plan T1410), T1515 P31 (managers), P32 (images), P36 (reply images), T1547 (discord-hire) · Last verified: 2026-11-10 by
+Ticket: T1412 (plan T1410), T1515 P31 (managers), P32 (images), P36 (reply images), T1547 (discord-hire), T1557 (manager context) · Last
+verified: 2026-11-10 by `po-context check` ok for the 4 managers, po-discord and po-mooblox (0.09-0.14 s each), after the C5-C8 migration; by
 `discord-liaison/tests` (85, `test_hire.py` 4) and a live hire of po-narrador-interactivo-ia; before: `po.test.sh` (71 ok) and
 `discord-liaison/tests` (77, `test_managers.py`); before: 2026-10-27 by `bin/tests/po.test.sh` (52 ok), pulse test (30 ok), liaison suite
 (40 tests) and two live po-mooblox runs (dry run 54 s, budget stop 18 s)
@@ -14,7 +15,7 @@ orchestrator relays with `po-ask`. Not for fleet tooling, work repos (Vass) or r
   manager roles; file state chosen over subagent `memory:` because it works headless and survives `agents-stop`).
 - Wake: `po@<p>.path` (`DirectoryNotEmpty=inbox/`) starts `po@<p>.service` = `po-run <p>`: inbox → `current/`, one
   `agent-run`, leftovers → `done/` with an outcome line, loop while the inbox refills; a second po-run exits 0. 0 tokens idle.
-- Clean context every run: BRIEF + `state/PROJECT.md` (≤ 200 lines), `BACKLOG.md`, `RUNS.md`, the ledger
+- Clean context every run: BRIEF + `state/PROJECT.md` (≤ 80 lines, 6 KB), `BACKLOG.md`, `RUNS.md`, the ledger
   `~/agent-work/decisions/<p>.md`. Requests keep his words verbatim (`quote: copy|intent`).
 - Budget: po-run passes `PO_BUDGET=stop` when `plan-usage --check 95` exits 1; the PO then spawns nothing and writes
   `ESCALATE: budget`. `po-status` shows `ESCALATE:` lines to the orchestrator.
@@ -51,6 +52,22 @@ orchestrator relays with `po-ask`. Not for fleet tooling, work repos (Vass) or r
   `state.lock`), `pc units enable` both path units `--apply` (skipped when `systemctl --user is-enabled`), one
   `chat post @owner` line. Each step checks first, so a re-run is a no-op; `--repo` later fills a null repo and
   re-renders the block. Then `po-ask <id> --from router` the request. ARCH: `$AGENT_WORK/research/2026-11-10/T1547/ARCH.md`.
+- Manager layout (T1557, every PO since C1; `po-template/PROJECT.md`, `HISTORY.md`): one home per fact.
+  | file | holds | cap | read |
+  |---|---|---|---|
+  | `BRIEF.md` | template + "## Project" block from `projects.json` (8 standing Discord rules) | | every run |
+  | `state/PROJECT.md` | 6 sections in order: What it is · People · Where requests come from · Owner taste and standing rules · Standards · Links | 80 lines, 6 KB | every run |
+  | `state/BACKLOG.md` | open asks only, 1 row per waiting decision (no per-PR rows) | 30 rows | every run |
+  | `state/REPO.md` | HEAD, unpushed branches, worktrees, open PRs; written by `po-context repo`, never by hand | 40 lines | every run |
+  | `state/RUNS.md` | one line per run | | last 20 lines |
+  | `state/HISTORY.md` | the past: one section per thread + "Archive" pointers (liaison jobs, transcripts) | 150 lines | on demand |
+  | `state/refs/` + `INDEX.md` | files people posted (`file \| who \| date \| what`; gone from Discord = `lost`) | INDEX names every file | on demand |
+  | `~/agent-work/decisions/<id>.md` | his words, dated, append-only; "## Before 2026-11-10" block = migrated past | | last 40 lines |
+- `po-context` (T1557-C2/C3): `check <p>` = files, caps, `refs/INDEX.md` covers `refs/`; managers (`PARENT=`) also the 6
+  headings in order, HISTORY.md, ledger, REPO.md under 24 h when a clone exists, the 8 rules in BRIEF. `repo <p>` rewrites
+  REPO.md (temp + mv) from the clone: read-only git + `gh pr list` (20 s), no fetch. po-run calls `repo` before and
+  `check` after each manager run; each miss is one `context:` line in REPORT.md that the manager fixes first next run.
+  The old liaison job folders stay as a cold archive: managers never read `discord-liaison/state/`, only the digest.
 - Context map (who reads what): `~/agent-work/research/2026-11-09/T1515/P31-architecture.md`. A manager reads its BRIEF,
   inbox, state and ledger only; `test_managers.py` proves a request for project A never reaches manager B.
 - `deploy-lock <env> --version '<cmd>' -- <cmd>`: one deployer per live env, second one waits and gets `DEPLOY_LIVE_BEFORE`.
@@ -63,6 +80,9 @@ discord-hire <id> "<Name>" --thread <tid> [--repo o/n] [--rule k=v]   # new proj
 pc units enable po@<p>.path --user --now --apply
 po-ask <p> --from owner --copy "<his words>"      # or --intent; prints the inbox file
 po-ask <p> --image <png|jpg|gif|webp> … "<text>"  # copies each into po-<p>/state/images/, `images:` line (P32)
+po-context check <p>                    # ok <p>, else miss: lines, exit 1 (layout + caps)
+po-context repo <p>                     # rewrite state/REPO.md from the clone (read-only)
+wait-for --label po-lock --until 'flock -n ~/agents/po-<p>/.po-run.lock true'   # before swapping state files
 po-status                               # last run, inbox, running, open items, pushes today, ESCALATE lines
 po-push <p> --pick 'A=Dimensioned;B=Plain' "pick a look <link>"
 deploy-lock 5.2 --version '<read live version>' -- <deploy cmd>
@@ -91,9 +111,18 @@ bash ~/agents/bin/tests/po.test.sh      # fixture: bwrap no-net, fake ntfy, fake
   in the orchestrator's DM with the owner.
 - A request handled before the hire stays in the old manager's `done/`: re-file it with `po-ask <id> --from router`.
 - The pulse lets only a *new* Discord escalation through between 80 and 95 % of the plan, as an escalation-only turn.
+- Migration counts from `job.json` undercount attachments: T1557 planned 22 tiny-epic-narrator files, the 3 threads held
+  58 (108 MB in `refs/`); the job copies were gone (0 of 23), so C6 re-downloaded them read-only from the threads. Count
+  from the thread, not the jobs.
+- A manager run holds `po-<p>/.po-run.lock` for 10-18 min (measured C5-C8): swap PROJECT/BACKLOG with
+  `flock ~/agents/po-<p>/.po-run.lock mv …` after writing the new files, and `wait-for` the lock; never hand-written sleeps.
+- `po.test.sh` must never read live `po-*` folders: a count of the real inbox/done raced live runs (flaky); C3 replaced it
+  with a read-only bind of the real tree.
+- A project with no clone (narrador-interactivo-ia) has no REPO.md and `check` still passes; spidey's 5 unpushed
+  branches show only in REPO.md (`commits on no remote`), so BACKLOG holds 1 row for them, not 5.
 
 ## Links
-- Code: `~/agents/bin/po-{ask,run,new,status,push,picks}`, `bin/polib.sh`, `lib/po_cap.py`, `discord-liaison/liaison/managers.py`, `bin/discord-hire`, `bin/deploy-lock`, `units/po@.{path,service}`,
+- Code: `~/agents/bin/po-{ask,run,new,status,push,picks,context}`, `bin/polib.sh`, `lib/po_cap.py`, `discord-liaison/liaison/managers.py`, `bin/discord-hire`, `bin/deploy-lock`, `units/po@.{path,service}`,
   `units/po-picks.service`, `po-template/` (`MANAGER.tmpl.md`), `discord-liaison/liaison/po.py`
-- Tests: `bin/tests/po.test.sh`, `discord-liaison/tests/test_po.py`, `test_hire.py` (`bin/tests/discord-liaison.test.sh`), `bin/tests/orchestrator-pulse.test.sh`
-- Design: `~/agent-work/research/2026-10-27/T1410/PLAN.md`; pilot `~/agents/po-mooblox/`
+- Tests: `bin/tests/po.test.sh`, `bin/tests/po-context.test.sh`, `discord-liaison/tests/test_po.py`, `test_hire.py` (`bin/tests/discord-liaison.test.sh`), `bin/tests/orchestrator-pulse.test.sh`
+- Design: `~/agent-work/research/2026-10-27/T1410/PLAN.md`; manager context `~/agent-work/research/2026-11-10/T1557/PLAN.md`; pilot `~/agents/po-mooblox/`

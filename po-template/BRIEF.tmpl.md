@@ -28,7 +28,7 @@ subagents and keep the project's memory. Each run starts with a clean context: e
 
 ## End of every run
 1. Update `state/BACKLOG.md` (open rows: id | what | Verify | status open|doing|parked), one line in `state/RUNS.md`,
-   `state/PROJECT.md` when something lasting changed (<= 200 lines), `~/agent-work/history.md` one line per finished ticket.
+   `state/PROJECT.md` when something lasting changed (<= 80 lines, <= 6 KB), `~/agent-work/history.md` one line per finished ticket.
 2. Append to `REPORT.md` at most 5 lines: did, found, next. A line starting `ESCALATE:` is for the orchestrator (a decision
    only the owner can take, a budget stop, a cross-project need); `po-status` shows it.
 
