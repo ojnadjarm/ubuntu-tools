@@ -16,7 +16,7 @@
 #   pc_cmd <name> [args…]           run $PC_FIXTURE/bin/<name> (recorded stdout) when it exists, else the real binary
 #   cached <name> <ttl> <cmd…>      stdout of cmd, reused while the cache entry is younger than ttl; FRESH=1 bypasses
 #   pc_smart_json                   `smartctl -j -H -A /dev/nvme0` (root; fixture under PC_FIXTURE), cached io_smart 1 h unless empty; --fresh keeps it
-#   pc_fleet_enabled                the enabled user units matching PC_FLEET_GLOBS, one per line
+#   pc_fleet_enabled                enabled user units matching PC_FLEET_GLOBS or a units/ file (minus UNITS_OFF), plus PC_FLEET_INSTANCES
 #   pc_fleet_states [--system] <u…> "unit<TAB>active<TAB>sub<TAB>OK|FAIL" per unit (failed, failed oneshot, enabled but down)
 #   pc_unit_loops                   timer-driven user units failing >= 10/h in the last hour; exit 1 when any is ours
 #   PC_NOT_OURS                     ERE of protected units (`protected ere unit`): never a fleet failure
@@ -276,9 +276,24 @@ protected_ere() {
 [ -n "${PC_NOT_OURS:-}" ] || PC_NOT_OURS=$(protected_ere unit)
 # User units the fleet owns by name (AGENTS.md §5): an enabled one is judged even off a roster.
 PC_FLEET_GLOBS='dark-eye*.service sentinel*.service agent@*.service'
+# Repo unit files: an enabled one is fleet too, minus UNITS_OFF; template instances count via their wants/ links.
+PC_UNITS_DIR=${PC_UNITS_DIR:-$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")/units}
+PC_FLEET_INSTANCES='po@*.path discord-liaison-relay@*.path'
 pc_fleet_enabled() {
-  # shellcheck disable=SC2086  # deliberate: one glob per word
-  pc_cmd systemctl --user list-unit-files --state=enabled --no-legend $PC_FLEET_GLOBS 2>/dev/null | awk '{print $1}'
+  local u g wants=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
+  {
+    pc_cmd systemctl --user list-unit-files --state=enabled --no-legend 2>/dev/null | awk '{print $1}' | while read -r u; do
+      for g in $PC_FLEET_GLOBS; do
+        # shellcheck disable=SC2254  # deliberate: $g is a fleet glob
+        case $u in $g) echo "$u"; continue 2;; esac
+      done
+      [ -e "$PC_UNITS_DIR/$u" ] && [[ " ${UNITS_OFF:-} " != *" $u "* ]] && echo "$u"
+    done
+    for g in $PC_FLEET_INSTANCES; do
+      # shellcheck disable=SC2231  # deliberate: $g is an instance glob
+      for u in "$wants"/*.wants/$g; do [ -e "$u" ] || [ -L "$u" ] && echo "${u##*/}"; done
+    done
+  } | awk '!seen[$0]++'
 }
 # pc_fleet_states [--system] <unit…> — FAIL is a failed unit, a oneshot whose last run failed, or an enabled unit not running.
 pc_fleet_states() {

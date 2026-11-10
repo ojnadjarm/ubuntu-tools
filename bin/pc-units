@@ -46,7 +46,8 @@ accounts-daemon. System units go through sudo -n.
 Roster (KB/orchestrator.md): sentinel-check.timer, agent@moodle-keeper, agent@sentinel-digest,
 agent@maintenance, moodle-keep-weekly.timer, dark-eye(.service/-failed), agents-dashboard,
 the orchestrator unit, ydotoold (system). `fleet` = just those plus any enabled user unit named
-like the fleet (dark-eye*, sentinel*, agent@*), with next/last run from timers and a verdict:
+like the fleet (dark-eye*, sentinel*, agent@*) or shipped in ~/agents/units/ (minus UNITS_OFF), and
+the enabled po@*.path and discord-liaison-relay@*.path instances, with next/last run from timers and a verdict:
 FAIL for a failed unit, a oneshot whose last run failed, or an enabled unit that is not running.' "$@"
 
 # Roster units (KB/orchestrator.md persistent-agent table + always-on services).

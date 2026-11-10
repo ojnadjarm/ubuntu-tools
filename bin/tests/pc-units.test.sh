@@ -76,6 +76,45 @@ HOME="$FF" PC_FIXTURE=$FF "$U" fleet | grep -q 'dark-eye-old.service *inactive *
 is 'fleet text shows the verdict column' "$?" 0
 rm -rf "$FF"
 
+## --- fixture: every enabled repo unit is fleet (T1546-K3) ----------------
+FR=$(mktemp -d); mkdir -p "$FR/bin" "$FR/units" "$FR/.config/systemd/user/default.target.wants"
+touch "$FR/units/"{discord-bot.service,po-picks.service,selenium-idle.timer,po@.path,discord-liaison-relay@.path}
+touch "$FR/.config/systemd/user/default.target.wants/"{po@demo.path,discord-liaison-relay@demo.path}
+cat >"$FR/bin/systemctl" <<'S'
+#!/bin/sh
+case "$*" in
+  *list-unit-files*)
+    pats=; for a in "$@"; do case "$a" in -*|list-unit-files) ;; *) pats="$pats $a";; esac; done
+    for u in discord-bot.service po-picks.service selenium-idle.timer foreign.service; do
+      [ -z "$pats" ] && echo "$u enabled enabled" && continue
+      for g in $pats; do case "$u" in $g) echo "$u enabled enabled";; esac; done
+    done; exit 0;;
+  *list-timers*) echo '[]'; exit 0;;
+  *show*) ;;
+  *) exit 0;;
+esac
+skip=0
+for a in "$@"; do
+  [ $skip = 1 ] && { skip=0; continue; }
+  case "$a" in -p) skip=1; continue;; -*|show) continue;; esac
+  case "$a" in
+    discord-bot.service|po@demo.path) set -- inactive dead enabled simple success;;
+    *) set -- active running enabled simple success;;
+  esac
+  printf 'Id=%s\nActiveState=%s\nSubState=%s\nUnitFileState=%s\nType=%s\nResult=%s\n\n' "$a" "$1" "$2" "$3" "$4" "$5"
+done
+S
+chmod +x "$FR/bin/systemctl"
+fl=$(HOME="$FR" XDG_CONFIG_HOME='' PC_UNITS_DIR="$FR/units" UNITS_OFF=selenium-idle.timer PC_FIXTURE=$FR "$U" fleet --json)
+st() { jq -r --arg u "$1" '[.[]|select(.unit==$u)|.state][0] // "absent"' <<<"$fl"; }
+is 'fleet: enabled repo unit not running is FAIL' "$(st discord-bot.service)" FAIL
+is 'fleet: a running enabled repo unit is OK' "$(st po-picks.service)" OK
+is 'fleet: an enabled po@ path instance not running is FAIL' "$(st po@demo.path)" FAIL
+is 'fleet: an enabled relay path instance is listed' "$(st discord-liaison-relay@demo.path)" OK
+is 'fleet: a unit in UNITS_OFF is not listed' "$(st selenium-idle.timer)" absent
+is 'fleet: an enabled unit outside units/ is not listed' "$(st foreign.service)" absent
+rm -rf "$FR"
+
 ## --- fixture: reset-failed (TSP-044) — stubbed systemctl on PATH, never a real unit ----
 RF=$(mktemp -d); mkdir -p "$RF/bin"; echo failed >"$RF/state"
 cat >"$RF/bin/systemctl" <<S
