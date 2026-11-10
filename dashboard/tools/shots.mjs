@@ -1,5 +1,5 @@
 // Panel screenshots at five widths plus metrics.json; POSTs blocked; exit 1 if any shot scrolls sideways.
-// Usage: node tools/shots.mjs <out-dir> [screen,screen|all] [base-url]
+// Usage: [GPU=1] node tools/shots.mjs <out-dir> [screen,screen|all] [base-url]   (GPU=1: hardware WebGL, the office in 3D)
 import fs from 'node:fs'; import path from 'node:path'; import { createRequire } from 'node:module'; import { fileURLToPath } from 'node:url';
 const dir = path.join(path.dirname(process.execPath), '..', 'lib', 'node_modules', '@playwright/mcp/node_modules/playwright-core');
 const { chromium } = createRequire(path.join(dir, 'package.json'))(dir);
@@ -10,7 +10,8 @@ if (!out) { console.error('usage: shots.mjs <out-dir> [screen,screen|all] [base-
 const screens = !pick || pick === 'all' ? all : pick.split(',');
 fs.mkdirSync(out, { recursive: true });
 const sizes = [[400, 850], [768, 1024], [1366, 768], [1920, 1080], [2560, 1440]];
-const b = await chromium.launch({ headless: true, args: ['--mute-audio'] });
+const gpu = process.env.GPU ? ['--enable-gpu', '--ignore-gpu-blocklist', '--use-angle=vulkan', '--enable-features=Vulkan'] : [];
+const b = await chromium.launch({ headless: true, args: ['--mute-audio', ...gpu] });
 const rows = [];
 for (const [w, h] of sizes) for (const s of screens) {
   const ctx = await b.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 1 });

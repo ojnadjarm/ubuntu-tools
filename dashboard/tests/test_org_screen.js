@@ -27,7 +27,7 @@ const say = (from) => CHAT.push({ id: CHAT.length + 1, ts: new Date().toISOStrin
 const shownTip = (p) => p.$eval('.org .seat[data-seat="mooblox"] .av svg', (e) => !!e.querySelector(".mouth") && !!e.querySelector(".say"));
 const srv = serveStatic((u, res) => {
   if (u === "/api/status") return STATUS;
-  if (u === "/api/org") return ORG;
+  if (u === "/api/org" || u === "/api/office") return ORG;
   if (u === "/api/chat") {
     const after = new URL(res.req.url, "http://x").searchParams.get("after");
     if (after != null) reads++;

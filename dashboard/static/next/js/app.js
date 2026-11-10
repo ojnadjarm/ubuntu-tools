@@ -154,7 +154,7 @@ function refresh() {
   if (!cur) return;
   const m = M[cur];
   const shown = m && m.own && grid.dataset.live && grid.querySelector(":scope > .nxs:not(.skel)");
-  if (shown && m.keep) { chrome(); rescene(); return; }
+  if (shown && m.keep) { if (m.tick) m.tick(); chrome(); rescene(); return; }
   if (shown) {
     const changed = sync(grid, m.render(grid, store.D), 1);
     motion();
@@ -170,10 +170,10 @@ function life() {
 function agents() {
   return getJSON("/api/agents").then((a) => { store.A = a; life(); }).catch(() => {});
 }
-/* Fast agents poll while the court or roster is on screen and someone works; otherwise agents ride the 30 s tick. */
+/* Fast agents poll while the office, court or roster is on screen and someone works; otherwise agents ride the 30 s tick. */
 function fast() {
   clearTimeout(aTimer);
-  if (document.hidden || (cur !== "agents" && cur !== "roster") || !WORKING(store.A)) return;
+  if (document.hidden || (cur !== "agents" && cur !== "roster" && cur !== "org") || !WORKING(store.A)) return;
   aTimer = setTimeout(() => agents().then(() => { refresh(); fast(); }), 5000);
 }
 /* The 30 s tick, aligned to the wall clock so the minute display is never late; nothing runs while hidden. */
@@ -236,7 +236,7 @@ board.addEventListener("touchend", (e) => {
   if (tx === null) return;
   const t = e.changedTouches[0], dx = t.clientX - tx, dy = t.clientY - ty;
   tx = null;
-  if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5 || e.target.closest(".tw, .facets, .lb, .scape, .chat .cgrid, .vx:not([data-rs=idle])")) return;
+  if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5 || e.target.closest(".tw, .facets, .lb, .scape, .office .stage, .chat .cgrid, .vx:not([data-rs=idle])")) return;
   const subs = subsOf(byId[cur].sec), i = subs.indexOf(byId[cur]) + (dx < 0 ? 1 : -1);
   if (i >= 0 && i < subs.length) nav(subs[i].id);
 }, { passive: true });

@@ -11,7 +11,7 @@ export const SCREENS = [
   { id: "services", sec: "machine", name: "Services", shape: "rain", load: "/static/js/screens/services.js" },
   { id: "sites", sec: "machine", name: "Sites", shape: "stars", load: "/static/js/screens/sites.js" },
   { id: "todo", sec: "machine", name: "To do", shape: "wave", load: "/static/js/screens/todo.js" },
-  { id: "org", sec: "agents", name: "Org", load: "./screens/org.js" },
+  { id: "org", sec: "agents", name: "Office", load: "./screens/org.js" },
   { id: "chat", sec: "agents", name: "Chat", load: "./screens/chat.js" },
   { id: "agents", sec: "agents", name: "Court", load: "./screens/court.js" },
   { id: "roster", sec: "agents", name: "Roster", load: "./screens/roster.js" },

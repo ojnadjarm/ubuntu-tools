@@ -1,148 +1,136 @@
-/* Org: who reports to whom (the seats of org.json) and every live Claude session on this laptop, from GET /api/org. */
+/* Office: the composition root of #org. Reads GET /api/office, builds the model and its plan, hands them to the 3D renderer and to the overlay (list, labels, card, panels). */
 import { esc } from "/static/js/core/fmt.js";
 import { getJSON } from "/static/js/core/api.js";
 import { cur, go } from "/static/js/core/router.js";
-import { familiar } from "../familiars/alive.js";
 import { watch } from "../familiars/talk.js";
 import { listen } from "../familiars/ear.js";
 import { sync } from "../ui/sync.js";
 import { dust } from "../shapes.js";
 import { fitEye } from "../gl/cam.js";
-import { ago } from "./court.js";
 import { plural } from "../summary.js";
+import { build, diff } from "../office/model.js";
+import { plan as planOf } from "../office/layout.js";
+import { until } from "../office/time.js";
+import { list } from "../office/overlay/list.js";
+import { panels } from "../office/overlay/panels.js";
+import { labels } from "../office/overlay/labels.js";
+import * as card from "../office/overlay/card.js";
 
-export const own = true;
-const STALE_MS = 20000;
-const ROLE = { ceo: "Runs the fleet and answers questions about the harness.", po: "Product owner.", manager: "Project manager. Never posts." };
-const WAKE = { channel: "Always on; woken through its chat channel.", "po-inbox": "Asleep until someone writes to its inbox.", pull: "Reads its messages when it next runs." };
-const PILL = { working: "running", idle: "idle", asleep: "off", off: "off", yours: "his" };
-const SHOWN = 3;
-let O = null, at = 0, busy = false, err = "";
+export { seatState, titled, dmOf } from "../seats.js";
+export const own = true, keep = true;
+const STALE_MS = 20000, FAST_MS = 4500, DRAG_PX = 6;
+const NOTE = "Still picture: this browser has no graphics acceleration. The list below is live.";
+const grid = document.getElementById("grid"), canvas = document.createElement("canvas"), tags = document.createElement("div");
+canvas.setAttribute("aria-hidden", "true");
+tags.className = "otags"; tags.setAttribute("aria-hidden", "true");
+let M = null, plan = null, applied = null, R = null, L = null, starting = false, at = 0, busy = false, err = "", down = null;
 
-if (!document.querySelector('link[href="/static/css/org.css"]')) {
+for (const href of ["/static/css/org.css", "/static/css/office.css"]) if (!document.querySelector(`link[href="${href}"]`)) {
   const l = document.createElement("link");
-  l.rel = "stylesheet"; l.href = "/static/css/org.css";
+  l.rel = "stylesheet"; l.href = href;
   document.head.appendChild(l);
 }
 
-/* Reads /api/org when it is missing or older than STALE_MS, then repaints the screen if it is still on. */
-function pull() {
-  if (busy || (O && Date.now() - at < STALE_MS)) return;
+const root = () => grid.querySelector(":scope > .nxs.office");
+
+/* Reads /api/office when the copy is missing or older than max ms; never while the tab is hidden. */
+function pull(max) {
+  if (busy || document.hidden || (at && Date.now() - at < max)) return;
   busy = true;
-  getJSON("/api/org").then((j) => { O = j; err = j.error || ""; }, (e) => { err = e.message || "unreadable"; })
-    .finally(() => { busy = false; at = Date.now(); if (cur === "org") go("org", true); });
+  getJSON("/api/office").then((j) => { M = build(j); plan = planOf(M); err = M.error; }, (e) => { err = e.message || "unreadable"; })
+    .finally(() => { busy = false; at = Date.now(); paint(); });
 }
 
-/* A seat starts or stops talking: the tree is patched in place. */
-watch(() => {
-  const grid = document.getElementById("grid");
-  if (cur === "org" && O && grid.querySelector(":scope > .nxs.org")) sync(grid, render(), 1);
-});
-
-const prot = (s) => !("pid" in s);
-const pill = (st) => `<span class="pill ${PILL[st] || "idle"}">${esc(st)}</span>`;
-const dot = (st) => `<span class="pill dot ${PILL[st] || "idle"}" title="${esc(st)}"><span class="sr-only">${esc(st)}</span></span>`;
-const BUBBLE = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H10l-5 4v-4H4z"/></svg>';
-
-/* An avatar button described by its tooltip (a top-layer popover): lines[0] bold, the rest plain; hover, keyboard focus or a tap shows it. */
-const av = (id, name, art, lines, cls = "") => `<span class="av${cls}"><button type="button" class="avb" aria-label="About ${esc(name)}" aria-describedby="tip-${esc(id)}">${art}</button>` +
-  `<span class="tip" role="tooltip" popover="manual" id="tip-${esc(id)}">${lines.filter(Boolean).map((l, i) => i ? `<span>${esc(l)}</span>` : `<b>${esc(l)}</b>`).join("")}</span></span>`;
-
-/* Puts an open tooltip under its avatar, else above it, else beside it, always whole inside the viewport. */
-function place(a) {
-  const t = a.querySelector(".tip"), r = a.querySelector(".avb").getBoundingClientRect(), W = document.documentElement.clientWidth, H = innerHeight;
-  const w = t.offsetWidth, h = t.offsetHeight, m = 8, g = 4;
-  let top = r.bottom + g, left = r.left + r.width / 2 - w / 2;
-  if (top + h > H - m) top = r.top - g - h;
-  if (top < m) { top = Math.min(r.top, H - m - h); left = W - r.right >= r.left ? r.right + g : r.left - g - w; }
-  t.style.left = Math.round(Math.max(m, Math.min(W - m - w, left))) + "px";
-  t.style.top = Math.round(Math.max(m, top)) + "px";
+/* The band's text: sessions, staff on, the next run, a stale note. */
+function line() {
+  const l = M.line;
+  return `<p class="kin" data-dec>Office</p><p class="bsum"><b>${plural(l.sessions, "Claude session")} on this laptop</b>, ${l.working} working · ${l.on} of ${l.of} staff on` +
+    `${l.soon ? ` · next up ${esc(l.soon.name)} in ${esc(until(l.soon.next))}` : ""}${err ? ` · stale: ${esc(err)}` : ""}</p>`;
 }
 
-const why = new WeakMap();
-/* Adds or drops one reason (hover, focus, tap) an avatar's tooltip is open; open while any is left. */
-function tip(a, reason, on) {
-  const s = why.get(a) || new Set(), t = a.querySelector(".tip");
-  on ? s.add(reason) : s.delete(reason);
-  why.set(a, s);
-  if (s.size && !t.matches(":popover-open")) { t.showPopover(); place(a); } else if (!s.size && t.matches(":popover-open")) t.hidePopover();
+/* Hands the renderer what changed since its last model; redraw forces a frame after the canvas came back. */
+function show(redraw) {
+  if (!R || !M || !canvas.isConnected) return;
+  const patch = applied !== M ? diff(applied, M) : redraw ? { rooms: [(M.ceo || M.rooms[0]).id] } : null;
+  if (patch) R.apply(M, plan, patch);
+  applied = M;
+  L.update(M);
 }
 
-const avOf = (e) => e.target.closest && e.target.closest(".org .av");
-/* A tap on an avatar toggles its tooltip; a tap anywhere else closes any tapped-open one. */
-document.addEventListener("click", (e) => {
-  const a = avOf(e);
-  document.querySelectorAll(".org .av").forEach((x) => x !== a && why.get(x)?.has("tap") && tip(x, "tap", false));
-  if (a) tip(a, "tap", !why.get(a)?.has("tap"));
-});
-document.addEventListener("pointerover", (e) => { const a = avOf(e); if (e.pointerType === "mouse" && a && !a.contains(e.relatedTarget)) tip(a, "hover", true); });
-document.addEventListener("pointerout", (e) => { const a = avOf(e); if (e.pointerType === "mouse" && a && !a.contains(e.relatedTarget)) tip(a, "hover", false); });
-document.addEventListener("focusin", (e) => { const a = avOf(e); if (a && e.target.matches(":focus-visible")) tip(a, "focus", true); });
-document.addEventListener("focusout", (e) => { const a = avOf(e); if (a) tip(a, "focus", false); });
-/* An open tooltip follows its avatar through a scroll or a resize. */
-const follow = () => document.querySelectorAll(".org .tip:popover-open").forEach((t) => place(t.parentElement));
-addEventListener("scroll", follow, { capture: true, passive: true });
-addEventListener("resize", follow);
-
-/* A seat's state from its own sessions: working, idle, yours (a protected session), else asleep (or off for the always-on seat). */
-export function seatState(seat, S) {
-  const mine = S.filter((s) => s.seat === seat.id);
-  if (mine.some(prot)) return "yours";
-  if (mine.some((s) => s.state === "working")) return "working";
-  if (mine.length) return "idle";
-  return seat.wake === "channel" ? "off" : "asleep";
+/* Loads the furniture kit, the theme and the renderer once, then draws the office. */
+function start(st) {
+  if (starting) return;
+  starting = true;
+  Promise.all([import("../office/gl/index.js"), import("../office/theme.js"), import("../office/kit.js").then((k) => k.load())]).then(([gl, th, kit]) => {
+    R = window.__office = gl.createRenderer(canvas, { theme: th.THEME, kit });
+    L = labels(tags, R);
+    canvas.addEventListener("view", L.place);
+    canvas.addEventListener("pointerdown", (e) => { down = [e.clientX, e.clientY]; });
+    canvas.addEventListener("click", (e) => {
+      const r = canvas.getBoundingClientRect(), id = down && Math.hypot(e.clientX - down[0], e.clientY - down[1]) < DRAG_PX && R.pick(e.clientX - r.left, e.clientY - r.top);
+      if (id) card.open(id, { x: e.clientX, y: e.clientY });
+    });
+    mount();
+  }).catch((e) => { console.error(e); st.dataset.still = "1"; });
 }
 
-/* A seat or worker as "Name · Rank" when the API gives a rank, else its name. */
-export const titled = (s) => (s.rank ? s.name + " · " + s.rank : s.name);
-
-/* The owner's direct message with seat `id`, as Chat names it. */
-export const dmOf = (id) => "dm-" + ["owner", id].sort().join("--");
-
-const worker = (s) => `<li title="${esc(titled({ ...s, name: s.name || "pid " + s.pid }))}"><span class="mini" aria-hidden="true">${familiar("pid" + s.pid, s.state === "working" ? "working" : "idle", "worker")}</span><b>${esc(s.name || "pid " + s.pid)}</b>${dot(s.state)}</li>`;
-
-/* The sessions a seat started, working first: SHOWN of them, the rest folded behind a "hidden N" line. */
-function crew(H) {
-  if (!H.length) return "";
-  const all = [...H.filter((s) => s.state === "working"), ...H.filter((s) => s.state !== "working")], rest = all.slice(SHOWN);
-  return `<div class="hang"><p class="hn">${plural(H.length, "worker")}, ${H.filter((s) => s.state === "working").length} working</p><ul class="crew">${all.slice(0, SHOWN).map(worker).join("")}</ul>` +
-    (rest.length ? `<details class="fold"><summary>hidden ${rest.length}</summary><ul class="folded">${rest.map(worker).join("")}</ul></details>` : "") + `</div>`;
+/* Puts the one canvas and its tags back into the stage of the fresh markup. */
+function mount() {
+  const st = document.querySelector(".office .stage");
+  if (!st) return;
+  const back = canvas.parentNode !== st;
+  if (back) st.prepend(canvas, tags);
+  if (!R) { start(st); return; }
+  st.dataset.still = R.still ? "1" : "";
+  show(back);
 }
 
-function seatCard(seat, S) {
-  if (seat.role === "owner") return `<div class="seat him">${av(seat.id, seat.name, "<i></i>", ["Read every channel, write anywhere, message anyone.", "Only your words change what an agent may do."], " dia")}<h3>${esc(seat.name)}</h3></div>`;
-  const st = seatState(seat, S), helpers = S.filter((s) => !s.seat && s.parent === seat.id), msg = "Message " + seat.name;
-  return `<div class="seat" data-seat="${esc(seat.id)}">${av(seat.id, seat.name, familiar(seat.id, st, seat.role), [titled(seat), seat.area, seat.about, ROLE[seat.role], WAKE[seat.wake], "Now " + st + "."])}<h3>${esc(seat.name)} ${seat.rank ? `<span class="rk">${esc(seat.rank)}</span>` : ""}${dot(st)}</h3>` +
-    `${crew(helpers)}<a class="btn msg" href="#chat?ch=${esc(dmOf(seat.id))}" aria-label="${esc(msg)}" title="${esc(msg)}">${BUBBLE}</a></div>`;
+/* After a read: the first answer renders the screen, later ones patch band, list and boards in place and update card and scene. */
+function paint() {
+  if (cur !== "org") return;
+  const el = root();
+  if (!M || !el) { go("org", true); return; }
+  sync(el.querySelector(".bt"), line());
+  sync(el.querySelector(".olist"), list(M));
+  sync(el.querySelector(".opanels"), panels(M));
+  card.refresh(M);
+  show(false);
 }
 
-/* The seat tree: the owner and the seats reporting to the owner one above the other, every deeper level as a grid under its parent. */
-function sub(seats, S, id) {
-  const kids = seats.filter((s) => s.parent === id);
-  return kids.length ? `<ol class="pos">` + kids.map((s) => `<li class="${s.role}">${seatCard(s, S)}${sub(seats, S, s.id)}</li>`).join("") + `</ol>` : "";
-}
-function tree(seats, S) {
-  const owner = seats.find((s) => s.role === "owner"), top = owner ? [owner, ...seats.filter((s) => s.parent === owner.id)] : [];
-  return `<ol class="otree">` + top.map((s) => `<li class="${s.role}">${seatCard(s, S)}${s === owner ? "" : sub(seats, S, s.id)}</li>`).join("") + `</ol>`;
-}
-
-function row(s, names) {
-  if (prot(s)) return `<tr class="dim"><td>protected project</td><td>${esc(names[s.seat] || "—")}</td><td>hidden</td><td>${pill(s.state === "working" ? "working" : "idle")}</td><td>—</td><td>${ago(s.since)} ago</td></tr>`;
-  const seat = s.seat ? names[s.seat] || s.seat : s.parent ? "under " + (names[s.parent] || s.parent) : "—";
-  return `<tr><td>${esc(s.name || "pid " + s.pid)}</td><td>${esc(seat)}</td><td class="dir">${esc(s.cwd)}</td><td>${pill(s.state)}</td><td>${esc(s.started_by || "—")}</td><td>${ago(s.since)} ago</td></tr>`;
-}
+/* A seat starts or stops talking: the list is patched in place. */
+watch(() => { const el = cur === "org" && M && root(); if (el) sync(el.querySelector(".olist"), list(M)); });
 
 export function render() {
-  pull();
+  pull(STALE_MS);
   listen(() => cur === "org");
-  if (!O) return `<div class="nxs skel" aria-busy="true"><p class="sm pad">${err ? "org unreadable · " + esc(err) : "reading the org…"}</p></div>`;
-  const S = O.sessions || [], seats = O.seats || [], names = Object.fromEntries(seats.map((s) => [s.id, titled(s)]));
-  const work = S.filter((s) => s.state === "working").length;
-  return `<div class="nxs org"><section class="band" aria-label="Org summary"><div class="perch" id="perch" aria-hidden="true"></div><div class="bt"><p class="kin" data-dec>Org</p>` +
-    `<p class="bsum"><b>${plural(S.length, "Claude session")} on this laptop</b>, ${work} working${err ? ` · stale: ${esc(err)}` : ""}</p></div></section><div class="ocols">` +
-    `<section class="pane"><h2><span data-dec>who reports to whom</span><s>${plural(seats.length, "seat")}</s></h2>${tree(seats, S)}</section>` +
-    `<section class="pane"><h2><span data-dec>every claude session</span><s>live session list</s></h2><table class="ses"><thead><tr><th>Session</th><th>Seat</th><th>Folder</th><th>State</th><th>Started by</th><th>Last active</th></tr></thead>` +
-    `<tbody>${S.map((s) => row(s, names)).join("") || `<tr><td colspan="6">no live session</td></tr>`}</tbody></table></section></div></div>`;
+  if (!M) return `<div class="nxs skel" aria-busy="true"><p class="sm pad">${err ? "org unreadable · " + esc(err) : "reading the org…"}</p></div>`;
+  card.refresh(M);
+  queueMicrotask(mount);
+  return `<div class="nxs org office"><section class="band" aria-label="Office summary"><div class="perch" id="perch" aria-hidden="true"></div><div class="bt">${line()}</div></section>` +
+    `<section class="stage" aria-label="The office"><div class="hud"><button type="button" id="office-zin" aria-label="Zoom in">+</button><button type="button" id="office-zout" aria-label="Zoom out">−</button><button type="button" id="office-reset">Reset view</button></div>` +
+    `<p class="hint">Drag to turn · wheel or pinch to zoom · tap a creature</p><p class="still">${NOTE}</p></section>` +
+    `<div class="olist">${list(M)}</div><div class="opanels">${panels(M)}</div></div>`;
+}
+
+/* The dashboard's tick: a fresh read every 20 s, every 5 s while someone works. */
+export function tick() {
+  pull(M && (M.line.working || M.panels.running.length) ? FAST_MS : STALE_MS);
+}
+
+/* A list button, a tag or a chip opens its card; the stage buttons move the camera. */
+export function click(e) {
+  const t = e.target.closest && e.target.closest("[data-who], #office-zin, #office-zout, #office-reset");
+  if (!t) return false;
+  if (t.dataset.who) { const r = t.getBoundingClientRect(); card.open(t.dataset.who, t.closest("#office-card") ? null : { x: r.left + r.width / 2, y: r.bottom }); }
+  else if (R) t.id === "office-reset" ? R.reset() : R.zoom(t.id === "office-zin" ? 0.8 : 1.25);
+  return true;
+}
+
+/* Escape closes an open card instead of leaving the screen. */
+export function key(e) {
+  if (e.key !== "Escape" || !card.isOpen()) return false;
+  card.close();
+  return true;
 }
 
 /* The eye on the band's perch over a field of dust, as on the shared screens. */
