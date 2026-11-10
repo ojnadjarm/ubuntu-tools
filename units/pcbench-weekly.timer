@@ -1,8 +1,8 @@
 [Unit]
-Description=Weekly pcbench A/B run (Sun 02:00, before maintenance)
+Description=Weekly pcbench A/B run (Sun 06:47, clear of the nightly suite)
 
 [Timer]
-OnCalendar=Sun *-*-* 02:00
+OnCalendar=Sun *-*-* 06:47
 Persistent=true
 
 [Install]

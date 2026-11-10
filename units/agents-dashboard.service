@@ -10,7 +10,8 @@ ExecStartPre=-/usr/bin/tailscale wait --timeout 60s
 ExecStart=/bin/bash -c '. %h/agents/bin/env.sh; exec /usr/bin/python3 %h/agents/dashboard/server.py'
 Restart=always
 RestartSec=5
-MemoryMax=300M
+MemoryHigh=250M
+MemoryMax=450M
 
 [Install]
 WantedBy=default.target
