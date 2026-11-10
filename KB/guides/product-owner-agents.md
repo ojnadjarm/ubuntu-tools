@@ -39,8 +39,9 @@ orchestrator relays with `po-ask`. Not for fleet tooling, work repos (Vass) or r
   work, then the result. Each reply is written as `.…tmp` and `mv`-ed to `.md`: `discord-liaison-relay@<p>.path`
   posts it within seconds (enable it for each new manager; `discord-liaison manager` prints the line).
 - Managers report up, not out: po-run gives them no `CHAT_SEAT` (Q5) and files each new `ESCALATE:` line of their
-  REPORT.md to the parent (`po-ask discord --from manager`, counted in `state/escalated`). po-discord holds no project
-  context: it maps/forwards (`po-ask <id> --from router`) and writes its own `ESCALATE:` for the orchestrator.
+  REPORT.md to the parent (`po-ask discord --from manager`) once: `state/escalated` keeps a sha1 per sent line
+  (newest 50, T1546-L6). po-discord holds no project context: it maps/forwards (`po-ask <id> --from router`) and
+  writes its own `ESCALATE:` for the orchestrator.
 - Wakes (Q4, no limit since P38): `po-ask --from router|manager` counts one of the target seat's wakes today in chat's
   counters (`lib/po_count.py`, shown in Agents › Chat "Wakes today"); chat mentions of a manager count there too.
   Liaison handoffs (Discord members) are not counted.

@@ -4,7 +4,7 @@ import re
 
 CDN = ('https://cdn.discordapp.com/', 'https://media.discordapp.net/')
 IMAGE_EXT = ('.png', '.jpg', '.jpeg', '.webp', '.gif')
-MAX_ATTACHMENT, MAX_ATTACHMENTS = 8 * 1024 * 1024, 4
+MAX_ATTACHMENT, MAX_ATTACHMENTS, MAX_TEXT = 8 * 1024 * 1024, 4, 1500
 TYPED = re.compile(r'(?<![\w@./:`>-])@agents?\b(?![@.]\w)', re.IGNORECASE)
 
 
@@ -22,6 +22,28 @@ def images(m, cdn=CDN):
            if a.get('url', '').startswith(tuple(cdn)) and a.get('size', 0) <= MAX_ATTACHMENT
            and os.path.splitext(a.get('filename', ''))[1].lower() in IMAGE_EXT]
     return out[:MAX_ATTACHMENTS]
+
+
+def entry(m, text, cdn=CDN):
+    """The message's text (cut to MAX_TEXT) and images, plus `skipped` attachments and the `cut` full length when any."""
+    kept = images(m, cdn)
+    out = {'content': text[:MAX_TEXT], 'attachments': kept}
+    urls = {a['url'] for a in kept}
+    skipped = [{'filename': a.get('filename', '?'), 'size': a.get('size', 0)}
+               for a in m.get('attachments', []) if a.get('url') not in urls]
+    if skipped:
+        out['skipped'] = skipped
+    if len(text) > MAX_TEXT:
+        out['cut'] = len(text)
+    return out
+
+
+def lost(m):
+    """Note lines for what the manager did not get: skipped attachments and a cut text."""
+    notes = [f'\n[attachment not delivered: {a["filename"]}, {a["size"] / 1024 / 1024:.1f} MB]' for a in m.get('skipped', [])]
+    if m.get('cut'):
+        notes.append(f'\n[message cut at {MAX_TEXT} of {m["cut"]} characters]')
+    return ''.join(notes)
 
 
 class Watcher:
@@ -60,9 +82,7 @@ class Watcher:
                 out.append({'id': m['id'], 'thread_id': tid, 'thread': t.get('name', ''),
                             'tags': [names[i] for i in t.get('applied_tags', []) if i in names],
                             'author': a.get('global_name') or a.get('username', '?'), 'author_id': a.get('id', ''),
-                            'bot': bool(a.get('bot')),
-                            'content': m.get('content', '')[:1500],
-                            'attachments': images(m, self.cdn)})
+                            'bot': bool(a.get('bot')), **entry(m, m.get('content', ''), self.cdn)})
             cur.setdefault(tid, '0')
         return out, cur
 
@@ -83,6 +103,5 @@ class Watcher:
                 text = text.replace(f'<@&{self.role}>', '@agents')
             out.append({'id': m['id'], 'channel': 'general', 'thread_id': channel_id, 'thread': '#general', 'tags': [],
                         'author': a.get('global_name') or a.get('username', '?'), 'author_id': a.get('id', ''),
-                        'bot': bool(a.get('bot')),
-                        'content': text[:1500], 'attachments': images(m, self.cdn)})
+                        'bot': bool(a.get('bot')), **entry(m, text, self.cdn)})
         return out, last

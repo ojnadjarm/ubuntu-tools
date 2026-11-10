@@ -9,6 +9,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 from contextlib import redirect_stdout
 
 import aiohttp
@@ -18,8 +19,10 @@ from discordbot.store import save_json
 
 from .cli import App
 from .runlock import run_lock
+from .watch import lost
 
 UPLOAD_MAX = 10 * 1024 * 1024
+FRESH = 5
 
 
 def po_home(env):
@@ -61,7 +64,7 @@ async def deliver(app, env, to, m, pid):
     """File one message with po-ask, its downloaded images attached; the liaison keeps no copy. True when filed."""
     await app.fetch_images([m])
     imgs = app.images(m['id'])
-    notes = ''.join(f'\n[image {i + 1}: {app.note(p)}]' for i, p in enumerate(imgs) if app.note(p))
+    notes = ''.join(f'\n[image {i + 1}: {app.note(p)}]' for i, p in enumerate(imgs) if app.note(p)) + lost(m)
     try:
         return subprocess.call(ask(env, to, m, pid, imgs, notes), stdin=subprocess.DEVNULL,
                                stdout=subprocess.DEVNULL) == 0
@@ -101,7 +104,8 @@ async def relay(app, env, kept=None):
     """Post each PO reply (`thread: <id>` line, `image: <path>` lines, then the text) with the liaison's own post; move it
     to sent/ or refused/ (with a `<name>.why` line and a line in the agent's REPORT.md; the router may post in any forum
     thread or #general, a manager only in its own projects' threads). A transient error on the thread lookup leaves the
-    file in the outbox (added to `kept`) for the next relay. Images must sit in the agent's own folder or its clone."""
+    file in the outbox (added to `kept`) for the next relay; a file with no text younger than FRESH seconds (half written)
+    waits for a later pass. Images must sit in the agent's own folder or its clone."""
     n, kept = 0, set() if kept is None else kept
     cap = int(env.get('LIAISON_UPLOAD_MAX') or UPLOAD_MAX)
     for f in outbox_files(app, env):
@@ -109,6 +113,9 @@ async def relay(app, env, kept=None):
             continue
         with open(f) as fh:
             head, _, text = fh.read().partition('\n')
+        if not text.strip() and time.time() - os.path.getmtime(f) < FRESH:
+            await asyncio.sleep(0.5)
+            continue
         images = []
         while text.startswith('image:'):
             line, _, text = text.partition('\n')

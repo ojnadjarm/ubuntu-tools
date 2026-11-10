@@ -29,7 +29,7 @@ from .runlock import run_lock
 from .state import State
 from .threads import batch, key, merge, newer
 from .wake import debounce
-from .watch import CDN, MAX_ATTACHMENT, Watcher
+from .watch import CDN, MAX_ATTACHMENT, Watcher, lost
 
 GENERAL = '#general'
 ME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -293,7 +293,7 @@ class App:
         body = m['content'].replace('</message', '<\\/message')
         imgs = self.images(m['id'])
         images = f' images="{" ".join(imgs)}"' if imgs else ''
-        notes = ''.join(f'\n[{p}: {self.note(p)}]' for p in imgs if self.note(p))
+        notes = ''.join(f'\n[{p}: {self.note(p)}]' for p in imgs if self.note(p)) + lost(m)
         owner = str(bool(self.owner) and m.get('author_id') == self.owner).lower()
         print(f'<message channel="{m.get("channel", "foro")}" thread="{m["thread_id"]}" title="{m["thread"]}" '
               f'tags="{",".join(m["tags"])}" project="{pid}" route="{route}" author="{m["author"]}" '

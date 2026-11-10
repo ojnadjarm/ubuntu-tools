@@ -1,4 +1,5 @@
 """T1412 P5: messages of a project with a `po` go to that PO once (po-ask); the PO's outbox replies are posted to their thread."""
+import asyncio
 import io
 import json
 import os
@@ -200,6 +201,26 @@ class TestPO(Base):
             self.assertEqual(await po.amain(['relay'], self.env, self.rest), 0)
         self.assertEqual(self.fake.sent('400'), ['Listo'])
         self.assertEqual(os.listdir(os.path.join(self.outbox, 'sent')), ['a.md'])
+
+    async def test_relay_fresh_empty_file_waits_then_posts_or_refuses_when_old(self):
+        a, b = os.path.join(self.outbox, 'a.md'), os.path.join(self.outbox, 'b.md')
+        for f in (a, b):
+            open(f, 'w').close()
+        self.assertEqual(await po.relay(App(self.env, self.rest), self.env), 0)
+        self.assertEqual(sorted(os.listdir(self.outbox)), ['a.md', 'b.md'])
+
+        async def write_later():
+            await asyncio.sleep(1)
+            with open(a, 'w') as f:
+                f.write('thread: 400\nListo')
+        os.utime(b, (time.time() - 10, time.time() - 10))
+        task = asyncio.create_task(write_later())
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(await po.amain(['relay'], self.env, self.rest), 0)
+        await task
+        self.assertEqual(self.fake.sent('400'), ['Listo'])
+        self.assertEqual(os.listdir(os.path.join(self.outbox, 'sent')), ['a.md'])
+        self.assertEqual(sorted(os.listdir(os.path.join(self.outbox, 'refused'))), ['b.md', 'b.md.why'])
 
     async def test_relay_refusal_writes_why_and_a_report_line_and_po_status_counts_it(self):
         await self.run_cli('map', '998', 'other')

@@ -5,7 +5,7 @@ subagents and keep the project's memory. Each run starts with a clean context: e
 ## Read first, every run
 1. `~/agents/KB/DECISIONS.md` (fleet decisions), then `state/PROJECT.md`, `state/BACKLOG.md`, the last 20 lines of
    `state/RUNS.md`, the head of the ledger `~/agent-work/decisions/mooblox.md`, and the project block below.
-2. Every file in `current/` (oldest first): one request each. Front matter: `from` (owner|orchestrator|liaison|pick),
+2. Every file in `current/` (oldest first): one request each. Front matter: `from` (owner|orchestrator|liaison|pick|chat),
    `channel` (none|discord|ntfy), `thread`, `quote` (copy = his exact words, intent = the orchestrator's summary).
 
 ## Each request
@@ -22,7 +22,8 @@ subagents and keep the project's memory. Each run starts with a clean context: e
 - A pick he must make (mockup set, A/B/C) or a play-test build live: `po-push mooblox --pick 'A=<label>;B=<label>' "<one
   line + link>"` (at most 3 a day; refused = put it in REPORT.md). His tap comes back as a `from: pick` request.
 - `channel: discord` requests: write the reply (Spanish, short, no paths or hosts) to
-  `outbox/discord/<utc>-<thread>.md`, first line `thread: <thread>`, then the text; the liaison posts it.
+  `outbox/discord/.<utc>-<thread>.tmp`, then `mv` it to `outbox/discord/<utc>-<thread>.md` (atomic), first line
+  `thread: <thread>`, then the text; the liaison posts it.
 - When done with a request: append `outcome: <one line>` to its file and move it to `done/`.
 
 ## End of every run
