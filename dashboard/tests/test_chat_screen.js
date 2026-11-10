@@ -1,5 +1,6 @@
 // Chat screen (T1515-P10): cold load of #chat?ch=, a direct message per seat, unread badges and /seen, the composer (sent, woke, held), fixed at 400, swipe-proof stream, wakes today.
 // P38: wakes today as plain numbers; "<seat> is thinking" / "woken, starting" under the last message and a marker on its channel.
+// P39: below 900 px the list and the conversation are two views; the back arrow returns to the list.
 // V3: Familiars in rows, the channel box and the direct list; a new message makes its sender talk for about 2 s.
 // Run: node tests/test_chat_screen.js   (fixture API only: every POST lands in this file's server, nothing reaches the real store)
 "use strict";
@@ -69,8 +70,9 @@ srv.on("request", (req, res) => {
 
     await p.waitForTimeout(1000);
     const box = await p.evaluate(() => { const r = document.querySelector(".chat .compose").getBoundingClientRect(), d = document.querySelector(".dock").getBoundingClientRect(); return { pos: getComputedStyle(document.querySelector(".chat .compose")).position, bottom: Math.round(r.bottom), dock: Math.round(d.top) }; });
-    assert.deepStrictEqual([box.pos, box.bottom], ["fixed", box.dock], "at 400 the composer is fixed on top of the dock");
+    assert.strictEqual(box.bottom, box.dock, "at 400 the composer sits on top of the dock (P39: the conversation is one full-screen page)");
 
+    await p.click(".chat [data-back]");
     await p.click('.chat [data-ch="org"]');
     await p.waitForFunction(() => document.querySelector(".chat .stream header h2").textContent === "# org");
     await p.waitForFunction(() => !document.querySelector('.chat [data-ch="org"] .unread'), null, { timeout: 5000 });
