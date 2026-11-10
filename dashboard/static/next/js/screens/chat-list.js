@@ -1,4 +1,4 @@
-/* Chat's phone list: the newest message seen per channel, its one-line preview and time, and rows ordered by last activity. */
+/* Chat's channel list (every width): the newest message seen per channel, its one-line preview and time, and rows ordered by last activity. */
 import { p2 } from "/static/js/core/fmt.js";
 
 const last = {};

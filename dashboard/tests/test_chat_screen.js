@@ -2,6 +2,7 @@
 // P38: wakes today as plain numbers; "<seat> is thinking" / "woken, starting" under the last message and a marker on its channel.
 // P39: below 900 px the list and the conversation are two views; the back arrow returns to the list.
 // V3: Familiars in rows, the channel box and the direct list; a new message makes its sender talk for about 2 s.
+// T1545-A: from 900 px the list rows show full names, preview and time, ordered by activity; the stream box >= 430 px at 1366x768; text through chat-text.js's rich when it exists.
 // Run: node tests/test_chat_screen.js   (fixture API only: every POST lands in this file's server, nothing reaches the real store)
 "use strict";
 const assert = require("assert");
@@ -19,15 +20,28 @@ const STORE = {
   harness: [row(T0, "harness", "mooblox", "how do I drop a link?", "ask"), row(T0 + 1000, "harness", "orchestrator", "use drop-link", "answer")],
   org: [row(T0 + 2000, "org", "orchestrator", "one"), row(T0 + 3000, "org", "discord", "two")],
 };
+/* T1545-A's fixture: long seat names, an agent-to-agent direct message, each channel's last message. */
+const ORG2 = { seats: [ORG.seats[0], ORG.seats[1],
+  { id: "discord", name: "Discord product owner", role: "po", parent: "orchestrator", wake: "po-inbox", match: null },
+  { id: "tiny", name: "Tiny Epic Narrator manager", role: "manager", parent: "orchestrator", wake: "channel", match: null },
+  { id: "spidey", name: "Spidey PR Dashboard manager", role: "manager", parent: "orchestrator", wake: "channel", match: null }], sessions: [], hidden: 0 };
+const T1 = T0 + 60000, STORE2 = {
+  harness: [row(T1, "harness", "orchestrator", "the oldest room line")],
+  org: [row(T1 + 4000, "org", "discord", "a room line newer than harness")],
+  "dm-discord--orchestrator": [row(T1 + 2000, "dm-discord--orchestrator", "discord", "agents talking")],
+  "dm-owner--spidey": Array.from({ length: 20 }, (_, i) => row(T1 + 5000 + i, "dm-owner--spidey", i % 2 ? "owner" : "spidey", "line " + i + " of a long conversation with `code` & <b>no markup</b>")),
+};
+let org = ORG, store = STORE, withLast = false;
 let unread = { harness: 0, org: 2 }, posts = [], seen = [], answer = null, thinking = [];
 
 const srv = serveStatic((u, res) => {
   const q = new URL(res.req.url, "http://x").searchParams;
   if (u === "/api/status") return STATUS;
-  if (u === "/api/org") return ORG;
+  if (u === "/api/org") return org;
   if (u === "/api/chat") {
-    const ch = q.get("ch") || "", after = +(q.get("after") || 0);
-    return { messages: (STORE[ch] || []).filter((m) => m.id > after), channels: Object.keys(STORE).map((c) => ({ ch: c, unread: unread[c] || 0 })), wakes: { today: { mooblox: 13, orchestrator: 5 } }, thinking };
+    const ch = q.get("ch") || "", after = +(q.get("after") || 0), all = Object.values(store).flat().sort((a, b) => a.id - b.id);
+    const last = (c) => (withLast ? { last: store[c][store[c].length - 1] } : {});
+    return { messages: (ch ? store[ch] || [] : withLast ? all : []).filter((m) => m.id > after), channels: Object.keys(store).map((c) => ({ ch: c, unread: unread[c] || 0, ...last(c) })), wakes: { today: { mooblox: 13, orchestrator: 5 } }, thinking };
   }
 });
 /* The two POSTs: answered from the body once it is read, so the status can be the fixture's (422 for held). */
@@ -109,7 +123,7 @@ srv.on("request", (req, res) => {
     assert.deepStrictEqual(wk, ["Orchestrator 5", "Mooblox 13", "Discord 0"], "wakes today per seat as plain numbers (no limit, P38); the pull seat vass is never woken");
     assert.strictEqual(await p.$$eval(".chat .wakes progress", (l) => l.length), 0, "no bar to a limit");
     const fixed = await p.evaluate(() => getComputedStyle(document.querySelector(".chat .compose")).position);
-    assert.strictEqual(fixed, "static", "from 900 px the composer sits under the stream");
+    assert.notStrictEqual(fixed, "fixed", "from 900 px the composer sits under the stream");
 
     thinking = [{ seat: "discord", ch: "org", state: "thinking", since: 1 }, { seat: "mooblox", ch: "dm-mooblox--owner", state: "starting", since: 1 }];
     await p.waitForSelector(".chat .msgs > .thinking:last-child", { timeout: 6000 });
@@ -137,6 +151,44 @@ srv.on("request", (req, res) => {
     await p.emulateMedia({ reducedMotion: "reduce" });
     assert.strictEqual(await p.$eval(".chat .cside .fam", (e) => getComputedStyle(e).animationName), "none", "prefers-reduced-motion stops the motion");
     assert.deepStrictEqual(errs, [], "no page errors");
-    console.log("ok · cold #chat?ch= · 8 channels, no vass room · unread + /seen · composer sent/woke/held · fixed at 400 · swipe-proof · wakes today as numbers · thinking row + channel marker · Familiars in rows, channel box and direct list; sender talks ~2 s, owner silent");
+    await ctx.close();
+
+    org = ORG2; store = STORE2; withLast = true;
+    const RICH = "export function rich(t) { return '<mark class=\"rx\">' + t.replace(/[&<>\"]/g, (c) => '&#' + c.charCodeAt(0) + ';') + '</mark>'; }";
+    for (const [w, h, hasRich] of [[1366, 768, false], [1920, 1080, true]]) {
+      unread = { "dm-owner--spidey": 3 };
+      const c2 = await b.newContext({ viewport: { width: w, height: h } }), q = await c2.newPage(), logs = [];
+      q.on("pageerror", (e) => errs.push(String(e)));
+      q.on("console", (m) => { if (m.type() === "error" && /chat-text|imported module/.test(m.text())) logs.push(m.text()); });
+      await q.route("**/screens/chat-text.js", (r) => (hasRich ? r.fulfill({ status: 200, contentType: "text/javascript", body: RICH }) : r.fulfill({ status: 404, body: "" })));
+      await q.goto(base + "/#chat?ch=harness", { waitUntil: "load" });
+      await q.waitForFunction(() => document.querySelectorAll('.chat .chans a .tm').length >= 4, null, { timeout: 15000 });
+      await q.waitForTimeout(300);
+      assert.deepStrictEqual(await q.$$eval(".chat .cn", (l) => l.filter((e) => e.scrollWidth > e.clientWidth).map((e) => e.textContent)), [], `${w}: no channel name is cut`);
+      assert.ok(await q.$$eval(".chat .cn", (l) => l.some((e) => e.textContent === "Discord product owner · Orchestrator")), "the agents' direct message is listed");
+      const rows = await q.$$eval(".chat .chans a", (l) => l.map((a) => { const v = (s) => { const e = a.querySelector(s); return e && e.offsetWidth > 0 ? e.textContent : ""; }; return [a.dataset.ch, v(".pv"), v(".tm")]; }));
+      for (const c of Object.keys(STORE2)) {
+        const r = rows.find((x) => x[0] === c);
+        assert.ok(r && r[1] && /^\d\d:\d\d$|^\d|Yesterday/.test(r[2]), `${w}: ${c} shows a preview and a time (${r})`);
+      }
+      const order = rows.map((r) => r[0]).filter((c) => c in STORE2);
+      assert.deepStrictEqual(order, ["org", "harness", "dm-owner--spidey", "dm-discord--orchestrator"], `${w}: rooms and direct messages by last activity`);
+      assert.strictEqual(await q.textContent('.chat [data-ch="dm-owner--spidey"] .unread'), "3", "unread count on the row");
+      await q.click('.chat [data-ch="dm-owner--spidey"]');
+      await q.waitForFunction(() => document.querySelectorAll(".chat .msg .tx").length === 20, null, { timeout: 6000 });
+      const tx = await q.$$eval(".chat .msg .tx", (l) => l.map((e) => [e.tagName, e.textContent, !!e.querySelector("b"), !!e.querySelector(".rx")]));
+      assert.ok(tx.every((t) => t[0] === "DIV" && /^line \d+ of a long conversation with `?code`? & <b>no markup<\/b>$/.test(t[1]) && !t[2] && t[3] === hasRich), `${w}: text renders ${hasRich ? "through rich" : "through text() (chat-text.js absent)"}, escaped, in div.tx`);
+      if (w === 1366) {
+        await q.waitForFunction(() => document.querySelector(".chat .stream").getAnimations().every((a) => a.playState === "finished"), null, { timeout: 5000 });
+        const m = await q.evaluate(() => ({ box: document.querySelector(".chat .msgs").getBoundingClientRect().height, low: document.querySelector(".chat .compose").getBoundingClientRect().bottom }));
+        assert.ok(m.box >= 430, `at 1366x768 the messages box is at least 430 px (${m.box})`);
+        assert.ok(m.low <= 768, `at 1366x768 the composer is on screen (${m.low})`);
+      }
+      assert.strictEqual(await q.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `${w}: no sideways scroll`);
+      assert.deepStrictEqual(logs, [], `${w}: no console error from the rich seam`);
+      await c2.close();
+    }
+    assert.deepStrictEqual(errs, [], "no page errors");
+    console.log("ok · cold #chat?ch= · 8 channels, no vass room · unread + /seen · composer sent/woke/held · fixed at 400 · swipe-proof · wakes today as numbers · thinking row + channel marker · Familiars in rows, channel box and direct list; sender talks ~2 s, owner silent · T1545-A: 0 names cut at 1366/1920, preview + time per row, by activity, box >= 430 at 1366x768, rich seam absent/present");
   } finally { await b.close(); srv.close(); }
 })().catch((e) => { console.error(e); process.exit(1); });

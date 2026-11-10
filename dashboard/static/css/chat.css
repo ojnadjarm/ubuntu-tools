@@ -1,4 +1,4 @@
-/* Agents › Chat: channel list, message stream, composer, who is in the channel, who is thinking, wakes today, attachments and Recent (T1515-P9, P10, P33, P38); below 900 px a messenger list and a full-screen conversation (P39); eye.css tokens only. */
+/* Agents › Chat: channel list, message stream, composer, who is in the channel, who is thinking, wakes today, attachments and Recent (T1515-P9, P10, P33, P38); below 900 px a messenger list and a full-screen conversation (P39); from 900 px messenger rows in a list column sized to its names (T1545-A); eye.css tokens only. */
 .chat { display: grid; gap: 1rem; }
 .chat .cgrid { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr); align-items: start; }
 .chat .pill.off { color: var(--mute); border-color: var(--line); border-style: dashed; }
@@ -81,18 +81,41 @@
 .chat .cside .mem b { color: var(--hi); display: block; font-weight: 600; }
 .chat .cside .mem span { color: var(--mid); font-size: max(11px, .82rem); }
 @media (min-width: 900px) {
-  .chat .back, .chat .hav, .chat .stream header .st, .chat .chans .pv, .chat .chans .tm, .chat .chans .glyph { display: none; }
-  .chat .cgrid { grid-template-columns: 14rem minmax(0, 1fr); }
-  .chat .chans { flex-direction: column; overflow: visible; position: sticky; top: calc(var(--rail) + 1rem); }
+  .chat .back, .chat .hav, .chat .stream header .st { display: none; }
+  .chat .cgrid { grid-template-columns: fit-content(30vw) minmax(0, 1fr); }
+  .chat { --sh: max(26rem, 100svh - var(--rail) - 17rem); }
+  .chat .chans { flex-direction: column; gap: .1rem; max-height: var(--sh); overflow: hidden auto; scrollbar-width: thin; position: sticky; top: calc(var(--rail) + 1rem); min-width: 15rem; }
   .chat .chans h3 { display: block; font-size: max(11px, .72rem); letter-spacing: .2em; text-transform: uppercase; color: var(--mute); font-weight: 400; margin: .6rem 0 .1rem; }
-  .chat .chans a { justify-content: space-between; border-color: transparent; background: none; }
-  .chat .chans a .cn { flex: 1; min-width: 0; }
+  .chat .chans a { display: grid; grid-template-columns: 2rem minmax(0, 1fr) auto auto; grid-template-areas: "av cn cn tm" "av pv think tail"; align-items: center; gap: .1rem .6rem;
+    padding: .4rem .7rem; border-color: transparent; background: none; }
+  .chat .chans > * { flex: none; }
+  .chat .chans a:hover { background: var(--w04); }
   .chat .chans a.on { border-color: var(--line3); background: var(--w08); }
-  .chat .stream { height: calc(100svh - var(--rail) - 17rem); min-height: 26rem; }
+  .chat .chans a .fam, .chat .chans a .glyph { grid-area: av; width: 2rem; }
+  .chat .chans a .fam svg { width: 100%; height: auto; display: block; }
+  .chat .chans a .cn { grid-area: cn; min-width: 0; color: var(--hi); font-weight: 600; }
+  .chat .chans a .pv { grid-area: pv; min-width: 0; contain: inline-size; overflow: hidden; text-overflow: ellipsis; color: var(--mute); font-size: max(11px, .78rem); }
+  .chat .chans a .tm { grid-area: tm; justify-self: end; color: var(--mute); font-size: max(11px, .72rem); font-variant-numeric: tabular-nums; }
+  .chat .chans a .think { grid-area: think; }
+  .chat .chans a .unread, .chat .chans a .pill { grid-area: tail; justify-self: end; }
+  .chat .chans a:has(.unread) .pv { color: var(--txt); }
+  .chat .glyph { display: grid; place-items: center; aspect-ratio: 1; border: 1px solid var(--line3); color: var(--g2); background: var(--w04); }
+  .chat .stream header { display: flex; flex-wrap: wrap; align-items: baseline; gap: .1rem .8rem; padding: .55rem 1.1rem; }
+  .chat .stream { height: var(--sh); }
   .chat .msgs { flex: 1; align-content: start; overflow-y: auto; scrollbar-width: thin; }
 }
+@media (min-width: 900px) and (max-height: 900px) {
+  .chat { gap: .5rem; }
+  .chat .band { padding: 0; }
+  .chat .perch { width: clamp(6rem, 9vw, 10rem); }
+  .chat .kin { font-size: clamp(1.7rem, .6rem + 1.6vw, 2.6rem); }
+  .chat .bsum { margin-top: .15rem; }
+  .chat { --sh: calc(100svh - var(--rail) - 11rem); }
+  .chat .stream header { padding-block: .4rem; }
+  .chat .compose { padding-block: .45rem; }
+}
 @media (min-width: 1300px) {
-  .chat .cgrid { grid-template-columns: 15rem minmax(0, 1fr) 19rem; }
+  .chat .cgrid { grid-template-columns: fit-content(28vw) minmax(0, 1fr) clamp(15rem, 16vw, 19rem); }
   .chat .cside { display: block; position: sticky; top: calc(var(--rail) + 1rem); }
 }
 @media (max-width: 820px) { .chat .chtag { --tap: 44px; } }

@@ -175,15 +175,18 @@ function day(m) {
 }
 /* Message text is data: escaped, only `code` spans become markup. */
 const text = (t) => esc(t).replace(/`([^`\n]+)`/g, "<code>$1</code>");
+/* Message text to HTML: text() until chat-text.js's rich loads (absent: text() stays). */
+let rich = text;
+import("./chat-text.js").then((m) => { rich = m.rich; paint(); }, () => {});
 const clip = (t) => (t.length > QUOTE ? t.slice(0, QUOTE).trimEnd() + "…" : t);
 
 function msg(m, byId, N) {
-  if (m.kind === "system") return `<li class="csys">${text(m.text)}</li>`;
+  if (m.kind === "system") return `<li class="csys">${rich(m.text)}</li>`;
   const him = m.from === "owner", r = m.re != null ? byId[m.re] : null;
   const av = him ? `<i class="dia"></i>` : familiar(m.from, stateOf(m.from), roleOf(m.from), m.id);
   const re = m.re == null ? "" : `<p class="re">${r ? esc(nameOf(r.from, N) + " " + time(r) + ": " + clip(r.text)) : "a reply to an earlier message"}</p>`;
   const where = ch ? "" : `<a class="chtag" href="#chat?ch=${esc(m.ch)}" data-ch="${esc(m.ch)}">${esc(label(m.ch, N))}</a>`;
-  return `<li class="msg${him ? " him" : ""}"><span class="av" aria-hidden="true">${av}</span><div><p class="who"><b>${esc(nameOf(m.from, N))}</b>${where}${TAG[m.kind] || ""}<time datetime="${esc(m.ts)}">${time(m)}</time></p>${re}${m.text ? `<p class="tx">${text(m.text)}</p>` : ""}${attachments(m.files)}</div></li>`;
+  return `<li class="msg${him ? " him" : ""}"><span class="av" aria-hidden="true">${av}</span><div><p class="who"><b>${esc(nameOf(m.from, N))}</b>${where}${TAG[m.kind] || ""}<time datetime="${esc(m.ts)}">${time(m)}</time></p>${re}${m.text ? `<div class="tx">${rich(m.text)}</div>` : ""}${attachments(m.files)}</div></li>`;
 }
 /* "<seat> is thinking" (or "woken, starting") for an agent woken from channel c and still running. */
 const busyLine = (t, N) => esc(nameOf(t.seat, N)) + (t.state === "thinking" ? " is thinking" : " woken, starting");
@@ -246,7 +249,7 @@ export function render() {
   if (!C) return `<div class="nxs skel" aria-busy="true"><p class="sm pad">${err ? "chat unreadable · " + esc(err) : "reading the chat…"}</p></div>`;
   bind(paintNow, (id) => nameOf(id, names()), paint);
   shown = ch + "|" + listing;
-  const N = names(), L = listed(), rooms = phone.matches ? byActivity(L.rooms) : L.rooms, dms = phone.matches ? byActivity(L.dms) : L.dms;
+  const N = names(), L = listed(), rooms = byActivity(L.rooms), dms = byActivity(L.dms);
   const unread = C.filter((c) => c.unread && c.ch !== ch), n = msgs.filter((m) => m.kind !== "system").length;
   const sum = `<b>${esc(label(ch, N))}</b>, ${plural(n, "message")}` + (unread.length ? ` · <span class="gold">${unread.map((c) => `${c.unread} new in ${esc(label(c.ch, N))}`).join(", ")}</span>` : "");
   const nav = `<nav class="chans" aria-label="Channels">${chanLink({ ch: "", unread: 0 }, N)}<h3>Channels</h3>${rooms.map((c) => chanLink(c, N)).join("")}` +
