@@ -5,7 +5,7 @@ import importlib.util
 import os
 import re
 import sys
-from collections import namedtuple
+from collections import Counter, namedtuple
 
 from memory_check import Finding
 import memory_store  # noqa: E402 (memory_check puts bin/ on the path)
@@ -14,7 +14,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 QD, IDD = "checks/questions.d", "checks/ids.d"
 VIEW_Q, VIEW_IDS, BASELINE = "checks/questions.tsv", "checks/ids.tsv", "checks/quiz-baseline.tsv"
 QHEAD = ["key", "domain", "page", "id", "question", "must", "source"]
+BHEAD = ["key", "pass", "page", "id", "page_sha", "row_sha"]
 CHUNK = 25
+VOTES = 3
 Q = namedtuple("Q", "key domain page id question must")
 
 
@@ -80,9 +82,9 @@ def _carrier():
 
 
 def ask(prompt, domains):
-    """The one model call: the carrier's seam (MEMORY_QUIZ_CMD, else haiku through agent-exec, closed-book)."""
+    """The one model call, (answer, tokens): the carrier's seam (MEMORY_QUIZ_CMD, else haiku through agent-exec, closed-book)."""
     os.environ["PATH"] = os.path.join(ROOT, "bin") + os.pathsep + os.environ.get("PATH", "")
-    return _carrier().ask(prompt, domains)
+    return _carrier().ask_usage(prompt, domains)
 
 
 def pages_for(store, domain):
@@ -111,17 +113,36 @@ def answers(text):
     return out
 
 
-def quiz(store, qs):
-    """{key: [missing must words]} for the questions, asked per domain in chunks of CHUNK."""
+def quiz(store, qs, used):
+    """{key: [missing must words]} for the questions, asked per domain in chunks of CHUNK; calls and tokens added to used."""
     out = {}
     for dom in sorted({q.domain for q in qs}):
         group = [q for q in qs if q.domain == dom]
         for c in range(0, len(group), CHUNK):
             part = group[c:c + CHUNK]
-            got = answers(ask(prompt(store, dom, part), [] if dom == "core" else [dom]))
+            text, tokens = ask(prompt(store, dom, part), [] if dom == "core" else [dom])
+            used.update(tokens, calls=1)
+            got = answers(text)
             for i, q in enumerate(part, 1):
                 out[q.key] = [w for w in q.must if " ".join(w.lower().split()) not in got.get(i, "")]
     return out
+
+
+def vote(store, qs):
+    """{key: [missing must words]}: ask once, re-ask the reds VOTES-1 times; red only when most of the VOTES asks fail."""
+    first, again = Counter(), Counter()
+    miss = quiz(store, qs, first)
+    reds = [q for q in qs if miss[q.key]]
+    fails = Counter(q.key for q in reds)
+    for _ in range(VOTES - 1 if reds else 0):
+        fails.update(k for k, m in quiz(store, reds, again).items() if m)
+    print(f"quiz · {len(reds)} re-asked {VOTES - 1}x · first {_cost(first)} · re-asks {_cost(again)}", file=sys.stderr)
+    return {k: m if fails[k] * 2 > VOTES else [] for k, m in miss.items()}
+
+
+def _cost(used):
+    tin = sum(v for k, v in used.items() if k.endswith("input_tokens"))
+    return f"{used['calls']} calls, {tin} in / {used['output_tokens']} out tokens"
 
 
 def changed(store, before):
@@ -130,14 +151,25 @@ def changed(store, before):
     return {p for p in now | set(before) if p not in now or p not in before or store.text(p) != before[p]}
 
 
+def _sha(text):
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:10]
+
+
+def shas(store, q):
+    """(page_sha, row_sha): the question's page text and its own row (id, page, must), as the baseline keeps them."""
+    page = store.text(q.page) if q.page and os.path.isfile(store.path(q.page)) else ""
+    return _sha(page), _sha("\t".join([q.id, q.page, "|".join(q.must)]))
+
+
 def check(store, before, only_changed=False):
     """A question green in the baseline that is red now is a finding; a green gate updates the baseline for the asked ones."""
     qs = questions(store)
+    base = {r["key"]: r for r in _tsv(store.path(BASELINE))}
     if only_changed:
         pages = changed(store, before)
-        qs = [q for q in qs if q.page in pages]
-    base = {r["key"]: r for r in _tsv(store.path(BASELINE))}
-    miss = quiz(store, qs) if qs else {}
+        qs = [q for q in qs if base.get(q.key, {}).get("row_sha") != shas(store, q)[1]
+              or (q.page in pages and base[q.key].get("page_sha") != shas(store, q)[0])]
+    miss = vote(store, qs) if qs else {}
     out = [Finding("quiz", q.page, 0, f"{q.id or q.key}: green in the baseline, red now (missing: {', '.join(miss[q.key])})")
            for q in qs if miss[q.key] and base.get(q.key, {}).get("pass") == "1"]
     for q in qs:
@@ -147,9 +179,9 @@ def check(store, before, only_changed=False):
     if not out and qs:
         keep = {q.key for q in questions(store)}
         base = {k: r for k, r in base.items() if k in keep}
-        base.update({q.key: {"key": q.key, "pass": "0" if miss[q.key] else "1", "page": q.page, "id": q.id} for q in qs})
-        memory_store._atomic(store.path(BASELINE), "key\tpass\tpage\tid\n" + "".join(
-            f"{r['key']}\t{r['pass']}\t{r['page']}\t{r['id']}\n" for r in sorted(base.values(), key=lambda r: (r["page"], r["key"]))))
+        base.update({q.key: dict(zip(BHEAD, [q.key, "0" if miss[q.key] else "1", q.page, q.id, *shas(store, q)])) for q in qs})
+        memory_store._atomic(store.path(BASELINE), "\t".join(BHEAD) + "\n" + "".join(
+            "\t".join(r.get(c, "") for c in BHEAD) + "\n" for r in sorted(base.values(), key=lambda r: (r["page"], r["key"]))))
     return out
 
 

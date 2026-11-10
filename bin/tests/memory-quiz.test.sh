@@ -67,6 +67,38 @@ ev "--changed: exit 0, only the 2 zebra card questions asked" \
   '[ "$rc" = 0 ] && [ "$(asked)" = 2 ] && grep -q "lead zebra" "$LOG" && grep -q "fence" "$LOG"' || { echo "$out$err"; cat "$LOG"; }
 eq "--changed: the baseline keeps all 7 rows" 7 "$(tail -n +2 "$S/checks/quiz-baseline.tsv" | grep -c .)"
 
+# 8. The vote (T1599-M07c): a red is re-asked twice and stays red only when most of the 3 asks fail; tokens are reported.
+quizx() { : >"$LOG"; rm -f "$LOG.drop"; out=$(fx env "$@" "$BIN/memory" check --quiz 2>"$WORK/err"); rc=$?; err=$(cat "$WORK/err"); }
+times() { grep -c "$1" "$LOG"; }
+quiz
+ev "vote: an all-green run asks 3 calls once, no re-ask, reports the tokens" \
+  'grep -qx "quiz · 0 re-asked 2x · first 3 calls, 300 in / 30 out tokens · re-asks 0 calls, 0 in / 0 out tokens" <<<"$err"' || echo "$err"
+cp "$S/checks/quiz-baseline.tsv" "$WORK/base.1"
+quizx QUIZ_DROP=saffron QUIZ_DROP_N=1
+ev "vote: a noisy model failing 1 of 3 asks: green, exit 0, asked 3 times" \
+  '[ "$rc" = 0 ] && grep -qx "quiz · 7/7 green" <<<"$err" && [ "$(times lighthouse)" = 3 ]' || echo "$out$err"
+ev "vote: the re-asks are counted apart" 'grep -q "^quiz · 1 re-asked 2x · first 3 calls, .* · re-asks 2 calls, 200 in / 20 out tokens$" <<<"$err"' || echo "$err"
+quizx QUIZ_DROP=saffron QUIZ_DROP_N=2
+ev "vote: failing 2 of 3 asks is red: exit 1, 1 finding" '[ "$rc" = 1 ] && [ "$(grep -c . <<<"$out")" = 1 ] && grep -q saffron <<<"$out"' || echo "$out$err"
+sed -i '/\^z101$/d' "$S/domains/zebra/stripes.md"
+quizx
+ev "vote: a removed lesson is red 3 of 3: exit 1, asked 3 times" \
+  '[ "$rc" = 1 ] && grep -q "missing: gravel, north" <<<"$out" && [ "$(times "which side")" = 3 ]' || echo "$out$err"
+cp "$FX/store/domains/zebra/stripes.md" "$S/domains/zebra/stripes.md"
+
+# 9. --changed and the baseline's page_sha/row_sha: an unchanged git-ignored private page is skipped, an edited row re-asked.
+printf 'domains/vault/\n' >"$S/.gitignore"; git -C "$S" rm -rq --cached domains/vault; g add -A; g commit -qm ignore-vault
+ev "--changed: the vault page is git-ignored" 'git -C "$S" check-ignore -q domains/vault/DOMAIN.md'
+quiz
+quiz --changed
+ev "--changed: an unchanged private page is not asked (0 asked, exit 0)" '[ "$rc" = 0 ] && [ "$(asked)" = 0 ]' || { echo "$out$err"; cat "$LOG"; }
+printf -- '- The vault door is oak. (26-04-02) ^v02\n' >>"$S/domains/vault/DOMAIN.md"
+quiz --changed
+ev "--changed: an edited private page is asked again (1 asked)" '[ "$rc" = 0 ] && [ "$(asked)" = 1 ] && grep -q "vault combination" "$LOG"' || cat "$LOG"
+sed -i 's/\tPemberton\t/\tpemberton\t/' "$S/checks/questions.d/core.tsv"; fx python3 "$ROOT/lib/memory_quiz.py" merge >/dev/null
+quiz --changed
+ev "--changed: a row edited on an unchanged page is asked again (1 asked)" '[ "$rc" = 0 ] && [ "$(asked)" = 1 ] && grep -q mascot "$LOG"' || cat "$LOG"
+
 # 7. The gate module keeps its size cap.
 ev "memory_check.py is at most 300 lines" '[ "$(wc -l <"$ROOT/lib/memory_check.py")" -le 300 ]'
 

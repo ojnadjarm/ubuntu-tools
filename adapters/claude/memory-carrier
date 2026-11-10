@@ -269,12 +269,18 @@ def install(store, plan=False):
 
 def ask(prompt, domains):
     """The model seam: MEMORY_QUIZ_CMD (prompt on stdin, answer on stdout), else one headless haiku run through the Claude adapter."""
+    return ask_usage(prompt, domains)[0]
+
+
+def ask_usage(prompt, domains):
+    """(answer, tokens) of one ask; tokens = the run's meta.json usage (agent-exec, or the MEMORY_QUIZ_CMD), {} when absent."""
     env = dict(os.environ, MEMORY_DOMAINS=",".join(domains), MEMORY_WORKER="1")
     with tempfile.TemporaryDirectory(prefix="memory-live.") as t:
         cmd = os.environ.get("MEMORY_QUIZ_CMD")
         if cmd:
-            return subprocess.run(cmd, shell=True, input=prompt, env=env, cwd=t, capture_output=True, text=True,
-                                  timeout=600).stdout
+            out = subprocess.run(cmd, shell=True, input=prompt, env=env, cwd=t, capture_output=True, text=True,
+                                 timeout=600).stdout
+            return out, _tokens(t)
         for k in [k for k in env if k == "CLAUDECODE" or k.startswith("CLAUDE_CODE_")]:
             del env[k]
         env.update(HARNESS_AGENT="claude", AGENT_TOOLS="")
@@ -282,11 +288,21 @@ def ask(prompt, domains):
         with open(pf, "w", encoding="utf-8") as f:
             f.write(prompt)
         try:
-            return subprocess.run([os.path.join(ROOT, "bin", "agent-exec"), "--prompt-file", pf, "--model", "haiku",
-                                   "--cwd", t, "--name", "memory-live", "--timeout", "300"],
-                                  env=env, cwd=t, capture_output=True, text=True, timeout=400).stdout
+            out = subprocess.run([os.path.join(ROOT, "bin", "agent-exec"), "--prompt-file", pf, "--model", "haiku",
+                                  "--cwd", t, "--name", "memory-live", "--timeout", "300"],
+                                 env=env, cwd=t, capture_output=True, text=True, timeout=400).stdout
+            return out, _tokens(t)
         finally:
             shutil.rmtree(project_dir(os.path.realpath(t)), ignore_errors=True)
+
+
+def _tokens(folder):
+    try:
+        with open(os.path.join(folder, "meta.json"), encoding="utf-8") as f:
+            tok = json.load(f).get("tokens") or {}
+    except (OSError, ValueError):
+        return {}
+    return {k: v for k, v in tok.items() if k.endswith("_tokens") and isinstance(v, int)}
 
 
 def main():
