@@ -73,7 +73,7 @@ Long jobs: background run or `agent-run <name>`. One-off agents stop once report
 `agents-stop`. Detail: `~/agents/README.md` "Running agents".
 
 ## 7. Known gaps
-Agent CLI browser integration awaits sign-in: use Playwright MCP. T11 (RDP), T22 (restic) skipped: no off-machine backups.
+Agent CLI browser integration awaits sign-in: use Playwright MCP. T11 (RDP) skipped. Backups: nightly encrypted restic to the USB stick only (`fleet-backup`, T1580), no cloud copy.
 
 ## 8. Persistent agents
 Timer-run by `agent-run` in `~/agents/<name>/`: brief `BRIEF.md`, scratch `state/`; end by overwriting `REPORT.md`

@@ -1,0 +1,10 @@
+[Unit]
+Description=fleet-backup nightly at 02:30 (+<= 20 min, after the 00:50-01:50 CI window, before the 03:40 reclaim)
+
+[Timer]
+OnCalendar=*-*-* 02:30
+RandomizedDelaySec=1200
+Persistent=true
+
+[Install]
+WantedBy=timers.target

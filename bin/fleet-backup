@@ -1,0 +1,231 @@
+#!/usr/bin/env bash
+# fleet-backup — nightly encrypted restic backup of laptop-only data to the USB stick (T1580, guide fleet-backup).
+set -uo pipefail
+BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$BIN/env.sh"  # always: FLEET_BACKUP_* keys added after a session started still apply
+
+LABEL="${FLEET_BACKUP_LABEL:-}"
+MOUNT="${FLEET_BACKUP_MOUNT:-}"
+BUDGET_MB="${FLEET_BACKUP_BUDGET_MB:-18432}"
+MIN_FREE_MB="${FLEET_BACKUP_MIN_FREE_MB:-512}"
+KEEP="${FLEET_BACKUP_KEEP---keep-daily 7 --keep-weekly 4}"  # empty = no forget/prune
+export RESTIC_PASSWORD_FILE="${FLEET_BACKUP_PASSWORD_FILE:-$HARNESS_HOME/secrets/fleet-backup.pass}"
+STATE="$HARNESS_HOME/state/fleet-backup"
+CLAUDE="$HARNESS_CONTEXT_DIR"
+TAG=nightly
+
+usage() {
+  cat <<EOF
+usage: fleet-backup run       back up tier 1 + tier 2 (newest first, within the budget), then forget/prune
+       fleet-backup --check   restic, password file (600), stick mounted and writable, repo readable; exit 1 if not
+       fleet-backup list      the snapshots
+       fleet-backup restore <snapshot|latest> <path> <dest>   restore one absolute path under <dest>
+Stick: FLEET_BACKUP_MOUNT or FLEET_BACKUP_LABEL (config.env); repo <stick>/fleet-backup/restic.
+Absent stick: run logs "skip" and exits 0. Budget ${BUDGET_MB} MB; keep: $KEEP. Log: $STATE/run.log.
+EOF
+}
+
+log() { mkdir -p "$STATE"; printf '%s %s\n' "$(date '+%F %T')" "$*" | tee -a "$STATE/run.log"; }
+
+# locate — print the stick mount point; exit 1 when absent or read-only.
+locate() {
+  local m="$MOUNT"
+  [ -n "$m" ] || { [ -n "$LABEL" ] && m=$(findmnt -n -o TARGET --source "LABEL=$LABEL" 2>/dev/null | head -1); }
+  [ -n "$m" ] && mountpoint -q "$m" 2>/dev/null && [ -w "$m" ] && printf '%s\n' "$m"
+}
+
+# Protected paths, words and env-dir globs, read once. Paths are expanded lexically: `protected entries path`
+# runs readlink -m, which stats the protected paths themselves.
+. "$BIN/pclib.sh"
+_ppaths() {
+  local n w
+  for n in $(protected_projects); do
+    while IFS= read -r w; do [ -n "$w" ] && { w=${w/#\~/$HOME}; w=${w//\$HOME/$HOME}; printf '%s\n' "${w%/}"; }; done \
+      < <(_protected_words path "$n")
+  done
+}
+mapfile -t P_PATHS < <(_ppaths)
+mapfile -t P_WORDS < <(protected_entries text)
+mapfile -t P_GLOBS < <(protected_entries container)
+
+# blocked <abs path> — true when the path is, holds or sits under a protected path, or its name has a protected word.
+blocked() {
+  local p="$1" n="${1##*/}" q w g enc
+  n="${n,,}"
+  for q in "${P_PATHS[@]}"; do
+    case "$p/" in "$q/"*) return 0;; esac
+    case "$q/" in "$p/"*) return 0;; esac
+    enc="${q//[\/.]/-}"
+    case "$p" in "$CLAUDE/projects/$enc"|"$CLAUDE/projects/$enc-"*) return 0;; esac
+  done
+  for w in "${P_WORDS[@]}"; do [ -n "$w" ] && case "$n" in *"${w,,}"*) return 0;; esac; done
+  # shellcheck disable=SC2254
+  for g in "${P_GLOBS[@]}"; do [ -n "$g" ] && case "$n" in ${g,,}) return 0;; esac; done
+  return 1
+}
+
+# kids <dir> — entries of a dir (names from readdir, no stat), protected ones dropped.
+kids() {
+  local e; shopt -s nullglob dotglob
+  for e in "$1"/*; do blocked "$e" || printf '%s\n' "$e"; done
+  shopt -u nullglob dotglob
+}
+
+# tier1 — the paths that must fit every night.
+tier1() {
+  local p d f
+  for p in "$HOME/finance" "$HOME/invoices" "$HARNESS_HOME/secrets" "$HOME/.config/pc-harness" "$HARNESS_HOME/state" \
+           "$AGENT_WORK/history.md" "$AGENT_WORK/README.md" "$AGENT_WORK/briefs" "$AGENT_WORK/decisions" "$AGENT_WORK/owner"; do
+    [ -e "$p" ] && printf '%s\n' "$p"
+  done
+  [ -d "$CLAUDE" ] && kids "$CLAUDE" | grep -vxF "$CLAUDE/projects"
+  [ -d "$CLAUDE/projects" ] && kids "$CLAUDE/projects" | while read -r d; do [ -d "$d/memory" ] && printf '%s\n' "$d/memory"; done
+  [ -d "$HARNESS_HOME/backups/moodle" ] && kids "$HARNESS_HOME/backups/moodle" | while read -r d; do
+    f=$(kids "$d" | grep -E '\.sql(\.gz)?$' | sort | tail -1); [ -n "$f" ] && printf '%s\n' "$f"
+  done
+}
+
+# tier2_candidates — the rest of ~/agent-work and the transcripts, one entry per ticket/session, any order.
+tier2_candidates() {
+  local e d
+  [ -d "$AGENT_WORK" ] && kids "$AGENT_WORK" | while read -r e; do
+    case "${e##*/}" in history.md|README.md|briefs|decisions|owner|tmp|scratch) ;;
+      research) kids "$e" | while read -r d; do kids "$d"; done ;;
+      evidence|archive) kids "$e" ;;
+      *) printf '%s\n' "$e" ;;
+    esac
+  done
+  [ -d "$CLAUDE/projects" ] && kids "$CLAUDE/projects" | while read -r d; do kids "$d" | grep -vxF "$d/memory"; done
+}
+
+# sizes <paths on stdin> — "<bytes>\t<path>" per path; protected names and mirrors are pruned by name before any stat
+# (du and find stat every entry they skip).
+SIZES_PY='
+import os, stat, sys
+words = [w.lower() for w in os.environ["FB_WORDS"].split("\n") if w]
+rels = ["/" + r for r in os.environ["FB_RELS"].split("\n") if r]
+def bad(p, n):
+    n = n.lower()
+    return any(w in n for w in words) or any(p.endswith(r) for r in rels)
+def size(p):
+    try:
+        st = os.lstat(p)
+    except OSError:
+        return 0
+    if not stat.S_ISDIR(st.st_mode):
+        return st.st_size
+    t, todo = 0, [p]
+    while todo:
+        try:
+            it = os.scandir(todo.pop())
+        except OSError:
+            continue
+        with it:
+            for e in it:
+                if bad(e.path, e.name):
+                    continue
+                try:
+                    if e.is_dir(follow_symlinks=False):
+                        todo.append(e.path)
+                    else:
+                        t += e.stat(follow_symlinks=False).st_size
+                except OSError:
+                    pass
+    return t
+for p in sys.stdin.read().splitlines():
+    if p:
+        print(f"{size(p)}\t{p}")
+'
+sizes() { FB_WORDS="$(printf '%s\n' "${P_WORDS[@]}")" FB_RELS="$(rels)" python3 -I -c "$SIZES_PY"; }
+# rels — protected paths relative to $HOME: their mirrors (e.g. claims snapshots) are excluded anywhere.
+rels() { local q; for q in "${P_PATHS[@]}"; do case "$q" in "$HOME"/*) printf '%s\n' "${q#"$HOME"/}";; esac; done; }
+
+# select — writes $W/t1, $W/t2 (chosen, newest first), $W/skip; prints "t1_bytes t2_bytes skip_bytes skip_n".
+select_paths() {
+  local allow t1 used=0 sk=0 n=0 m s p
+  tier1 >"$W/t1"
+  t1=$(sizes <"$W/t1" | awk -F'\t' '{s+=$1} END{print s+0}')
+  allow=$(( BUDGET_MB * 1048576 * 6 / 10 - t1 ))
+  : >"$W/t2"; : >"$W/skip"
+  tier2_candidates | tr '\n' '\0' | xargs -0 -r stat -c '%Y %n' 2>/dev/null | sort -rn | cut -d' ' -f2- >"$W/cand"
+  sizes <"$W/cand" >"$W/sizes"
+  while IFS=$'\t' read -r s p; do
+    if [ $((used + s)) -le "$allow" ]; then used=$((used + s)); printf '%s\n' "$p" >>"$W/t2"
+    else sk=$((sk + s)); n=$((n + 1)); printf '%s\n' "$p" >>"$W/skip"; fi
+  done <"$W/sizes"
+  echo "$t1 $used $sk $n"
+}
+
+excludes() {
+  local q w
+  for q in "${P_PATHS[@]}"; do [ -n "$q" ] && printf -- '--exclude=%s\n' "$q"; done
+  rels | while read -r q; do printf -- '--exclude=**/%s\n' "$q"; done
+  for w in "${P_WORDS[@]}"; do [ -n "$w" ] && while read -r q; do printf -- '--iexclude=%s/**/*%s*\n' "$q" "$w"; done <"$W/t2"; done
+  printf -- '--exclude=%s\n' node_modules .venv venv __pycache__ .godot
+}
+
+mb() { echo $(( ($1 + 524287) / 1048576 )); }
+
+cmd_run() {
+  local m repo free t1 t2 sk skn out rc snap repob
+  exec 9>"${XDG_RUNTIME_DIR:-/tmp}/fleet-backup.lock"; flock -n 9 || { log "skip: another run holds the lock"; return 0; }
+  m=$(locate) || { log "skip: stick absent (label '${LABEL}' mount '${MOUNT}')"; return 0; }
+  free=$(df -Pm "$m" | awk 'NR==2{print $4}')
+  [ "$free" -ge "$MIN_FREE_MB" ] || { log "FAIL: stick full ($free MB free < $MIN_FREE_MB)"; return 1; }
+  repo="$m/fleet-backup/restic"; export RESTIC_REPOSITORY="$repo"
+  if [ ! -s "$RESTIC_PASSWORD_FILE" ]; then
+    (umask 077; mkdir -p "${RESTIC_PASSWORD_FILE%/*}"; head -c 32 /dev/urandom | base64 >"$RESTIC_PASSWORD_FILE.tmp" &&
+      mv "$RESTIC_PASSWORD_FILE.tmp" "$RESTIC_PASSWORD_FILE")
+    log "password: generated $RESTIC_PASSWORD_FILE (600)"
+  fi
+  if [ ! -e "$repo/config" ]; then
+    restic init -q >/dev/null 2>"$W/err" || { log "FAIL: restic init: $(tail -1 "$W/err")"; return 1; }
+    log "repo: initialised $repo"
+  fi
+  read -r t1 t2 sk skn <<<"$(select_paths)"
+  cat "$W/t1" "$W/t2" | tr '\n' '\0' >"$W/files"
+  mapfile -t ex < <(excludes)
+  out=$(restic backup -q --json --tag "$TAG" --group-by host,tags --files-from-raw "$W/files" "${ex[@]}" 2>"$W/err"); rc=$?
+  snap=$(jq -r 'select(.message_type=="summary")|.snapshot_id // empty' <<<"$out" 2>/dev/null | tail -1)
+  if [ -z "$snap" ]; then
+    if grep -qi 'no space left' "$W/err"; then log "FAIL: stick full during backup ($(tail -1 "$W/err"))"
+    else log "FAIL: restic backup rc=$rc: $(tail -1 "$W/err")"; fi
+    return 1
+  fi
+  # shellcheck disable=SC2086
+  [ -z "$KEEP" ] || restic forget -q --tag "$TAG" --group-by tags $KEEP --prune >/dev/null 2>"$W/err" || log "warn: forget/prune: $(tail -1 "$W/err")"
+  repob=$(du -sb "$m/fleet-backup" | awk '{print $1}')
+  printf '%s %s %s %s %s %s %s\n' "$(date +%s)" "${snap:0:8}" "$(mb "$t1")" "$(mb "$t2")" "$(mb "$sk")" "$skn" "$(mb "$repob")" \
+    >"$STATE/last-ok.tmp" && mv "$STATE/last-ok.tmp" "$STATE/last-ok"
+  cp "$W/skip" "$STATE/last-skipped.txt"
+  log "ok: snapshot ${snap:0:8} rc=$rc tier1=$(mb "$t1")MB tier2=$(mb "$t2")MB skipped=$(mb "$sk")MB/$skn repo=$(mb "$repob")MB budget=${BUDGET_MB}MB"
+  [ "$repob" -le $(( BUDGET_MB * 1048576 )) ] || { log "FAIL: repo over budget"; return 1; }
+}
+
+cmd_check() {
+  local m bad=0 mode
+  command -v restic >/dev/null || { echo "FAIL restic not installed"; bad=1; }
+  if [ -s "$RESTIC_PASSWORD_FILE" ]; then
+    mode=$(stat -c %a "$RESTIC_PASSWORD_FILE"); [ "$mode" = 600 ] || { echo "FAIL password file mode $mode (want 600)"; bad=1; }
+  else echo "FAIL no password file (first run creates it)"; bad=1; fi
+  if m=$(locate); then
+    export RESTIC_REPOSITORY="$m/fleet-backup/restic"
+    restic cat config >/dev/null 2>&1 && echo "ok repo $RESTIC_REPOSITORY" || { echo "FAIL repo unreadable: $RESTIC_REPOSITORY"; bad=1; }
+  else echo "FAIL stick absent (label '${LABEL}' mount '${MOUNT}')"; bad=1; fi
+  [ -r "$STATE/last-ok" ] && read -r ts snap _ <"$STATE/last-ok" && echo "ok last snapshot $snap $(( ($(date +%s) - ts) / 3600 )) h ago"
+  return "$bad"
+}
+
+repo_or_die() { local m; m=$(locate) || { echo "fleet-backup: stick absent" >&2; exit 1; }; export RESTIC_REPOSITORY="$m/fleet-backup/restic"; }
+
+W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
+case "${1:-}" in
+  run) cmd_run ;;
+  --check) cmd_check ;;
+  list) repo_or_die; restic snapshots --compact ;;
+  restore)
+    [ $# -eq 4 ] || { usage >&2; exit 2; }
+    repo_or_die; restic restore "$2" --include "$3" --target "$4" ;;
+  -h|--help|"") usage ;;
+  *) usage >&2; exit 2 ;;
+esac

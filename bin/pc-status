@@ -727,6 +727,11 @@ add agents unit_loops_foreign "${a_loops_foreign:-none}${a_loops_foreign:+ (prot
 add agents moodle_upgrade "$([ ${#a_mup[@]} -gt 0 ] && echo "pending: $(joined a_mup)" || echo "none pending")" "${V[moodle_upgrade]}"
 add agents sentinel_age "$([ "$a_sent" -ge 0 ] && echo "$a_sent min" || echo "no tick recorded")" "${V[sentinel]}"
 add agents user_timers "$a_timers${nt:+ (next: $nt)}"
+# fleet-backup (T1580): age of the last good snapshot on the USB stick; red after 7 days.
+read -r b_ts b_snap _ _ _ _ b_repo <<<"$(first "$HARNESS_HOME/state/fleet-backup/last-ok")"
+if [ -n "${b_ts:-}" ]; then b_h=$(( (EPOCHSECONDS - b_ts) / 3600 )); st=-; [ "$b_h" -le 48 ] && st=OK; [ "$b_h" -gt 168 ] && st=FAIL
+  add agents backup_age "$b_h h (snapshot $b_snap, repo $b_repo MB)" "$st"
+else add agents backup_age "no snapshot yet (fleet-backup run)"; fi
 _sessions() { claude agents --json 2>/dev/null | jq 'length' 2>/dev/null || echo n/a; }
 # `claude agents` is a ~0.4 s Node start-up; 1 h outlives the 15-min sentinel tick (T943).
 add agents claude_sessions "$(slow claude_sessions 3600 _sessions)"

@@ -1,0 +1,12 @@
+[Unit]
+Description=Nightly encrypted restic backup of laptop-only data to the USB stick (fleet-backup run; absent stick = logged skip; T1580)
+
+[Service]
+Type=oneshot
+TimeoutStartSec=14400
+Slice=fleet-heavy.slice
+Nice=19
+CPUSchedulingPolicy=idle
+IOSchedulingClass=idle
+Environment=PATH=%h/agents/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/agents/bin/fleet-backup run
