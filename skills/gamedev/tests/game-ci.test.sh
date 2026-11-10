@@ -31,7 +31,7 @@ ok "stages in order, all pass" '[ "$(jq -r ".stages | keys_unsorted | join(\" \"
 ok "every stage has status string + integer seconds" 'jq -e "[.stages[] | (.status | type == \"string\") and (.seconds | type == \"number\")] | all" "$S" >/dev/null'
 ok "top-level keys pinned" 'jq -e "has(\"project\") and has(\"date\") and has(\"godot\") and has(\"load\") and has(\"seconds\") and has(\"ok\")" "$S" >/dev/null'
 ok "stages.perf: baseline set, median_fps 120" 'jq -e ".stages.perf.rc == 0 and .stages.perf.median_fps == 120 and (.stages.perf.line | startswith(\"PERFGATE baseline set\"))" "$S" >/dev/null'
-ok "T539: perf.csv ends p50,p95,p99,low1 with the stub values" 'head -1 "$T/ci1/perf.csv" | grep -q ",p50_ms,p95_ms,p99_ms,low1_fps,gpu_mhz_p50,throttle_pct,verdict$" && tail -1 "$T/ci1/perf.csv" | grep -q ",8.00,9.00,10.00,100.0,,,PASS$"'
+ok "T539: perf.csv ends p50,p95,p99,low1 with the stub values" 'head -1 "$T/ci1/perf.csv" | grep -q ",p50_ms,p95_ms,p99_ms,low1_fps,gpu_mhz_p50,throttle_pct,verdict,kernel$" && tail -1 "$T/ci1/perf.csv" | grep -q ",8.00,9.00,10.00,100.0,,,PASS,$(uname -r)$"'
 ok "test: 3 tests, 0 failures" 'jq -e ".stages.test.tests == 3 and .stages.test.failures == 0" "$S" >/dev/null'
 ok "export: Linux + Windows builds with bytes" 'jq -e "[.stages.export.builds.Linux.bytes, .stages.export.builds.Windows.bytes] | all(. > 0)" "$S" >/dev/null'
 ok "capture: mp4 10 s, game line, shader gdshader_errors 0" 'jq -e ".stages.capture.duration_s == 10 and (.stages.capture.game | startswith(\"SMOKE done\")) and .stages.shader.gdshader_errors == 0 and .stages.shader.glsl_files == 1" "$S" >/dev/null'
