@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# usage: po-context check <p> | repo <p> — a PO's context against the manager layout (T1557, po-template/PROJECT.md).
+#   check: state/PROJECT|BACKLOG|RUNS.md exist; caps: PROJECT <= 80 lines and 6 KB, BACKLOG <= 30 rows, REPO <= 40 lines,
+#          HISTORY <= 150 lines, refs/INDEX.md names every file in refs/. A manager (PARENT= in agent.env) also: the 6
+#          template headings in order, HISTORY.md, its ledger, a REPO.md under 24 h old when its clone exists, the 8
+#          standing rules in BRIEF.md. Prints `ok <p>`, else one `miss: ...` line each and exits 1.
+#   repo:  rewrites state/REPO.md (temp + mv) from the clone in discord-liaison/projects.json: HEAD, branches with
+#          commits on no remote, worktrees, open PRs (`gh pr list`, 20 s). Read-only in the clone: no fetch, no lock.
+help() { awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; }
+case "${1:-}" in -h|--help) help; exit 0 ;; check|repo) ;; *) help >&2; exit 2 ;; esac
+set -uo pipefail
+. "$(dirname "$(readlink -f "$0")")/polib.sh"
+cmd="$1"; p="${2:-}"
+d=$(po_dir po-context "$p") || exit 2
+s="$d/state"
+export GIT_OPTIONAL_LOCKS=0
+
+registry() { jq -r --arg po "po-$p" ".projects[]? | select(.po == \$po) | .$1 // empty" \
+  "$HARNESS_HOME/discord-liaison/projects.json" 2>/dev/null | head -1; }
+clone=$(registry clone); clone="${clone/#\~/$HOME}"
+
+check() {
+  local miss=() f n want got rule parent
+  parent=$(grep -c '^PARENT=' "$d/agent.env" 2>/dev/null)
+  local files=(PROJECT BACKLOG RUNS); [ "$parent" = 0 ] || files+=(HISTORY)
+  for f in "${files[@]}"; do [ -f "$s/$f.md" ] || miss+=("state/$f.md missing"); done
+  if [ -f "$s/PROJECT.md" ]; then
+    n=$(wc -l <"$s/PROJECT.md"); [ "$n" -le 80 ] || miss+=("PROJECT.md $n lines > 80 (oldest lines to HISTORY.md)")
+    n=$(wc -c <"$s/PROJECT.md"); [ "$n" -le 6144 ] || miss+=("PROJECT.md $n bytes > 6 KB (oldest lines to HISTORY.md)")
+  fi
+  if [ -f "$s/BACKLOG.md" ]; then
+    n=$(grep -E '^\|' "$s/BACKLOG.md" | grep -vcE '^\|[-:| ]+$|^\| *id *\|')
+    [ "$n" -le 30 ] || miss+=("BACKLOG.md $n rows > 30 (done rows to RUNS.md)")
+  fi
+  [ ! -f "$s/REPO.md" ] || { n=$(wc -l <"$s/REPO.md"); [ "$n" -le 40 ] || miss+=("REPO.md $n lines > 40"); }
+  [ ! -f "$s/HISTORY.md" ] || { n=$(wc -l <"$s/HISTORY.md"); [ "$n" -le 150 ] || miss+=("HISTORY.md $n lines > 150"); }
+  if [ -d "$s/refs" ]; then
+    while IFS= read -r f; do
+      grep -qF "$f" "$s/refs/INDEX.md" 2>/dev/null || miss+=("refs/INDEX.md does not name refs/$f")
+    done < <(cd "$s/refs" && find . -type f ! -path ./INDEX.md | sed 's|^\./||' | sort)
+  fi
+  if [ "$parent" != 0 ]; then
+    want=$(grep '^## ' "$HARNESS_HOME/po-template/PROJECT.md" | sed 's/ (.*//' | paste -sd'|' -)
+    got=$(grep '^## ' "$s/PROJECT.md" 2>/dev/null | sed 's/ (.*//' | paste -sd'|' -)
+    [ "$got" = "$want" ] || miss+=("PROJECT.md headings '$got', want '$want'")
+    [ -f "$AGENT_WORK/decisions/$p.md" ] || miss+=("ledger $AGENT_WORK/decisions/$p.md missing")
+    if [ -n "$clone" ] && [ -d "$clone/.git" ] && [ -z "$(find "$s/REPO.md" -mmin -1440 2>/dev/null)" ]; then
+      miss+=("REPO.md missing or older than 24 h (po-context repo $p)")
+    fi
+    for rule in AAA OpenRouter 'no puedo' 'Superseded work' 'Number every ask' 'One subject first' \
+                'Sound by default' 'Facts from the group'; do
+      grep -qF "$rule" "$d/BRIEF.md" || miss+=("BRIEF.md lacks the standing rule '$rule'")
+    done
+  fi
+  [ ${#miss[@]} -eq 0 ] && { echo "ok $p"; return 0; }
+  for f in "${miss[@]}"; do echo "miss: $p: $f"; done
+  return 1
+}
+
+# list <cap> — stdin lines as "- ..." items, the ones past <cap> as one "- ... N more" line.
+list() { awk -v cap="$1" 'NR<=cap{print "- " $0} END{if (NR>cap) print "- ... " NR-cap " more"}'; }
+
+repo_body() {
+  local g=(git -C "$clone") head up ab dirty b n wt br lines
+  echo "# $p: repo state (po-context repo, $(date -u +%FT%TZ); written by code, never edit)"
+  echo "repo: $(registry repo)  clone: $(registry clone)"
+  head=$("${g[@]}" symbolic-ref --short -q HEAD || echo detached)
+  up=$("${g[@]}" rev-parse --abbrev-ref '@{u}' 2>/dev/null)
+  ab=''; [ -z "$up" ] || ab=$("${g[@]}" rev-list --left-right --count "HEAD...@{u}" | awk -v u="$up" '{print ", ahead " $1 ", behind " $2 " of " u}')
+  dirty=''; [ -z "$("${g[@]}" status --porcelain 2>/dev/null | head -1)" ] || dirty=', dirty'
+  echo "HEAD: $head $("${g[@]}" rev-parse --short HEAD 2>/dev/null)${ab:-, no upstream}$dirty"
+  lines=$(timeout 20 gh pr list -R "$(registry repo)" --state open --limit 100 \
+    --json number,title,headRefName,baseRefName \
+    -q '.[] | "#\(.number) \(.title[0:90]) [\(.headRefName) -> \(.baseRefName)]"' 2>/dev/null); n=$?
+  if [ $n -ne 0 ]; then echo "## Open PRs: unknown (gh exit $n)"
+  else echo "## Open PRs ($(grep -c . <<<"$lines"))"; [ -z "$lines" ] || list 15 <<<"$lines"; fi
+  lines=$("${g[@]}" for-each-ref --format='%(refname:short)' refs/heads | while IFS= read -r b; do
+    n=$("${g[@]}" rev-list --count "refs/heads/$b" --not --remotes); [ "$n" = 0 ] || echo "$b: $n commits on no remote"
+  done)
+  echo "## Branches with unpushed commits ($(grep -c . <<<"$lines"))"; [ -z "$lines" ] || list 8 <<<"$lines"
+  lines=$("${g[@]}" worktree list --porcelain | awk '/^worktree /{w=substr($0,10); b="detached"} /^branch /{b=substr($0,19)} /^$/{print w "\t" b}')
+  n=$(grep -c . <<<"$lines")
+  lines=$(while IFS=$'\t' read -r wt br; do
+    [ -d "$wt" ] && [ -n "$(git -C "$wt" status --porcelain 2>/dev/null | head -1)" ] && echo "$br (${wt/#$HOME/\~})"
+  done <<<"$lines")
+  echo "## Worktrees ($n, $(grep -c . <<<"$lines") dirty)"; [ -z "$lines" ] || list 6 <<<"$lines"
+}
+
+repo() {
+  [ -n "$(registry repo)" ] || { echo "po-context: po-$p has no repo in projects.json; REPO.md not written"; return 0; }
+  mkdir -p "$s"
+  if [ -d "$clone/.git" ]; then repo_body >"$s/.REPO.md.tmp"
+  else echo "# $p: repo state (po-context repo, $(date -u +%FT%TZ)): $(registry clone) is not cloned yet" >"$s/.REPO.md.tmp"; fi
+  mv "$s/.REPO.md.tmp" "$s/REPO.md" && echo "wrote $s/REPO.md ($(wc -l <"$s/REPO.md") lines)"
+}
+
+"$cmd"
