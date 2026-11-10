@@ -1,4 +1,4 @@
-"""Every POST route answers only loopback and tailnet callers; a LAN address gets 403 before the handler runs."""
+"""Every route answers only loopback and tailnet callers; a LAN address gets 403 before the handler runs."""
 import email.message, os, sys, unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import server
@@ -10,8 +10,8 @@ POSTS = ["/api/voice/clip", "/api/voice/delete", "/api/voice/clear", "/api/seen"
          "/api/files/restore", "/api/docs/delete", "/api/owner-todo/done"]
 
 
-def post(path, ip, fwd=None):
-    """(status sent or None, True when the route handler ran) for a same-origin POST from ip, X-Forwarded-For fwd."""
+def post(path, ip, fwd=None, method="POST"):
+    """(status sent or None, True when the route handler ran) for a same-origin request from ip, X-Forwarded-For fwd."""
     h = Handler.__new__(Handler)
     h.path, h.client_address, h.headers = path, (ip, 0), email.message.Message()
     if fwd:
@@ -19,12 +19,15 @@ def post(path, ip, fwd=None):
     sent, ran = [], []
     h.send = lambda code, *a, **k: sent.append(code)
     h.json = lambda obj, code=200: sent.append(code)
-    real = routes.EXACT[("POST", path)]
-    routes.EXACT[("POST", path)] = lambda hh, p: ran.append(p)
+    real = routes.EXACT.get((method, path))
+    routes.EXACT[(method, path)] = lambda hh, p: ran.append(p)
     try:
-        h.dispatch("POST")
+        h.dispatch(method)
     finally:
-        routes.EXACT[("POST", path)] = real
+        if real:
+            routes.EXACT[(method, path)] = real
+        else:
+            del routes.EXACT[(method, path)]
     return (sent[-1] if sent else None), bool(ran)
 
 
@@ -41,6 +44,19 @@ class TrustedPosts(unittest.TestCase):
         for path in POSTS:
             for ip in ("127.0.0.1", "::1", "100.101.102.103", "fd7a:115c:a1e0::5"):
                 self.assertEqual(post(path, ip), (None, True), (path, ip))
+
+    def test_lan_gets_403_on_every_get_route(self):
+        paths = [p for m, p in routes.EXACT if m == "GET"] + ["/static/eye.css", "/files/x", "/no/such/page"]
+        self.assertLessEqual({"/", "/api/status", "/api/agents"}, set(paths))
+        for path in paths:
+            for ip in ("192.0.2.10", "::ffff:198.51.100.4", "fe80::1%eth9"):
+                self.assertEqual(post(path, ip, method="GET"), (403, False), (path, ip))
+
+    def test_loopback_and_tailnet_reach_get_routes(self):
+        for path in ("/", "/api/status", "/api/agents"):
+            for ip in ("127.0.0.1", "::1", "100.101.102.103", "fd7a:115c:a1e0::5"):
+                self.assertEqual(post(path, ip, method="GET"), (None, True), (path, ip))
+        self.assertEqual(post("/api/agents", "127.0.0.1", "192.0.2.10", method="GET"), (403, False))
 
     def test_tailnet_front_judges_the_forwarded_hop(self):
         path = POSTS[0]

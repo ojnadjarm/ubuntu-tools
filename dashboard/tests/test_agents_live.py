@@ -1,5 +1,6 @@
 """/api/agents liveness on fixtures: finished agents leave the live list, live ones stay, persistent ones show idle/running."""
-import io, json, os, sys, tempfile, threading, time, unittest
+import io, json, os, re, subprocess, sys, tempfile, threading, time, unittest
+from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dash import cache
 from dash.services import agents
@@ -331,6 +332,32 @@ class Live(unittest.TestCase):
         rss, notes = map(int, subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout.split())
         self.assertGreater(notes, 0)
         self.assertLess(rss, 100 * 1024)
+
+
+class ClaimsProtected(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.saved = agents.CLAIMS
+        agents.CLAIMS = os.path.join(self.tmp.name, "FILE-CLAIMS.md")
+        open(agents.CLAIMS, "w").write("# board\n- T1 \u00b7 ~/pp/moodle/a.php  ~/agents/x.py /srv/pp \u00b7 2026-11-10 10:00\n"
+                                       "- T2 \u00b7 lib/org.py \u00b7 2026-11-10 10:01\n")
+
+    def tearDown(self):
+        agents.CLAIMS = self.saved
+        self.tmp.cleanup()
+
+    def test_claims_protected_path_reads_protected_project(self):
+        pairs = [("p", re.compile("^" + re.escape(os.path.expanduser("~/pp")) + "(/|$)")), ("q", re.compile("^/srv/pp(/|$)"))]
+        with mock.patch.object(agents.protectedlib, "eres", lambda kind: pairs if kind == "path" else []):
+            self.assertEqual(agents.claims(), ["T1 \u00b7 protected project  ~/agents/x.py protected project \u00b7 2026-11-10 10:00",
+                                               "T2 \u00b7 lib/org.py \u00b7 2026-11-10 10:01"])
+
+    def test_claims_protected_matcher_down_hides_every_path(self):
+        def down(kind):
+            raise subprocess.CalledProcessError(1, "protected")
+        with mock.patch.object(agents.protectedlib, "eres", down):
+            self.assertEqual(agents.claims(), ["T1 \u00b7 [path]  [path] [path] \u00b7 2026-11-10 10:00",
+                                               "T2 \u00b7 [path] \u00b7 2026-11-10 10:01"])
 
 
 if __name__ == "__main__":

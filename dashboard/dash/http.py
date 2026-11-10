@@ -97,14 +97,14 @@ class Handler(BaseHTTPRequestHandler):
     def dispatch(self, method):
         if not self.known_host():
             return self.json({"error": "unknown host"}, 403)
+        if not trusted(self.client_address[0], self.headers.get("X-Forwarded-For")):
+            return self.json({"error": "tailnet only"}, 403)
         path = self.path.split("?")[0]
         fn = routes.find(method, path)
         if not fn:
             return self.send(404, b"not found\n", "text/plain")
         if method == "POST" and self.cross_site():
             return self.json({"error": "cross-site request refused"}, 403)
-        if method == "POST" and not trusted(self.client_address[0], self.headers.get("X-Forwarded-For")):
-            return self.json({"error": "tailnet only"}, 403)
         fn(self, path)
 
     def known_host(self):

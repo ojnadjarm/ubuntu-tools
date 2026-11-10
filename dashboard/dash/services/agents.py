@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import agent_ends  # noqa: E402
 import org  # noqa: E402
 import sessions  # noqa: E402
+import protectedlib  # noqa: E402
 from agent_ends import iso_s  # noqa: E402
 
 PROJ = os.path.join(HOME, ".claude/projects", HOME.replace("/", "-"))
@@ -312,9 +313,22 @@ def roles():
 
 
 def claims():
+    """Claims board lines; a protected path reads `protected project`, and every path `[path]` when the matcher is down."""
     if not os.path.exists(CLAIMS):
         return []
-    return [l[2:].strip() for l in open(CLAIMS, errors="replace") if l.startswith("- ")]
+    try:
+        pairs = protectedlib.eres("path")
+    except Exception:
+        pairs = None
+
+    def word(m):
+        w = m.group(0)
+        if "/" not in w:
+            return w
+        if pairs is None:
+            return "[path]"
+        return "protected project" if protectedlib.project(pairs, os.path.expanduser(w)) else w
+    return [re.sub(r"\S+", word, l[2:].strip()) for l in open(CLAIMS, errors="replace") if l.startswith("- ")]
 
 
 def collect():
