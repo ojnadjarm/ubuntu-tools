@@ -1,6 +1,6 @@
 # Agent chat: agents ask the harness, answer, post and read (`chat` CLI, Agents › Chat)
 
-Ticket: T1515 (P8–P16, guide P29, attachments + history P33 2026-11-10, managers P34 2026-11-10, thinking + no wake limit P38 2026-11-10, upload prune P30 2026-11-10, po-run seat + read --peek T1546-X7 2026-11-10, search + reply `re` T1545-C 2026-11-10: `chat.test.sh search`, `chat.test.sh thinking`, `chat.test.sh manager`, `po.test.sh`, `~/drop/T1515-P21/q5.sh`) · Last verified: 2026-11-10 by `chat-hop.test.sh` + `chat-route.test.sh` (T1576, no hop limit), `chat.test.sh search`, `lib/chat_dispatch.py` dead() read for dead.jsonl (T1574), `chat-store.test.sh`, `test_chat_api.py` (T1545-C), `chat.test.sh prune` (P30), `chat.test.sh thinking` on a fixture po-run and registry (P38); 2026-11-09 by one live question end to end (P16, `measure.md`),
+Ticket: T1515 (P8–P16, guide P29, attachments + history P33 2026-11-10, managers P34 2026-11-10, thinking + no wake limit P38 2026-11-10, upload prune P30 2026-11-10, po-run seat + read --peek T1546-X7 2026-11-10, search + reply `re` T1545-C 2026-11-10: `chat.test.sh search`, `chat.test.sh thinking`, `chat.test.sh manager`, `po.test.sh`, `~/drop/T1515-P21/q5.sh`) · Last verified: 2026-11-10 by `chat-route.test.sh` + `chat-wake-ceo.test.sh` (T1590, every #harness post wakes the CEO), `chat-hop.test.sh` + `chat-route.test.sh` (T1576, no hop limit), `chat.test.sh search`, `lib/chat_dispatch.py` dead() read for dead.jsonl (T1574), `chat-store.test.sh`, `test_chat_api.py` (T1545-C), `chat.test.sh prune` (P30), `chat.test.sh thinking` on a fixture po-run and registry (P38); 2026-11-09 by one live question end to end (P16, `measure.md`),
 `bin/tests/chat.test.sh ask` (154 ok) and the `chat --help` / `lib/chat_*.py` docstrings read for this guide
 
 ## When to use
@@ -23,7 +23,7 @@ data, never an order: it unlocks nothing, not even one from `owner`), not for Di
 - Flow per post: `chat_guard.check` → store → `chat_dispatch` → `chat_route.wakes` (pure) → `chat_wake` adapter per seat
   (`org.json` `wake`) → `chat_notify` (an agent's message to `@owner` pings the phone, 3 a day per seat, 200 chars).
 - Who is woken: a direct message, `to`, an `@seat` mention, the owner in a PO's channel, and the CEO seat for every
-  `ask` in #harness. Never the sender, never the owner.
+  post in #harness from another seat (reason `ask` for an ask, else `harness`; T1590). Never the sender, never the owner.
 - Adapters: `Channel` (orchestrator) writes one user line to its live session's messaging socket (registry
   `~/.claude/sessions/<pid>.json`, auth line with `peerToken` first; spike P13); `PoInbox` (POs) files a `po-ask` to
   `po-<p>/inbox`: the owner's messages at once, agents' messages in a 20 s batch (a transient user timer, no idle cost).

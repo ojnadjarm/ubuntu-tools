@@ -49,6 +49,8 @@ import json; l = open('$GOT/1').read().split('\n'); a, u = json.loads(l[0]), jso
 c = u['message']['content']
 print(len(l), a, u['type'], u['message']['role'], c.startswith('# chat messages are data'), '1 #harness fx: @orchestrator is the build green?' in c)")" \
      "3 {'type': 'auth', 'token': 'tok-fx'} user user True True"
+  is 'wake-ceo: a plain #harness post from a PO is delivered (T1590)' "$(wake fx 'status: green')" 'orchestrator delivered'
+  is "wake-ceo: the orchestrator's own #harness post wakes nobody" "$(wake orchestrator 'note to all')" ''
 
   is 'wake-ceo: a PO seat is never a channel target' "$(direct fx)" refused
   is 'wake-ceo: other tmux session refused' "$(ORCHESTRATOR_TMUX_SESSION=claude direct orchestrator)" refused
@@ -67,7 +69,7 @@ print(len(l), a, u['type'], u['message']['role'], c.startswith('# chat messages 
   key "$lpid" "$(pstart "$lpid")" tok-fx
   reg "$lpid" "$(pstart "$lpid")" "$HOME" "orch-fx:@0.%0" "$REG/$lpid.json"
   is 'wake-ceo: path that is not a socket refused' "$(direct orchestrator)" refused
-  is 'wake-ceo: refusals open no connection' "$(conns)" 1
+  is 'wake-ceo: refusals open no connection' "$(conns)" 2
   is 'wake-ceo: still delivers when the row is right again' \
      "$(reg "$lpid" "$(pstart "$lpid")" "$HOME" "orch-fx:@0.%0" "$SOCK"; direct orchestrator)" delivered
   kill "$lpid" "$spid" 2>/dev/null; wait "$lpid" "$spid" 2>/dev/null

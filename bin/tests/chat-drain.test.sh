@@ -28,7 +28,7 @@ print([r['outcome'] for r in map(json.loads, open('$ST/audit.jsonl')) if r.get('
   chat pause --apply >/dev/null; c=$(CHAT_SEAT=gx chat post @fx 'while paused'); printf 'not json\n' >>"$ST/queue/fx.jsonl"
   out=$(chat resume --apply 2>&1); rc=$?
   is 'drain (A9): resume with a bad line: rc 0, the good row re-sent' "$rc ${out##*$'\n'} $(last "$c") $(queued)" \
-     '0 chat: 1 held wake re-sent: fx queued queued 0'
+     '0 chat: 4 held wakes re-sent: fx queued, orchestrator refused, orchestrator refused, orchestrator refused queued 0'
 
   a=$(plan 'after the crash'); printf '{"id": 5, "ch": "../x", "why": "plan"}\n' >"$ST/queue/fx.jsonl"
   printf '{"id": %s, "ch": "dm-fx--gx", "why": "plan"}\n' "$a" >>"$ST/queue/fx.jsonl"; newday

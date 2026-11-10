@@ -30,8 +30,8 @@ def _targets(msg, seats):
         out += [(s, "mention") for s in MENTION.findall(msg["text"].lower())]
     if msg["from"] == "owner" and msg["ch"] in seats:
         out.append((msg["ch"], "own-channel"))
-    if msg["ch"] == "harness" and msg.get("kind") == "ask":
-        out += [(s["id"], "ask") for s in seats.values() if s["role"] == "ceo"]
+    if msg["ch"] == "harness":
+        out += [(s["id"], "ask" if msg.get("kind") == "ask" else "harness") for s in seats.values() if s["role"] == "ceo"]
     seen, uniq = set(), []
     for seat, reason in out:
         if seat in seen or seat == msg["from"] or seat not in seats or seats[seat]["role"] == "owner":

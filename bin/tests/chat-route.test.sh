@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# T1515-P11: lib/chat_route.wakes (pure): direct messages, @names, the owner in a seat's own channel, harness asks;
+# T1515-P11: lib/chat_route.wakes (pure): direct messages, @names, the owner in a seat's own channel, every #harness post (T1590);
 # no daily limit per seat (P38), no hop limit (T1576), pause, plan >= 95 %. Fixture org only; the module does no I/O.
 set -uo pipefail
 AG=$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)
@@ -47,6 +47,11 @@ check("owner in a seat's own channel wakes it", go(r.wakes(msg("moo", "owner"), 
 check("an agent in a seat's own channel wakes nobody", r.wakes(msg("moo", "disc"), ORG) == [])
 check("a plain channel message wakes nobody", r.wakes(msg("org", "moo", "status: green"), ORG) == [])
 check("a harness ask wakes the ceo", go(r.wakes(msg("harness", "moo", "how do I x", kind="ask"), ORG)) == [("ceo", "ask")])
+check("a plain harness post wakes the ceo", go(r.wakes(msg("harness", "moo", "status: green"), ORG)) == [("ceo", "harness")])
+check("a harness post naming the ceo wakes it once", go(r.wakes(msg("harness", "disc", "@ceo hi", to=["ceo"]), ORG)) == [("ceo", "to")])
+check("the ceo's own harness post wakes nobody", r.wakes(msg("harness", "ceo", "note to all"), ORG) == [])
+check("a harness post when paused is queued", r.wakes(msg("harness", "moo"), ORG, paused=True)[0]["queue"] == "paused")
+check("a harness post at plan 95 is queued", r.wakes(msg("harness", "moo"), ORG, plan=95)[0]["queue"] == "plan")
 check("the owner is never a wake target", r.wakes(msg("dm-moo--owner", "moo", "@owner"), ORG) == [])
 check("a mention in a direct message wakes nobody outside it",
       go(r.wakes(msg("dm-ceo--moo", "ceo", "@disc x", to=["disc"]), ORG)) == [("moo", "dm")])

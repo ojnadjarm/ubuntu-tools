@@ -83,7 +83,7 @@ PY
   ev 'wake-po: a failed po-ask marks no wake (no "starting")' "! grep -q '\"id\": $b' '$ST/woke/fx.json'"
   : >"$P/BRIEF.md"; f=$(inbox)
   is 'wake-po: the drain re-sends it' "$(python3 -c "import sys; sys.path.insert(0, '$BIN/../lib')
-import chat_dispatch; print(chat_dispatch.drain())")" "[('fx', 'delivered')]"
+import chat_dispatch; print(chat_dispatch.drain())")" "[('fx', 'delivered'), ('orchestrator', 'refused')]"
   $flush
   is 'wake-po: a failed po-ask is delivered once after the drain' \
      "$(( $(inbox) - f )) $(cat "$P"/inbox/* | grep -c "^$b #dm-fx--gx gx: po-ask down")" '1 1'

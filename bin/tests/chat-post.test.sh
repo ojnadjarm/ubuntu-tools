@@ -11,7 +11,7 @@ t_post() {
   is 'post: stored once in harness' "$(cat "$ST"/harness.*.jsonl | python3 -c '
 import json, sys; r = [json.loads(l) for l in sys.stdin]; print(len(r), r[0]["id"], r[0]["from"], r[0]["to"], r[0]["text"])')" \
      "1 $id fx [] build is green"
-  is 'post: one audit line' "$(grep -c "\"id\": $id" "$ST/audit.jsonl")" 1
+  is 'post: one audit line besides the wakes' "$(grep "\"id\": $id" "$ST/audit.jsonl" | grep -vc '"wake"')" 1
 
   out=$(printf 'line one\nline two\n' | CHAT_SEAT=orchestrator chat post fx -); rc=$?
   is 'post -: rc 0 from stdin' "$rc" 0
