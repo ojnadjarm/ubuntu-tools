@@ -29,7 +29,7 @@ orchestrator relays with `po-ask`. Not for fleet tooling, work repos (Vass) or r
   stay with the liaison triage (fallback, jobs). `tick` first posts every `outbox/discord/*.md` of managers and router:
   `thread: <id>`, then `image: <path>` lines (P36: <= 10, PNG/JPEG/GIF/WebP/MP4 <= 25 MB, only from the agent's own
   folder or its project clone, else the file goes to `refused/` unposted), then the text.
-- Reply first (T1515 P40): code posts "¡Recibido!" at hand-off; the manager's first act is a one-line plan reply, then
+- Reply first (T1515 P40): no code ack (T1536); the manager's first reply is the ack, its first act is a one-line plan reply, then
   work, then the result. Each reply is written as `.…tmp` and `mv`-ed to `.md`: `discord-liaison-relay@<p>.path`
   posts it within seconds (enable it for each new manager; `discord-liaison manager` prints the line).
 - Managers report up, not out: po-run gives them no `CHAT_SEAT` (Q5) and files each new `ESCALATE:` line of their

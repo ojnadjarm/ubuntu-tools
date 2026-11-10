@@ -10,13 +10,11 @@ import subprocess
 import sys
 
 from discordbot.config import Config
-from discordbot.rest import Rest, RestError
+from discordbot.rest import Rest
 from discordbot.store import save_json
 
 from .cli import App
 from .runlock import run_lock
-
-ACK = '¡Recibido! Me pongo con ello y te respondo aquí en un momento.'
 
 
 def po_home(env):
@@ -26,7 +24,7 @@ def po_home(env):
 async def handoff(app, env):
     """po-ask every inbox message `Registry.dispatch` gives an agent, once (state/po-asked.json), its images copied into
     that agent's folder; with a router set the handed message leaves the liaison inbox, so no triage run wakes for it.
-    Each thread with a newly handed human message gets one ACK at once, not waiting for the agent's run. Returns the number handed off."""
+    Posts nothing: the agent's first reply is the ack. Returns the number handed off."""
     path = os.path.join(app.home, 'state', 'po-asked.json')
     with app.locked():
         app.reload()
@@ -35,7 +33,7 @@ async def handoff(app, env):
                 asked = set(json.load(f))
         except (OSError, ValueError):
             asked = set()
-        handed, ack = set(), {}
+        handed = set()
         for m in app.state.inbox:
             pid = (app.state.thread(m['thread_id']) or {}).get('project', '')
             to = app.registry.dispatch(m, pid)
@@ -44,19 +42,12 @@ async def handoff(app, env):
             if m['id'] not in asked:
                 if not await deliver(app, env, to, m, pid):
                     continue
-                if not m['bot']:
-                    ack[m['thread_id']] = m['id']
             handed.add(m['id'])
         n = len(handed - asked)
         save_json(path, sorted(asked | handed))
         if app.registry.router and handed:
             app.state.inbox = [m for m in app.state.inbox if m['id'] not in handed]
             save_json(os.path.join(app.home, 'state', 'inbox.json'), app.state.inbox)
-    for tid, mid in ack.items():
-        try:
-            await app.post([tid, '--reply', mid, ACK])
-        except RestError:
-            pass
     return n
 
 

@@ -20,8 +20,8 @@ your answer with `chat post @owner "<text>"` (short, no paths, hosts or secrets;
   subagent (Agent tool) with "Your brief: <path>. Read it and follow it." More than one at once: `quiet-gate` first, at
   most MAX_WORKERS (agent.env). Wait for every worker's notification before you finish.
 - A decision of the owner (owner="true" on Discord, or relayed by your router): one dated line in your ledger, his words.
-- `channel: discord` requests: reply first, then work, then the result (owner rule, T1515 P40). Code has already posted
-  "¡Recibido!" in the thread. Your first act, before any worker or long read: a one-line plan reply (what you will do,
+- `channel: discord` requests: reply first, then work, then the result (owner rule, T1515 P40). No code ack (T1536): your
+  first reply is the ack. Your first act, before any worker or long read: a one-line plan reply (what you will do,
   that the result comes here); a question you answer from the files is one reply. Then the work, then the result reply.
 - Each reply (the project's language, short, no paths, hosts or machine details): write `outbox/discord/.<utc>-<thread>.tmp`,
   then `mv` it to `outbox/discord/<utc>-<thread>.md` (atomic; the relay posts it within seconds). First line
