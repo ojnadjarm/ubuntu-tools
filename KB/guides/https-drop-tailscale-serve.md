@@ -30,7 +30,7 @@ tailscale serve status                                       # want: :8470 → h
 systemctl --user status drop.service                         # caddy up?
 sudo tailscale serve --https=8470 off                        # undo (orchestrator's go only)
 ```
-Other https fronts on the same pattern: 8452 Moodle 5.2, 8453 Moodle 5.3, 8472 ailearning test site, 8498 dashboard (for the mic), 8499 netdata, 8644 Dark Eye page;
+Other https fronts on the same pattern: 8452 Moodle 5.2, 8453 Moodle 5.3, 8472 ailearning test site, 8498 dashboard (for the mic; :19998 itself answers loopback + tailnet only, the LAN gets 403, T1546-H3), 8499 netdata, 8644 Dark Eye page;
 `tailscale serve status` lists 12 https fronts (also 8445, 8446, 8447, 8474, 8476) and 9 tcp fronts on the same port as
 the service (4444, 5452, 5453, 8025, 8052, 8053, 8070, 8072, 19999; T1559). New service: bind loopback, add a front,
 then `pc net listeners --check` must stay clean.

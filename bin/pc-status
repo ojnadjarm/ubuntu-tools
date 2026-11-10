@@ -569,7 +569,7 @@ $(docker ps --format '{{.Names}}|{{.Label "com.docker.compose.project"}}|{{.Port
 
 ## Exposure (T25 firewall, T1559 tailnet only)
 Every service binds loopback (Docker publishes \`127.0.0.1:<port>\`); the tailnet reaches it through \`tailscale serve\`
-(https fronts 84xx, tcp fronts on the same port). LAN listeners left: 22 (sshd), 19998 (dashboard, T1546-H3) and the
+(https fronts 84xx, tcp fronts on the same port). LAN listeners left: 22 (sshd), 19998 (dashboard: binds 0.0.0.0, every route 403s the LAN, T1546-H3) and the
 Vass env (8045, 5445, 5000), the owner's by hand (\`~/drop/T1559/OWNER-STEPS.md\`). \`pc net listeners --check\` and the
 \`lan_listeners\` row of \`pc status\` name any other. ufw is $(cached ufw-status 300 sudo -n ufw status | sed -n '1s/Status: //p' || echo unknown):
 default deny incoming, everything allowed in on \`tailscale0\`; Docker-published ports bypass ufw's INPUT chain
@@ -581,7 +581,7 @@ default deny incoming, everything allowed in on \`tailscale0\`; Docker-published
 | 80, 1025, 5900, 7900 | shared proxy, mailhog SMTP, selenium VNC (docker) | loopback only |
 $(serve_tcp_row)
 $(serve_row)
-| 19998 | agents status page | tailscale0, 192.168.1.0/24 (binds 0.0.0.0 + ::; T1546-H3) |
+| 19998 | agents status page | tailscale0 + loopback; the LAN gets 403 on every route (binds 0.0.0.0 + ::; T1546-H3) |
 
 Everything else from the LAN and everything from the internet is dropped. Revert commands:
 \`~/agents/KB/runbooks/locked-out.md\`.
@@ -606,9 +606,9 @@ $(moodle_lines)
   \`GET /images/json\` costs ~0.5 s of dockerd+containerd CPU per call on the containerd image store
 
 ## Status page (T30)
-- Phone-first one-screen status (tailnet + LAN): http://$(jq -r '.Self.DNSName // "localhost"' <<<"${n_ts_json:-null}" | sed 's/\.$//'):19998
+- Phone-first one-screen status (tailnet only, https front :8498): http://$(jq -r '.Self.DNSName // "localhost"' <<<"${n_ts_json:-null}" | sed 's/\.$//'):19998
 - JSON behind it: \`curl http://$n_ts_ip:19998/api/status\` · code \`~/agents/dashboard/\`
-- Unit \`agents-dashboard.service\` (systemd **user**); bound to 0.0.0.0 + :: (ufw limits :19998 to tailscale0 + 192.168.1.0/24)
+- Unit \`agents-dashboard.service\` (systemd **user**); bound to 0.0.0.0 + ::, answers loopback + tailnet only (LAN 403, T1546-H3)
 
 ## Session env for desktop control (see ~/agents/bin/env.sh)
 $(sed -n 's/^export /- /p' "$BIN/env.sh" 2>/dev/null | tr ' ' '\n' | sed '/^-$/d;s/^/  /' | paste -sd' ' - | sed 's/^ *//')
