@@ -5,7 +5,7 @@ BIN="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 . "$HOME/agents/bin/tests/lib/assert.sh"
 
-real_sum() { ls -la /etc/sysctl.d /etc/systemd/journald.conf.d /etc/NetworkManager/conf.d /etc/avahi 2>/dev/null | md5sum; md5sum "$HOME/agents/log/changes.jsonl" 2>/dev/null; }
+real_sum() { ls -la /etc/sysctl.d /etc/systemd/journald.conf.d /etc/NetworkManager/conf.d /etc/avahi 2>/dev/null | md5sum; grep -cF "$WORK" "$HOME/agents/log/changes.jsonl" 2>/dev/null; }
 before=$(real_sum)
 
 R="$WORK/root"; mkdir -p "$R" "$WORK/path"
@@ -37,6 +37,8 @@ is 'write ran through sudo and etckeeper' "$(calls | grep -c -e '^sudo -n instal
 is 'ledger entry verified' "$(jq -rs --arg id "$id" '[.[] | select(.id == $id and has("verified"))][0].verified' "$PC_LEDGER")" true
 ev 'backup marks the absence' '[ -e "$PC_CONF_BACKUP"/*-etc_sysctl.d_99-test.conf.*/absent ]'
 is 'get shows the file and its ledger id' "$(pc get $F | tail -1)" "ledger: $id"
+gzip -c "$PC_LEDGER" >"$PC_LEDGER.1.gz" && : >"$PC_LEDGER"
+is 'get finds the id after the ledger rotated (T1546 D7)' "$(pc get $F | tail -1)" "ledger: $id"
 "$BIN/pc-undo" "$id" --apply >/dev/null
 [ ! -e "$R$F" ] && ok 'undo removes a file that was absent' || nok 'undo absent' 'file still there'
 
@@ -64,6 +66,8 @@ ev 'reload ran as root' 'calls | grep -qx "systemctl reload-or-restart systemd-j
 is 'undo restores byte-identical' "$(md5sum <"$R$J")" "$orig"
 ev 'undo reloads again' 'calls | grep -qx "systemctl reload-or-restart systemd-journald"'
 is 'same content again is a no-op' "$(pc put $J --from <(cat "$R$J") --apply | cut -d' ' -f1)" 'unchanged:'
+calls >/dev/null; o=$(pc put $J --from <(cat "$R$J") --reload systemd-journald --apply)
+is 'unchanged with --reload says the reload was skipped (T1546 D11)' "$(grep -c 'reload skipped' <<<"$o")|$(calls | wc -l)" '1|0'
 
 # owner and group: put, undo and an undo after the file was deleted keep a secondary group (T1546 D4)
 G=$(id -G | tr ' ' '\n' | grep -vx "$(id -g)" | head -1)
@@ -133,6 +137,11 @@ ok_paths=(/etc/systemd/system/foo-.service.d/x.conf /etc/systemd/system/user@.se
 for p in "${ok_paths[@]}"; do pc put "$p" --line a | grep -q '^would:' || { nok "allow $p" 'not a would: line'; n=1; }; done
 [ $n = 0 ] && ok 'allowed roots dry-run'
 pc put /etc/sysctl.d/x.conf >/dev/null 2>&1; is 'no content exits 2' $? 2
+r=''; for a in '--line' '--line a --from' '--line a --reload' '--line a --reload=' '--from='; do
+  # shellcheck disable=SC2086
+  pc put /etc/sysctl.d/99-y.conf $a >/dev/null 2>&1; r+="$? "
+done
+is 'a value flag with no value exits 2 (T1546 D11)' "$r" '2 2 2 2 2 '
 
 # apparmor local overrides: reparse the profile on write and undo; the profile itself and guarded names refused
 mkdir -p "$R/etc/apparmor.d/local"; for a in who usr.sbin.sshd bwrap-userns-restrict; do echo "profile $a {}" >"$R/etc/apparmor.d/$a"; done

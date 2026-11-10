@@ -1,9 +1,9 @@
 # Write a config file or systemd drop-in with undo (pc conf put)
 
-Ticket: T1040, T1074 · Last verified: 2026-11-10 by bin/tests/pc-conf.test.sh (66 ok) and real applies of /etc/tmpfiles.d/99-t1040-probe.conf (+ undo) and /etc/apparmor.d/local/{who,hostname,locale}
+Ticket: T1040, T1074, T1091, T1117, T1137, T1546 · Last verified: 2026-11-10 by bin/tests/pc-conf.test.sh (69 ok) and real applies of /etc/tmpfiles.d/99-t1040-probe.conf (+ undo) and /etc/apparmor.d/local/{who,hostname,locale}
 
 ## When to use
-Any persistent change to a sysctl.d, tmpfiles.d, journald/logind/oomd `.conf.d`, unit drop-in (`/etc/systemd/{system,user}/<unit>.d/`, `~/.config/systemd/user/<unit>.d/`), `/etc/netdata/**`, `/etc/default/grub.d/*.cfg` AppArmor local override `/etc/apparmor.d/local/<profile>` or `/etc/modprobe.d/90-agents-*.conf` file. Never `sudo tee`. Not for runtime-only values (`pc kernel sysctl set`) or unit start/stop (`pc units`).
+Any persistent change to a sysctl.d, tmpfiles.d, journald/logind/oomd `.conf.d`, unit drop-in (`/etc/systemd/{system,user}/<unit>.d/`, `~/.config/systemd/user/<unit>.d/`), `/etc/netdata/**`, `/etc/default/grub.d/*.cfg`, AppArmor local override `/etc/apparmor.d/local/<profile>`, `/etc/modprobe.d/90-agents-*.conf`, `/etc/NetworkManager/conf.d/zz-agents-*.conf`, `/etc/avahi/avahi-daemon.conf`, `/var/lib/fwupd/remotes.d/lvfs.conf` or user unit file `~/.config/systemd/user/*.{service,timer}`. Never `sudo tee`. Not for runtime-only values (`pc kernel sysctl set`) or unit start/stop (`pc units`).
 
 ## The path we took
 No fleet verb wrote a config file with an undo; six OS tickets (T1041 T1045 T1046 T1052 T1055 T1056) needed one. `pc-conf` reuses pclib's `pc_apply` ledger and `pc undo`, like `pc crashes archive`:
@@ -19,7 +19,7 @@ pc conf put /etc/systemd/journald.conf.d/90-agents.conf --line '[Journal]' --lin
 pc conf put ~/.config/systemd/user/fleet.slice.d/50-cpu.conf --from /path/new.conf --daemon-reload --apply   # user scope, no sudo
 pc conf put /etc/systemd/system/user@.service.d/90-oomd.conf --from f --daemon-reload --apply
 pc conf put /etc/apparmor.d/local/who --from f --apply                                       # -Q check, write, apparmor_parser -r
-pc conf get /etc/systemd/journald.conf.d/90-agents.conf                                       # content + last ledger id
+pc conf get /etc/systemd/journald.conf.d/90-agents.conf                                       # content + last ledger id (rotations too)
 pc conf put /etc/modprobe.d/90-agents-regdom.conf --line "options cfg80211 ieee80211_regdom=$WIFI_REGDOM" --apply   # T1091, effective at boot
 pc undo <id> --apply
 ```
@@ -34,6 +34,9 @@ pc undo <id> --apply
 - The internal `write`/`restore` argv is re-parsed by `pc_opt`: a `--reload` token inside it was eaten as a flag and the reload silently never ran (first test run: 3 FAIL). Internal modes are `reload`/`daemon-reload`, no dashes.
 - `case /$p/` on an absolute path makes `//etc` and refused every path; normalize checks run on `$p/`.
 - Owner and group (T1546 D4): `install -m` alone made every put and undo `root:root` (`/etc/netdata/netdata.conf` lost `root:netdata` on 2026-10-21; a `netdata`-read file like `go.d/docker.conf` would silently stop its collector). Now `install -o -g` copies them from the existing file, `put` saves `<uid>:<gid>:<mode>` as `meta` in the backup, and `restore` uses it when the file is gone. A put cannot repair an already wrong group (it keeps the current one; same content is `unchanged`): fix that with `sudo chgrp`.
+- `get` asks `pc-undo list --json -n 0` (T1546 D7): reading only `log/changes.jsonl` printed `ledger: none` for every change older than the nightly rotation.
+- `--line`, `--from` or `--reload` as the last token, or an empty `--from`/`--reload`, exits 2 (T1546 D11; before, `--line` alone proposed a file of one empty line). `--line ''` still writes a blank line.
+- Same content with a reload mode prints `unchanged: … (reload skipped; use pc units)`: nothing is reloaded, so restart the unit with `pc units restart <unit> --apply`.
 - `--reload` uses `reload-or-restart`: units without ExecReload (journald) restart.
 - Dry run 0.05 s; a real apply + undo of a comment-only tmpfiles file left no file and two etckeeper commits.
 - AppArmor `local/<profile>`: only a direct child of `/etc/apparmor.d/local` whose profile `/etc/apparmor.d/<profile>` exists; README, ssh*, tailscale*, bwrap*, docker* and fleet names refused; `--reload`/`--daemon-reload` exit 2 (the reparse is automatic). Before writing, `apparmor_parser -Q -I <tmp>` parses the profile with the new content as `<local/<profile>>` (an `-I` dir wins over /etc/apparmor.d): a syntax error exits 1, nothing written or ledgered. Without it a bad include stayed on disk, ledgered `verified`, and would break that profile at boot.

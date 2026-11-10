@@ -36,7 +36,9 @@ display-manager, dbus*, systemd-logind,
 symlinks, and anything outside the roots. PC_CONF_ROOT prefixes every filesystem path (tests).' "$@"
 
 PC_SUB='pc conf'; PC_EXTRA_FLAGS=(--from: --line: --reload: --daemon-reload --user)
+case ${!#} in --line|--from|--reload) echo "pc conf: ${!#} needs a value" >&2; exit 2;; esac
 pc_opt "$@"; ARGS=(${PC_ARGS[@]+"${PC_ARGS[@]}"})
+for f in --from --reload; do [ "${PC_OPT[$f]+set}" ] && [ -z "${PC_OPT[$f]}" ] && { echo "pc conf: $f needs a value" >&2; exit 2; }; done
 : "${PC_CONF_ROOT:=}" "${PC_CONF_BACKUP:=$HOME/agents/backups/conf}"
 [ -n "$PC_CONF_ROOT" ] && PC_CONF_ROOT=$(readlink -m "$PC_CONF_ROOT")
 
@@ -236,7 +238,7 @@ case "${ARGS[0]:-}" in
     p=${ARGS[1]:-}; [ -n "$p" ] || { echo "pc conf get: need a path" >&2; exit 2; }
     check "$p"
     if [ -e "$(fs "$p")" ]; then readf "$p" || { echo "pc conf: cannot read $p" >&2; exit 1; }; else echo "(absent) $p"; fi
-    id=$(jq -r --arg t "$p" 'select(.target? == $t and has("rollback")) | .id' "$PC_LEDGER" 2>/dev/null | tail -1)
+    id=$(PC_LEDGER="$PC_LEDGER" "$BIN/pc-undo" list --json -n 0 | jq -r --arg t "$p" 'first(.[] | select(.target == $t and has("rollback")) | .id) // empty' 2>/dev/null)
     echo "ledger: ${id:-none}";;
   put)
     p=${ARGS[1]:-}; [ -n "$p" ] || { echo "pc conf put: need a path" >&2; exit 2; }
@@ -275,7 +277,7 @@ case "${ARGS[0]:-}" in
     fi
     [ "$p" = /etc/avahi/avahi-daemon.conf ] && avahi_check "$old" "$new"
     after="sha:$(sha256sum <"$new" | cut -c1-12)"
-    [ "$before" = "$after" ] && { echo "unchanged: $p $after"; exit 0; }
+    [ "$before" = "$after" ] && { echo "unchanged: $p $after${mode:+ (reload skipped; use pc units)}"; exit 0; }
     d=$(diff -u --label "$p" --label "$p" "$old" "$new")
     add=$(tail -n +3 <<<"$d" | grep -c '^+'); del=$(tail -n +3 <<<"$d" | grep -c '^-')
     if [ "$APPLY" != 1 ]; then
