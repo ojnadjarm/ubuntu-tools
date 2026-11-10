@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+# liaison-build-clean scan|apply — rebuildable build output inside finished liaison job folders: a TSV manifest, then delete its rows only.
+import fcntl, json, os, shutil, subprocess, sys
+
+USAGE = """usage: liaison-build-clean scan <jobs-root> [--refused <file>]
+       liaison-build-clean apply <manifest.tsv>
+
+scan   one TSV row per candidate (path, kb, job_status, why, job) on stdout; refused dirs (path, why) to --refused or stderr.
+       A candidate passes ALL: a build marker (target/ with CACHEDIR.TAG or .rustc_info.json; node_modules/ beside
+       package.json; .godot/ beside project.godot; __pycache__/ holding only .pyc; dist|build/ ignored by a rule naming
+       it), `git ls-files` empty, `git status --porcelain --ignored` all `!!`, job.json status done|superseded|failed,
+       the job lock free and no process cwd/fd/root inside the job folder.
+apply  re-checks every row, deletes one job at a time, then requires `git status --porcelain -- <job>` byte-identical
+       and job.json still present; prints DELETED/REFUSED rows and a total line."""
+FINISHED = ('done', 'superseded', 'failed')
+
+
+def git(repo, *args):
+    return subprocess.run(['git', '-C', repo, *args], capture_output=True, text=True).stdout
+
+
+def kb(path):
+    return int(subprocess.run(['du', '-sk', path], capture_output=True, text=True).stdout.split()[0])
+
+
+def marker(d):
+    """Why d is build output by marker, or '' when it is not."""
+    name, parent = os.path.basename(d), os.path.dirname(d)
+    has = lambda *p: os.path.exists(os.path.join(*p))
+    if name == 'target' and (has(d, 'CACHEDIR.TAG') or has(d, '.rustc_info.json')):
+        return 'cargo target (CACHEDIR.TAG/.rustc_info.json)'
+    if name == 'node_modules' and has(parent, 'package.json'):
+        return 'node_modules beside package.json'
+    if name == '.godot' and has(parent, 'project.godot'):
+        return 'godot import cache beside project.godot'
+    if name == '__pycache__':
+        files = [f for _, _, fs in os.walk(d) for f in fs]
+        return 'python bytecode only' if all(f.endswith('.pyc') for f in files) else ''
+    if name in ('dist', 'build'):
+        rule = git(d, 'check-ignore', '-v', '--no-index', d.rstrip('/') + '/').split('\t')[0]
+        pattern = rule.split(':', 2)[-1] if rule else ''
+        return f'{name}/ ignored by rule {pattern}' if name in pattern else ''
+    return ''
+
+
+def git_refusal(d):
+    """'' when d is ignored and has no tracked file in its repo, else why not."""
+    repo = git(d, 'rev-parse', '--show-toplevel').strip()
+    if not repo:
+        return 'not in a git repo'
+    if git(repo, 'ls-files', '--', d).strip():
+        return 'has files tracked by git'
+    lines = git(repo, 'status', '--porcelain', '--ignored', '--', d).splitlines()
+    if not lines or any(not ln.startswith('!! ') for ln in lines):
+        return 'not ignored by git (untracked or changed)'
+    return ''
+
+
+def job_busy(job):
+    """'' when the job is finished and idle, else why it is live."""
+    try:
+        status = json.load(open(os.path.join(job, 'job.json'))).get('status')
+    except (OSError, ValueError):
+        return 'no readable job.json'
+    if status not in FINISHED:
+        return f'job status {status}'
+    lock = os.path.join(job, 'lock')
+    if os.path.exists(lock):
+        with open(lock, 'a') as f:
+            try:
+                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(f, fcntl.LOCK_UN)
+            except BlockingIOError:
+                return 'job lock held'
+    root = os.path.realpath(job) + os.sep
+    for pid in filter(str.isdigit, os.listdir('/proc')):
+        links = [f'/proc/{pid}/{n}' for n in ('cwd', 'root')]
+        try:
+            links += [f'/proc/{pid}/fd/{fd}' for fd in os.listdir(f'/proc/{pid}/fd')]
+        except OSError:
+            pass
+        for link in links:
+            try:
+                if (os.readlink(link) + os.sep).startswith(root):
+                    return f'process {pid} uses the job folder'
+            except OSError:
+                pass
+    return ''
+
+
+def check(job, d):
+    """(why, '') for a candidate, ('', refusal) otherwise."""
+    if os.path.islink(d):
+        return '', 'symlink'
+    why = marker(d)
+    if not why:
+        return '', 'no build marker'
+    refusal = git_refusal(d) or job_busy(job)
+    return (why, '') if not refusal else ('', refusal)
+
+
+def walk(root):
+    """(job, dir) for every dir named like build output, not descending into a match."""
+    names = {'target', 'node_modules', '.godot', '__pycache__', 'dist', 'build'}
+    for job in sorted(os.listdir(root)):
+        jd = os.path.join(root, job)
+        if not os.path.isdir(jd):
+            continue
+        for cur, dirs, _ in os.walk(jd):
+            for n in sorted(dirs):
+                if n in names:
+                    yield jd, os.path.join(cur, n)
+            dirs[:] = [n for n in dirs if n not in names and n != '.git']
+
+
+def scan(root, refused_path):
+    out = open(refused_path, 'w') if refused_path else sys.stderr
+    print('path\tkb\tjob_status\twhy\tjob')
+    for job, d in walk(os.path.abspath(root)):
+        why, refusal = check(job, d)
+        if why:
+            status = json.load(open(os.path.join(job, 'job.json')))['status']
+            print(f'{d}\t{kb(d)}\t{status}\t{why}\t{job}')
+        else:
+            print(f'{d}\t{refusal}', file=out)
+
+
+def apply(manifest):
+    rows = [ln.rstrip('\n').split('\t') for ln in open(manifest) if ln.strip()][1:]
+    jobs = {}
+    for r in rows:
+        jobs.setdefault(r[4], []).append(r[0])
+    freed, done, bad = 0, 0, 0
+    for job, dirs in jobs.items():
+        repo = git(job, 'rev-parse', '--show-toplevel').strip()
+        before = git(repo, 'status', '--porcelain', '--', job)
+        for d in dirs:
+            why, refusal = check(job, d) if os.path.isdir(d) else ('', 'gone')
+            if not why:
+                print(f'REFUSED\t{d}\t{refusal}')
+                bad += 1
+                continue
+            size = kb(d)
+            shutil.rmtree(d)
+            freed += size
+            done += 1
+            print(f'DELETED\t{d}\t{size}')
+        after = git(repo, 'status', '--porcelain', '--', job)
+        if before != after or not os.path.exists(os.path.join(job, 'job.json')):
+            print(f'VERIFY-FAIL\t{job}\tgit status changed or job.json missing')
+            return 1
+    print(f'total: {done} deleted, {bad} refused, {freed} kb freed')
+    return 0
+
+
+def main(argv):
+    if not argv or argv[0] in ('-h', '--help', 'help'):
+        print(USAGE)
+        return 0 if argv else 2
+    if argv[0] == 'scan' and len(argv) in (2, 4) and (len(argv) == 2 or argv[2] == '--refused'):
+        scan(argv[1], argv[3] if len(argv) == 4 else None)
+        return 0
+    if argv[0] == 'apply' and len(argv) == 2:
+        return apply(argv[1])
+    print(USAGE, file=sys.stderr)
+    return 2
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))
