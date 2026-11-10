@@ -55,13 +55,13 @@ async function walk(p) {
         p.on("pageerror", (e) => errs.push(String(e)));
         await p.goto(base + "/#org", { waitUntil: "load" });
         await p.waitForSelector(".office .olist .otree .who", { timeout: 15000 });
-        await p.waitForFunction((m) => { const s = document.querySelector(".office .stage"); return s && s.querySelector("canvas") && (m === "still" ? s.dataset.still === "1" : window.__office && !window.__office.still && document.querySelectorAll(".otags .otag").length > 0); }, mode, { timeout: 20000 });
+        await p.waitForFunction((m) => { const s = document.querySelector(".office .stage"); return s && s.querySelector("canvas") && (m === "still" ? s.dataset.still === "1" : window.__office && !window.__office.still && window.__office.stats().frames >= 1); }, mode, { timeout: 20000 });
 
         const hid = await p.evaluate(() => {
-          const s = document.querySelector(".office .stage"), c = s.querySelector("canvas"), t = s.querySelector(".otags");
-          return { canvas: c.getAttribute("aria-hidden"), ctab: c.tabIndex, tags: t.getAttribute("aria-hidden"), n: t.children.length, tabbable: [...t.children].filter((e) => e.tabIndex >= 0).length };
+          const s = document.querySelector(".office .stage"), c = s.querySelector("canvas");
+          return { canvas: c.getAttribute("aria-hidden"), ctab: c.tabIndex, tags: document.querySelectorAll(".otag, .otags").length };
         });
-        check(() => assert.ok(hid.canvas === "true" && hid.ctab < 0 && hid.tags === "true" && hid.tabbable === 0, JSON.stringify(hid)), `${where}: canvas and tags hidden from assistive tech, out of the tab order`);
+        check(() => assert.ok(hid.canvas === "true" && hid.ctab < 0 && hid.tags === 0, JSON.stringify(hid)), `${where}: canvas hidden from assistive tech, out of the tab order; no tags (owner 2026-11-10)`);
 
         const stops = await walk(p), L = stops.filter((s) => s.list && s.who), ids = L.map((s) => s.who);
         const all = await p.evaluate(() => [...new Set([...document.querySelectorAll(".olist [data-who]")].filter((e) => !e.closest("details:not([open])")).map((e) => e.dataset.who))]);

@@ -8,7 +8,7 @@ export const SLOTS = 6;
 const SESSION = { working: "working", idle: "idle" };
 const AGENT = { working: "working", error: "error" };
 const STATE = { working: "working", talking: "talking", error: "error", idle: "idle", sleep: "asleep" };
-const RECENT = 10, FAIL_MS = 10 * 60e3;
+const FAIL_MS = 10 * 60e3;
 
 /* A label's ticket ("T1601-04"), else its first word. */
 export const ticket = (l) => (/^[A-Za-z]{1,3}\d+[\w-]*(\s+[A-Za-z]{1,3}\d+\b)?/.exec(l) || [l.split(" ")[0]])[0];
@@ -37,8 +37,6 @@ function seatPose(seat, state, mine) {
 
 /* A member of a staff team: running is working, a bad health is an error, anything else sleeps. */
 const staffPose = (m) => (m.state === "running" ? "working" : m.health === "bad" ? "error" : "sleep");
-/* A stopped run with no report names its last step, as Court did. */
-const ended = (a) => a.report || (a.state === "stale" ? "no report · last step · " + (a.doing || "—") : "");
 
 /* build(P, {now, needs}) → Model; needs (the CEO's lamp) defaults to the status verdict in the store. */
 export function build(P, { now = Date.now(), needs = verdict(store.D).bad } = {}) {
@@ -94,20 +92,46 @@ export function build(P, { now = Date.now(), needs = verdict(store.D).bad } = {}
   const members = staff.flatMap((r) => r.people.map((p) => p.raw)), on = members.filter((m) => m.on);
   const next = on.filter((m) => m.next).sort((a, b) => Date.parse(a.next) - Date.parse(b.next));
   const names = Object.fromEntries(seats.map((s) => [s.id, titled(s)]));
-  return {
-    ceo, rooms, staff, who, night, error: P.error || "",
-    line: { sessions: S.length, working: S.filter((s) => s.state === "working").length, on: on.length, of: members.length, soon: next.length ? { name: next[0].name, next: next[0].next } : null },
-    panels: {
-      next: next.map((m) => ({ id: m.id, name: m.name, next: m.next, last: (m.last || {}).end || "", bad: m.health === "bad" })),
-      running: live.map((a) => ({ id: a.id, ticket: ticket(a.label), label: rest(a.label), type: a.type, started: a.started, doing: a.doing || "" })),
-      recent: subs.filter((a) => a.state !== "working").slice(0, RECENT).map((a) => ({ id: a.id, ticket: ticket(a.label), label: rest(a.label), type: a.type, state: a.state, report: ended(a), last: a.last })),
-      sessions: S.map((s) => (!("pid" in s)
-        ? { id: s.seat, protected: true, session: "protected project", seat: names[s.seat] || "—", folder: "hidden", state: s.state === "working" ? "working" : "idle", by: "—", since: s.since }
-        : { id: "pid" + s.pid, protected: false, session: s.name || "pid " + s.pid, seat: s.seat ? names[s.seat] || s.seat : s.parent ? "under " + (names[s.parent] || s.parent) : "—",
-          folder: s.cwd || "", state: s.state, by: s.started_by || "—", since: s.since })),
-      claims: (A.claims || []).map(claimRow),
-    },
+  const panels = {
+    next: next.map((m) => ({ id: m.id, name: m.name, next: m.next, last: (m.last || {}).end || "", bad: m.health === "bad" })),
+    running: live.map((a) => ({ id: a.id, ticket: ticket(a.label), label: rest(a.label), type: a.type, started: a.started, doing: a.doing || "" })),
+    sessions: S.map((s) => (!("pid" in s)
+      ? { id: s.seat, protected: true, session: "protected project", seat: names[s.seat] || "—", folder: "hidden", state: s.state === "working" ? "working" : "idle", by: "—", since: s.since }
+      : { id: "pid" + s.pid, protected: false, session: s.name || "pid " + s.pid, seat: s.seat ? names[s.seat] || s.seat : s.parent ? "under " + (names[s.parent] || s.parent) : "—",
+        folder: s.cwd || "", state: s.state, by: s.started_by || "—", since: s.since })),
+    claims: (A.claims || []).map(claimRow),
   };
+  signs([...rooms, ...staff], who, S, byPid, panels, ceo);
+  return {
+    ceo, rooms, staff, who, night, error: P.error || "", panels,
+    line: { sessions: S.length, working: S.filter((s) => s.state === "working").length, on: on.length, of: members.length, soon: next.length ? { name: next[0].name, next: next[0].next } : null },
+  };
+}
+
+const base = (k) => String(k).replace(/-\d+$/, "");
+/* Gives every room but the CEO's a wall sign (`sign` id, its people's `sign`) and its info: next runs, sessions, held files, running sub-agents; rows no avatar holds go to the CEO's `loose`. */
+function signs(all, who, S, byPid, panels, ceo) {
+  const owner = {}, ses = {};
+  for (const r of all) {
+    r.sign = r.kind === "seat" ? "room-" + r.id : r.id;
+    who[r.sign] = r;
+    for (const p of r.people) {
+      p.sign = r.sign;
+      for (const k of [p.id, p.kind === "agent" ? p.name : "", p.raw.started_by]) if (k) for (const x of [k, base(k)]) owner[x] = owner[x] || r.sign;
+    }
+  }
+  for (const s of S) {
+    const a = s.pid != null && byPid.get(s.pid), p = s.seat ? who[s.seat] : who["pid" + s.pid] || (a && who[a.id]);
+    if (p) ses["pid" in s ? "pid" + s.pid : s.seat] = p.sign || (p === (ceo && ceo.people[0]) ? "ceo" : "");
+  }
+  const held = (c) => owner[c.who] || "";
+  for (const r of all) {
+    const ids = new Set(r.people.map((p) => p.id));
+    r.info = { name: r.kind === "seat" && r.area ? r.area : r.name, next: panels.next.filter((n) => ids.has(n.id)), sessions: panels.sessions.filter((x) => ses[x.id] === r.sign),
+      claims: panels.claims.filter((c) => held(c) === r.sign), subs: panels.running.filter((a) => ids.has(a.id)) };
+    for (const p of r.people) p.info = r.info;
+  }
+  if (ceo) ceo.people[0].raw.loose = { needs: ceo.live.lamp === "needs", sessions: panels.sessions.filter((x) => !(x.id in ses)), claims: panels.claims.filter((c) => !held(c)) };
 }
 
 const rooms = (M) => [M.ceo, ...M.rooms, ...M.staff].filter(Boolean);

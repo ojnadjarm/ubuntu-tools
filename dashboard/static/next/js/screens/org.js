@@ -1,4 +1,4 @@
-/* Office: the composition root of #org. Reads GET /api/office, builds the model and its plan, hands them to the 3D renderer and to the overlay (list, labels, card, panels). */
+/* Office: the composition root of #org. Reads GET /api/office, builds the model and its plan, hands them to the 3D renderer and to the overlay (the keyboard list and the card a click opens). */
 import { esc } from "/static/js/core/fmt.js";
 import { getJSON } from "/static/js/core/api.js";
 import { cur, go } from "/static/js/core/router.js";
@@ -14,18 +14,15 @@ import { build, diff } from "../office/model.js";
 import { plan as planOf } from "../office/layout.js";
 import { until } from "../office/time.js";
 import { list } from "../office/overlay/list.js";
-import { panels } from "../office/overlay/panels.js";
-import { labels } from "../office/overlay/labels.js";
 import * as card from "../office/overlay/card.js";
 
 export { seatState, titled, dmOf } from "../seats.js";
 export const own = true, keep = true;
 const STALE_MS = 20000, FAST_MS = 4500, DRAG_PX = 6;
 const NOTE = "Still picture: this browser has no graphics acceleration. The list below is live.";
-const grid = document.getElementById("grid"), canvas = document.createElement("canvas"), tags = document.createElement("div");
+const grid = document.getElementById("grid"), canvas = document.createElement("canvas");
 canvas.setAttribute("aria-hidden", "true");
-tags.className = "otags"; tags.setAttribute("aria-hidden", "true");
-let P = null, M = null, plan = null, applied = null, R = null, L = null, starting = false, at = 0, busy = false, err = "", down = null;
+let P = null, M = null, plan = null, applied = null, R = null, starting = false, at = 0, busy = false, err = "", down = null, over = null;
 
 for (const href of ["/static/css/org.css", "/static/css/office.css"]) if (!document.querySelector(`link[href="${href}"]`)) {
   const l = document.createElement("link");
@@ -64,7 +61,12 @@ function show(redraw) {
   const patch = applied !== M ? diff(applied, M) : redraw ? { rooms: [(M.ceo || M.rooms[0]).id] } : null;
   if (patch) R.apply(M, plan, patch);
   applied = M;
-  L.update(M);
+}
+
+/* The creature or sign under a pointer event on the canvas, or null. */
+function under(e) {
+  const r = canvas.getBoundingClientRect(), id = R.pick(e.clientX - r.left, e.clientY - r.top);
+  return id && M && M.who[id] ? id : null;
 }
 
 /* Loads the furniture kit, the theme and the renderer once, then draws the office. */
@@ -73,36 +75,40 @@ function start(st) {
   starting = true;
   Promise.all([import("../office/gl/index.js"), import("../office/theme.js"), import("../office/kit.js").then((k) => k.load())]).then(([gl, th, kit]) => {
     R = window.__office = gl.createRenderer(canvas, { theme: th.THEME, kit });
-    L = labels(tags, R);
-    canvas.addEventListener("view", L.place);
     canvas.addEventListener("pointerdown", (e) => { down = [e.clientX, e.clientY]; });
     canvas.addEventListener("click", (e) => {
-      const r = canvas.getBoundingClientRect(), id = down && Math.hypot(e.clientX - down[0], e.clientY - down[1]) < DRAG_PX && R.pick(e.clientX - r.left, e.clientY - r.top);
+      const id = down && Math.hypot(e.clientX - down[0], e.clientY - down[1]) < DRAG_PX && under(e);
       if (id) card.open(id, { x: e.clientX, y: e.clientY });
     });
+    canvas.addEventListener("pointermove", (e) => {
+      const id = e.pointerType === "mouse" && !e.buttons ? under(e) : null;
+      if (id === over) return;
+      over = id; R.hover(id);
+      canvas.classList.toggle("hot", !!id);
+    });
+    canvas.addEventListener("pointerleave", () => { if (over) { over = null; R.hover(null); canvas.classList.remove("hot"); } });
     mount();
   }).catch((e) => { console.error(e); st.dataset.still = "1"; });
 }
 
-/* Puts the one canvas and its tags back into the stage of the fresh markup. */
+/* Puts the one canvas back into the stage of the fresh markup. */
 function mount() {
   const st = document.querySelector(".office .stage");
   if (!st) return;
   const back = canvas.parentNode !== st;
-  if (back) st.prepend(canvas, tags);
+  if (back) st.prepend(canvas);
   if (!R) { start(st); return; }
   st.dataset.still = R.still ? "1" : "";
   show(back);
 }
 
-/* After a read: the first answer renders the screen, later ones patch band, list and boards in place and update card and scene. */
+/* After a read: the first answer renders the screen, later ones patch band and list in place and update card and scene. */
 function paint() {
   if (cur !== "org") return;
   const el = root();
   if (!M || !el) { go("org", true); return; }
   sync(el.querySelector(".bt"), line());
   sync(el.querySelector(".olist"), list(M));
-  sync(el.querySelector(".opanels"), panels(M));
   card.refresh(M);
   show(false);
 }
@@ -118,8 +124,8 @@ export function render() {
   queueMicrotask(mount);
   return `<div class="nxs org office"><section class="band" aria-label="Office summary"><div class="perch" id="perch" aria-hidden="true"></div><div class="bt">${line()}</div></section>` +
     `<section class="stage" aria-label="The office"><div class="hud"><button type="button" id="office-zin" aria-label="Zoom in">+</button><button type="button" id="office-zout" aria-label="Zoom out">−</button><button type="button" id="office-reset">Reset view</button></div>` +
-    `<p class="hint">Drag to turn · wheel or pinch to zoom · tap a creature</p><p class="still">${NOTE}</p></section>` +
-    `<div class="olist">${list(M)}</div><div class="opanels">${panels(M)}</div></div>`;
+    `<p class="hint">Drag to turn · wheel or pinch to zoom · tap a creature or a room's sign</p><p class="still">${NOTE}</p></section>` +
+    `<div class="olist">${list(M)}</div></div>`;
 }
 
 /* The dashboard's tick: the lamp follows the store at once, a fresh read every 20 s, every 5 s while someone works. */
@@ -128,11 +134,12 @@ export function tick() {
   pull(M && (M.line.working || M.panels.running.length) ? FAST_MS : STALE_MS);
 }
 
-/* A list button, a tag or a chip opens its card; the stage buttons move the camera. */
+/* A list button or a chip opens its card, the card's × closes it; the stage buttons move the camera. */
 export function click(e) {
-  const t = e.target.closest && e.target.closest("[data-who], #office-zin, #office-zout, #office-reset");
+  const t = e.target.closest && e.target.closest("[data-who], [data-close], #office-zin, #office-zout, #office-reset");
   if (!t) return false;
-  if (t.dataset.who) { const r = t.getBoundingClientRect(); card.open(t.dataset.who, t.closest("#office-card") ? null : { x: r.left + r.width / 2, y: r.bottom }); }
+  if ("close" in t.dataset) card.close();
+  else if (t.dataset.who) { const r = t.getBoundingClientRect(); card.open(t.dataset.who, t.closest("#office-card") ? null : { x: r.left + r.width / 2, y: r.bottom }); }
   else if (R) t.id === "office-reset" ? R.reset() : R.zoom(t.id === "office-zin" ? 0.8 : 1.25);
   return true;
 }

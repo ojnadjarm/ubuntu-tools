@@ -95,17 +95,45 @@ function staff(p, t) {
 }
 
 const NOTE = { "team-unassigned": "Rostered agents that no team in staff.json names." };
-/* A staff team's room: how many run now and who is in it; the Unassigned room says why they are there. */
-function team(r) {
-  return { title: r.name, rank: "Team", sub: r.people.length + " staff", ...(NOTE[r.id] ? { lines: [NOTE[r.id]] } : {}), state: { pose: r.pose, text: r.busy + " running now" }, rows: [], actions: [], roll: r.people.map((p) => p.id) };
+const part = (h, empty, rows, chips) => ({ h, empty, rows: rows || [], chips: chips || [] });
+/* Running sub-agents as chips: ticket, running since, what each does now. */
+const subs = (I, t) => part("Sub-agents running", "none running for this project", null, I.subs.map((a) => ({ id: a.id, name: a.ticket, note: "since " + at(a.started, t) + " · " + (a.doing || "starting"), pose: "working" })));
+const sessions = (I, t) => part("Sessions", "no sessions", I.sessions.map((x) => [x.session, [x.state, x.protected ? "" : x.folder, ago(x.since, t) + " ago"].filter(Boolean).join(" · ")]));
+const held = (I) => part("Held files", "no files held", I.claims.map((c) => [c.who, [c.paths.map((x) => x.short).join(" "), c.note].filter(Boolean).join(" · ")]));
+const runs = (I, t) => part("Next runs", "no scheduled runs", I.next.map((n) => [n.name, "in " + until(n.next, t) + " · " + at(n.next, t) + (n.bad ? " · last run failed" : ""), n.bad ? "bad" : ""].filter(Boolean)));
+
+/* A room's info, its sign's card: who is in it with their state, its next runs, sessions, held files and running sub-agents; empty parts say so in one line. */
+function room(r, t, sub, extra) {
+  const I = r.info;
+  return { title: I.name, rank: r.kind === "seat" ? "Project" : r.kind === "pool" ? r.rank : "Team", sub, ...extra, state: { pose: r.pose, text: r.busy + " working now" }, rows: [], actions: [], roll: r.people.map((p) => p.id),
+    parts: [runs(I, t), sessions(I, t), held(I), subs(I, t)] };
+}
+/* A staff team's room; the Unassigned room says why they are there. */
+const team = (r, t) => room(r, t, r.people.length + " staff", NOTE[r.id] ? { lines: [NOTE[r.id]] } : {});
+/* The desk pool: the agents the CEO runs himself. */
+const pool = (r, t) => room(r, t, "Agents the CEO runs himself");
+/* A seat's room: its project, the seat and the workers at its desks. */
+const project = (r, t) => room(r, t, r.area || r.people[0].name + "'s room");
+
+/* A person's card gains the line naming its room (opens the room's card) and the room's running sub-agents; a seat also its room's sessions and held files. */
+function homed(p, t, c) {
+  const r = p.sign && p.info, lead = p.kind === "seat";
+  return r ? { ...c, home: { id: p.sign, text: "Team · " + r.name },
+    parts: [...(lead ? [sessions(r, t), held(r)] : []), subs(r, t)] } : c;
 }
 
-/* The desk pool: the agents the CEO runs himself. */
-function pool(r) {
-  return { title: r.name, rank: r.rank, sub: "Agents the CEO runs himself", state: { pose: r.pose, text: r.busy + " working" }, rows: [], actions: [], roll: r.people.map((p) => p.id) };
+/* What only the CEO sees: needs-you, the sessions and claims no avatar holds. */
+function loose(p, t, c) {
+  const L = p.raw.loose || { sessions: [], claims: [] };
+  return { ...c, parts: [part("Needs you", "nothing needs you", L.needs ? [["Needs you", "yes · the status lamp is on"]] : []),
+    sessions(L, t), held(L)] };
 }
 
 export const CARDS = { ceo, seat, worker, agent, staff, team, pool };
 
-/* The card of a person or room, by its kind. */
-export const card = (p, t = Date.now()) => CARDS[p.kind](p, t);
+/* The card of a person or room, by its kind; a person's card links its room, the CEO's adds what no avatar shows. */
+export function card(p, t = Date.now()) {
+  if (p.people) return p.kind === "seat" ? project(p, t) : CARDS[p.kind](p, t);
+  const c = CARDS[p.kind](p, t);
+  return p.kind === "ceo" ? loose(p, t, c) : homed(p, t, c);
+}

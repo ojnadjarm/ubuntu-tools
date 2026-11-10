@@ -1,5 +1,5 @@
 // Office court (T1601-10, PLAN 2.1 C1-C5): DarkSaddler's running agents sit at the desk pool under their ticket, a pid session an
-// agent started is one person in its seat's room, the agent card, the Running now and Recent 24 h boards, the CEO's motes, lamp
+// agent started is one person in its seat's room, the agent card, the Running now rows, the CEO's motes, lamp
 // and error pose as Court's crowd() set them, and a staff agent that is off reads apart from one asleep until its next run. Pure: node, fixture.
 // Run: node tests/test_office_court.js
 "use strict";
@@ -22,8 +22,8 @@ let n = 0;
 const ok = (name, fn) => { fn(); n++; console.log("ok " + n + " " + name); };
 
 (async () => {
-  const [Mo, F, { panels }, { chunk }, { plan }, { THEME }, { decode }, { store }] = await Promise.all(
-    ["office/model.js", "office/fields.js", "office/overlay/panels.js", "office/build/index.js", "office/layout.js", "office/theme.js", "office/kit.js", "store.js"].map(load));
+  const [Mo, F, { chunk }, { plan }, { THEME }, { decode }, { store }] = await Promise.all(
+    ["office/model.js", "office/fields.js", "office/build/index.js", "office/layout.js", "office/theme.js", "office/kit.js", "store.js"].map(load));
   const kit = decode(JSON.parse(fs.readFileSync(path.join(ROOT, "static/next/office/kit.json"), "utf8")));
   const M = Mo.build(copy(), { now: NOW });
   const built = (m, id) => chunk(id, m, plan(m), THEME, kit, ink);
@@ -56,23 +56,12 @@ const ok = (name, fn) => { fn(); n++; console.log("ok " + n + " " + name); };
     assert.deepStrictEqual(s.actions, []);
   });
 
-  ok("C3: Running now and Recent 24 h boards; recent rows say error or stopped, the report or last step, how long ago", () => {
+  ok("C3: Running now rows (the boards and Recent 24 h are gone, owner 2026-11-10)", () => {
     const Q = copy();
     Q.agents.subagents.push(ended("e1", "T9006 broken build", "error", S - 120, { report: "2 of 5 red" }), ended("e2", "T9007 stopped run", "stale", S - 3000));
     const m = Mo.build(Q, { now: NOW });
     assert.deepStrictEqual(m.panels.running.map((r) => [r.id, r.ticket, r.label, r.type, r.doing]),
       [["pid1005", "T9002", "", "session", "live session · pid 1005"], ["a0000000000000002", "T9003-04", "office renderer", "worker-max", "Builds the stage"]]);
-    assert.deepStrictEqual(m.panels.recent.map((r) => [r.ticket, r.state, r.report]), [["T9000", "done", "3 of 3 green"], ["T9006", "error", "2 of 5 red"], ["T9007", "stale", "no report · last step · npm test"]]);
-    const html = panels(m), cut = (id) => html.slice(html.indexOf(`data-panel="${id}"`), html.indexOf("</details>", html.indexOf(`data-panel="${id}"`)));
-    assert.deepStrictEqual([...html.matchAll(/data-panel="(\w+)"/g)].map((x) => x[1]), ["next", "running", "recent", "sessions", "claims"]);
-    const run = cut("running"), rec = cut("recent");
-    assert.ok(/open/.test(run.slice(0, 40)) && !/open/.test(rec.slice(0, 40)), "running open, recent a closed drawer");
-    assert.ok(run.includes("<s>2</s>") && run.includes('data-who="a0000000000000002"') && run.includes("<b>T9003-04</b>") && run.includes("Builds the stage"));
-    assert.ok(rec.includes("<s>3 ended</s>") && rec.includes('class="pill stray">stopped<') && rec.includes('class="pill warn">error<') && rec.includes("2 of 5 red"));
-    const x = "<img src=x>", odd = panels({ panels: { next: [], sessions: [], claims: [], running: [{ id: x, ticket: x, label: x, type: x, started: "", doing: x }], recent: [{ id: x, ticket: x, label: x, type: x, state: "error", report: x, last: 0 }] } });
-    assert.ok(!odd.includes("<img"), "escaped");
-    const empty = panels({ panels: { next: [], sessions: [], claims: [], running: [], recent: [] } });
-    assert.ok(empty.includes("nobody is working") && empty.includes("nothing ended in the last 24 h"));
   });
 
   ok("C4: the CEO has a mote per working agent, the lamp ok, and stands in the error pose only while an agent failed < 10 min ago", () => {

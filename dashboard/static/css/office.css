@@ -1,37 +1,20 @@
-/* Agents › Office: the 3D stage with its tags and buttons, the staff list, the card (T1601-05); eye.css tokens only. */
-.office .olist, .office .opanels { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr); }
+/* Agents › Office: the 3D stage and its buttons, the staff list (the keyboard and no-GPU path), the card a click opens (T1601-05, 17); eye.css tokens only. */
+.office .olist { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr); }
 .office .stage { position: relative; width: 100%; height: clamp(340px, calc(100svh - 21.5rem), 125vw); overflow: hidden; border: 1px solid var(--line2); background: radial-gradient(70% 60% at 50% 50%, var(--gold-w), transparent 70%), var(--bg); container-type: inline-size; }
 .office .stage::before, .office .stage::after { content: ""; position: absolute; width: .8rem; height: .8rem; border: solid var(--g); pointer-events: none; z-index: 2; }
 .office .stage::before { left: -1px; top: -1px; border-width: 1px 0 0 1px; }
 .office .stage::after { right: -1px; bottom: -1px; border-width: 0 1px 1px 0; }
 .office .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; outline: none; }
 .office .stage canvas:active { cursor: grabbing; }
+.office .stage canvas.hot { cursor: pointer; }
 .office .stage[data-still="1"] canvas { cursor: default; }
-.office .otags { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
-.office .otag { position: absolute; left: 0; top: 0; pointer-events: auto; cursor: pointer; min-width: 33px; min-height: 33px; border: 1px solid var(--line2); background: color-mix(in srgb, var(--bg1) 82%, transparent); color: var(--txt); padding: .15rem .55rem; font: inherit; font-size: clamp(11px, .3cqi + 8px, 14px); line-height: 1.2; text-transform: none; letter-spacing: normal; display: grid; grid-template-columns: auto auto auto; column-gap: .5em; align-items: center; align-content: center; justify-content: center; white-space: nowrap; will-change: transform; }
-.office .otag[hidden] { display: none; }
-.office .otag { touch-action: pan-y; }
-.office .otag b { font-weight: 700; color: var(--hi); letter-spacing: .04em; }
-.office .otag span { color: var(--mute); font-size: max(11px, .82em); text-transform: uppercase; letter-spacing: .12em; }
-.office .otag small { grid-column: 1 / -1; color: var(--mid); font-size: max(11px, .8em); }
-.office .otag small:empty { display: none; }
-.office .otag i, .ocard .chip i, .ocard .st i { width: .55em; height: .55em; background: var(--mute); display: inline-block; flex: none; }
-.office .otag.working i, .ocard .working i { background: var(--g); box-shadow: 0 0 .7em var(--g); }
-.office .otag.talking i, .ocard .talking i { background: var(--g2); box-shadow: 0 0 .7em var(--g2); }
-.office .otag.idle i, .ocard .idle i { background: var(--mid); }
-.office .otag.error i, .ocard .error i { background: var(--gold); box-shadow: 0 0 .7em var(--gold); }
-.office .otag.sleep { opacity: .7; }
-.office .otag.working, .office .otag.talking { border-color: var(--g); box-shadow: 0 0 18px -6px var(--g); }
-.office .otag.working b { color: var(--g2); }
-.office .otag.k-team span { color: var(--gold); }
-.office .otag.mini { border-color: var(--line); font-size: 11px; }
-.office .otag.mini b { font-weight: 400; color: var(--mid); }
-.office .otag.mini.working b { color: var(--g2); }
-.office .otags:not(.near) .otag.mini { display: none; }
-.office .otag.led::after { content: ""; position: absolute; left: 50%; top: 100%; height: var(--lead); border-left: 1px solid var(--line3); pointer-events: none; }
-.office .otag.led.dn::after { top: auto; bottom: 100%; height: calc(-1 * var(--lead)); }
-@container (max-width: 1500px) { .office .otag small { display: none; } }
-@container (max-width: 760px) { .office .otag span { display: none; } }
+.office .stage:not([data-still="1"]) ~ .olist:not(:focus-within) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.office .stage:not([data-still="1"]) ~ .olist:not(:focus-within) :is(.fam, .fam *) { animation: none; will-change: auto; }
+.ocard .chip i, .ocard .st i { width: .55em; height: .55em; background: var(--mute); display: inline-block; flex: none; }
+.ocard .working i { background: var(--g); box-shadow: 0 0 .7em var(--g); }
+.ocard .talking i { background: var(--g2); box-shadow: 0 0 .7em var(--g2); }
+.ocard .idle i { background: var(--mid); }
+.ocard .error i { background: var(--gold); box-shadow: 0 0 .7em var(--gold); }
 .office .hud { position: absolute; right: .7rem; bottom: .7rem; display: flex; gap: .3rem; z-index: 3; }
 .office .hud button { display: inline-flex; align-items: center; justify-content: center; min-width: 2.5rem; min-height: 2.5rem; padding: .3rem .9rem; border: 1px solid var(--line2); background: color-mix(in srgb, var(--bg1) 82%, transparent); color: var(--mid); font: inherit; font-size: max(11px, .8rem); letter-spacing: .14em; text-transform: uppercase; white-space: nowrap; cursor: pointer; }
 .office .hud button:hover { color: var(--g2); background: var(--w08); }
@@ -40,7 +23,7 @@
 .office .stage[data-still="1"] .still { display: block; max-width: calc(100% - 2rem); color: var(--gold); text-shadow: 0 0 2px var(--bg), 0 0 10px var(--bg); }
 .office .who { display: inline-flex; align-items: center; min-width: 32px; min-height: 32px; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .office .who:hover, .office .who:hover b { color: var(--g2); }
-.office .who:focus-visible, .office .otag:focus-visible, .office .hud button:focus-visible, .ocard :focus-visible { outline: 1px solid var(--g); outline-offset: 2px; }
+.office .who:focus-visible, .office .hud button:focus-visible, .ocard :focus-visible { outline: 1px solid var(--g); outline-offset: 2px; }
 .office .crew li, .office .folded li { display: block; padding: 0; }
 .office .crew .who, .office .folded .who, .office .mem .who { display: grid; grid-template-columns: 1.7rem minmax(0, 1fr) auto; gap: .5rem; align-items: center; width: 100%; }
 .office .teams { display: grid; gap: 1rem 1.6rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); list-style: none; margin: 0; padding: 0; }
@@ -55,10 +38,18 @@
 .ocard { position: fixed; inset: auto; margin: 0; width: min(38rem, calc(100vw - 16px)); max-height: calc(100svh - 16px); overflow: auto; padding: 1rem; gap: 1rem; border: 1px solid var(--line3); background: color-mix(in srgb, var(--bg1) 94%, transparent); color: var(--txt); box-shadow: 0 0 40px -10px var(--g), 0 12px 40px var(--bg); }
 .ocard:popover-open { display: flex; }
 .ocard:focus { outline: none; }
+.ocard .cx { position: sticky; top: 0; order: 2; align-self: flex-start; flex: none; margin: -.6rem -.6rem 0 calc(.6rem - 44px); width: 44px; height: 44px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line2); background: var(--bg1); color: var(--mid); font: inherit; font-size: 1.4rem; line-height: 1; cursor: pointer; z-index: 1; }
+.ocard .cx:hover { color: var(--g2); background: var(--w08); }
+.ocard h3 { margin: .9rem 0 0; color: var(--mute); font-size: max(var(--fs-min), .75rem); font-weight: 400; text-transform: uppercase; letter-spacing: .16em; }
+.ocard .cpart dl { margin-top: .3rem; grid-template-columns: minmax(0, 1fr); row-gap: 0; }
+.ocard .cpart dt { overflow-wrap: anywhere; }
+.ocard .cpart dd { margin-bottom: .4rem; text-align: left; }
+.ocard .quiet { color: var(--mute); }
+.ocard .home .chip { color: var(--g2); }
 .ocard .cfig { flex: 0 0 5rem; }
 .ocard .cfig svg { width: 100%; height: auto; display: block; }
 .ocard .cbody { min-width: 0; flex: 1; }
-.ocard h2 { margin: 0; font-size: 1.1rem; color: var(--hi); letter-spacing: .04em; overflow-wrap: anywhere; }
+.ocard h2 { margin: 0; padding-right: 2.6rem; font-size: 1.1rem; color: var(--hi); letter-spacing: .04em; overflow-wrap: anywhere; }
 .ocard h2 span { display: block; font-weight: 400; color: var(--mute); font-size: max(var(--fs-min), .75rem); text-transform: uppercase; letter-spacing: .16em; }
 .ocard p { margin: .45rem 0 0; font-size: max(var(--fs-min), .9rem); overflow-wrap: anywhere; }
 .ocard .area { color: var(--g); }

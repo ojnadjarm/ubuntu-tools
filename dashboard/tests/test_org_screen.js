@@ -105,7 +105,8 @@ const srv = serveStatic((u, res) => {
       assert.ok(r.x >= 0 && r.x + r.width <= 400, `${id}'s card stays inside 400 px`);
       if (id === "orchestrator") await ph.keyboard.press("Escape");
     }
-    await ph.tap(".org .olist h2");
+    const box = await tips.first().boundingBox();
+    await ph.touchscreen.tap(box.x + box.width / 2, box.y > 60 ? box.y / 2 : (box.y + box.height + 850) / 2);
     assert.strictEqual(await tips.count(), 0, "a tap elsewhere closes it");
 
     const talkers = () => p.$$eval(".org .seat:has(.av .cr.talking)", (l) => l.map((x) => x.dataset.seat));

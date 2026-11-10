@@ -1,7 +1,7 @@
 // Office screen (T1601-05): #org is the office. One canvas in the stage, the staff list names every seat, team, member and worker,
 // a Message link per seat, the Sessions table, a list button opens the card of the same name, no sideways scroll at 5 widths,
 // the still note without a graphics card, one canvas through #chat and back, a swipe on the stage keeps the sub-tab,
-// /api/office read at most once per 5 s and never while hidden. With the GPU flags: the real chunks, labels, tap, + − Reset.
+// /api/office read at most once per 5 s and never while hidden. With the GPU flags: the real chunks, every room and creature in view, no tags, a tap on a creature and on a room sign, + − Reset.
 // Staff cards (T1601-08): every Roster row label per runner kind, a seat's runner rows, gold when bad, dim when off, the Unassigned room.
 // Run: node tests/test_office_screen.js   (fixture API only; SHOTS=<dir> adds 1366 shots: home, 2 angles, a card, night)
 "use strict";
@@ -57,9 +57,20 @@ async function soft(b, base, [w, h]) {
   const who = await p.$$eval(".office .olist [data-who]", (l) => l.map((e) => e.dataset.who));
   assert.ok(who.length >= SEATS.length + TEAMS.length + MEMBERS.length + WORKERS.length, `${w}: a button per seat, team, member and worker, got ${who.length}`);
   assert.deepStrictEqual(await p.$$eval(".office .olist a.msg", (l) => l.map((a) => a.getAttribute("href"))), FIX.seats.map((s) => "#chat?ch=dm-" + ["owner", s.id].sort().join("--")), `${w}: a Message link per seat, none for staff`);
-  const rows = await p.$$eval(".office table.ses tbody tr", (l) => l.map((r) => r.innerText));
-  assert.strictEqual(rows.length, FIX.sessions.length, `${w}: a Sessions row per session`);
-  assert.ok(rows.some((r) => /protected project/.test(r) && /hidden/.test(r)), `${w}: the protected session row says protected project, hidden`);
+  /* The Sessions rows of the card a list button opens (or of the room its card's line opens): name and text. */
+  const ses = async (id, home) => {
+    await p.click(`.office .olist [data-who="${id}"]`);
+    if (home) await p.click("#office-card .home [data-who]");
+    const r = await p.$$eval("#office-card .cpart", (l) => { const x = l.find((c) => c.querySelector("h3").textContent === "Sessions"); return x ? [...x.querySelectorAll("dt")].map((d) => d.textContent + " " + d.nextElementSibling.textContent) : []; });
+    await p.keyboard.press("Escape");
+    return r;
+  };
+  const rows = [...await ses("vass"), ...await ses("tiny-epic-narrator"), ...await ses("a0000000000000002", true)];
+  await p.click('.office .olist [data-who="orchestrator"]');
+  const own = await p.$$eval("#office-card .cbody > dl dt", (l) => l.filter((d) => d.textContent === "Folder").length);
+  await p.keyboard.press("Escape");
+  assert.strictEqual(rows.length + own, FIX.sessions.length, `${w}: every session on a card (no boards, owner 2026-11-10): ${JSON.stringify(rows)}`);
+  assert.ok(rows.some((r) => /^protected project /.test(r) && !/[~/]/.test(r)), `${w}: the protected session row says protected project, no folder`);
   for (const [id, name] of [["maintenance", "Briar"], ["mooblox", "Mossfang"], ["team-quality", "Quality"], ["pid1003", "agent-T9001"]]) {
     await p.click(`.office .olist [data-who="${id}"]`);
     assert.strictEqual(await cardName(p), name, `${w}: the list button of ${id} opens the card named ${name}`);
@@ -108,7 +119,7 @@ async function staffCards(b, base, [w, h]) {
   assert.ok(!/\bhello\b/.test(await p.$eval(".office .olist", (e) => e.innerText)), `${w}: a hidden agent is not in the list`);
   for (const [id, labels] of Object.entries(STAFF)) {
     await p.click(`.office .olist [data-who="${id}"]`);
-    const c = await p.$eval("#office-card:popover-open", (e) => ({ dt: [...e.querySelectorAll("dt")].map((d) => d.textContent), gold: [...e.querySelectorAll("dd.bad")].map((d) => d.previousElementSibling.textContent),
+    const c = await p.$eval("#office-card:popover-open", (e) => ({ dt: [...e.querySelectorAll(".cbody > dl dt")].map((d) => d.textContent), gold: [...e.querySelectorAll(".cbody > dl dd.bad")].map((d) => d.previousElementSibling.textContent),
       ln: e.querySelector(".area") && e.querySelector(".area").textContent, dim: !!e.querySelector(".cfig.dim"), msg: e.querySelectorAll("a.btn").length, box: e.getBoundingClientRect().toJSON() }));
     assert.deepStrictEqual(c.dt, labels, `${w}: the card of ${id} has the Roster's rows`);
     assert.ok(c.box.left >= 0 && c.box.right <= w && c.box.top >= 0 && c.box.bottom <= h, `${w}: the card of ${id} is inside the viewport`);
@@ -153,17 +164,22 @@ async function gpu(base) {
     const st = await p.evaluate(() => ({ still: window.__office.still, ...window.__office.stats() }));
     assert.deepStrictEqual([st.still, st.chunks], [false, 12], "with a graphics card: not still, the fixture's 12 chunks");
     assert.strictEqual(await p.$eval(".office .stage .still", (e) => getComputedStyle(e).display), "none", "no still note with a graphics card");
-    const tags = await p.$$eval(".office .stage .otags .otag:not([hidden])", (l) => l.map((t) => { const r = t.getBoundingClientRect(), s = t.closest(".stage").getBoundingClientRect(); return [t.dataset.who, r.left >= s.left - 1 && r.right <= s.right + 1]; }));
-    for (const id of ["orchestrator", "mooblox", "vass", "discord", "tiny-epic-narrator", "mosaico", "pool", "team-operations", "team-quality", "team-improvement", "team-unassigned"]) assert.ok(tags.some((t) => t[0] === id), "a label for " + id);
-    assert.strictEqual(await p.$$eval(".office .stage .otags .otag", (l) => l.filter((t) => t.tabIndex >= 0).length), 0, "labels are not in the tab order");
+    const shown = await p.evaluate((ids) => { const c = document.querySelector(".office .stage canvas"); return ids.filter((id) => { const q = window.__office.project(id); return q.ok && q.x >= 0 && q.x <= c.clientWidth && q.y >= 0 && q.y <= c.clientHeight; }); },
+      ["orchestrator", "mooblox", "vass", "discord", "tiny-epic-narrator", "mosaico", "pool", "room-mooblox", "team-operations", "team-quality", "team-improvement", "team-unassigned"]);
+    for (const id of ["orchestrator", "mooblox", "vass", "discord", "tiny-epic-narrator", "mosaico", "pool", "room-mooblox", "team-operations", "team-quality", "team-improvement", "team-unassigned"]) assert.ok(shown.includes(id), "in view for a click: " + id);
+    assert.strictEqual(await p.$$eval(".otag, .otags", (l) => l.length), 0, "no tags (owner 2026-11-10)");
     const at = (id) => p.evaluate((i) => { const q = window.__office.project(i), r = document.querySelector(".office .stage canvas").getBoundingClientRect(); return { x: r.left + q.x, y: r.top + q.y, ok: q.ok }; }, id);
     const m = await at("maintenance");
     await p.mouse.click(m.x, m.y + 14);
     assert.strictEqual(await cardName(p), "Briar", "a tap on a creature opens its card");
     if (shots) await p.screenshot({ path: `${shots}/card-1366.png` });
     await p.keyboard.press("Escape");
-    await p.click('.office .otags .otag[data-who="team-quality"]');
-    assert.strictEqual(await cardName(p), "Quality", "a tap on a label opens its card");
+    const qs = await p.evaluate(() => { const R = window.__office, q = R.project("team-quality"), c = document.querySelector(".office .stage canvas").getBoundingClientRect();
+      for (let r = 0; r < 40; r += 2) for (let a = 0; a < 6.28; a += 0.4) { const x = Math.round(q.x + r * Math.cos(a)), y = Math.round(q.y + r * Math.sin(a) * 0.5); if (R.pick(x, y) === "team-quality") return [c.left + x, c.top + y]; }
+      return null; });
+    assert.ok(qs, "the Quality room's sign is on screen");
+    await p.mouse.click(...qs);
+    assert.strictEqual(await cardName(p), "Quality", "a tap on a room's sign opens its card");
     await p.keyboard.press("Escape");
     if (shots) await p.screenshot({ path: `${shots}/home-1366.png` });
     const on = () => p.evaluate(() => window.__office.project("mooblox"));
@@ -176,13 +192,13 @@ async function gpu(base) {
     await p.waitForTimeout(400);
     const a2 = await on();
     assert.ok(Math.hypot(a2.x - a0.x, a2.y - a0.y) < 1, "Reset view restores it");
-    const tag0 = await p.$eval('.office .otags .otag[data-who="mooblox"]', (t) => t.getBoundingClientRect().left);
+    const tag0 = (await on()).x;
     const c = await p.$eval(".office .stage canvas", (e) => { const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; });
     for (const [k, dx, dy] of [[1, 380, -40], [2, -700, 90]]) {
       await p.mouse.move(c[0], c[1]); await p.mouse.down(); await p.mouse.move(c[0] + dx / 2, c[1] + dy / 2, { steps: 4 }); await p.mouse.move(c[0] + dx, c[1] + dy, { steps: 4 }); await p.mouse.up();
       await p.waitForTimeout(500);
       if (k === 1) {
-        assert.ok(Math.abs(await p.$eval('.office .otags .otag[data-who="mooblox"]', (t) => t.getBoundingClientRect().left) - tag0) > 3, "a drag turns the office and the labels follow");
+        assert.ok(Math.abs((await on()).x - tag0) > 3, "a drag turns the office (mooblox moves on screen)");
         assert.strictEqual(await p.$$eval("#office-card:popover-open", (l) => l.length), 0, "a drag opens no card");
       }
       if (shots) await p.screenshot({ path: `${shots}/angle${k}-1366.png` });

@@ -5,7 +5,7 @@ import { creatures } from "./creatures.js";
 import { effects } from "./fx.js";
 import { halos } from "./halos.js";
 
-const HALL = "hall", SLICE_MS = 8, REACH = 2.6, made = new WeakMap(), inks = new Map();
+const HALL = "hall", SLICE_MS = 8, REACH = 2.6, TAP_PX = 22, made = new WeakMap(), inks = new Map();
 
 /* Lit pixel runs of a text set in the page's monospace: {w, h, runs: [[x0, x1, y]]}. */
 function ink(text) {
@@ -25,14 +25,25 @@ function reach(p, a, b) {
   return Math.hypot(p.x - a.x - dx * k, p.y - a.y - dy * k);
 }
 
+/* True when pixel p lies inside the convex polygon Q (projected corners in order). */
+function inside(p, Q) {
+  let sign = 0;
+  for (let i = 0; i < Q.length; i++) {
+    const a = Q[i], b = Q[(i + 1) % Q.length], c = Math.sign((b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x));
+    if (c && sign && c !== sign) return false;
+    sign = sign || c;
+  }
+  return true;
+}
+
 /* The lamps that reach the box of chunk c on the ground plan: bake cuts a lamp at REACH radii. */
 const near = (c, lamps) => lamps.filter((l) => l.i > 0 && Math.hypot(Math.max(c.lo[0] - l.x, 0, l.x - c.hi[0]), Math.max(c.lo[2] - l.z, 0, l.z - c.hi[2])) <= REACH * l.r);
 
 /* createRenderer(canvas, {theme, kit, still?, build?, chunk?, ink?}) → Renderer; one per canvas, a second call returns the first. build = {steps, stamp?} defaults to build/index.js; chunk is a one-step build. */
 export function createRenderer(canvas, opts) {
   if (made.has(canvas)) return made.get(canvas);
-  const S = stage(canvas, { still: opts.still }), mesh = chunks(S), fam = creatures(S.scene), fx = effects(S.scene), halo = halos(S), built = new Map(), anchors = new Map();
-  let B = opts.build || (opts.chunk && { steps: (...a) => [() => opts.chunk(...a)] }), actors = [], jobs = [], raf = 0, cur = null, fit = false, queued = null, tally = { rebuilt: 0, relit: 0, ms: 0 };
+  const S = stage(canvas, { still: opts.still }), mesh = chunks(S), fam = creatures(S.scene), fx = effects(S.scene), halo = halos(S), lit = halos(S), built = new Map(), anchors = new Map();
+  let B = opts.build || (opts.chunk && { steps: (...a) => [() => opts.chunk(...a)] }), actors = [], boards = [], jobs = [], raf = 0, cur = null, fit = false, queued = null, tally = { rebuilt: 0, relit: 0, ms: 0 };
   S.ticker((t, dt) => { fx.step(t); return fam.step(t, dt); });
 
   /* Runs queued jobs for SLICE_MS, then leaves the rest to the next frame. */
@@ -65,13 +76,13 @@ export function createRenderer(canvas, opts) {
   /* Hands actors, lamps and anchors to the scene parts and asks for one frame. */
   function done() {
     const { M, plan } = cur, lamps = [], lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
-    actors = []; anchors.clear();
+    actors = []; anchors.clear(); boards = [];
     for (const { c } of built.values()) {
       actors.push(...(c.actors || [])); lamps.push(...(c.lamps || []));
       for (let i = 0; i < 3; i++) { lo[i] = Math.min(lo[i], c.lo[i]); hi[i] = Math.max(hi[i], c.hi[i]); }
     }
     for (const a of actors) anchors.set(a.id, [a.x, a.y + (0.8 * a.scale) / 0.36, a.z]);
-    for (const { c } of built.values()) for (const l of c.labels || []) anchors.set(l.id ?? l.who, l.pos);
+    for (const { c } of built.values()) for (const l of c.labels || []) { anchors.set(l.id ?? l.who, l.pos); if (l.quad) boards.push(l); }
     fam.set(actors); halo(lamps); fx.look(opts.theme, M.night);
     if (fit) S.view({ lo, hi, ...plan.home }); else { S.invalidate(); canvas.dispatchEvent(new Event("view")); }
     fit = false;
@@ -100,14 +111,22 @@ export function createRenderer(canvas, opts) {
     apply,
     /* Canvas pixels of the label point of a person or room; ok is false off screen or for an unknown id. */
     project(id) { const p = anchors.get(id); return p ? S.project(p) : { x: 0, y: 0, ok: false }; },
-    /* The id of the creature under canvas pixel (x, y), nearest first. */
+    /* The id under canvas pixel (x, y): a creature's body, else a room sign, else the nearest creature within TAP_PX (a 44 px target). */
     pick(x, y) {
-      let best = null, bd = 1e9;
+      let best = null, bd = 1e9, body = false;
       for (const a of actors) {
-        const feet = S.project([a.x, a.y, a.z]), tip = S.project(anchors.get(a.id)), d = reach({ x, y }, feet, tip);
-        if (feet.ok && d < Math.max(16, Math.hypot(tip.x - feet.x, tip.y - feet.y) * 0.45) && d < bd) { bd = d; best = a.id; }
+        const feet = S.project([a.x, a.y, a.z]), tip = S.project(anchors.get(a.id)), d = reach({ x, y }, feet, tip), own = Math.hypot(tip.x - feet.x, tip.y - feet.y) * 0.45;
+        if (feet.ok && d < Math.max(TAP_PX, own) && d < bd) { bd = d; best = a.id; body = d < own; }
       }
-      return best;
+      if (body) return best;
+      const b = boards.find((l) => { const Q = l.quad.map(S.project); return Q.every((q) => q.ok) && inside({ x, y }, Q); });
+      return b ? b.id : best;
+    },
+    /* Lights the creature or sign `id` with a soft accent halo (null clears it) and draws one frame. */
+    hover(id) {
+      const a = id && actors.find((x) => x.id === id), b = id && !a && boards.find((l) => l.id === id), col = opts.theme.accent;
+      lit(a ? [{ x: a.x, y: a.y + 0.3 * a.scale / 0.36, z: a.z, col, r: 0.7, halo: 0.9 }] : b ? [{ x: b.pos[0], y: b.pos[1], z: b.pos[2] + 0.1, col, r: b.r, halo: 0.6 }] : []);
+      S.invalidate();
     },
     reset: S.reset,
     zoom: S.zoom,

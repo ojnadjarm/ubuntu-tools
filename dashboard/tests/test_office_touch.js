@@ -1,7 +1,7 @@
 // Office phone gestures (T1601-11), driven by real touch events (CDP Input.dispatchTouchEvent) at 400×850 and 768×1024, DPR 2, with a graphics card:
 // one finger sideways turns, one finger up or down scrolls the page and leaves the view alone, a pinch zooms, two fingers dragged tilt,
-// a tap opens the card, Reset view restores, frames stop within 1 s of release; a finger that lands on a name tag turns the office too (T1601-08)
-// and a tap on a tag still opens its card.
+// a tap opens the card, Reset view restores, frames stop within 1 s of release; a finger that lands on a creature turns the office too (T1601-08)
+// and a tap on it opens its card.
 // Run: node tests/test_office_touch.js   (fixture API only; SHOTS=<dir> adds 400 px shots: start, turned, zoomed, card)
 "use strict";
 const assert = require("assert");
@@ -65,6 +65,8 @@ async function gestures(b, base, [w, h], shots) {
   const { p, errs, cdp } = await open(b, base, w, h), shot = (name) => (shots && w === 400 ? p.screenshot({ path: `${shots}/${name}-400.png` }) : null);
   const c = await box(p), v0 = await view(p);
   assert.ok(c.y >= 0 && c.y + c.h <= h, `the stage is whole on the first screen at ${w}`);
+  /* The office fits one screen (no boards, owner 2026-11-10): a page taller than the screen keeps the vertical-swipe checks meaningful. */
+  await p.evaluate(() => { document.documentElement.style.minHeight = "250vh"; });
   await shot("start");
 
   const quarter = Math.round(c.h / 4), strokes = [quarter, quarter, quarter, Math.round(c.h) - 3 * quarter];
@@ -123,28 +125,27 @@ async function gestures(b, base, [w, h], shots) {
   const v7 = await view(p);
   assert.ok(same(v0, v7), `${w}: Reset view restores the first view: ${JSON.stringify([v0, v7])}`);
 
-  const tg = await p.evaluate((d) => {
-    const c = document.querySelector(".office .stage canvas").getBoundingClientRect();
-    for (const t of document.querySelectorAll(".office .otags .otag:not([hidden]):not(.mini)")) {
-      const r = t.getBoundingClientRect(), x = Math.round(r.left + r.width / 2), y = Math.round(r.top + r.height / 2), dx = x - d > c.left + 12 ? -d : d;
-      if (document.elementFromPoint(x, y).closest(".otag") === t && x + dx > c.left + 12 && x + dx < c.right - 12) return { id: t.dataset.who, name: t.querySelector("b").textContent, x, y, dx };
+  const tg = await p.evaluate(([d, ids]) => {
+    const cv = document.querySelector(".office .stage canvas"), c = cv.getBoundingClientRect(), R = window.__office;
+    for (const id of ids) {
+      const q = R.project(id), x = Math.round(c.left + q.x), y = Math.round(c.top + q.y + 10), dx = x - d > c.left + 12 ? -d : d;
+      if (q.ok && R.pick(x - c.left, y - c.top) === id && document.elementFromPoint(x, y) === cv && x + dx > c.left + 12 && x + dx < c.right - 12) return { id, x, y, dx };
     }
     return null;
-  }, quarter);
-  assert.ok(tg, `${w}: a name tag with room for a sideways drag`);
+  }, [quarter, ["mooblox", "discord", "mosaico", "maintenance", "sentinel"]]);
+  assert.ok(tg, `${w}: a creature with room for a sideways drag`);
   await drag(p, cdp, [[[tg.x, tg.y], [tg.x + tg.dx, tg.y]]]);
   await settle(p);
   const vg = await view(p);
-  assert.ok(Math.abs(vg.turn - v7.turn) > 0.15, `${w}: one finger sideways from the tag of ${tg.id} turns the office (${(vg.turn - v7.turn).toFixed(3)} rad)`);
-  assert.deepStrictEqual([vg.scroll, vg.hash, await p.$$eval("#office-card:popover-open", (l) => l.length)], [0, "#org", 0], `${w}: a drag from a tag scrolls nothing and opens no card`);
+  assert.ok(Math.abs(vg.turn - v7.turn) > 0.15, `${w}: one finger sideways from the creature ${tg.id} turns the office (${(vg.turn - v7.turn).toFixed(3)} rad)`);
+  assert.deepStrictEqual([vg.scroll, vg.hash, await p.$$eval("#office-card:popover-open", (l) => l.length)], [0, "#org", 0], `${w}: a drag from a creature scrolls nothing and opens no card`);
   await p.touchscreen.tap(...await p.$eval("#office-reset", (e) => { const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }));
   await settle(p);
-  const t2 = await p.$eval(`.office .otags .otag[data-who="${tg.id}"]`, (t) => { const r = t.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)]; });
-  await p.touchscreen.tap(...t2);
+  await p.touchscreen.tap(tg.x, tg.y);
   await p.waitForSelector("#office-card:popover-open", { timeout: 3000 });
-  assert.strictEqual(await p.$eval("#office-card:popover-open h2", (e) => e.firstChild.textContent.trim()), tg.name, `${w}: a tap on the tag of ${tg.id} opens its card`);
+  assert.strictEqual(await p.$eval("#office-card:popover-open", (e) => e.dataset.for), tg.id, `${w}: a tap on the creature ${tg.id} opens its card`);
   await p.keyboard.press("Escape");
-  assert.ok(same(v7, await view(p)), `${w}: a tap on a tag leaves the view alone`);
+  assert.ok(same(v7, await view(p)), `${w}: a tap on a creature leaves the view alone`);
 
   const m = await p.evaluate(() => { const q = window.__office.project("maintenance"), r = document.querySelector(".office .stage canvas").getBoundingClientRect(); return [r.left + q.x, r.top + q.y + 10]; });
   await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ id: 0, x: Math.round(m[0]), y: Math.round(m[1]) }] });

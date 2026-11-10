@@ -1,4 +1,4 @@
-/* One room per builder, in its own frame (centre at the origin, back wall at -z): a desk station per person, decor in the empty places, a lounge corner, the floor sign and the room light. */
+/* One room per builder, in its own frame (centre at the origin, back wall at -z): a desk station per person, decor in the empty places, a lounge corner, the room's name on its floor sign or its status board, and the room light. */
 import { hash, genome } from "../../familiars/genome.js";
 import { mul, glow, lamp, rack, grow, holo, cable, sign } from "./props.js";
 
@@ -59,9 +59,22 @@ function places(ctx, R, list, tint, w, d, slots, tags, bare) {
     B.pop();
   }
 }
-/* The room's name as a dot sign on the floor in front of it: bright while someone works, dim when all sleep. */
+/* The room's name as a dot sign on the floor at its entrance: bright while someone works, dim when all sleep; its corners go to labels so a click on it opens the room's card. */
 function plate(ctx, R, d, col) {
-  sign(ctx, (R.kind === "seat" && R.area ? R.area : R.name).toUpperCase(), [0, 0.012, d / 2 + 0.32], [1, 0, 0], [0, 0, -1], 0.27, mul(col, R.busy ? 1 : R.awake ? 0.75 : 0.42), { i: R.busy ? 0.22 : 0, halo: 0.12 });
+  const z = d / 2 + 0.32, h = 0.27, w = sign(ctx, R.info.name.toUpperCase(), [0, 0.012, z], [1, 0, 0], [0, 0, -1], h, mul(col, R.busy ? 1 : R.awake ? 0.75 : 0.42), { i: R.busy ? 0.22 : 0, halo: 0.12 });
+  mark(ctx, R, (x, y) => [x * (w / 2 + 0.05), 0.012, z - y * (h / 2 + 0.05)], w);
+}
+/* The room's back status board (a holo between its racks) with the room's name across it in dot letters; a click on it opens the room's card. */
+function screen(ctx, R) {
+  const { th } = ctx, col = R.busy ? th.accent : th.second, W = 0.8, H = 0.62, t = ctx.ink(R.info.name.toUpperCase());
+  holo(ctx, [-W / 2, 0.5, 0.05], [W, 0, 0], [0, H, 0], col, R.busy ? 1 : 0.4);
+  sign(ctx, R.info.name.toUpperCase(), [0, 0.5 + H / 2, 0.06], [1, 0, 0], [0, 1, 0], Math.min(0.3, (W - 0.08) * t.h / t.w), col, { i: 0 });
+  mark(ctx, R, (x, y) => [x * W / 2, 0.5 + H / 2 + y * H / 2, 0.05], W);
+}
+/* Pushes the clickable outline of room R's name: f(±1, ±1) gives its corners in the current frame. */
+function mark(ctx, R, f, w) {
+  const at = (x, y) => { const q = f(x, y), p = ctx.B.at(...q); return [p.x, p.y, p.z]; };
+  ctx.labels.push({ id: R.sign, pos: at(0, 0), quad: [at(-1, -1), at(1, -1), at(1, 1), at(-1, 1)], r: w * 0.7 });
 }
 /* The furnished size of a room, its desk count, its tint and its hash, from its cell of the plan. */
 function frame(ctx, R, k) {
@@ -85,33 +98,25 @@ export function seatRoom(ctx, R) {
   ctx.labels.push({ id: R.id, pos: [p.x, p.y + 0.82, p.z] });
 }
 
-/* A team room of staff: racks and the team's status board at the back, one desk per member. */
+/* A team room of staff: racks and the team's status board with its name at the back, one desk per member. */
 export function teamRoom(ctx, R) {
   const { B, th } = ctx, { w, d, slots, h, tint } = frame(ctx, R, () => 0.9);
   trace(ctx, R, w, d); rug(ctx, R, tint, h);
   B.push({ z: -d / 2 + 0.3 });
   rack(ctx, -0.62, 0, 0, { seed: R.id, live: R.busy > 0 }); rack(ctx, 0.62, 0, 0, { seed: R.id + "b", live: R.busy > 0 });
-  holo(ctx, [-0.34, 0.5, 0.05], [0.68, 0, 0], [0, 0.62, 0], R.busy ? th.accent : th.second, R.busy ? 1 : 0.4);
+  screen(ctx, R);
   cable(ctx, [[-0.62, 0.3], [-0.62, 0.55], [0.62, 0.55], [0.62, 0.3]]);
-  const p = B.at(0, 0, 0.05);
   B.pop();
   places(ctx, R, R.people, tint, w, d, slots, true);
   B.push({ z: d / 2 - 0.75 }); LOUNGE[(h + 1) % LOUNGE.length](B, mul(tint, 0.9)); B.pop();
-  plate(ctx, R, d, th.accent);
-  ctx.labels.push({ id: R.id, pos: [p.x, 1.42, p.z] });
 }
 
-/* The desk pool: one desk per agent the CEO runs himself (bare when free), no lead desk, a status board at the back. */
+/* The desk pool: one desk per agent the CEO runs himself (bare when free), no lead desk, a status board with its name at the back. */
 export function pool(ctx, R) {
-  const { B, th } = ctx, { w, d, slots, h, tint } = frame(ctx, R, () => 0.9);
+  const { B } = ctx, { w, d, slots, h, tint } = frame(ctx, R, () => 0.9);
   trace(ctx, R, w, d); rug(ctx, R, tint, h);
-  B.push({ z: -d / 2 + 0.3 });
-  holo(ctx, [-0.34, 0.5, 0.05], [0.68, 0, 0], [0, 0.62, 0], R.busy ? th.accent : th.second, R.busy ? 1 : 0.4);
-  const p = B.at(0, 0, 0.05);
-  B.pop();
+  B.push({ z: -d / 2 + 0.3 }); screen(ctx, R); B.pop();
   places(ctx, R, R.people, tint, w, d, slots, true, true);
-  plate(ctx, R, d, th.accent);
-  ctx.labels.push({ id: R.id, pos: [p.x, 1.42, p.z] });
 }
 
 /* The CEO's place: a neon ring on the deck, a wide desk under three holo screens and the Conductor standing on the floor with the model's motes, lamp and failing agent. */

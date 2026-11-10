@@ -18,18 +18,25 @@ function host() {
 }
 
 const safe = (href) => (/^(#|https?:\/\/)/.test(href) ? href : "#");
-const chip = (p) => `<li><button type="button" class="chip ${esc(p.pose)}" data-who="${esc(p.id)}"><i></i>${esc(p.name)}<span>${esc(p.rank)}</span></button></li>`;
+const chip = (p) => `<li><button type="button" class="chip ${esc(p.pose)}" data-who="${esc(p.id)}"><i></i>${esc(p.name)}<span>${esc(p.note ?? p.rank)}</span></button></li>`;
+const CLOSE = `<button type="button" class="cx" data-close aria-label="Close">×</button>`;
+const dl = (rows) => `<dl>${rows.map(([k, v, tone]) => `<dt>${esc(k)}</dt><dd${tone ? ` class="${esc(tone)}"` : ""}>${esc(v)}</dd>`).join("")}</dl>`;
+/* One titled part of a card: its rows, its chips, else its one quiet line. */
+const part = (x) => `<section class="cpart"><h3>${esc(x.h)}</h3>` + (x.rows.length ? dl(x.rows) : "") + (x.chips.length ? `<ul class="roll">${x.chips.map(chip).join("")}</ul>` : "") +
+  (x.rows.length || x.chips.length ? "" : `<p class="quiet">${esc(x.empty)}</p>`) + `</section>`;
 
 /* Markup of the card of p (a person or a room). */
 function html(p) {
   const c = card(p), pose = talking(p.id) ? "talking" : c.state.pose;
-  return (p.people ? "" : `<div class="cfig${c.dim ? " dim" : ""}" aria-hidden="true">${creature(p.id, talking(p.id) ? "talking" : p.pose, p.role)}</div>`) +
+  return CLOSE + (p.people ? "" : `<div class="cfig${c.dim ? " dim" : ""}" aria-hidden="true">${creature(p.id, talking(p.id) ? "talking" : p.pose, p.role)}</div>`) +
     `<div class="cbody"><h2>${esc(c.title)}${c.rank ? `<span><b class="sr-only"> · </b>${esc(c.rank)}</span>` : ""}</h2>` + (c.sub ? `<p class="area">${esc(c.sub)}</p>` : "") +
     (c.lines || []).map((l) => `<p class="ln">${esc(l)}</p>`).join("") +
     `<p class="st ${esc(pose)}${c.dim ? " dim" : ""}"><i></i>${esc(c.state.text)}</p>` +
     (c.bar != null ? `<progress max="100" value="${Math.round(c.bar)}" aria-label="To the next run"></progress>` : "") +
-    (c.rows.length ? `<dl>${c.rows.map(([k, v, tone]) => `<dt>${esc(k)}</dt><dd${tone ? ` class="${esc(tone)}"` : ""}>${esc(v)}</dd>`).join("")}</dl>` : "") +
-    (c.roll ? `<ul class="roll">${c.roll.map((id) => M.who[id]).filter(Boolean).map(chip).join("")}</ul>` : "") +
+    (c.rows.length ? dl(c.rows) : "") +
+    (c.home ? `<p class="home"><button type="button" class="chip" data-who="${esc(c.home.id)}">${esc(c.home.text)}</button></p>` : "") +
+    (c.roll ? (c.parts ? `<h3>Members</h3>` : "") + (c.roll.length ? `<ul class="roll">${c.roll.map((id) => M.who[id]).filter(Boolean).map(chip).join("")}</ul>` : `<p class="quiet">nobody here</p>`) : "") +
+    (c.parts || []).map(part).join("") +
     (c.actions || []).map((a) => `<a class="btn" href="${esc(safe(a.href))}">${esc(a.label)}</a>`).join("") + `</div>`;
 }
 

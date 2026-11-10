@@ -118,17 +118,14 @@ const ok = (name, fn) => { fn(); n++; console.log("ok " + n + " " + name); };
     assert.deepStrictEqual(M.line, { sessions: 6, working: 4, on: 11, of: 13, soon: { name: "Sorrel", next: "2026-11-10T16:02:00+01:00" } });
   });
 
-  ok("panels: next soonest first, running, recent at most 10, sessions with a protected row, claims", () => {
+  ok("panels: next soonest first, running, no recent, sessions with a protected row, claims", () => {
     const nx = M.panels.next.map((r) => Date.parse(r.next));
     assert.strictEqual(nx.length, 10);
     assert.deepStrictEqual(nx, [...nx].sort((a, b) => a - b));
     assert.strictEqual(M.panels.next[1].bad, true);
     assert.deepStrictEqual(M.panels.running.map((r) => r.ticket), ["T9002", "T9003-04"]);
     assert.strictEqual(M.panels.running[1].label, "office renderer");
-    const Q = copy();
-    for (let i = 0; i < 14; i++) Q.agents.subagents.push({ id: "z" + i, label: "T8" + i + " old", type: "worker", started: "2026-11-10T10:00:00Z", last: 1794300000 + i, state: "done", doing: "", report: "r" });
-    assert.strictEqual(Mo.build(Q).panels.recent.length, 10);
-    assert.deepStrictEqual(M.panels.recent.map((r) => [r.ticket, r.state, r.report]), [["T9000", "done", "3 of 3 green"]]);
+    assert.ok(!("recent" in M.panels), "Recent 24 h is gone (owner 2026-11-10)");
     const prot = M.panels.sessions.find((r) => r.protected);
     assert.deepStrictEqual(prot, { id: "vass", protected: true, session: "protected project", seat: "Thistle · Product Owner", folder: "hidden", state: "idle", by: "—", since: 1794322086 });
     assert.strictEqual(M.panels.sessions.length, 6);
