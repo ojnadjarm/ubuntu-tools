@@ -61,13 +61,8 @@ a. Diff the inputs against `state/last-seen.json` — the only state you carry �
 b. Close the loop on every `measuring` proposal with the new number: `done`, `no-effect` or
    `regressed`. A delta counts only if it holds two consecutive weekly runs or exceeds 2/3 on the
    task. `regressed` produces a revert proposal — never a self-revert.
-b2. **Seed-verify `SEED.md`** — items 1-14 are candidate problems already located in the tree.
-   Check each one against the tree yourself (`grep -n` the cited path, run the read-only verb):
-   confirm it, or drop it as fixed with a one-line reason in the report. A confirmed seed item is
-   a proposal candidate with its Evidence line already grounded.
 
-c. Pick the problems with the strongest evidence — confirmed seed items and anything the inputs
-   show — and write one proposal each: as many as the evidence supports, capped by the backlog
+c. Pick the problems with the strongest evidence — anything the inputs show — and write one proposal each: as many as the evidence supports, capped by the backlog
    limit of 10 open proposals.
 c2. **Failure clusters, weekly:** read the top 5 of `failures.clusters` in the collector
    (`agents-log --errors --cluster --since 7d` for the full list). A cluster seen in 2+ sessions,
@@ -81,16 +76,16 @@ e. Write `proposals/TSP-NNN.md` from `PROPOSAL-TEMPLATE.md` (owned by ticket TS0
 f. Re-rank `BACKLOG.md` (also TS03): score = evidence weight × expected gain ÷ sessions. Cap 10
    open; a proposal with no go for 4 weeks is `dropped` with a one-line reason.
 g. Overwrite `REPORT.md` with at most 5 lines: what you closed, what you opened, what needs the owner.
-h. Monday run only: one push, `notify-owner` , at most 200 characters —
-   `toolsmith: N open, top 3: TSP-… — say "go TSP-nnn"`. No push on a Thursday run.
+h. Monday run only: one push, `notify-owner` , at most 200 characters, listing only `owner-go` rows that wait
+   for his word — `toolsmith: N need a go: TSP-… — say "go TSP-nnn"`. None waiting: no push. No push on a Thursday run.
 
 ## Classes — what you decide alone, what needs the owner
 
 Alone: everything inside `~/agents/toolsmith/`. Everything else is a proposal carrying a class:
 
 - **`auto-ok`** — a new or better `pc` verb or flag, a KB or runbook entry, a test, a doc, a bench
-  task or schema fix, a script under `bin/` with no resident process. The owner can clear these in
-  one go with "go all auto-ok".
+  task or schema fix, a script under `bin/` with no resident process. The Saturday code-review lane
+  takes these at `proposed`; they need no go.
 - **`owner-go`** — any resident process, systemd unit or timer, apt/snap of a daemon, anything
   touching sound, TV, monitors or network, `ufw` / `sshd` / `sudoers`, `AGENTS.md` (a change to its
   §5 is additionally flagged `contract-§5`), or `~/.claude/CLAUDE.md`.
@@ -100,7 +95,8 @@ Alone: everything inside `~/agents/toolsmith/`. Everything else is a proposal ca
 - A `BACKLOG.md` row with status `hold` is the owner's veto: no toolsmith run or swarm lane edits it (any cell but
   rank), re-queues, spawns, drops or re-proposes it. Only the owner changes it.
 - Step a also runs `toolsmith-inputs --check`; a changed hold row it prints goes in the report, never reverted. At
-  the end of the run, save the collector's `hold.rows` as `hold` in `state/last-seen.json`.
+  the end of the run, save the collector's `hold.rows` as `hold` and `hold.classes` as `class` in
+  `state/last-seen.json`; a `class changed` line it prints goes in the report too.
 - A hold new since that snapshot shows once in the digest (`REPORT.md`, Monday push) as "held by owner: TSP-nnn".
 
 ## Flow after a go
@@ -109,7 +105,7 @@ Owner says `go TSP-007` → the orchestrator spawns one implementer (Opus for `b
 Sonnet for KB, doc or test-only work) whose brief is the proposal file plus the fixed
 `IMPLEMENTER-FOOTER.md` → the implementer appends a `## Result` section and sets the status to
 `measuring` → Sunday's `pcbench-weekly` rewrites `LAST.json` → you close it on Monday.
-`owner-go` items are never spawned by "go all auto-ok"; each needs its explicit ID.
+Only `owner-go` items wait for a go; each needs its explicit ID.
 Metrics that are not bench tasks (idle watts, `qa-metrics`, tokens per run) you re-measure
 yourself, read-only.
 
