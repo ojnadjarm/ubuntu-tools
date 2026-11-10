@@ -212,7 +212,7 @@ echo 0 >"$D/k3"; echo 1500 >"$D/k4"; echo disabled >"$D/zufs"
 grep -v -e dfwb -e dfwc -e dvolb -e dvolc "$DL" >"$DL.ok"; mv "$DL.ok" "$DL"
 dr >/dev/null; is 'drift exits 0 when only boot-restored rows differ' "$?" 0
 
-# T1597: a pre-move ledger line names $HARNESS_HOME/backups; once that folder is gone the undo reads $FLEET_BACKUPS_DIR.
+# T1597: a pre-move ledger line names the old backups folder; once it is gone the undo reads $FLEET_BACKUPS_DIR.
 HH="$WORK/hh"; FB="$WORK/aw/backups"; mkdir -p "$HH" "$FB/conf/s1"; echo old >"$FB/conf/s1/old"; echo new >"$WORK/mv-target"
 jq -nc --arg t "$WORK/mv-target" --arg rb "cat '$HH/backups/conf/s1/old' >'$WORK/mv-target'" --arg rd "cat '$WORK/mv-target'" \
   '{ts:"2026-11-01T00:00:00+0100",id:"mv1",cmd:"x",target:$t,before:"old",after:"new",rollback:$rb,redo:"true",read:$rd}' >>"$PC_LEDGER"

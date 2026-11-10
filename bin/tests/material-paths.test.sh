@@ -6,12 +6,12 @@ A="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 . "$A/bin/tests/lib/assert.sh"
 bad=0
-OLD='HARNESS_HOME/backups|agents/backups|state/claims-snap|agents/dashboard/plans|HERE, .plans|agents/toolsmith/(proposals|BACKLOG)|AGENTS, .toolsmith'
+OLD='HARNESS_HOME''/backups|agents''/backups|state/claims-snap|agents/dashboard/plans|HERE, .plans|agents/toolsmith/(proposals|BACKLOG)|AGENTS, .toolsmith'
 
 # scan <dir> — tool lines (not tests, not docs) naming an old home without a `fallback` mark.
 scan() { grep -rnE "$OLD" "$1" --include='*' 2>/dev/null | grep -v '/tests/' | grep -v 'fallback' | grep -vE '\.(md|html)(:|$)'; }
 
-mkdir -p "$W/neg/bin"; printf 'BAK="$HARNESS_HOME/backups/x"\n' >"$W/neg/bin/tool"
+mkdir -p "$W/neg/bin"; printf 'BAK="$HARNESS_HOME/%s/x"\n' backups >"$W/neg/bin/tool"
 is "selftest: the scan catches an old-path writer" "$(scan "$W/neg" | wc -l)" 1
 
 hits=$(cd "$A" && git ls-files bin lib units dashboard/dash code-review/swarm.js | grep -v '^bin/tests/' |
