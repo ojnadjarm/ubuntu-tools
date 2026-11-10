@@ -1,0 +1,12 @@
+[Unit]
+Description=Dashboard terminal shell (ttyd on a 0700 unix socket, T1548)
+PartOf=dash-terminal.service
+
+[Service]
+Type=simple
+RuntimeDirectory=dash-terminal
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/ttyd -i %t/dash-terminal/tty.sock -b /tty -W -O -m 3 -P 20 -w %h -t fontSize=16 -t disableLeaveAlert=true -t titleFixed=terminal /bin/bash -l
+Restart=on-failure
+RestartSec=5
+MemoryMax=400M

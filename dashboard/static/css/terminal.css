@@ -1,0 +1,4 @@
+/* Terminal screen: one frame that fills the space under the band, never wider than the page. */
+.nxs.term { display: flex; flex-direction: column; }
+.termf { display: block; width: 100%; height: calc(100dvh - 16rem); min-height: 22rem; border: 1px solid var(--line2); border-radius: 6px; background: var(--bg); }
+@media (max-width: 820px) { .termf { height: calc(100dvh - 300px); min-height: 16rem; } }

@@ -18,6 +18,7 @@ export const SCREENS = [
   { id: "docs", sec: "library", name: "Docs", shape: "sheets", load: "/static/js/screens/docs.js" },
   { id: "files", sec: "library", name: "Files", shape: "sheets", load: "/static/js/screens/files.js" },
   { id: "style", sec: "library", name: "Style", shape: "swatch", load: "/static/js/screens/style.js" },
+  { id: "terminal", sec: "library", name: "Terminal", shape: "rain", load: "./screens/terminal.js" },
   { id: "record", sec: "voice", name: "Record", load: "./screens/record.js" },
   { id: "pronunciation", sec: "voice", name: "Pronunciation", load: "./screens/pron.js" },
 ];

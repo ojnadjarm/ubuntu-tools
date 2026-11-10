@@ -1,0 +1,10 @@
+/* Terminal page: the shell fills the screen, a key bar under it on touch screens and narrow windows. */
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; background: #101114; overflow: hidden; }
+body { display: flex; flex-direction: column; height: 100dvh; }
+#tty { flex: 1; width: 100%; min-height: 0; border: 0; display: block; }
+.keys { display: none; gap: 4px; padding: 4px; background: #17181c; border-top: 1px solid #2a2c33; overflow-x: auto; scrollbar-width: none; }
+.keys button { flex: 1 0 auto; min-width: 44px; height: 44px; padding: 0 8px; border: 1px solid #2f323a; border-radius: 6px; background: #22242a; color: #e6e6e6; font: 600 15px/1 ui-monospace, monospace; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.keys button:active { background: #2f323a; }
+.keys button[aria-pressed="true"] { background: #c9a227; color: #101114; border-color: #c9a227; }
+@media (pointer: coarse), (max-width: 820px) { .keys { display: flex; } }

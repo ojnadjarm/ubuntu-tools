@@ -1,0 +1,24 @@
+# Dashboard terminal front (T1548): 127.0.0.1 only, reached through tailscale serve https :8476; only the owner's Tailscale login passes.
+{
+	admin off
+	auto_https off
+}
+
+http://:{$TERMINAL_PORT:8477} {
+	bind 127.0.0.1
+	header Content-Security-Policy "frame-ancestors 'self' https://{$HARNESS_TAILNET_FQDN}:8498"
+	header Cache-Control no-store
+	@owner header Tailscale-User-Login {$TERMINAL_OWNER_LOGIN}
+	handle @owner {
+		handle /tty/* {
+			reverse_proxy unix/{$XDG_RUNTIME_DIR}/dash-terminal/tty.sock
+		}
+		handle {
+			root * {$TERMINAL_WEB}
+			file_server
+		}
+	}
+	handle {
+		respond "forbidden" 403
+	}
+}

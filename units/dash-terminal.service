@@ -1,0 +1,17 @@
+[Unit]
+Description=Dashboard terminal front (caddy 127.0.0.1:8477, owner's Tailscale login only, T1548)
+Requires=dash-terminal-tty.service
+After=dash-terminal-tty.service
+
+[Service]
+Type=simple
+Environment=TERMINAL_WEB=%h/agents/dashboard/terminal/web XDG_DATA_HOME=%t/dash-terminal-caddy XDG_CONFIG_HOME=%t/dash-terminal-caddy
+RuntimeDirectory=dash-terminal-caddy
+ExecStart=/bin/bash -c '. %h/agents/bin/env.sh; [ -n "$TERMINAL_OWNER_LOGIN" ] || { echo "TERMINAL_OWNER_LOGIN unset in config.env: refusing to start" >&2; exit 78; }; exec /usr/bin/caddy run --config %h/agents/dashboard/terminal/Caddyfile --adapter caddyfile'
+Restart=on-failure
+RestartSec=5
+RestartPreventExitStatus=78
+MemoryMax=200M
+
+[Install]
+WantedBy=default.target
