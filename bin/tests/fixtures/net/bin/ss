@@ -11,6 +11,12 @@ tcp   LISTEN 0      128        127.0.0.1:8642        0.0.0.0:*     users:(("dark
 tcp   LISTEN 0      4096       0.0.0.0:8052           0.0.0.0:*     users:(("docker-proxy",pid=1002,fd=7))
 tcp   LISTEN 0      128        0.0.0.0:19998          0.0.0.0:*     users:(("node",pid=1003,fd=20))
 tcp   LISTEN 0      128        0.0.0.0:22             0.0.0.0:*     users:(("sshd",pid=1004,fd=3))
+tcp   LISTEN 0      4096       127.0.0.1:8070         0.0.0.0:*     users:(("caddy",pid=1005,fd=6))
+tcp   LISTEN 0      4096       [::1]:8070             [::]:*        users:(("caddy",pid=1005,fd=7))
+tcp   LISTEN 0      4096       100.64.0.1%tailscale0:8070 0.0.0.0:* users:(("tailscaled",pid=1006,fd=9))
+tcp   LISTEN 0      4096       [fd7a:115c:a1e0::1]%tailscale0:8070 [::]:* users:(("tailscaled",pid=1006,fd=10))
+tcp   LISTEN 0      4096       127.0.0.53%lo:53       0.0.0.0:*     users:(("systemd-resolve",pid=1007,fd=15))
+udp   UNCONN 0      0          0.0.0.0:5353           0.0.0.0:*     users:(("avahi-daemon",pid=1008,fd=12))
 LISTEN
     ;;
 esac

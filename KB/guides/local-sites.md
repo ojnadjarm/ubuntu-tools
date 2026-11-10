@@ -1,6 +1,6 @@
 # Serve a Vite site locally like GitHub Pages (ailearning, portfolio) at a stable https link
 
-Ticket: T85 · Last verified: 2026-10-20 (T846: `sites --help`, paths, caddy 2.6.2, coreutils 9.7, listeners, `tailscale serve status`); 2026-10-19 (T425) by `sites.test.sh` (stale build.json fails verify, fresh passes) and a live publish
+Ticket: T85 · Last verified: 2026-11-10 (T1559: ss loopback-only bind, LAN curl refused, tailnet http + https 200); 2026-10-20 (T846: `sites --help`, paths, caddy 2.6.2, coreutils 9.7, listeners, `tailscale serve status`); 2026-10-19 (T425) by `sites.test.sh` (stale build.json fails verify, fresh passes) and a live publish
 
 ## When to use
 - **ailearning: the only test site (T271, owner 2026-10-07).** `.local/drop.sh` = `sites publish ailearning` (build env `REVIEW=toggle` from `BUILD_ENV`
@@ -12,7 +12,7 @@ Ticket: T85 · Last verified: 2026-10-20 (T846: `sites --help`, paths, caddy 2.6
 
 ## The path we took
 - Started from `drop.service` (caddy 2.6.2 in bwrap) and the repo's `tests/lib/pages-sim.mjs`; architecture `~/agent-work/research/2026-09-24/T85/ARCHITECTURE.md`.
-- `sites.service`: caddy in bwrap, only `~/sites` + the Caddyfile bound read-only, :8072 on LAN IP, tailnet IP, ::1; `tailscale serve --https=8472`.
+- `sites.service`: caddy in bwrap, only `~/sites` + the Caddyfile bound read-only, :8072 on 127.0.0.1 + ::1 (T1559); `tailscale serve --https=8472` and `--tcp=8072` → 127.0.0.1:8072.
 - `~/.config/sites/Caddyfile` = the Pages rules: dir without slash → 301 (a `redir` with a `file {path}/` matcher, runs before file_server's own 308),
   misses → 404 with `/<first segment>/404.html` else `/404.html` (`handle_errors` + `try_files`), `encode zstd gzip`, `Cache-Control` no-cache for HTML (`*/`, `*.html`) and `build.json`, `public, max-age=31536000, immutable` for `*/assets/*` (Vite-hashed), max-age=600 for the rest (T403),
   explicit `Content-Type` for .opus .m4a .avif .wasm .woff2 (no `/etc/mime.types` inside the sandbox).
@@ -34,7 +34,7 @@ systemctl --user status sites.service; tailscale serve status   # want :8472 →
 - A plain `mv` cannot replace a non-empty directory; `mv --exchange` (coreutils 9.7) can. 20 swaps under a poll: 3438 requests, 0 non-200.
 - Stage must be on the same filesystem as `~/sites` (rename); keep it outside `~/sites` so it is never served.
 - Bind the `~/sites` directory, never replace `~/sites` itself: the bwrap bind would keep pointing at the old inode.
-- LAN: no ufw rule for 8072 (agents may not edit ufw, FLEET §5.3); tailnet works. Owner command in `KB/machine.md`.
+- LAN: nothing listens there since T1559 (2026-11-10, tailnet only); `curl http://<lan-ip>:8072` is refused, the tailnet URLs work.
 - `sites publish ailearning --no-build` snapshots whatever `dist/` holds: a plain `npm run build` there has no review switch. Rebuild through `sites`.
 - `tools/link-check.mjs` read `/u/x/?review=1` as a missing page until T271 stripped the query; `base-check` refuses a bare `?review=1` (use the page's own path).
 - The stray `python3 -m http.server 8071` (portfolio preview, 2026-09-21) is gone (nothing listens on 8071, 2026-10-20); its LAN ufw rule remains, owner's call to drop it.

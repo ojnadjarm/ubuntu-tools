@@ -91,6 +91,8 @@ _keepalive() {
   done
 }
 _internet() { ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 && echo reachable || echo unreachable; }
+# _lanl — tcp ports listening off loopback/tailnet outside pc-net's allow-list (T1559), or none.
+_lanl() { local p; p=$("$BIN/pc-net" listeners --check 2>/dev/null | sed -n 's/^exposed: [^\t]*:\([0-9]*\)\t.*/\1/p' | sort -un | paste -sd' '); echo "${p:-none}"; }
 # A cheap portal-liveness dbus call replaces a real screenshot (0.81 s wall + ~15 python3
 # forks every 15 min for a value that rarely regresses); measured cheaper than a real
 # screenshot even under --fresh, so it is used unconditionally, and still fails when the
@@ -177,6 +179,7 @@ _spawn wifi 900 _pf wifi 900 _wifi
 _spawn fleet 60 _pf fleet 60 _fleet
 _spawn services 60 _pf services 60 _svc
 _spawn internet 60 _pf internet 60 _internet
+_spawn lan_listeners 60 _pf lan_listeners 60 _lanl
 _spawn tailscale 60 _pf tailscale 60 _ts
 case $MODE in text|json|check)
   _spawn idle 30 _pf idle 30 _idle
@@ -328,6 +331,9 @@ done
 _await internet
 n_inet=$(cached internet 60 _internet); : "${n_inet:=unreachable}"
 gate internet [ "$n_inet" != reachable ]
+_await lan_listeners
+n_lanl=$(cached lan_listeners 60 _lanl); : "${n_lanl:=none}"
+V[lan_listeners]=OK; [ "$n_lanl" = none ] || V[lan_listeners]=WARN
 sz=$(cached screenshot 900 _shotkb); : "${sz:=0}"
 gate screenshot [ "$sz" -le 10240 ]
 _orch_bad() { [ "$a_orch" != ok ] && [ "$a_orch" != off ]; }
@@ -503,6 +509,12 @@ serve_row() {
     "$(cut -d' ' -f1 <<<"$pairs" | paste -sd, - | sed 's/,/, /g')" \
     "$(sed 's/ /→/' <<<"$pairs" | paste -sd, - | sed 's/,/, /g')" "$n_ts_ip" "${ip6:+ + $ip6}"
 }
+# serve_tcp_row: one table row for the tailscale serve tcp fronts (same port on the tailnet → 127.0.0.1, T1559).
+serve_tcp_row() {
+  local ports
+  ports=$(tailscale serve status --json 2>/dev/null | jq -r '.TCP // {} | to_entries[] | select(.value.TCPForward) | .key' | sort -n | paste -sd, - | sed 's/,/, /g')
+  [ -z "$ports" ] || printf '| %s | tailscale serve (tailscaled) tcp, same port → 127.0.0.1 | tailnet only |\n' "$ports"
+}
 # moodle_dirs: each Moodle env dir (trailing /), i.e. a compose stack mounting /var/www/html, as moodle-keep.
 moodle_dirs() {
   local d
@@ -548,34 +560,28 @@ Regenerate: \`pc status --facts --apply\` rewrites only the region between the p
 - SSH: \`ssh $USER@$(jq -r '.Self.DNSName // "n/a"' <<<"${n_ts_json:-null}" | sed 's/\.$//')\`
 
 ## Published ports
-| Port | Container | Compose project |
-|---|---|---|
+| Port | Container | Compose project | Bind |
+|---|---|---|---|
 $(docker ps --format '{{.Names}}|{{.Label "com.docker.compose.project"}}|{{.Ports}}' 2>/dev/null \
   | while IFS='|' read -r n p ports; do
-      for pt in $(grep -oE '0\.0\.0\.0:[0-9]+' <<<"$ports" | cut -d: -f2 | sort -un); do
-        echo "| $pt | $n | $p |"; done; done | sort -t'|' -k2 -n)
+      grep -oE '(0\.0\.0\.0|127\.0\.0\.1):[0-9]+' <<<"$ports" | sort -u | while IFS=: read -r b pt; do
+        echo "| $pt | $n | $p | $b |"; done; done | sort -t'|' -k2 -n)
 
-## Exposure (T25 firewall)
-ufw is $(cached ufw-status 300 sudo -n ufw status | sed -n '1s/Status: //p' || echo unknown): default deny incoming,
-allow outgoing, everything allowed in on \`tailscale0\`, and only these ports from the LAN
-\`192.168.1.0/24\`. Docker-published ports bypass ufw's INPUT chain, so the same source policy is
-repeated in the \`DOCKER-USER\` chain (\`/etc/ufw/after.rules\`, matched on \`conntrack --ctorigdstport\`
-because DNAT rewrites the port before FORWARD).
+## Exposure (T25 firewall, T1559 tailnet only)
+Every service binds loopback (Docker publishes \`127.0.0.1:<port>\`); the tailnet reaches it through \`tailscale serve\`
+(https fronts 84xx, tcp fronts on the same port). LAN listeners left: 22 (sshd), 19998 (dashboard, T1546-H3) and the
+Vass env (8045, 5445, 5000), the owner's by hand (\`~/drop/T1559/OWNER-STEPS.md\`). \`pc net listeners --check\` and the
+\`lan_listeners\` row of \`pc status\` name any other. ufw is $(cached ufw-status 300 sudo -n ufw status | sed -n '1s/Status: //p' || echo unknown):
+default deny incoming, everything allowed in on \`tailscale0\`; Docker-published ports bypass ufw's INPUT chain
+(\`DOCKER-USER\` mirror in \`/etc/ufw/after.rules\`), so the bind address is the real fence.
 
-| Port | Service | Allowed sources |
+| Port | Service | Reachable from |
 |---|---|---|
-| 22 | OpenSSH (public key only) + Tailscale SSH | tailscale0, 192.168.1.0/24 |
-| 80 | shared proxy (docker) | tailscale0 |
-| 1025 | mailhog SMTP (docker) | tailscale0 |
-| 4444 | selenium (docker) | tailscale0, 192.168.1.0/24 |
-| 5452 | moodle52 postgres (docker) | tailscale0 |
-| 5900 | selenium VNC (docker) | tailscale0 |
-| 7900 | selenium noVNC (docker) | tailscale0 |
-| 8025 | mailhog UI (docker) | tailscale0, 192.168.1.0/24 |
-| 8052 | Moodle 5.2 (docker) | tailscale0, 192.168.1.0/24 |
+| 22 | OpenSSH (public key only) + Tailscale SSH | tailscale0, 192.168.1.0/24 (binds 0.0.0.0 + ::) |
+| 80, 1025, 5900, 7900 | shared proxy, mailhog SMTP, selenium VNC (docker) | loopback only |
+$(serve_tcp_row)
 $(serve_row)
-| 19998 | agents status page | tailscale0, 192.168.1.0/24 (binds 0.0.0.0 + ::) |
-| 19999 | netdata | tailscale0, 192.168.1.0/24 (binds 0.0.0.0 + ::) |
+| 19998 | agents status page | tailscale0, 192.168.1.0/24 (binds 0.0.0.0 + ::; T1546-H3) |
 
 Everything else from the LAN and everything from the internet is dropped. Revert commands:
 \`~/agents/KB/runbooks/locked-out.md\`.
@@ -592,9 +598,9 @@ $(moodle_lines)
 - Shared stack: mailhog http://localhost:8025, selenium :4444, proxy :80
 
 ## Monitoring (netdata, T26)
-- Dashboard (tailnet + LAN): http://$(jq -r '.Self.DNSName // "localhost"' <<<"${n_ts_json:-null}" | sed 's/\.$//'):19999
+- Dashboard (tailnet): http://$(jq -r '.Self.DNSName // "localhost"' <<<"${n_ts_json:-null}" | sed 's/\.$//'):19999 (tcp front) or https :8499
 - API example: \`curl 'http://$n_ts_ip:19999/api/v1/data?chart=system.cpu&after=-60&points=1'\`
-- Bound to 0.0.0.0 + :: (ufw limits :19999 to tailscale0 + 192.168.1.0/24) · no cloud account · config \`/etc/netdata/netdata.conf\`
+- Bound to 127.0.0.1 + ::1 (tailscale serve fronts it, T1559) · no cloud account · config \`/etc/netdata/netdata.conf\`
 - CRITICAL alarms push to the owner via \`/usr/local/sbin/netdata-alert\` + \`netdata-alert-drain.path\`
 - go.d docker collector pinned to \`update_every: 60\` in \`/etc/netdata/go.d/docker.conf\` (EF01): its
   \`GET /images/json\` costs ~0.5 s of dockerd+containerd CPU per call on the containerd image store
@@ -676,6 +682,7 @@ add network tailscale "$n_ts_state" "${V[tailscale]}"
 _dns() { resolvectl dns 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1; }
 add network dns "$(slow dns 3600 _dns)"
 add network internet "$n_inet" "${V[internet]}"
+add network lan_listeners "$n_lanl" "${V[lan_listeners]}"
 
 for s in $SERVICES; do add services "$s" "${SV[$s]}" "${V[svc_$s]}"; done
 

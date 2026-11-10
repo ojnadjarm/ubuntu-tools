@@ -20,6 +20,22 @@ is '8642 unit is dark-eye.service' "$(jq -r '.[]|select(.port==8642)|.unit' <<<"
 is '19998 scope is all'          "$(jq -r '.[]|select(.port==19998)|.scope' <<<"$J")" all
 is '19998 unit is agents-dashboard.service' "$(jq -r '.[]|select(.port==19998)|.unit' <<<"$J")" agents-dashboard.service
 
+# 1b. scope strips brackets and %iface (T1559): ::1 and 127.0.0.53%lo are lo, the fd7a tailnet range is ts.
+is '[::1]:8070 scope is lo'          "$(jq -r '.[]|select(.addr=="[::1]")|.scope' <<<"$J")" lo
+is '127.0.0.53%lo scope is lo'       "$(jq -r '.[]|select(.port==53)|.scope' <<<"$J")" lo
+is 'fd7a tailnet scope is ts'        "$(jq -r '.[]|select(.addr|startswith("[fd7a"))|.scope' <<<"$J")" ts
+is '100.64.0.1%tailscale0 is ts'     "$(jq -r '.[]|select(.addr|startswith("100."))|.scope' <<<"$J")" ts
+
+# 1c. listeners --check: tcp lan/all ports outside PC_NET_ALLOW go red; udp and lo/ts never count.
+out=$(PC_NET_ALLOW="22 19998" fx listeners --check); rc=$?
+is 'check names the exposed 8052 only' "$out" $'exposed: 0.0.0.0:8052\tall\tdocker-proxy\tmoodle52-app-1'
+is 'check exits 1 when exposed' "$rc" 1
+out=$(PC_NET_ALLOW="22 19998 8052" fx listeners --check); rc=$?
+is 'check exits 0 when all allowed' "$rc" 0
+case "$out" in ok:*) ok 'check prints ok';; *) nok 'check prints ok' "$out";; esac
+out=$(fx listeners --check); rc=$?
+is 'default allow-list keeps 8052 red' "$rc" 1
+
 # 2. who <port> — docker port owner and a plain unit.
 out=$(fx who 8052)
 case "$out" in *moodle52-app-1*) ok 'who 8052 -> moodle52-app-1';; *) nok 'who 8052 -> moodle52-app-1' "$out";; esac

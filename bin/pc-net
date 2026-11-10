@@ -8,6 +8,8 @@ BIN="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 pc_usage 'usage: pc net [ifaces|listeners|tailscale] [--json]        default: ifaces + listeners + tailscale one-liners
        pc net ifaces [--json]                          addresses, state, mtu, rx/tx bytes per interface
        pc net listeners [--json]                        listening sockets: proto, addr, port, pid, comm, scope, unit|container
+       pc net listeners --check                         exit 1 on a tcp listener with scope lan/all outside PC_NET_ALLOW
+                                                        (default "22 19998 8045 5445"; T1559: tailnet + loopback only)
        pc net sockets [--pid P|--comm C] [--json]        established sockets, optionally filtered
        pc net who <port>                                who owns a listening port: pid, comm, unit|container
        pc net tailscale [--json]                         self, peers, serve mappings
@@ -35,7 +37,7 @@ for a in "$@"; do case $a in
      elif [ "${NEXTCOMM:-0}" = 1 ]; then FILTER_COMM=$a; NEXTCOMM=0
      else ARGV+=("$a"); fi;;
 esac; done
-PC_EXTRA_FLAGS=(--since: --stats --confirm --con:)
+PC_EXTRA_FLAGS=(--since: --stats --confirm --con: --check)
 pc_opt ${ARGV[@]+"${ARGV[@]}"}
 SINCE=${PC_OPT[--since]-}
 sub="${PC_ARGS[0]:-}"
@@ -53,11 +55,12 @@ TS_IP="$(cached net_tsip 60 _ts_ip4)"
 
 # scope_for <addr> — lo, all, ts (tailscale range) or lan.
 scope_for() {
-  case "$1" in
-    127.0.0.1|::1) echo lo;;
+  local a=${1%%%*}; a=${a#[}; a=${a%]}
+  case "$a" in
+    127.*|::1) echo lo;;
     0.0.0.0|'*'|::) echo all;;
-    100.*) echo ts;;
-    *) if [ -n "$TS_IP" ] && [ "$1" = "$TS_IP" ]; then echo ts; else echo lan; fi;;
+    100.*|fd7a:115c:a1e0:*) echo ts;;
+    *) if [ -n "$TS_IP" ] && [ "$a" = "$TS_IP" ]; then echo ts; else echo lan; fi;;
   esac
 }
 
@@ -131,7 +134,19 @@ listeners_json() {
       pid: (if .[3] == "" then null else (.[3] | tonumber) end),
       comm: .[4], scope: .[5], unit: .[6]})'
 }
+# check_listeners — tcp listeners reachable off loopback/tailnet whose port is not allow-listed; exit 1 on any.
+check_listeners() {
+  local bad
+  bad=$(listeners_json | jq -r --arg allow "${PC_NET_ALLOW-22 19998 8045 5445}" '
+    ($allow | split(" ") | map(select(length>0) | tonumber)) as $ok
+    | .[] | select(.proto=="tcp" and (.scope=="lan" or .scope=="all") and ((.port) as $p | $ok | index($p) | not))
+    | "\(.addr):\(.port)\t\(.scope)\t\(.comm)\t\(.unit)"' | sort -u)
+  if [ -z "$bad" ]; then echo "ok: no tcp listener outside loopback/tailnet (allow: ${PC_NET_ALLOW-22 19998 8045 5445})"; return 0; fi
+  sed 's/^/exposed: /' <<<"$bad"
+  return 1
+}
 do_listeners() {
+  [ -n "${PC_OPT[--check]-}" ] && { check_listeners; exit; }
   local j; j=$(listeners_json)
   if [ "$JSON" = 1 ]; then printf '%s\n' "$j"; return; fi
   jq -r '.[] | "\(.proto)\t\(.addr):\(.port)\t\(.scope)\t\(.pid)\t\(.comm)\t\(.unit)"' <<<"$j" \

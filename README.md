@@ -151,7 +151,7 @@ Agent working papers (briefs, research, evidence, archive, owner material) live 
 2. **Where to look**
    - **Status page (phone): `http://$HARNESS_TAILNET_FQDN:19998`** (also `http://$HARNESS_LAN_IP:19998` on the LAN) — one screen: verdict,
      power, disk, docker + Moodle URLs, network, agents, last 24 h, live charts. Full netdata
-     is on :19999 (tailnet name or LAN IP, both work).
+     is on :19999 or https :8499 (tailnet only, T1559).
    - `agents-status` — every agent: enabled, schedule, next run, last run, exit code, duration.
    - `~/agents/<name>/REPORT.md` — what that agent did on its last run (5 lines).
    - `agents-log --since 24h` — audit log of every tool call agents made.

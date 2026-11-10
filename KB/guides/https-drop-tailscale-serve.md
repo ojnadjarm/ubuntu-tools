@@ -1,19 +1,20 @@
 # Give the owner an https link to a file or web build in ~/drop (tailscale serve :8470)
 
-Ticket: T70 (set up by T70-godot-web; T65/T69 found the need) · Last verified: 2026-10-20 (T846) by `tailscale serve status` (11 fronts), Caddyfile bind/matcher, `drop-link --help`; 2026-10-19 (T487) by `bin/tests/drop-link.test.sh` 7/7 (1.7 s), `tailscale serve status`, and `curl` on 127.0.0.1/::1 :8070 + :8470 (200; `.html` opens, other files `attachment`)
+Ticket: T70 (set up by T70-godot-web; T65/T69 found the need) · Last verified: 2026-11-10 (T1559: ss loopback-only bind, LAN curl refused, tailnet http + https 200); 2026-10-20 (T846) by `tailscale serve status` (11 fronts), Caddyfile bind/matcher, `drop-link --help`; 2026-10-19 (T487) by `bin/tests/drop-link.test.sh` 7/7 (1.7 s), `tailscale serve status`, and `curl` on 127.0.0.1/::1 :8070 + :8470 (200; `.html` opens, other files `attachment`)
 
 ## When to use
 - Any file, video, zip or web page he should open or test: **invoke the `drop-link` skill** (`drop-link <path> <tNN>`),
   send the https link it prints. Never an `http://…:8070` link (owner, 2026-09-24).
 - Adding https to another local port: same `tailscale serve` pattern below.
-- Not for private files: the drop has no login (tailnet over https, tailnet + LAN over http).
+- Not for private files: the drop has no login (tailnet only: https :8470, http :8070 through a tcp front).
 
 ## The path we took
-- `drop.service` (user unit): caddy inside bwrap, `~/drop` bind-mounted read-only as `/srv/drop`, `:8070` bound to the
-  LAN IP, the tailnet IP, `127.0.0.1` and `::1` (`~/.config/drop/Caddyfile`). Every file URL not ending in `/`, `.html` or `.htm`
+- `drop.service` (user unit): caddy inside bwrap, `~/drop` bind-mounted read-only as `/srv/drop`, `:8070` bound to
+  `127.0.0.1` and `::1` only (`~/.config/drop/Caddyfile`, T1559); the tailnet gets it through `tailscale serve`. Every file URL not ending in `/`, `.html` or `.htm`
   gets `Content-Disposition: attachment` (forced download); `.html` pages open; folders get an index or a browse listing (T388).
 - https without certificates to manage: tailscaled terminates TLS with the tailnet cert and proxies to the http port.
-  `sudo tailscale serve --bg --https=8470 http://<tailnet-ip>:8070` → `https://<tailnet-fqdn>:8470/`, tailnet only.
+  `tailscale serve --bg --https=8470 http://127.0.0.1:8070` → `https://<tailnet-fqdn>:8470/`, tailnet only (the
+  operator user needs no sudo); `tailscale serve --bg --tcp=8070 tcp://127.0.0.1:8070` keeps `http://<tailnet-fqdn>:8070`.
 - Why https: plain http on a non-localhost origin is not a secure context, so `navigator.gpu` is absent and three.js
   falls back to WebGL2 without a word. `http://localhost` is a secure context, which is why agents did not see it.
 - `bin/drop-link` (architecture: publish → url → check, one small bash file): hard-links a file (`ln`), or a folder
@@ -25,12 +26,14 @@ Ticket: T70 (set up by T70-godot-web; T65/T69 found the need) · Last verified: 
 drop-link ./dist t70                                         # folder with index.html → https://…:8470/t70/dist/ (page opens)
 drop-link /path/to/video.mp4 t72                             # → https://…:8470/t72/video.mp4 (downloads)
 bash ~/agents/bin/tests/drop-link.test.sh                    # 7 checks, temp drop + loopback server, 0.4 s
-tailscale serve status                                       # want: :8470 → http://<tailnet-ip>:8070
+tailscale serve status                                       # want: :8470 → http://127.0.0.1:8070
 systemctl --user status drop.service                         # caddy up?
 sudo tailscale serve --https=8470 off                        # undo (orchestrator's go only)
 ```
 Other https fronts on the same pattern: 8452 Moodle 5.2, 8453 Moodle 5.3, 8472 ailearning test site, 8498 dashboard (for the mic), 8499 netdata, 8644 Dark Eye page;
-`tailscale serve status` lists 11 fronts (also 8445, 8446, 8447, 8474).
+`tailscale serve status` lists 12 https fronts (also 8445, 8446, 8447, 8474, 8476) and 9 tcp fronts on the same port as
+the service (4444, 5452, 5453, 8025, 8052, 8053, 8070, 8072, 19999; T1559). New service: bind loopback, add a front,
+then `pc net listeners --check` must stay clean.
 
 ## Pitfalls (measured)
 - He tested the T65 Atelier mockup over http: 5 of 5 runs fell back to WebGL2 ("WebGPU is not available"); over :8470
