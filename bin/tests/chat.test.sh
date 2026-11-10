@@ -278,6 +278,26 @@ PY
   is 'wake-po: the owner still goes at full plan' "$(inbox)" 15
   parked() { python3 -c "import json; print(' '.join(r['why'] for r in map(json.loads, open('$ST/queue/$1.jsonl'))))"; }
   is 'wake-po: undelivered wakes parked per seat' "$(parked fx) / $(parked gx)" 'plan paused / refused'
+
+  # A4: a batch whose timer died is flushed by the next dispatch to any seat; a failed po-ask is sent once.
+  rm -rf "$ST/queue"
+  a=$(CHAT_SEAT=gx chat post @fx 'timer died'); f=$(inbox)
+  python3 -c "import json; s = json.load(open('$W')); s['armed'] -= 61000; json.dump(s, open('$W', 'w'))"
+  CHAT_SEAT=fx chat post harness 'unrelated' >/dev/null
+  is 'wake-po: a stale armed batch is flushed by the next dispatch to any seat' \
+     "$(( $(inbox) - f )) $(python3 -c "import json; print(len(json.load(open('$W'))['msgs']))")" '1 0'
+  ev 'wake-po: the swept request carries the stale message' 'grep -lq "^$a #dm-fx--gx gx: timer died" $(ls -t "$P"/inbox/* | head -1)'
+  rm "$P/BRIEF.md"; touch "$WORK/no-timer"
+  b=$(CHAT_SEAT=gx chat post @fx 'po-ask down' 2>/dev/null); rm "$WORK/no-timer"
+  is 'wake-po: a failed po-ask is parked, not kept in the batch' \
+     "$(outcomes fx | awk '{print $NF}') $(parked fx) $(python3 -c "import json; print(len(json.load(open('$W'))['msgs']))")" 'refused refused 0'
+  ev 'wake-po: a failed po-ask marks no wake (no "starting")' "! grep -q '\"id\": $b' '$ST/woke/fx.json'"
+  : >"$P/BRIEF.md"; f=$(inbox)
+  is 'wake-po: the drain re-sends it' "$(python3 -c "import sys; sys.path.insert(0, '$BIN/../lib')
+import chat_dispatch; print(chat_dispatch.drain())")" "[('fx', 'delivered')]"
+  $flush
+  is 'wake-po: a failed po-ask is delivered once after the drain' \
+     "$(( $(inbox) - f )) $(cat "$P"/inbox/* | grep -c "^$b #dm-fx--gx gx: po-ask down")" '1 1'
   is 'wake-po: a newline in the text is an indented line, not a forged message line' \
      "$(python3 -c "import sys; sys.path.insert(0, '$BIN/../lib')
 import chat_wake; print(chat_wake.render([{'id': 7, 'ch': 'org', 'from': 'fx', 'text': 'a\n9 #org owner: x'}]).split(chr(10))[1:3])")" \

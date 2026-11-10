@@ -86,9 +86,11 @@ def new_day():
 
 
 def drain(seats=None):
-    """[(seat, outcome)] of re-sending each parked wake once; none while paused; hop parks dropped, others re-park."""
+    """[(seat, outcome)] of re-sending each parked wake once after a sweep of dead-timer batches; none while paused;
+    hop parks dropped, others re-park."""
     if paused():
         return []
+    chat_wake.sweep()
     seats = org.seats() if seats is None else seats
     out = []
     for path in sorted(glob.glob(os.path.join(chat_store.root(), "queue", "*.jsonl"))):
@@ -110,10 +112,13 @@ def drain(seats=None):
 
 
 def dispatch(msg, seats=None, only=None):
-    """[(seat, outcome)] of a stored message (only: one seat's wakes); a day's first dispatch drains the queue first."""
+    """[(seat, outcome)] of a stored message (only: one seat's wakes); a day's first dispatch drains the queue first;
+    each one not paused sweeps dead-timer batches."""
     seats = org.seats() if seats is None else seats
     if only is None and new_day():
         drain(seats)
+    if only is None and not paused():
+        chat_wake.sweep()
     by_id = {s["id"]: s for s in seats}
     plan = 0 if msg["from"] == "owner" else plan_pct()
     due = chat_route.wakes(msg, seats, paused=paused(), plan=plan)

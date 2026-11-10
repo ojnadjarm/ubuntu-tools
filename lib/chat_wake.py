@@ -260,8 +260,9 @@ def _row(ch, mid):
     return got[0] if got and got[0]["id"] == mid else None
 
 
-def flush(seat):
-    """File the seat's pending messages as one inbox request; False (batch kept) when po-ask fails."""
+def flush(seat, parked=()):
+    """File the seat's pending messages as one inbox request; False when po-ask fails: the batch keeps all but the
+    (ch, id) pairs in parked, which the caller re-queues."""
     with _batch(seat) as state:
         pending, state["msgs"], state["armed"] = state["msgs"], [], 0
     rows = [r for r in (_row(p["ch"], p["id"]) for p in pending) if r]
@@ -275,8 +276,23 @@ def flush(seat):
         woke(seat, rows, os.path.basename(run.stdout.strip()))
     else:
         with _batch(seat) as state:
-            state["msgs"] = pending + state["msgs"]
+            state["msgs"] = [p for p in pending if (p["ch"], p["id"]) not in parked] + state["msgs"]
     return done
+
+
+def sweep():
+    """[(seat, filed)] of flushing each batch with messages whose timer is gone (armed STALE_MS ago, or never)."""
+    now, out = int(time.time() * 1000), []
+    for path in sorted(glob.glob(os.path.join(_dir(), "*.json"))):
+        try:
+            with open(path) as f:
+                state = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if state.get("msgs") and now - state.get("armed", 0) >= STALE_MS:
+            seat = os.path.basename(path)[:-len(".json")]
+            out.append((seat, flush(seat)))
+    return out
 
 
 class PoInbox(Adapter):
@@ -296,10 +312,9 @@ class PoInbox(Adapter):
             armed = now - state["armed"] < STALE_MS
             if not armed and not owner:
                 state["armed"] = now
-        if not owner:
-            woke(seat, msgs)
         if owner or (not armed and not _arm(seat)):
-            return DELIVERED if flush(seat) else REFUSED
+            return DELIVERED if flush(seat, {(m["ch"], m["id"]) for m in msgs}) else REFUSED
+        woke(seat, msgs)
         return QUEUED if armed else DELIVERED
 
 
