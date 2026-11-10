@@ -1,0 +1,4 @@
+id	question	must	source
+c01	What is the name of the fleet mascot?	Pemberton	mascot.md
+c02	On which weekday do deploys happen?	Thursday	deploys.md
+c101	What colour is the release lighthouse?	saffron	deploys.md

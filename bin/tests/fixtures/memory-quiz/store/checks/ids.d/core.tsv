@@ -1,0 +1,4 @@
+id	page	state	source
+c01	core/CORE.md	live	mascot.md
+c02	core/CORE.md	live	deploys.md
+c101	core/lore.md	live	deploys.md

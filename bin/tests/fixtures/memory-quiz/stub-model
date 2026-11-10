@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+"""Stub model for the quiz test: answers every question with its whole context (memory load + the memory pages), no model."""
+import os
+import re
+import subprocess
+import sys
+
+prompt = sys.stdin.read()
+pages = re.search(r"<memory-pages>(.*?)</memory-pages>", prompt, re.S).group(1)
+load = subprocess.run(["memory", "load"], capture_output=True, text=True).stdout
+ctx = " ".join((load + " " + pages).split())
+qs = re.findall(r"^(\d+): (.*)$", re.search(r"<questions>(.*?)</questions>", prompt, re.S).group(1), re.M)
+with open(os.environ["QUIZ_LOG"], "a", encoding="utf-8") as log:
+    log.write("".join(f"{os.environ.get('MEMORY_DOMAINS') or 'core'}\t{q}\n" for _, q in qs))
+print("\n".join(f"{n}: {ctx}" for n, _ in qs))

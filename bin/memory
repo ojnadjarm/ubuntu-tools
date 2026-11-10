@@ -92,7 +92,7 @@ def check(store, seat, args):
             die(f"{f} is not a folder of the store {store.root}")
         folders.append(rel)
     before = memory_check.before_dir(args.before) if args.before else memory_check.before_git(store)
-    found = memory_check.run(store, before, folders)
+    found = memory_check.run(store, before, folders, ["quiz-changed" if args.changed else "quiz"] if args.quiz else [])
     for f in found:
         print(memory_check.fmt(f))
     score = live(store, args.domains) if args.live else LIVE_N
@@ -174,6 +174,8 @@ def main():
     p.add_argument("--before", help="the store folder to compare ids against (default: the store's git HEAD)")
     p.add_argument("folders", nargs="*", help="check only these folders of the store")
     p.add_argument("--live", action="store_true", help=f"then ask {LIVE_N} quiz questions through one real headless agent (haiku)")
+    p.add_argument("--quiz", action="store_true", help="also the closed-book quiz (haiku): a question green in checks/quiz-baseline.tsv that turns red")
+    p.add_argument("--changed", action="store_true", help="--quiz: only the questions of pages changed since --before (default: git HEAD)")
     p.add_argument("--domains", type=lambda v: [d for d in re.split(r"[\s,]+", v) if d], default=[],
                    help="--live: the domains the agent gets besides core (comma-separated)")
     p = sub.add_parser("install", help="write the carriers: the core line, project stubs, MEMORY.md, agent.env domains")

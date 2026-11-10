@@ -239,7 +239,20 @@ def experience_only(store, before):
     return out
 
 
+def quiz(store, before):
+    """The closed-book quiz (lib/memory_quiz.py): a question green in the baseline that turns red."""
+    import memory_quiz
+    return memory_quiz.check(store, before)
+
+
+def quiz_changed(store, before):
+    """The quiz on the questions of pages that changed since before."""
+    import memory_quiz
+    return memory_quiz.check(store, before, only_changed=True)
+
+
 CHECKERS = [budgets, ids, line_format, secrets, machine_values, untrusted, provenance, experience_only]
+ON_DEMAND = {"quiz": quiz, "quiz-changed": quiz_changed}
 
 
 def before_git(store):
@@ -260,8 +273,8 @@ def before_dir(path):
     return {p: prev.text(p) for p in prev.pages()}
 
 
-def run(store, before, folders=()):
-    """Every checker's findings, kept to files under the given store-relative folders (none = all)."""
+def run(store, before, folders=(), also=()):
+    """Every checker's findings plus the named ON_DEMAND ones, kept to files under the given store-relative folders (none = all)."""
     scope = [f.rstrip("/") + "/" for f in folders if f not in ("", ".")]
-    found = [f for c in CHECKERS for f in c(store, before)]
+    found = [f for c in CHECKERS + [ON_DEMAND[n] for n in also] for f in c(store, before)]
     return [f for f in found if not scope or any((f.file + "/").startswith(s) for s in scope)]
