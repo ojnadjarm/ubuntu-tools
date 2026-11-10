@@ -50,7 +50,8 @@ async function crawl(p) {
       if (card && card.matches(":popover-open")) card.hidePopover();
       document.querySelector(`.office .olist [data-who="${CSS.escape(r[0])}"]`).click();
       for (const id of r.slice(1)) document.querySelector(`#office-card [data-who="${CSS.escape(id)}"]`).click();
-      const c = document.getElementById("office-card"), q = (s) => [...c.querySelectorAll(s)];
+      const c = document.getElementById("office-card"), q = (s) => [...c.querySelectorAll(s)], fold = c.querySelector("details.cdet");
+      if (fold) fold.open = true;
       const rows = q("dl").flatMap((dl) => [...dl.children].filter((e) => e.tagName === "DT").map((dt) => [dt.textContent, dt.nextElementSibling.textContent, dt.nextElementSibling.className]));
       const st = c.querySelector(".st");
       return { id: c.dataset.for, title: c.querySelector("h2").textContent, text: c.innerText, rows, hrefs: q("a[href]").map((a) => a.getAttribute("href")), titles: q("[title]").map((e) => e.title),

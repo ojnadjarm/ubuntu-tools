@@ -4,6 +4,7 @@ import { creature } from "../../avatar.js";
 import { talking, watch } from "../../familiars/talk.js";
 import { sync } from "../../ui/sync.js";
 import { card } from "../fields.js";
+import { tiers } from "../tier.js";
 
 let M = null, el = null;
 
@@ -26,19 +27,23 @@ const more = (n) => (n ? `<p class="more">+${n} more</p>` : "");
 const part = (x) => `<section class="cpart"><h3>${esc(x.h)}</h3>` + (x.rows.length ? dl(x.rows) : "") + (x.chips.length ? `<ul class="roll">${x.chips.map(chip).join("")}</ul>` : "") +
   (x.rows.length || x.chips.length ? more(x.more) : `<p class="quiet">${esc(x.empty)}</p>`) + `</section>`;
 
-/* Markup of the card of p (a person or a room). */
-function html(p) {
-  const c = card(p), pose = talking(p.id) ? "talking" : c.state.pose;
+/* Prose lines of a card. */
+const lns = (l) => l.map((x) => `<p class="ln">${esc(x)}</p>`).join("");
+/* A room's Members list: 5 chips, then how many more; "nobody here" when empty. */
+const members = (c) => (c.parts ? `<h3>Members</h3>` : "") + (c.roll.length ? `<ul class="roll">${c.roll.map((id) => M.who[id]).filter(Boolean).map(chip).join("")}</ul>` + more(c.rollMore) : `<p class="quiet">nobody here</p>`);
+/* One tier of a card: its lines, `mid` (the state line and team link at a glance), rows, Members (when the tier holds them) and parts. */
+const tier = (c, t, mid = "") => lns(t.lines) + (t.rows.length ? dl(t.rows) : "") + mid + (t.roll && c.roll ? members(c) : "") + t.parts.map(part).join("");
+
+/* Markup of the card of p (a person or a room): the glance tier, then the rest in one Details fold, closed unless `open`. */
+function html(p, open = false) {
+  const c = card(p), T = tiers(c), pose = talking(p.id) ? "talking" : c.state.pose, fold = tier(c, T.fold);
+  const st = `<p class="st ${esc(pose)}${c.dim ? " dim" : ""}"><i></i>${esc(c.state.text)}</p>` +
+    (c.bar != null ? `<progress max="100" value="${Math.round(c.bar)}" aria-label="To the next run"></progress>` : "");
   return CLOSE + (p.people ? "" : `<div class="cfig${c.dim ? " dim" : ""}" aria-hidden="true">${creature(p.id, talking(p.id) ? "talking" : p.pose, p.role)}</div>`) +
     `<div class="cbody"><h2>${esc(c.title)}${c.rank ? `<span><b class="sr-only"> · </b>${esc(c.rank)}</span>` : ""}</h2>` + (c.sub ? `<p class="area">${esc(c.sub)}</p>` : "") +
-    (c.lines || []).map((l) => `<p class="ln">${esc(l)}</p>`).join("") +
-    `<p class="st ${esc(pose)}${c.dim ? " dim" : ""}"><i></i>${esc(c.state.text)}</p>` +
-    (c.bar != null ? `<progress max="100" value="${Math.round(c.bar)}" aria-label="To the next run"></progress>` : "") +
-    (c.rows.length ? dl(c.rows) : "") +
-    (c.home ? `<p class="home"><button type="button" class="chip" data-who="${esc(c.home.id)}">${esc(c.home.text)}</button></p>` : "") +
-    (c.roll ? (c.parts ? `<h3>Members</h3>` : "") + (c.roll.length ? `<ul class="roll">${c.roll.map((id) => M.who[id]).filter(Boolean).map(chip).join("")}</ul>` + more(c.rollMore) : `<p class="quiet">nobody here</p>`) : "") +
-    (c.parts || []).map(part).join("") +
-    (c.actions || []).map((a) => `<a class="btn" href="${esc(safe(a.href))}">${esc(a.label)}</a>`).join("") + `</div>`;
+    lns(T.top.lines) + st + tier(c, { ...T.top, lines: [] }, c.home ? `<p class="home"><button type="button" class="chip" data-who="${esc(c.home.id)}">${esc(c.home.text)}</button></p>` : "") +
+    (c.actions || []).map((a) => `<a class="btn" href="${esc(safe(a.href))}">${esc(a.label)}</a>`).join("") +
+    (fold ? `<details class="cdet"${open ? " open" : ""}><summary>Details</summary>${fold}</details>` : "") + `</div>`;
 }
 
 /* Opens the card of `id` under the viewport point `anchor` {x, y}, else above it, and moves focus into it (closing gives it back); without an anchor it stays where it is. */
@@ -61,7 +66,7 @@ export function refresh(next) {
   M = next;
   if (!isOpen()) return;
   const p = M.who[el.dataset.for];
-  if (p) sync(el, html(p)); else close();
+  if (p) sync(el, html(p, !!el.querySelector(".cdet[open]"))); else close();
 }
 
 watch(() => { if (M) refresh(M); });

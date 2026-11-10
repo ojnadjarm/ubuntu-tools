@@ -34,7 +34,7 @@ const measure = (p) => p.evaluate(() => {
   const z = document.createElement("span"); z.textContent = "0".repeat(20); z.style.cssText = "position:absolute;visibility:hidden;white-space:nowrap";
   ln.appendChild(z); const ch = z.getBoundingClientRect().width / 20; z.remove();
   return { shown: true, for: c.dataset.for, l: r.left, r: r.right, t: r.top, b: r.bottom, vw: document.documentElement.clientWidth, vh: innerHeight,
-    cpl: ln.clientWidth / ch, lines: [...body.children].map((e) => e.textContent), tree };
+    cpl: ln.clientWidth / ch, lines: [...body.children].flatMap((e) => (e.matches("details") ? [...e.children].map((x) => x.textContent) : [e.textContent])), tree };
 });
 
 (async () => {
@@ -65,7 +65,7 @@ const measure = (p) => p.evaluate(() => {
         check(() => assert.deepStrictEqual(m.tree, tree0), `${where}: opening it moves nothing in the tree`);
         if (id !== "orchestrator") {
           const L = m.lines, ab = L.findIndex((l) => l.endsWith(ABOUT)), role = L.findIndex((l) => /^(Product owner|Project manager)/.test(l)), wake = L.findIndex((l) => /^Asleep until/.test(l)), now = L.findIndex((l) => /^Now /.test(l));
-          check(() => assert.ok(/ · (Manager|Product Owner)$/.test(L[0]) && ab > 0 && ab < role && role < wake && wake < now, JSON.stringify(L)), `${where}: Name · Rank, about, role, wake, state`);
+          check(() => assert.ok(/ · (Manager|Product Owner)$/.test(L[0]) && ab > 0 && ab < now && now < role && role < wake, JSON.stringify(L)), `${where}: Name · Rank, about, state; role, wake in Details`);
         }
         await p.keyboard.press("Escape");
         const gone = await measure(p);

@@ -133,7 +133,7 @@ async function odd(b, base) {
   for (const [id, home] of [["tiny-epic-narrator"], ["a0000000000000002"], ["a0000000000000002", true]]) {
     await p.$eval(`.office .olist [data-who="${id}"]`, (e) => e.click());
     if (home) await p.click("#office-card .home [data-who]");
-    seen.push(await p.$eval("#office-card:popover-open", (c) => [c.querySelectorAll("img").length, (c.innerText.match(/<img src=x onerror=window\.__pwn=1>/g) || []).length > 0]));
+    seen.push(await p.$eval("#office-card:popover-open", (c) => { const d = c.querySelector("details.cdet"); if (d) d.open = true; return [c.querySelectorAll("img").length, (c.innerText.match(/<img src=x onerror=window\.__pwn=1>/g) || []).length > 0]; }));
     await p.keyboard.press("Escape");
   }
   assert.deepStrictEqual([seen, await p.evaluate(() => window.__pwn), errs], [[[0, true], [0, true], [0, true]], undefined, []], "text is escaped on the seat, agent and pool cards, never markup");

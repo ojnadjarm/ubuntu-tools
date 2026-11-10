@@ -107,6 +107,8 @@ async function walk(p) {
         if (team.open.shown) {
           const chip = await p.evaluate(() => !!document.querySelector("#office-card .chip"));
           if (chip) {
+            for (let i = 0; i < 20 && !(await p.evaluate(() => !!document.activeElement.closest("#office-card .cdet > summary"))); i++) await p.keyboard.press("Tab");
+            await p.keyboard.press("Enter");
             for (let i = 0; i < 20 && !(await p.evaluate(() => !!document.activeElement.closest("#office-card .chip"))); i++) await p.keyboard.press("Tab");
             const to = await p.evaluate(() => document.activeElement.dataset.who);
             await p.keyboard.press("Enter");

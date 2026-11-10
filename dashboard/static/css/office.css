@@ -67,6 +67,13 @@
 .ocard .chip:hover { background: var(--w08); }
 .ocard .chip span { margin-left: auto; color: var(--mute); font-size: max(var(--fs-min), .8rem); }
 .ocard .btn { display: inline-flex; align-items: center; min-height: 2.6rem; margin-top: .8rem; padding: .5rem 1.1rem; text-decoration: none; }
+.ocard .cbody > .ln { -webkit-line-clamp: 1; line-clamp: 1; }
+.ocard .cdet { margin-top: .8rem; border-top: 1px solid var(--line); }
+.ocard .cdet > summary { display: flex; align-items: center; min-height: 44px; color: var(--mid); font-size: max(var(--fs-min), .8rem); text-transform: uppercase; letter-spacing: .16em; cursor: pointer; list-style: none; }
+.ocard .cdet > summary::-webkit-details-marker { display: none; }
+.ocard .cdet > summary::before { content: "▸"; margin-right: .6rem; color: var(--g); }
+.ocard .cdet[open] > summary::before { content: "▾"; }
+.ocard .cdet > summary:hover { color: var(--txt); }
 @media (max-width: 899px), (pointer: coarse) {
   .office .hud button, .office .who, .ocard .chip, .ocard .btn { min-width: 44px; min-height: 44px; }
 }

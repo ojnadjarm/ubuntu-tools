@@ -68,7 +68,8 @@ async function soft(b, base, [w, h]) {
   };
   const rows = [...await ses("vass"), ...await ses("tiny-epic-narrator"), ...await ses("a0000000000000002", true)];
   await p.click('.office .olist [data-who="orchestrator"]');
-  const own = await p.$$eval("#office-card .cbody > dl dt", (l) => l.filter((d) => d.textContent === "Folder").length);
+  await p.click("#office-card .cdet > summary");
+  const own = await p.$$eval("#office-card .cbody > dl dt, #office-card .cbody > .cdet > dl dt", (l) => l.filter((d) => d.textContent === "Folder").length);
   await p.keyboard.press("Escape");
   assert.strictEqual(rows.length + own, FIX.sessions.length, `${w}: every session on a card (no boards, owner 2026-11-10): ${JSON.stringify(rows)}`);
   assert.ok(rows.some((r) => /^protected project /.test(r) && !/[~/]/.test(r)), `${w}: the protected session row says protected project, no folder`);
@@ -120,9 +121,9 @@ async function staffCards(b, base, [w, h]) {
   assert.ok(!/\bhello\b/.test(await p.$eval(".office .olist", (e) => e.innerText)), `${w}: a hidden agent is not in the list`);
   for (const [id, labels] of Object.entries(STAFF)) {
     await p.click(`.office .olist [data-who="${id}"]`);
-    const c = await p.$eval("#office-card:popover-open", (e) => ({ dt: [...e.querySelectorAll(".cbody > dl dt")].map((d) => d.textContent), gold: [...e.querySelectorAll(".cbody > dl dd.bad")].map((d) => d.previousElementSibling.textContent),
+    const c = await p.$eval("#office-card:popover-open", (e) => ({ dt: [...e.querySelectorAll(".cbody > dl dt, .cbody > .cdet > dl dt")].map((d) => d.textContent), top: [...e.querySelectorAll(".cbody > dl dt")].map((d) => d.textContent), gold: [...e.querySelectorAll(".cbody > dl dd.bad")].map((d) => d.previousElementSibling.textContent),
       ln: e.querySelector(".area") && e.querySelector(".area").textContent, dim: !!e.querySelector(".cfig.dim"), msg: e.querySelectorAll("a.btn").length, box: e.getBoundingClientRect().toJSON() }));
-    assert.deepStrictEqual(c.dt, labels, `${w}: the card of ${id} has the Roster's rows`);
+    assert.deepStrictEqual(c.dt, [...labels.filter((k) => c.top.includes(k)), ...labels.filter((k) => !c.top.includes(k))], `${w}: the card of ${id} has the Roster's rows (glance, then Details, each in Roster order)`);
     assert.ok(c.box.left >= 0 && c.box.right <= w && c.box.top >= 0 && c.box.bottom <= h, `${w}: the card of ${id} is inside the viewport`);
     if (id in FIX.seats.reduce((o, s) => ({ ...o, [s.id]: 1 }), {})) assert.strictEqual(c.msg, 1, `${w}: a seat keeps its Message`);
     else assert.deepStrictEqual([c.ln.split(" · ")[0], c.msg], [id, 0], `${w}: a staff card names its id under its name and has no Message`);
