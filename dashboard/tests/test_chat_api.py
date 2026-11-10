@@ -305,6 +305,28 @@ class ChatApi(unittest.TestCase):
         self.assertEqual(self.req("/api/chat/seen", {"ch": "harness", "id": "1"})[0], 400)
         self.assertEqual(self.store_files(), [])
 
+    def test_huge_cursor_is_a_400(self):
+        svc.chat_store.post({"ch": "harness", "from": "fx", "text": "x"})
+        for q in ("ch=harness&after=", "ch=harness&before=", "recent=1&after=", "recent=1&before="):
+            self.assertEqual(self.req("/api/chat?" + q + "9" * 30)[0], 400, q)
+
+    def test_bad_org_still_reads_and_says_degraded(self):
+        svc.chat_store.post({"ch": "harness", "from": "fx", "text": "kept"})
+        self.assertNotIn("degraded", self.req("/api/chat?ch=harness")[1])
+        with open(os.environ["ORG_FILE"], "w") as f:
+            f.write('{"seats": [')
+        code, body, _ = self.req("/api/chat?ch=harness")
+        self.assertEqual(code, 200)
+        self.assertEqual([m["text"] for m in body["messages"]], ["kept"])
+        self.assertEqual(body["thinking"], [])
+        self.assertTrue(body["degraded"])
+
+    def test_paused_is_sent_while_the_file_exists(self):
+        self.assertNotIn("paused", self.req("/api/chat")[1])
+        os.makedirs(svc.chat_store.root(), exist_ok=True)
+        open(os.path.join(svc.chat_store.root(), "PAUSED"), "w").close()
+        self.assertIs(self.req("/api/chat")[1]["paused"], True)
+
     def test_search(self):
         """Every word in any case over every channel the owner sees (or one), oldest first, rows with ch; bad q or channel 400."""
         a = svc.chat_store.post({"ch": "harness", "from": "fx", "text": "Build is GREEN"})

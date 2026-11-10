@@ -52,10 +52,16 @@ def read_route(h, path):
         if before is not None:
             before = int(before)
         messages, more = page(ch, q.get("recent") == ["1"], after, before)
-    except ValueError as e:
+    except (ValueError, OverflowError, OSError) as e:
         return h.json({"error": str(e)}, 400)
-    h.json({"messages": messages, "more": more, "channels": chat_store.channels(OWNER),
-            "wakes": {"today": chat_dispatch.today()}, "thinking": chat_thinking.now()})
+    out = {"messages": messages, "more": more, "channels": chat_store.channels(OWNER), "wakes": {"today": chat_dispatch.today()}}
+    try:
+        out["thinking"] = chat_thinking.now()
+    except Exception as e:
+        out["thinking"], out["degraded"] = [], f"{type(e).__name__}: {e}"
+    if chat_dispatch.paused():
+        out["paused"] = True
+    h.json(out)
 
 
 @route("GET", "/api/chat/search")
