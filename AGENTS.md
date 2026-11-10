@@ -5,7 +5,7 @@
 `config.env`/ntfy topic this is, `notify-owner`'s target; usually the same person.
 
 ## 1. Know the machine
-- **First run `harness context`** (brief, output rules, guidelines); workers `harness context --worker` (≤ 600 B);
+- **First run `harness context`** (brief, output rules, guidelines); workers `harness context --worker` (≤ 750 B);
   the owner-facing session keeps its SessionStart hook's rules.
 - `pc status` before stating or deciding on power, network, disk, services, timers; `pc see` for the screen.
   **Never ask the owner for readable state.**

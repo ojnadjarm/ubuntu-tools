@@ -46,6 +46,8 @@ AGENT_NAME=x "$HARNESS" context --json | grep -q "ADHD OUTPUT MODE" && ok 0 "AGE
 AGENT_NAME=x "$HARNESS" context --json | grep -q '"hookEventName": "SessionStart"' && ok 1 "AGENT_NAME keeps the machine context" || ok 0 "AGENT_NAME keeps the machine context"
 w=$("$HARNESS" context --worker)
 [ "$(printf '%s\n' "$w" | wc -c)" -le 720 ] && ok 1 "--worker fits 720 bytes" || ok 0 "--worker fits 720 bytes"
+doc=$(grep -o 'context --worker` (≤ [0-9]* B)' "$HOME/agents/AGENTS.md" | grep -o '[0-9]\+')
+[ "${doc:-0}" -ge 720 ] && ok 1 "AGENTS.md's --worker cap ($doc B) covers the 720-byte hard cap" || ok 0 "AGENTS.md's --worker cap (${doc:-none}) covers the 720-byte hard cap"
 case "$w" in *"6. Claims: claims add T<n>"*"wait-for --label X --until"*) ok 1 "--worker names the claims and wait-for verbs";; *) ok 0 "--worker names the claims and wait-for verbs";; esac
 case "$w" in "Machine now: "*"at most 6 lines"*) ok 1 "--worker keeps the brief and report rules";; *) ok 0 "--worker keeps the brief and report rules";; esac
 case "$w" in *"ADHD OUTPUT MODE"*) ok 0 "--worker drops the ADHD skill";; *) ok 1 "--worker drops the ADHD skill";; esac
