@@ -4,7 +4,7 @@ set -uo pipefail
 BIN="$HOME/agents/bin"
 FIX="$BIN/tests/fixtures/brief-check"
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
-export AGENT_WORK="$WORK"
+export AGENT_WORK="$WORK" MEMORY_HOME="$WORK/memory"
 . "$HOME/agents/bin/tests/lib/assert.sh"
 
 # 1. lint: green (rules via _common include) and red pass; bare misses all five.

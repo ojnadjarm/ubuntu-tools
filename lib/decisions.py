@@ -2,6 +2,7 @@
 import os
 import re
 
+import memory_store
 from agent_work import agent_work
 
 PROJECTS = {
@@ -19,10 +20,13 @@ def ref(name):
 
 
 def path(name):
-    """Absolute path of the project's ledger."""
+    """Absolute path of the project's ledger: the store's ($MEMORY_HOME) once the old path is moved (gone or a link)."""
     if name == "fleet":
-        return os.path.expanduser("~/agents/KB/DECISIONS.md")
-    return os.path.join(agent_work(), "decisions", f"{name}.md")
+        old, new = os.path.expanduser("~/agents/KB/DECISIONS.md"), os.path.join(memory_store.home(), "core", "ledger.md")
+    else:
+        old = os.path.join(agent_work(), "decisions", f"{name}.md")
+        new = os.path.join(memory_store.home(), "domains", name, "ledger.md")
+    return old if (os.path.isfile(old) and not os.path.islink(old)) or not os.path.isfile(new) else new
 
 
 def named(text):

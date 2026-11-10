@@ -5,6 +5,10 @@ The one exception: the owner's own chat direct message (`from: chat`, `channel: 
 your answer with `chat post @owner "<text>"` (short, no paths, hosts or secrets; exit 2 anywhere else, exit 3 held).
 
 ## Read first, every run
+0. Memory (T1599): your card is `$MEMORY_HOME/domains/narrador-interactivo-ia/DOMAIN.md`, your ledger `ledger.md` beside it
+   (`state/PROJECT.md` and the old ledger path are links: edit the store files, Edit refuses a link). At the start
+   of a run fold `$MEMORY_HOME/domains/narrador-interactivo-ia/inbox/*` into DOMAIN.md (one fact a line, <= 200 characters, `(yy-mm-dd)`,
+   a new `^id`), run `memory check domains/narrador-interactivo-ia`, then file the notes in `$MEMORY_HOME/archive/notes/`.
 1. `~/agents/KB/DECISIONS.md` (fleet decisions), then `state/PROJECT.md` (what it is now), `state/BACKLOG.md` (open
    requests), `state/REPO.md` when present (branches and PRs, written by code before the run), the last 20 lines of
    `state/RUNS.md`, the last 40 lines of your ledger `~/agent-work/decisions/narrador-interactivo-ia.md`, any `context:` line in

@@ -20,8 +20,10 @@ cp -r "$BIN/../po-template" "$HARNESS_HOME/po-template"
 printf '#!/bin/sh\n[ -e "$WORK/gh.fail" ] && exit 4\necho "$*" >"$WORK/gh.args"\ncat "$WORK/gh.out" 2>/dev/null\n' >"$WORK/stubs/gh"
 chmod +x "$WORK/stubs/gh"
 export PATH="$WORK/stubs:$BIN:$PATH" WORK
+export MEMORY_HOME="$WORK/memory"; mkdir -p "$MEMORY_HOME/domains"
 
 # selftest
+case "$MEMORY_HOME" in "$WORK"/*) ok 'selftest: MEMORY_HOME is the fixture store';; *) echo "FAIL selftest: MEMORY_HOME $MEMORY_HOME"; exit 1;; esac
 if curl -sS -m 3 -o /dev/null https://github.com 2>/dev/null; then echo 'FAIL selftest: sandbox reaches the network'; exit 1; fi
 ok 'selftest: no route to github.com'
 is 'selftest: gh is the fake' "$(command -v gh)" "$WORK/stubs/gh"
@@ -105,6 +107,28 @@ rm "$AGENT_WORK/decisions/fx.md"; rm "$S/HISTORY.md"
 out=$(po-context check fx); rc=$?
 is 'check: misses exit 1' "$rc" 1
 is 'check: one line per miss (rule, HISTORY, ledger)' "$(grep -c '^miss: fx: ' <<<"$out")" 3
+
+# store (T1599-M06): the card and ledger come from $MEMORY_HOME/domains/<p>/ once the old paths are moved
+po-new sc "Store card" --parent rt >/dev/null
+D="$MEMORY_HOME/domains/sc"; SS="$HARNESS_HOME/po-sc/state"; mkdir -p "$D"
+mv "$SS/PROJECT.md" "$D/DOMAIN.md"; echo '- 2026-11-01 · Kites are blue · "blue kites"' >"$D/ledger.md"
+is 'store: card and ledger only in the store is ok' "$(po-context check sc)" "ok sc"
+ln -s "$D/DOMAIN.md" "$SS/PROJECT.md"; ln -s "$D/ledger.md" "$AGENT_WORK/decisions/sc.md"
+is 'store: old paths as links to the store is ok' "$(po-context check sc)" "ok sc"
+rm "$SS/PROJECT.md"; head -c 7000 /dev/zero | tr '\0' x >>"$D/DOMAIN.md"
+ev 'store: the store card is the one checked (7 KB miss)' 'grep -q "^miss: sc: PROJECT.md 7[0-9]* bytes > 6 KB" <<<"$(po-context check sc)"'
+cp "$HARNESS_HOME/po-template/PROJECT.md" "$SS/PROJECT.md"
+is 'store: an old path still a real file wins (not moved yet)' "$(po-context check sc)" "ok sc"
+rm "$D/ledger.md" "$AGENT_WORK/decisions/sc.md"
+ev 'store: no ledger anywhere names the old path' 'grep -qx "miss: sc: ledger $AGENT_WORK/decisions/sc.md missing" <<<"$(po-context check sc)"'
+is 'store: a manager with no store card behaves as today' "$(po-context check nc)" "ok nc"
+py() { python3 -c "import sys; sys.path.insert(0, '$BIN/../lib'); import decisions; print(decisions.path('$1'))"; }
+mkdir -p "$MEMORY_HOME/domains/kite" "$MEMORY_HOME/core"; touch "$MEMORY_HOME/domains/kite/ledger.md" "$MEMORY_HOME/core/ledger.md"
+is 'decisions: a ledger in the store is read from the store' "$(py kite)" "$MEMORY_HOME/domains/kite/ledger.md"
+is 'decisions: fleet reads core/ledger.md from the store' "$(py fleet)" "$MEMORY_HOME/core/ledger.md"
+is 'decisions: no store ledger keeps the old path' "$(py kelp)" "$AGENT_WORK/decisions/kelp.md"
+touch "$AGENT_WORK/decisions/kite.md"
+is 'decisions: an old ledger still a real file wins' "$(py kite)" "$AGENT_WORK/decisions/kite.md"
 
 # usage
 po-context check nope >/dev/null 2>&1; is 'usage: unknown PO exits 2' "$?" 2

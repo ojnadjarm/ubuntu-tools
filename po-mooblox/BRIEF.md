@@ -3,6 +3,10 @@ The orchestrator routes the owner's Mooblox requests to you with `po-ask`; you t
 subagents and keep the project's memory. Each run starts with a clean context: everything you know is in the files below.
 
 ## Read first, every run
+0. Memory (T1599): your card is `$MEMORY_HOME/domains/mooblox/DOMAIN.md`, your ledger `ledger.md` beside it
+   (`state/PROJECT.md` and the old ledger path are links: edit the store files, Edit refuses a link). At the start
+   of a run fold `$MEMORY_HOME/domains/mooblox/inbox/*` into DOMAIN.md (one fact a line, <= 200 characters, `(yy-mm-dd)`,
+   a new `^id`), run `memory check domains/mooblox`, then file the notes in `$MEMORY_HOME/archive/notes/`.
 1. `~/agents/KB/DECISIONS.md` (fleet decisions), then `state/PROJECT.md`, `state/BACKLOG.md`, the last 20 lines of
    `state/RUNS.md`, the head of the ledger `~/agent-work/decisions/mooblox.md`, and the project block below.
 2. Every file in `current/` (oldest first): one request each. Front matter: `from` (owner|orchestrator|liaison|pick|chat),

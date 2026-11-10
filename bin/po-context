@@ -4,6 +4,8 @@
 #          HISTORY <= 150 lines, refs/INDEX.md names every file in refs/. A manager (PARENT= in agent.env) also: the 6
 #          template headings in order, HISTORY.md, its ledger, a REPO.md under 24 h old when its clone exists, the 8
 #          standing rules in BRIEF.md. Prints `ok <p>`, else one `miss: ...` line each and exits 1.
+#          PROJECT.md and the ledger are read from $MEMORY_HOME/domains/<p>/{DOMAIN,ledger}.md once the old path is
+#          moved (gone or a link); an old path still a real file wins (T1599-M06).
 #   repo:  rewrites state/REPO.md (temp + mv) from the clone in discord-liaison/projects.json: HEAD, branches with
 #          commits on no remote, worktrees, open PRs (`gh pr list`, 20 s). Read-only in the clone: no fetch, no lock.
 help() { awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; }
@@ -19,14 +21,22 @@ registry() { jq -r --arg po "po-$p" ".projects[]? | select(.po == \$po) | .$1 //
   "$HARNESS_HOME/discord-liaison/projects.json" 2>/dev/null | head -1; }
 clone=$(registry clone); clone="${clone/#\~/$HOME}"
 
+# pick <old> <store> — the store file once the old path is moved (gone or a link), else the old path.
+pick() { if { [ -f "$1" ] && [ ! -L "$1" ]; } || [ ! -f "$2" ]; then echo "$1"; else echo "$2"; fi; }
+mem="${MEMORY_HOME:-$HOME/memory}/domains/$p"
+card=$(pick "$s/PROJECT.md" "$mem/DOMAIN.md")
+ledger=$(pick "$AGENT_WORK/decisions/$p.md" "$mem/ledger.md")
+
 check() {
   local miss=() f n want got rule parent
   parent=$(grep -c '^PARENT=' "$d/agent.env" 2>/dev/null)
   local files=(PROJECT BACKLOG RUNS); [ "$parent" = 0 ] || files+=(HISTORY)
-  for f in "${files[@]}"; do [ -f "$s/$f.md" ] || miss+=("state/$f.md missing"); done
-  if [ -f "$s/PROJECT.md" ]; then
-    n=$(wc -l <"$s/PROJECT.md"); [ "$n" -le 80 ] || miss+=("PROJECT.md $n lines > 80 (oldest lines to HISTORY.md)")
-    n=$(wc -c <"$s/PROJECT.md"); [ "$n" -le 6144 ] || miss+=("PROJECT.md $n bytes > 6 KB (oldest lines to HISTORY.md)")
+  for f in "${files[@]}"; do
+    [ -f "$s/$f.md" ] || { [ "$f" = PROJECT ] && [ -f "$card" ]; } || miss+=("state/$f.md missing")
+  done
+  if [ -f "$card" ]; then
+    n=$(wc -l <"$card"); [ "$n" -le 80 ] || miss+=("PROJECT.md $n lines > 80 (oldest lines to HISTORY.md)")
+    n=$(wc -c <"$card"); [ "$n" -le 6144 ] || miss+=("PROJECT.md $n bytes > 6 KB (oldest lines to HISTORY.md)")
   fi
   if [ -f "$s/BACKLOG.md" ]; then
     n=$(grep -E '^\|' "$s/BACKLOG.md" | grep -vcE '^\|[-:| ]+$|^\| *id *\|')
@@ -41,9 +51,9 @@ check() {
   fi
   if [ "$parent" != 0 ]; then
     want=$(grep '^## ' "$HARNESS_HOME/po-template/PROJECT.md" | sed 's/ (.*//' | paste -sd'|' -)
-    got=$(grep '^## ' "$s/PROJECT.md" 2>/dev/null | sed 's/ (.*//' | paste -sd'|' -)
+    got=$(grep '^## ' "$card" 2>/dev/null | sed 's/ (.*//' | paste -sd'|' -)
     [ "$got" = "$want" ] || miss+=("PROJECT.md headings '$got', want '$want'")
-    [ -f "$AGENT_WORK/decisions/$p.md" ] || miss+=("ledger $AGENT_WORK/decisions/$p.md missing")
+    [ -f "$ledger" ] || miss+=("ledger $ledger missing")
     if [ -n "$clone" ] && [ -d "$clone/.git" ] && [ -z "$(find "$s/REPO.md" -mmin -1440 2>/dev/null)" ]; then
       miss+=("REPO.md missing or older than 24 h (po-context repo $p)")
     fi
