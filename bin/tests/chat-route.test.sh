@@ -48,6 +48,8 @@ check("an agent in a seat's own channel wakes nobody", r.wakes(msg("moo", "disc"
 check("a plain channel message wakes nobody", r.wakes(msg("org", "moo", "status: green"), ORG) == [])
 check("a harness ask wakes the ceo", go(r.wakes(msg("harness", "moo", "how do I x", kind="ask"), ORG)) == [("ceo", "ask")])
 check("the owner is never a wake target", r.wakes(msg("dm-moo--owner", "moo", "@owner"), ORG) == [])
+check("a mention in a direct message wakes nobody outside it",
+      go(r.wakes(msg("dm-ceo--moo", "ceo", "@disc x", to=["disc"]), ORG)) == [("moo", "dm")])
 
 # No daily limit (P38): the 13th agent-caused wake of a day goes like the first; the owner is never counted.
 seen = [r.wakes(msg("dm-ceo--moo", "ceo"), ORG)[0] for _ in range(13)]

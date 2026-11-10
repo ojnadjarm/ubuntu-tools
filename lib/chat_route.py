@@ -22,12 +22,13 @@ def may_post(seat, ch, org):
 
 
 def _targets(msg, seats):
-    """[(seat id, reason)] the message addresses, first reason per seat, sender and owner left out."""
+    """[(seat id, reason)] the message addresses (a dm: its two members only), first reason per seat, sender and owner left out."""
     out = []
     if msg["ch"].startswith("dm-"):
         out += [(s, "dm") for s in msg["ch"][3:].split("--")]
-    out += [(s, "to") for s in msg.get("to") or []]
-    out += [(s, "mention") for s in MENTION.findall(msg["text"].lower())]
+    else:
+        out += [(s, "to") for s in msg.get("to") or []]
+        out += [(s, "mention") for s in MENTION.findall(msg["text"].lower())]
     if msg["from"] == "owner" and msg["ch"] in seats:
         out.append((msg["ch"], "own-channel"))
     if msg["ch"] == "harness" and msg.get("kind") == "ask":
