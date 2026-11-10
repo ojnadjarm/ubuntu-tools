@@ -18,7 +18,6 @@ declare -A KNOWN=()
 while read -r c k; do KNOWN[$c]=$k; done <<'EOF'
 agent-disable help
 agent-enable help
-agent-exec help
 agent-now help
 agent-run help
 agents-start help bogus
