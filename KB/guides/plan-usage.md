@@ -53,4 +53,4 @@ tail ~/agents/log/pulse.log
 ## Links
 - Code: `~/agents/bin/plan-usage`, `~/agents/bin/orchestrator-pulse`, `~/agents/bin/pulse-5h-reset`, `~/.config/systemd/user/{orchestrator-pulse,pulse-5h-reset}.{service,timer}`
 - Skill: `~/.claude/skills/plan-usage/SKILL.md`
-- Kill switch: `agents-stop` stops `orchestrator-pulse.{service,timer}` but not `pulse-5h-reset.timer` (not in its list; stop it by hand); `agents-start` follows the roster rows in `KB/orchestrator.md`
+- Kill switch: `agents-stop` stops `orchestrator-pulse.{service,timer}` and `pulse-5h-reset.{service,timer}`; `agents-start` starts them again (`state/agents-stopped.list`) plus the roster rows in `KB/orchestrator.md`

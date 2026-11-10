@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Kill switch: stop every running agent unit, every fleet timer and every background claude run; pause the chat.
-# Timers are stopped, not disabled: `agents-start` (or `agents-stop --resume`) brings the roster back;
-# `chat resume --apply` wakes chat seats again.
+# Timers are stopped, not disabled; every stopped unit is listed in state/agents-stopped.list, and
+# `agents-start` (or `agents-stop --resume`) starts that list and the roster again and resumes the chat.
 case "${1:-}" in -h|--help) awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; exit 0 ;; esac
 set -uo pipefail
 . "$HOME/agents/bin/fleetlib.sh"
@@ -11,6 +11,8 @@ fleet_path
 units() { systemctl --user list-units "$1" --all --no-legend --plain 2>/dev/null | awk '{print $1}'; }
 
 stopped=""
+list="$HARNESS_HOME/state/agents-stopped.list"
+mkdir -p "${list%/*}"
 stop_if_running() {
   case "$(systemctl --user is-active "$1" 2>/dev/null)" in
     active|activating|reloading|deactivating) ;;
@@ -18,12 +20,14 @@ stop_if_running() {
   esac
   systemctl --user stop "$1" >/dev/null 2>&1
   stopped="$stopped ${1%.*}"
+  grep -qxF "$1" "$list" 2>/dev/null || printf '%s\n' "$1" >>"$list"
 }
 
-for u in $(units 'agent@*.service') $(units 'po@*.service') po-picks.service sentinel-check.service moodle-keep-weekly.service pcbench-weekly.service ailearning-ci-daily.service ailearning-ci-weekly.service fleet-ci-daily.service orchestrator-pulse.service improve-meter.service discord-bot.service $(units 'discord-liaison-job-*.service') discord-liaison-check.service discord-liaison-wake.service discord-liaison-relay.service tier-nightly.service gamedev-perf.service pulse-5h-reset.service; do
+# Timers and paths first, so none can start a job between the two loops.
+for u in $(units 'agent@*.timer') $(units 'po@*.path') sentinel-check.timer moodle-keep-weekly.timer pcbench-weekly.timer ailearning-ci-daily.timer ailearning-ci-weekly.timer fleet-ci-daily.timer orchestrator-pulse.timer improve-meter.timer $(units 'discord-liaison-relay@*.path') discord-liaison-check.timer discord-liaison-wake.path tier-nightly.timer gamedev-perf.timer pulse-5h-reset.timer; do
   stop_if_running "$u"
 done
-for u in $(units 'agent@*.timer') $(units 'po@*.path') sentinel-check.timer moodle-keep-weekly.timer pcbench-weekly.timer ailearning-ci-daily.timer ailearning-ci-weekly.timer fleet-ci-daily.timer orchestrator-pulse.timer improve-meter.timer $(units 'discord-liaison-relay@*.path') discord-liaison-check.timer discord-liaison-wake.path tier-nightly.timer gamedev-perf.timer pulse-5h-reset.timer; do
+for u in $(units 'agent@*.service') $(units 'po@*.service') po-picks.service sentinel-check.service moodle-keep-weekly.service pcbench-weekly.service ailearning-ci-daily.service ailearning-ci-weekly.service fleet-ci-daily.service orchestrator-pulse.service improve-meter.service discord-bot.service $(units 'discord-liaison-job-*.service') discord-liaison-check.service discord-liaison-wake.service discord-liaison-relay.service tier-nightly.service gamedev-perf.service pulse-5h-reset.service; do
   stop_if_running "$u"
 done
 

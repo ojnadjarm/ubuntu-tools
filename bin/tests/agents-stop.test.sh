@@ -10,7 +10,7 @@ BINDIR="$(dirname "$here")"
 
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 BIN="$WORK/agents/bin"
-mkdir -p "$BIN/guards" "$WORK/agents/alpha/state"
+mkdir -p "$BIN/guards" "$WORK/agents/alpha/state" "$WORK/agents/KB"
 ln -s "$BINDIR/env.sh" "$BIN/env.sh"
 ln -s "$BINDIR/fleetlib.sh" "$BIN/fleetlib.sh"
 printf 'fixture agent\n' >"$WORK/agents/alpha/BRIEF.md"
@@ -24,18 +24,22 @@ case "$*" in
   *list-units*agent@*.service*) echo "agent@alpha.service loaded active running agent alpha" ;;
   *list-units*discord-liaison-relay@*.path*) echo "discord-liaison-relay@p1.path loaded active waiting relay" ;;
   *list-units*discord-liaison-job-*.service*) echo "discord-liaison-job-j1.service loaded active running job" ;;
+  *list-units*po@*.path*) echo "po@x.path loaded active waiting po x" ;;
   *list-units*) : ;;
   *is-active*agent@alpha.service*) echo active ;;
   *is-active*ailearning-ci-weekly.*) echo active ;;
   *is-active*discord-liaison*|*is-active*tier-nightly.*|*is-active*gamedev-perf.*|*is-active*pulse-5h-reset.*) echo active ;;
+  *is-active*po@x.path*|*is-active*discord-bot.service*) echo active ;;
   *is-active*) echo inactive ;;
+  *show*discord-bot.service*) echo simple ;;
+  *show*) echo oneshot ;;
 esac
 exit 0
 EOF
-for c in notify-owner claude agents-start; do
+for c in notify-owner claude agents-start chat; do
   printf '#!/bin/sh\necho "%s $*" >>"$CALLS"\nexit 0\n' "$c" >"$BIN/$c"
 done
-chmod +x "$BIN"/systemctl "$BIN"/notify-owner "$BIN"/claude "$BIN"/agents-start
+chmod +x "$BIN"/systemctl "$BIN"/notify-owner "$BIN"/claude "$BIN"/agents-start "$BIN"/chat
 
 run() { # run <script> [args...] — the fixture environment, nothing of the real fleet
   HOME="$WORK" HARNESS_HOME="$WORK/agents" HARNESS_CONFIG="$WORK/config.env" \
@@ -49,14 +53,14 @@ probe="$WORK/probe.sh"
 cat >"$probe" <<'EOF'
 . "$HOME/agents/bin/fleetlib.sh"
 fleet_path
-command -v systemctl; command -v notify-owner; command -v claude
+command -v systemctl; command -v notify-owner; command -v claude; command -v chat
 EOF
 resolved="$(HOME="$WORK" HARNESS_HOME="$WORK/agents" HARNESS_CONFIG="$WORK/config.env" \
             PATH="/usr/bin:/bin" bash "$probe")"
 for p in $resolved; do
   case "$p" in "$WORK"/*) ;; *) fail "selftest: $p is not a fixture shim — refusing to run" ;; esac
 done
-[ "$(printf '%s\n' "$resolved" | wc -l)" = 3 ] || fail "selftest: expected 3 shims, got: $resolved"
+[ "$(printf '%s\n' "$resolved" | wc -l)" = 4 ] || fail "selftest: expected 4 shims, got: $resolved"
 
 # --- metric: a background run recorded in state/pid is killed by agents-stop -----------
 sleep 300 & victim=$!
@@ -82,6 +86,19 @@ for u in discord-liaison-check.service discord-liaison-check.timer discord-liais
   n=$((n + 1))
 done
 
+# --- timers and paths are stopped before any service, so none starts a job in between ----
+last_trigger=$(grep -n 'systemctl .*stop .*\.\(timer\|path\)$' "$CALLS" | tail -1 | cut -d: -f1)
+first_service=$(grep -n 'systemctl .*stop .*\.service$' "$CALLS" | head -1 | cut -d: -f1)
+[ -n "$last_trigger" ] && [ -n "$first_service" ] && [ "$last_trigger" -lt "$first_service" ] \
+  || fail "a service was stopped before the last timer/path (line $first_service < $last_trigger)"
+
+# --- what was stopped is written down for agents-start ----------------------------------
+list="$WORK/agents/state/agents-stopped.list"
+[ -r "$list" ] || fail "no $list"
+for u in po@x.path agent@alpha.service discord-bot.service discord-liaison-relay@p1.path pulse-5h-reset.timer; do
+  grep -qx "$u" "$list" || fail "$u missing from agents-stopped.list"
+done
+
 # --- stale state/pid (written before its pid's process started, e.g. pre-reboot) is spared --
 sleep 300 & bystander=$!
 printf '%s\n' "$bystander" >"$WORK/agents/alpha/state/pid"
@@ -93,6 +110,20 @@ kill "$bystander" 2>/dev/null; wait "$bystander" 2>/dev/null
 [ "$alive" = 1 ] || fail "agents-stop killed pid $bystander named by a stale state/pid"
 case "$out" in *"pid:$bystander"*) fail "agents-stop reported stale pid:$bystander — $out" ;; esac
 rm -f "$WORK/agents/alpha/state/pid"
+
+# --- agents-start brings back what was stopped (not only the roster), then resumes the chat --
+printf '| Agent | Unit |\n|---|---|\n| alpha | `agent@alpha` | daily |\n' >"$WORK/agents/KB/orchestrator.md"
+: >"$CALLS"
+out="$(run agents-start 2>&1)"; rc=$?
+[ "$rc" = 0 ] || fail "agents-start exited $rc: $out"
+for u in po@x.path discord-liaison-relay@p1.path pulse-5h-reset.timer discord-bot.service; do
+  grep -q "systemctl --user start $u\$" "$CALLS" || fail "agents-start did not start stopped $u"
+done
+grep -q 'systemctl --user enable --now agent@alpha.timer$' "$CALLS" || fail "roster row not enabled"
+grep -q 'systemctl --user start agent@alpha.service$' "$CALLS" && fail "agents-start re-ran a killed oneshot run"
+[ -e "$list" ] && fail "agents-stopped.list left behind"
+[ "$(grep '^chat ' "$CALLS" | tail -1)" = "chat resume --apply" ] || fail "agents-start did not end with chat resume --apply"
+restored=$(grep -c 'systemctl --user start ' "$CALLS")
 
 # --- guards: -h and an unknown name never start anything -------------------------------
 for cli in agent-now agent-run agent-enable agent-disable; do
@@ -109,5 +140,5 @@ for cli in agent-now agent-run agent-enable agent-disable; do
   [ -e "$WORK/agents/no-such-agent" ] && fail "$cli created ~/agents/no-such-agent"
 done
 
-echo "agents-stop: state/pid runs killed 1 of 1; liaison/nightly units stopped $n of 13; -h and unknown-name rejected by 4 agent-* CLIs"
+echo "agents-stop: state/pid runs killed 1 of 1; liaison/nightly units stopped $n of 13; timers before services; agents-start restarted $restored stopped units + chat resume; -h and unknown-name rejected by 4 agent-* CLIs"
 exit 0
