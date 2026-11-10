@@ -1,0 +1,17 @@
+/* Agents › Chat composer: the @ list of seats to wake, above the box (T1545-E); eye.css tokens only. */
+.chat .compose { position: relative; }
+.chat .compose .mention { position: absolute; z-index: 5; left: 1.1rem; bottom: calc(100% - 1px); width: min(36rem, calc(100% - 2.2rem)); max-height: min(18rem, 45vh); overflow-y: auto; overscroll-behavior: contain;
+  margin: 0; padding: .25rem 0; list-style: none; border: 1px solid var(--gold-w); background: var(--bg1); }
+.chat .compose .mention[hidden] { display: none; }
+.chat .compose .mention [role=option] { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto; align-items: center; gap: .7rem; min-height: 32px; padding: .2rem .8rem; color: var(--txt); cursor: pointer; }
+.chat .compose .mention [role=option]:hover { background: var(--w04); }
+.chat .compose .mention [aria-selected=true] { background: var(--w08); color: var(--hi); box-shadow: inset 2px 0 0 var(--gold); }
+.chat .compose .mention .nm, .chat .compose .mention .id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat .compose .mention .id { color: var(--mute); font-family: var(--mono); font-size: max(11px, .8rem); }
+.chat .compose .mention .pill { justify-self: end; }
+@media (max-width: 899px), (pointer: coarse) {
+  .chat .compose .mention [role=option] { min-height: 44px; }
+}
+@media (max-width: 899px) {
+  .chat .compose .mention { left: var(--gut); width: calc(100% - 2 * var(--gut)); }
+}
