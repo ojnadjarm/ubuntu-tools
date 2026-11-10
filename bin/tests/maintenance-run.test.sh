@@ -9,7 +9,7 @@ has() { grep -q -- "$3" <<<"$2" && ok "$1" || nok "$1" "missing '$3' in: $2"; }
 
 # Stubs: every binary that could reach the real machine logs its call (CALLS, reset per case; AUDIT, never reset) and does nothing.
 mkdir -p "$WORK/stub"; CALLS="$WORK/calls.log"; AUDIT="$WORK/audit.log"; : >"$CALLS"; : >"$AUDIT"
-for n in shutdown sudo notify-owner pc systemctl docker apt-get dpkg needrestart uv pgrep du sleep chat; do
+for n in shutdown sudo notify-owner pc systemctl docker apt-get dpkg needrestart uv pgrep du sleep chat claims; do
   printf '#!/bin/sh\necho "%s $*" >>"%s"\necho "%s $*" >>"%s"\n' "$n" "$CALLS" "$n" "$AUDIT" >"$WORK/stub/$n"; chmod +x "$WORK/stub/$n"
 done
 printf 'case "$*" in -s*) printf "Inst fixture-a [1] (2 x)\\nInst fixture-b [1] (2 x)\\n" ;; esac\n' >>"$WORK/stub/apt-get"
@@ -238,6 +238,37 @@ rm -f "$WORK/stub/uv"
 HOME="$FH" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" >/dev/null 2>&1
 has 'uv missing: skipped in the summary' "$(cat "$FH/agents/maintenance/state/last-summary.txt")" 'uv cache: skip: uv not on PATH'
 mv "$WORK/pgrep.ok" "$WORK/stub/pgrep"; mv "$WORK/uv.ok" "$WORK/stub/uv"; mv "$WORK/du.ok" "$WORK/stub/du"
+
+# 4g. T1546-G2: stale claims expire; seats (po-*, discord-liaison) drop done/, sent/, logs over 60 days and request images 7 days after done.
+printf '#!/bin/sh\necho "claims $*" >>"%s"\ncase "$*" in "expire --apply") echo "dropped: - T1 · x · 2026-01-01 00:00" ;; esac\n' "$CALLS" >"$WORK/stub/claims"
+S="$FH/agents/po-fix"; L="$FH/agents/discord-liaison"
+mkdir -p "$S/done" "$S/current" "$S/outbox/discord/sent" "$S/logs" "$S/state/images" "$L/logs"
+mk() { : >"$1"; touch -d "$2 days ago" "$1"; }
+mk "$S/done/r70.md" 70; mk "$S/state/images/r70-0.png" 70
+mk "$S/done/r10.md" 10; mk "$S/state/images/r10-0.png" 10; mk "$S/state/images/r10-1.jpg" 10
+mk "$S/done/r2.md" 2; mk "$S/state/images/r2-0.png" 9
+mk "$S/current/rc.md" 20; mk "$S/state/images/rc-0.png" 20
+mk "$S/outbox/discord/sent/old.md" 61; mk "$S/outbox/discord/sent/new.md" 59
+mk "$S/logs/a.log" 70; mk "$S/logs/a.json" 70; mk "$S/logs/a.meta.json" 70; mk "$S/logs/index.tsv" 70; mk "$S/logs/b.log" 1
+mk "$L/logs/c.json" 90
+seatfiles() { (cd "$FH/agents" && find po-fix discord-liaison -type f | sort | tr '\n' ' '); }
+before=$(seatfiles); : >"$CALLS"
+out=$(run_mr 0)
+has 'dry run only prints the claims expire' "$out" 'would run: claims expire --apply'
+has 'dry run counts what it would prune' "$out" 'seats 2: would prune 1 done, 1 sent, 4 logs, 3 images'
+is 'dry run deletes nothing in the seats' "$(seatfiles)" "$before"
+grep -q '^claims' "$CALLS" && nok 'dry run never calls claims' "$(cat "$CALLS")" || ok 'dry run never calls claims'
+HOME="$FH" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" >/dev/null 2>&1
+sum=$(cat "$FH/agents/maintenance/state/last-summary.txt")
+has 'claims expire runs with --apply' "$(cat "$CALLS")" 'claims expire --apply'
+has 'claims count in the summary' "$sum" 'claims: expired 1'
+has 'seat counts in the summary' "$sum" 'seats 2: pruned 1 done, 1 sent, 4 logs, 3 images'
+is 'seat prune keeps the recent, the open and index.tsv' "$(seatfiles)" \
+  'po-fix/current/rc.md po-fix/done/r10.md po-fix/done/r2.md po-fix/logs/b.log po-fix/logs/index.tsv po-fix/outbox/discord/sent/new.md po-fix/state/images/r2-0.png po-fix/state/images/rc-0.png '
+printf '#!/bin/sh\nexit 6\n' >"$WORK/stub/claims"
+HOME="$FH" MAINT_AUTO_REBOOT=0 HARNESS_CONFIG="$WORK/config.env" bash "$BIN/maintenance-run" >/dev/null 2>&1
+has 'claims expire failure logs its rc' "$(cat "$FH/agents/maintenance/state/last-summary.txt")" 'claims expire failed rc 6'
+rm -rf "$S" "$L"
 
 # 5-6. The unit's chain (T116): env -i with agent@.service's environment, a parent that sources
 # fleetlib.sh like agent-run, then maintenance-run as a child, not dry, with a reboot pending.

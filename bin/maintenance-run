@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Weekly maintenance: /tmp sweep (pc tmp), chat uploads never posted, apt full-upgrade, autoremove, needrestart, docker image + build-cache prune, uv cache prune, reboot gate.
+# Weekly maintenance: /tmp sweep (pc tmp), chat uploads never posted, stale claims, old seat files, apt full-upgrade, autoremove, needrestart, docker image + build-cache prune, uv cache prune, reboot gate.
 # Exit 0 ok · 3 reboot required but refused (deferred) · 4 reboot scheduled · 1 error.
 set -uo pipefail
 export LC_ALL=C DEBIAN_FRONTEND=noninteractive
@@ -52,6 +52,27 @@ fi
 if [ "$dry" = 1 ]; then out "would run: chat prune --apply"
 else out "$(chat prune --apply 2>&1 || echo "maintenance-run: chat prune failed rc $?")"
 fi
+
+# --- claims board and seat folders (T1546-G2) -------------------------------
+if [ "$dry" = 1 ]; then out "would run: claims expire --apply"
+else cl=$(claims expire --apply 2>&1); crc=$?
+  if [ "$crc" = 0 ]; then out "claims: expired $(grep -c '^dropped: ' <<<"$cl")"; else out "maintenance-run: claims expire failed rc $crc"; fi
+fi
+del=$([ "$dry" = 1 ] || echo -delete)
+old() { find "$@" -mtime +60 $del -print 2>/dev/null | wc -l; }  # <dir> <find tests…>
+seats=0; nd=0; ns=0; nl=0; ni=0
+for s in "$HOME"/agents/po-*/ "$HOME/agents/discord-liaison/"; do
+  [ -d "$s" ] || continue; s=${s%/}; seats=$((seats + 1))
+  for f in "$s"/state/images/*; do  # <request>-<n>.<ext>: gone 7 days after its request reached done/
+    r="$s/done/$(basename "${f%-*}").md"
+    [ -f "$f" ] && [ -n "$(find "$r" -mtime +6 2>/dev/null)" ] || continue
+    ni=$((ni + 1)); [ "$dry" = 1 ] || rm -f "$f"
+  done
+  nd=$((nd + $(old "$s/done" -maxdepth 1 -type f)))
+  ns=$((ns + $(old "$s/outbox/discord/sent" -maxdepth 1 -type f)))
+  nl=$((nl + $(old "$s/logs" -maxdepth 1 -type f \( -name '*.log' -o -name '*.json' \))))
+done
+out "seats $seats: $([ "$dry" = 1 ] && echo would prune || echo pruned) $nd done, $ns sent, $nl logs, $ni images"
 
 # --- packages ---------------------------------------------------------------
 held=""
