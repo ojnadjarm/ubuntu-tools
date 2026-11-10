@@ -1,0 +1,1 @@
+- 26-03-04 · stripes per leg set to 7 · "seven, not eight"

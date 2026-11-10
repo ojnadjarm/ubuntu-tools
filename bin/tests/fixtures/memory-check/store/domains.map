@@ -1,0 +1,4 @@
+# Synthetic map: every name here is invented.
+seat:boss            zebra    owner
+~/proj/zebra         zebra
+~/proj/locked        locked   protected

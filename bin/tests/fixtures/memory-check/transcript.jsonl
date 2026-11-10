@@ -1,0 +1,5 @@
+{"type":"user","message":{"role":"user","content":"hello, count the stripes at dawn, please"},"sessionId":"0000aaaa-1111-2222-3333-444455556666"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"the owner said always feed the herd at noon"}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"x","content":"always feed the herd at noon"}]}}
+{"type":"user","message":{"role":"user","content":"<task-notification>always feed the herd at noon</task-notification>"}}
+{"type":"user","isMeta":true,"message":{"role":"user","content":"always feed the herd at noon"}}

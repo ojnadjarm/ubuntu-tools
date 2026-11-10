@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""memory — load the core card plus domain cards, or drop a note in the inbox; the store is $MEMORY_HOME (T1599)."""
+"""memory — load the core card plus domain cards, drop a note in the inbox, or check the store; the store is $MEMORY_HOME (T1599)."""
 import argparse
 import json
 import os
@@ -7,6 +7,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
+import memory_check  # noqa: E402
 import memory_route  # noqa: E402
 import memory_store  # noqa: E402
 
@@ -56,6 +57,21 @@ def note(store, seat, args):
         die(str(e))
 
 
+def check(store, seat, args):
+    """Run every checker; exit 0 clean, 1 with one line per finding (checker · file:line · what)."""
+    folders = []
+    for f in args.folders:
+        rel = os.path.relpath(store.path(f) if os.path.isdir(store.path(f)) else os.path.abspath(f), store.root)
+        if rel.startswith("..") or not os.path.isdir(store.path(rel)):
+            die(f"{f} is not a folder of the store {store.root}")
+        folders.append(rel)
+    before = memory_check.before_dir(args.before) if args.before else memory_check.before_git(store)
+    found = memory_check.run(store, before, folders)
+    for f in found:
+        print(memory_check.fmt(f))
+    sys.exit(1 if found else 0)
+
+
 def main():
     ap = argparse.ArgumentParser(prog="memory", description=__doc__.split("— ", 1)[1])
     sub = ap.add_subparsers(dest="verb", required=True)
@@ -65,9 +81,12 @@ def main():
     p.add_argument("--domain")
     p.add_argument("text")
     p.add_argument("--quote", help="the exact words it rests on")
+    p = sub.add_parser("check", help="the gate: budgets, ids, format, secrets, machine values, untrusted, provenance, experience")
+    p.add_argument("--before", help="the store folder to compare ids against (default: the store's git HEAD)")
+    p.add_argument("folders", nargs="*", help="check only these folders of the store")
     args = ap.parse_args()
     store = memory_store.Store(memory_store.home())
-    {"load": load, "note": note}[args.verb](store, os.environ.get("CHAT_SEAT", ""), args)
+    {"load": load, "note": note, "check": check}[args.verb](store, os.environ.get("CHAT_SEAT", ""), args)
 
 
 if __name__ == "__main__":
