@@ -3,7 +3,7 @@ import json
 import os
 import shutil
 
-from liaison import managers
+from liaison import managers, po
 from liaison.registry import Registry
 
 from .test_liaison import PNG, Base
@@ -100,6 +100,32 @@ class TestManagers(Base):
         self.assertFalse(os.path.exists(self.ran))
         self.assertEqual(len(os.listdir(os.path.join(self.home, 'po-ten', 'inbox'))), 1)
         self.assertEqual(self.state().inbox, [])
+
+    def acks(self, tid):
+        return [m for m in self.fake.messages.get(tid, []) if m['author']['id'] == '900']
+
+    async def test_hand_off_posts_one_ack_at_once_before_any_run(self):
+        await self.run_cli('tick')
+        self.fake.say('400', '2', 'pedido-A: voces nuevas')
+        last = self.fake.say('400', '2', 'pedido-A: y una musica')
+        self.fake.say('460', '4', 'pedido-sin-proyecto')
+        await self.run_cli('tick')
+        [ack] = self.acks('400')
+        self.assertEqual(ack['content'], po.ACK)
+        self.assertEqual(ack['message_reference']['message_id'], last)
+        self.assertEqual([m['content'] for m in self.acks('460')], [po.ACK])
+        self.assertEqual(len(os.listdir(os.path.join(self.home, 'po-ten', 'inbox'))), 2, 'filed, no run yet')
+        self.assertFalse(os.path.exists(self.ran))
+        await self.run_cli('tick')
+        self.assertEqual(len(self.acks('400')), 1, 'acked once')
+
+    async def test_no_ack_for_a_bot_or_a_failed_hand_off(self):
+        await self.run_cli('tick')
+        self.fake.say('400', '7', 'otro bot', bot=True)
+        shutil.rmtree(os.path.join(self.home, 'po-other'))
+        self.fake.say('450', '3', 'pedido-B')
+        await self.run_cli('tick')
+        self.assertEqual((self.acks('400'), self.acks('450')), ([], []))
 
     async def test_failed_po_ask_keeps_the_message_for_the_triage(self):
         await self.run_cli('tick')

@@ -42,6 +42,7 @@ def make(pid, env=None):
     if not os.path.exists(ledger):
         with open(ledger, 'w') as f:
             f.write(f'# {pid}: decisions ledger (his words, dated)\n')
+    print(f'relay its replies at once: pc units enable discord-liaison-relay@{pid}.path --user --now --apply')
     return 0
 
 

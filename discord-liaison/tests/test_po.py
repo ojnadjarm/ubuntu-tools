@@ -3,6 +3,9 @@ import io
 import json
 import os
 import shlex
+import subprocess
+import sys
+import time
 import unittest
 from contextlib import redirect_stdout
 
@@ -10,6 +13,8 @@ from liaison import po
 from liaison.cli import App
 
 from .test_liaison import Base
+
+AGENTS = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 class TestPO(Base):
@@ -56,6 +61,36 @@ class TestPO(Base):
         self.assertEqual(sorted(os.listdir(os.path.join(self.outbox, 'sent'))), ['a.md'])
         self.assertEqual(sorted(os.listdir(os.path.join(self.outbox, 'refused'))), ['b.md', 'c.md'])
         self.assertEqual([f for f in os.listdir(self.outbox) if f.endswith('.md')], [])
+
+    async def test_relay_waits_for_a_running_relay_and_posts_once(self):
+        with open(os.path.join(self.outbox, 'a.md'), 'w') as f:
+            f.write('thread: 400\nPlan: primero X, luego Y')
+        lock = os.path.join(self.tmp.name, 'state', 'relay.lock')
+        os.makedirs(os.path.dirname(lock), exist_ok=True)
+        hold = subprocess.Popen([sys.executable, '-c', 'import fcntl, sys, time; f = open(sys.argv[1], "a"); '
+                                 'fcntl.flock(f, fcntl.LOCK_EX); print(1, flush=True); time.sleep(1.5)', lock],
+                                stdout=subprocess.PIPE)
+        hold.stdout.readline()
+        t = time.monotonic()
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(await po.amain(['relay'], self.env, self.rest), 0)
+        took = time.monotonic() - t
+        hold.wait()
+        self.assertGreater(took, 1.0)
+        self.assertEqual(self.fake.sent('400'), ['Plan: primero X, luego Y'])
+
+    def test_outbox_write_fires_the_relay_unit(self):
+        units = os.path.join(AGENTS, 'units')
+        with open(os.path.join(units, 'discord-liaison-relay@.path')) as f:
+            path = f.read()
+        with open(os.path.join(units, 'discord-liaison-relay.service')) as f:
+            svc = f.read()
+        self.assertIn('PathModified=%h/agents/po-%i/outbox/discord\n', path)
+        self.assertIn('Unit=discord-liaison-relay.service\n', path)
+        self.assertIn('ExecStart=%h/agents/bin/discord-liaison relay\n', svc)
+        self.assertIn("'relay '*) exec \"$py\" -m liaison.po relay", open(os.path.join(AGENTS, 'bin', 'discord-liaison')).read())
+        self.assertEqual(os.path.join(po.po_home({'HARNESS_HOME': '/h'}), 'po-x', 'outbox', 'discord'),
+                         '/h/po-x/outbox/discord')
 
     def media(self, path, data=b'\x89PNG\r\n\x1a\n' + b'0' * 64):
         os.makedirs(os.path.dirname(path), exist_ok=True)

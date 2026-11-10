@@ -1,6 +1,6 @@
 # Discord liaison: the agent that answers the #foro forum and @agents in #general, and turns requests into PRs
 
-Ticket: T1409, T1411, T1413, T1414, T1415, T1416, T1421, T1482, T1515 P31, P32, P36 · Last verified: 2026-11-10 (P36: 77 fixture tests, a manager's reply images reach its thread, 8 bad paths refused; P32: 76 fixture tests, an image reaches only its manager; P31: 75 fixture tests,
+Ticket: T1409, T1411, T1413, T1414, T1415, T1416, T1421, T1482, T1515 P31, P32, P36, P40 · Last verified: 2026-11-10 (P40: 81 fixture tests, ack at hand-off, relay on outbox write; P36: 77 fixture tests, a manager's reply images reach its thread, 8 bad paths refused; P32: 76 fixture tests, an image reaches only its manager; P31: 75 fixture tests,
 `test_managers.py` 5: code routing to one manager per project); 2026-11-04 (T1482 postmortem of 119 jobs, lessons in `JOB.md`, guarded by `tests/test_lessons.py`); 2026-10-31 (caps re-read from agent.env, F71); 2026-10-27 by 63 liaison fixture tests (T1421: 6 batch/supersede/stale tests) + a live nudge → wake run; before: 57 (T1416: 8 routing tests, job vs escalate); before: 49 (T1415: job media + reply); before: 47 liaison fixture tests (T1414: 7 job tests, a transient-unit probe, a live tick) and eval 57 fixtures on opus (T1413: old brief 45/57 twice, new brief + context 55/57 twice); before: 25 liaison fixture tests + 25 orchestrator-pulse checks + 31 discord-bot tests, live ticks on #foro and #general
 
 ## When to use
@@ -28,6 +28,11 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
   message wakes no triage. No project / a 2nd project named → the router. The triage keeps #general, projects without
   `po` and failed handoffs. Context map and SOLID: `$AGENT_WORK/research/2026-11-09/T1515/P31-architecture.md`;
   guide `product-owner-agents`. Rollback: drop `router` and set `po` back (one commit).
+- Reply first (T1515 P40): `po.handoff` posts `po.ACK` ("¡Recibido!…", a reply to the newest human message) once per
+  thread right after a successful `po-ask`, not waiting for the manager's run; bots and failed hand-offs get none. The
+  manager's first act is a one-line plan reply, then work, then the result. `discord-liaison-relay@<p>.path`
+  (PathModified on `po-<p>/outbox/discord`, dot files ignored) runs `discord-liaison relay` on each outbox `mv`; the
+  relay holds `state/relay.lock` and loops until the outbox is empty; the 3-min tick still relays as a fallback.
 - #general (owner, T1411): answer general questions on any topic, in Spanish, and do small creative requests there
   (concept art via `art` + `post --image`, short texts); send people to #foro only for coordination with other agents
   or follow-up on a project; never `map`/`pr` from #general (`BRIEF.md`).
@@ -170,7 +175,9 @@ runaway loop), `LIAISON_IMAGES_PER_DAY` (5), `LIAISON_JOBS_MAX` (3), `LIAISON_JO
 - A retry of a crashed worker runs inline: requeuing it would launch a transient unit with the running unit's name.
 
 - Before P31 the handoff ran when the triage called `inbox`: every PO-routed message cost a triage run (target < 60 s)
-  plus a "passed on" reply; now the manager's own reply through its outbox is the only one.
+  plus a "passed on" reply; P31 dropped it, so a manager busy with workers answered only at the end (P40 measured
+  2026-11-09/10, 10 requests: Discord → hand-off median 22 s (20 s debounce), run start → first outbox 23–1205 s
+  (median 102 s), outbox → Discord 5–164 s (median 52 s, the 3-min tick), queue behind a busy run up to 1018 s).
 - Handed messages keep their 👀 (no `done` runs for them). Images (P32): `po.deliver` downloads the message's images into
   `state/work`, passes them as `po-ask --image` (copied into `po-<id>/state/images/`, `images:` in the front matter) and
   deletes its own copies; the router forwards them with `--image` to one manager only. Before P32 handoff passed text only.

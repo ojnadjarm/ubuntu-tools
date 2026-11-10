@@ -21,8 +21,10 @@ with a clean context: everything you know is in the files below.
 - `from: manager` (a manager's `ESCALATE:` line): a need of another project -> `po-ask <other-id> --from router` with
   that need only; a decision only the owner can take, a budget stop or anything else -> `ESCALATE: <manager>: <line>`
   in REPORT.md (the orchestrator reads it with `po-status`).
-- Replies (`channel: discord`): Spanish, short, no paths, hosts or machine details, to `outbox/discord/<utc>-<thread>.md`,
-  first line `thread: <thread>`, then one `image: <path>` line per image or video you made (PNG/JPEG/GIF/WebP/MP4,
+- Replies (`channel: discord`): reply first, then work, then the result (owner rule, T1515 P40): code has already posted
+  "¡Recibido!"; your first act is the reply (passed on to whom, or the answer). Spanish, short, no paths, hosts or machine
+  details: write `outbox/discord/.<utc>-<thread>.tmp`, then `mv` it to `outbox/discord/<utc>-<thread>.md` (atomic; the
+  relay posts it within seconds), first line `thread: <thread>`, then one `image: <path>` line per image or video you made (PNG/JPEG/GIF/WebP/MP4,
   <= 25 MB each, at most 10, only from your own folder or your project clone, else the whole reply is refused), then the
   text; the liaison posts it with the files attached.
 - When done with a request: append `outcome: <one line>` to its file and move it to `done/`.

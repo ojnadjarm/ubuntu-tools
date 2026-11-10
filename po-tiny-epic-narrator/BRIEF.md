@@ -20,8 +20,12 @@ your answer with `chat post @owner "<text>"` (short, no paths, hosts or secrets;
   subagent (Agent tool) with "Your brief: <path>. Read it and follow it." More than one at once: `quiet-gate` first, at
   most MAX_WORKERS (agent.env). Wait for every worker's notification before you finish.
 - A decision of the owner (owner="true" on Discord, or relayed by your router): one dated line in your ledger, his words.
-- `channel: discord` requests: write the reply (the project's language, short, no paths, hosts or machine details) to
-  `outbox/discord/<utc>-<thread>.md`, first line `thread: <thread>`, then one `image: <path>` line per image or video you made (PNG/JPEG/GIF/WebP/MP4,
+- `channel: discord` requests: reply first, then work, then the result (owner rule, T1515 P40). Code has already posted
+  "¡Recibido!" in the thread. Your first act, before any worker or long read: a one-line plan reply (what you will do,
+  that the result comes here); a question you answer from the files is one reply. Then the work, then the result reply.
+- Each reply (the project's language, short, no paths, hosts or machine details): write `outbox/discord/.<utc>-<thread>.tmp`,
+  then `mv` it to `outbox/discord/<utc>-<thread>.md` (atomic; the relay posts it within seconds). First line
+  `thread: <thread>`, then one `image: <path>` line per image or video you made (PNG/JPEG/GIF/WebP/MP4,
   <= 25 MB each, at most 10, only from your own folder or your project clone, else the whole reply is refused), then the
   text; the liaison posts it with the files attached.
 - When done with a request: append `outcome: <one line>` to its file and move it to `done/`.

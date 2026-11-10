@@ -1,0 +1,9 @@
+[Unit]
+Description=Relay po-%i's Discord replies the moment its outbox gets one (T1515 P40)
+
+[Path]
+PathModified=%h/agents/po-%i/outbox/discord
+Unit=discord-liaison-relay.service
+
+[Install]
+WantedBy=paths.target

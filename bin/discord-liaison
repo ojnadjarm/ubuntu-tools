@@ -3,8 +3,9 @@
 # `job` hands a request to a background worker (`job-run`, a transient user unit; LIAISON_JOBS_MAX at once, T1414);
 # one live job per conversation, `wake` runs on the bot's nudge (discord-liaison-wake.path, T1421);
 # a project with a `po` in projects.json: its messages go to that PO (po-ask), its outbox/discord/ replies are posted (T1412);
-# with a `router` set, tick hands them off by code before any LLM run; `manager <id>` makes po-<id> (T1515 P31).
-U='usage: discord-liaison tick [--dry-run]|wake|check|inbox|done|post <thread> [--image <file>] [--reply <message>] <text…>|react <thread> <message> <emoji>|art <prompt…>|escalate <message> <blocker> <what…>|map <thread> <project>|pr <project>|job <message> [--project <id>] <task…>|job-run <id>|status|manager <project-id>|test'
+# with a `router` set, tick hands them off by code before any LLM run; `manager <id>` makes po-<id> (T1515 P31);
+# `relay` posts the outbox replies now (discord-liaison-relay@<p>.path on each outbox write, T1515 P40).
+U='usage: discord-liaison tick [--dry-run]|wake|check|inbox|done|post <thread> [--image <file>] [--reply <message>] <text…>|react <thread> <message> <emoji>|art <prompt…>|escalate <message> <blocker> <what…>|map <thread> <project>|pr <project>|job <message> [--project <id>] <task…>|job-run <id>|status|manager <project-id>|relay|test'
 case "${1:-}" in
   -h|--help) echo "$U"; exit 0 ;;
   -*) echo "discord-liaison: unknown option: $1" >&2; echo "$U" >&2; exit 2 ;;
@@ -25,5 +26,6 @@ case "${1:-} ${2:-}" in
   'inbox '*) "$py" -m liaison.po handoff ;;
   'map '*) "$py" -m liaison "$@"; rc=$?; [ $rc -ne 0 ] || "$py" -m liaison.po handoff; exit $rc ;;
   'manager '*) shift; exec "$py" -m liaison.managers new "$@" ;;
+  'relay '*) exec "$py" -m liaison.po relay ;;
 esac
 exec "$py" -m liaison "$@"
