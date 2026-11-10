@@ -74,20 +74,32 @@ def park(seat, msg, why):
 
 
 def new_day():
-    """True for the one call that creates today's counters file: a new day has started."""
+    """True for the one call that creates today's drain marker counters/<day>.drained: a new day has started."""
     folder = os.path.join(chat_store.root(), "counters")
     os.makedirs(folder, exist_ok=True)
     try:
-        path = os.path.join(folder, f"{time.strftime('%Y-%m-%d')}.json")
+        path = os.path.join(folder, f"{time.strftime('%Y-%m-%d')}.drained")
         os.close(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
     except FileExistsError:
         return False
     return True
 
 
+def parsed(f):
+    """The parked rows of an open queue file; a line that does not parse is skipped."""
+    rows = []
+    for line in f:
+        try:
+            r = json.loads(line)
+            rows.append({"id": int(r["id"]), "ch": r["ch"], "why": r["why"]})
+        except (ValueError, TypeError, KeyError):
+            continue
+    return rows
+
+
 def drain(seats=None):
     """[(seat, outcome)] of re-sending each parked wake once after a sweep of dead-timer batches; none while paused;
-    hop parks dropped, others re-park."""
+    hop parks dropped, others re-park; rows not reached when it raises are parked again."""
     if paused():
         return []
     chat_wake.sweep()
@@ -97,17 +109,22 @@ def drain(seats=None):
         seat = os.path.basename(path)[:-len(".jsonl")]
         with open(path, "r+") as f:
             fcntl.flock(f, fcntl.LOCK_EX)
-            rows = [json.loads(line) for line in f if line.strip()]
+            rows = parsed(f)
             f.seek(0)
             f.truncate()
         done = set()
-        for r in rows:
-            if r["id"] in done or r["why"] == "hop":
-                continue
-            done.add(r["id"])
-            got = chat_store.read(r["ch"], after=r["id"] - 1, limit=1)
-            if got and got[0]["id"] == r["id"]:
-                out += dispatch(got[0], seats, only=seat)
+        try:
+            while rows:
+                r = rows[0]
+                if r["id"] not in done and r["why"] != "hop":
+                    done.add(r["id"])
+                    got = chat_store.read(r["ch"], after=r["id"] - 1, limit=1)
+                    if got and got[0]["id"] == r["id"]:
+                        out += dispatch(got[0], seats, only=seat)
+                rows.pop(0)
+        finally:
+            for r in rows:
+                park(seat, r, r["why"])
     return out
 
 

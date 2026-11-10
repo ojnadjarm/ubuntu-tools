@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# T1515 bin/chat: one section per ticket. Run: bash chat.test.sh [post] [read] [wake-ceo] [wake-po] [ask] [answer] [notify] [pause] [vass] [files] [prune] [history] [manager] [thinking] [search] [hop]   (no args: every section)
+# T1515 bin/chat: one section per ticket. Run: bash chat.test.sh [post] [read] [wake-ceo] [wake-po] [ask] [answer] [notify] [pause] [vass] [files] [prune] [history] [manager] [thinking] [search] [hop] [drain]   (no args: every section)
 # Fixture-only (FLEET §5.6): bwrap --unshare-net, HARNESS_HOME and HARNESS_CONFIG in a temp dir, a fixture org;
 # the real harness tree is read-only inside it, so the real chat store and PO inboxes cannot change; the selftest proves
 # both (immune to live po-runs taking their own inbox files meanwhile).
@@ -487,7 +487,7 @@ print([(r['wake'], r['outcome']) for r in map(json.loads, open('$ST/audit.jsonl'
   chat pause --apply >/dev/null
   is 'resume while the plan is still full: parked again, nothing lost' "$(chat resume --apply | tail -1) $(queued)" \
      'chat: 1 held wake re-sent: fx plan 1'
-  rm "$day" "$WORK/plan.rc"
+  rm "$day" "${day%.json}.drained" "$WORK/plan.rc"
   CHAT_SEAT=fx chat post harness 'first post of a new day' >/dev/null
   is "new day: the first post re-sends the parked wake" "$(wakes "$id" | grep -o "'fx', '[a-z]*')]$") $(queued)" \
      "'fx', 'queued')] 0"
@@ -675,7 +675,7 @@ print([(r['wake'], r['outcome']) for r in map(json.loads, open('$ST/audit.jsonl'
   CHAT_SEAT=fx chat post @acme 'ping' >/dev/null
   is 'vass: pull: every wake of the seat is queued, nothing delivered' "$(wakes)" "[('acme', 'queued'), ('acme', 'queued')]"
   ev 'vass: pull: no timer, no inbox, no parked wake, no count' \
-     '[ ! -s "$WORK/systemd-run.log" ] && [ ! -e "$HARNESS_HOME/po-acme" ] && [ ! -e "$ST/queue/acme.jsonl" ] && ! grep -q acme "$ST"/counters/2*.json'
+     '[ ! -s "$WORK/systemd-run.log" ] && [ ! -e "$HARNESS_HOME/po-acme" ] && [ ! -e "$ST/queue/acme.jsonl" ] && ! grep -qs acme "$ST"/counters/2*.json'
   CHAT_SEAT=fx chat post org 'fleet news' >/dev/null; CHAT_SEAT=orchestrator chat post fx 'fx only' >/dev/null
   is 'vass: read lists #harness and its direct messages only' "$(CHAT_SEAT=acme chat read | awk '{print $1}' | sort | tr '\n' ' ')" \
      'dm-acme--fx dm-acme--orchestrator harness '
@@ -883,10 +883,46 @@ chat_dispatch.dispatch({**m, 'id': chat_store.post(m), 'kind': 'msg'})" >/dev/nu
   ev 'hop: the post after the owner is not parked' '[[ "$(wake "$id")" =~ ^(delivered|queued)$ ]]'
 }
 
-[ $# -gt 0 ] || set -- post read wake-ceo wake-po ask answer notify pause vass files prune history manager thinking search hop
+t_drain() {
+  # A6: the day's first post drains the queue even when po_count made the day file; A9: a bad queue line is skipped.
+  local id n a b c out rc P="$HARNESS_HOME/po-fx" day="$ST/counters/$(date +%F)"
+  rm -rf "$ST" "$WORK/systemd-run.log"; mkdir -p "$P/inbox"; : >"$P/BRIEF.md"
+  last() { python3 -c "import json
+print([r['outcome'] for r in map(json.loads, open('$ST/audit.jsonl')) if r.get('id') == $1 and 'wake' in r][-1])"; }
+  queued() { cat "$ST/queue/fx.jsonl" 2>/dev/null | wc -l; }
+  plan() { echo 1 >"$WORK/plan.rc"; CHAT_SEAT=gx chat post @fx "$1"; rm "$WORK/plan.rc"; }
+  newday() { rm -f "$day.json" "$day.drained"; }
+
+  id=$(plan 'parked yesterday'); newday
+  python3 "$BIN/../lib/po_count.py" add fx
+  CHAT_SEAT=fx chat post harness 'day start' >/dev/null
+  is 'drain (A6): po_count first, then a post: the parked wake is re-sent, queue empty' "$(last "$id") $(queued)" 'delivered 0'
+  n=$(grep -c "\"id\": $id," "$ST/audit.jsonl"); id=$(plan 'parked today')
+  CHAT_SEAT=fx chat post harness 'second post' >/dev/null
+  is 'drain (A6): only the first post drains' "$n $(last "$id") $(queued)" '3 plan 1'
+
+  a=$(plan 'good one'); printf '{"id": 1, "ch\n' >>"$ST/queue/fx.jsonl"; b=$(plan 'good two'); newday
+  out=$(CHAT_SEAT=fx chat post harness 'day start 2' 2>&1); rc=$?
+  is 'drain (A9): a torn queue line: the post exits 0, prints only its id' "$rc $(grep -vc '^[0-9]*$' <<<"$out")" '0 0'
+  is 'drain (A9): both good rows re-sent, queue empty' "$(last "$a") $(last "$b") $(queued)" 'queued queued 0'
+
+  chat pause --apply >/dev/null; c=$(CHAT_SEAT=gx chat post @fx 'while paused'); printf 'not json\n' >>"$ST/queue/fx.jsonl"
+  out=$(chat resume --apply 2>&1); rc=$?
+  is 'drain (A9): resume with a bad line: rc 0, the good row re-sent' "$rc ${out##*$'\n'} $(last "$c") $(queued)" \
+     '0 chat: 1 held wake re-sent: fx queued queued 0'
+
+  a=$(plan 'after the crash'); printf '{"id": 5, "ch": "../x", "why": "plan"}\n' >"$ST/queue/fx.jsonl"
+  printf '{"id": %s, "ch": "dm-fx--gx", "why": "plan"}\n' "$a" >>"$ST/queue/fx.jsonl"; newday
+  out=$(CHAT_SEAT=fx chat post harness 'day start 3' 2>&1); rc=$?
+  is 'drain (A9): a drain that raises: the post exits 0 and says the wake failed' "$rc $(grep -c '^chat: stored [0-9]*, wake failed: ' <<<"$out")" '0 1'
+  is 'drain (A9): the rows not sent are parked again' "$(python3 -c "import json; print([json.loads(l)['id'] for l in open('$ST/queue/fx.jsonl')])")" \
+     "[5, $a]"
+}
+
+[ $# -gt 0 ] || set -- post read wake-ceo wake-po ask answer notify pause vass files prune history manager thinking search hop drain
 for s in "$@"; do
   case "$s" in
-    post|read|wake-ceo|wake-po|ask|answer|notify|pause|vass|files|prune|history|manager|thinking|search|hop) "t_$s" ;;
+    post|read|wake-ceo|wake-po|ask|answer|notify|pause|vass|files|prune|history|manager|thinking|search|hop|drain) "t_$s" ;;
     *) nok "section $s" 'unknown section'; exit 2 ;;
   esac
 done

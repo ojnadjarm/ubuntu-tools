@@ -106,6 +106,15 @@ def attachments(paths):
     return out
 
 
+def wake(routed, msg, seats):
+    """Dispatch a stored message and alert the owner; a failure is a warning, the message stays stored."""
+    try:
+        chat_dispatch.dispatch(routed, seats)
+        chat_notify.alert(msg, seats)
+    except Exception as e:
+        print(f"chat: stored {msg['id']}, wake failed: {e}", file=sys.stderr)
+
+
 def post(a, seat, seats):
     ch, to = target(a.where, seat, seats)
     allow(seat, ch, seats)
@@ -127,8 +136,7 @@ def post(a, seat, seats):
             chat_files.drop(f["id"])
         raise
     print(mid)
-    chat_dispatch.dispatch({**msg, "id": mid, "kind": "msg"}, seats)
-    chat_notify.alert({**msg, "id": mid}, seats)
+    wake({**msg, "id": mid, "kind": "msg"}, {**msg, "id": mid}, seats)
     return 0
 
 
@@ -184,8 +192,7 @@ def send(msg, seats):
         return None
     mid = chat_store.post(msg)
     print(mid)
-    chat_dispatch.dispatch({"to": [], "re": None, "hop": 0, **msg, "id": mid}, seats)
-    chat_notify.alert({**msg, "id": mid}, seats)
+    wake({"to": [], "re": None, "hop": 0, **msg, "id": mid}, {**msg, "id": mid}, seats)
     return mid
 
 
