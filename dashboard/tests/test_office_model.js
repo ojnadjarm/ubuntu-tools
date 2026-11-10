@@ -248,9 +248,9 @@ const ok = (name, fn) => { fn(); n++; console.log("ok " + n + " " + name); };
     const off = F.card(M.who.toolsmith, NOW); shape(off);
     assert(!("bar" in off));
     const t = F.card(M.who["team-operations"], NOW); shape(t);
-    assert.deepStrictEqual(t.roll, ["sentinel-digest", "maintenance", "moodle-keeper", "fleet-backup", "sentinel", "discord-liaison"]);
+    assert.deepStrictEqual([t.roll, t.rollMore], [["sentinel-digest", "maintenance", "moodle-keeper", "fleet-backup", "sentinel"], 1]);
     const pool = F.card(M.who.pool, NOW); shape(pool);
-    assert.strictEqual(pool.roll.length, 2);
+    assert.deepStrictEqual([pool.roll, pool.parts.find((x) => x.h === "Sub-agents running").chips.length], [null, 2]);
     for (const id of Object.keys(M.who)) shape(F.card(M.who[id], NOW));
   });
 

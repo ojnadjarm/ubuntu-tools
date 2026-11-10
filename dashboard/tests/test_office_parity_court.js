@@ -36,14 +36,12 @@ function area(row, V) {
       if (r.last && r.last.end) has(c, ago(r.last.end) + " ago");
     }
   });
-  row("C8", "Court claims board: who, note, paths (short, full on hover), empty text", "room card Held files of the owner's room (CEO card when no owner)", (X) => {
+  row("C8", "Court claims board: who, note, paths (short, full on hover), empty text", "room card Files held row \"N · who\" of the owner's room (CEO card when no owner); paths, note and empty text removed on the owner's word (2026-11-10, minimal card)", (X) => {
     const all = Object.values(X.cards);
     for (const c of F0.agents.claims.map(X.claimRow)) {
-      const k = all.find((x) => x.rows.some((r) => r[0] === c.who));
-      assert.ok(k, c.who + ": on no card"); has(k, c.note, ...c.paths.map((p) => p.short));
-      for (const p of c.paths) assert.ok(k.text.includes(p.full) || k.titles.includes(p.full), `${c.who}: full path ${p.full} nowhere on the card (old: on hover)`);
+      const k = all.find((x) => x.rows.some((r) => r[0] === "Files held" && r[1].split(" · ")[1].split(", ").includes(c.who)));
+      assert.ok(k, c.who + ": on no card"); assert.ok(!c.paths.some((p) => k.text.includes(p.full)), c.who + ": a path on the card");
     }
-    assert.ok(all.some((x) => x.text.includes("no files held")), "empty text");
   });
   row("C10", "Dock and sub-tab: gold count of failed agents, green count of working", "Office sub-tab badge (PLAN §2.1: ticket 15)", (X) => {
     assert.strictEqual(X.badge, String(subs.filter((s) => s.state === "error").length), `Office sub-tab badge is "${X.badge}"`);

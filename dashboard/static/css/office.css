@@ -44,7 +44,8 @@
 .ocard .cpart dl { margin-top: .3rem; grid-template-columns: minmax(0, 1fr); row-gap: 0; }
 .ocard .cpart dt { overflow-wrap: anywhere; }
 .ocard .cpart dd { margin-bottom: .4rem; text-align: left; }
-.ocard .quiet { color: var(--mute); }
+.ocard .quiet, .ocard .more { color: var(--mute); }
+.ocard dd, .ocard .chip span, .ocard .ln { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .ocard .home .chip { color: var(--g2); }
 .ocard .cfig { flex: 0 0 5rem; }
 .ocard .cfig svg { width: 100%; height: auto; display: block; }

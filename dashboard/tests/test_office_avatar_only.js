@@ -30,7 +30,7 @@ async function pure() {
   for (const r of M.panels.next) assert.ok(C(r.id).rows.some(([k, v]) => k === "Next run" && /^in /.test(v)), r.id + ": its card has its next run");
   for (const r of M.panels.running) { const c = C(r.id); assert.deepStrictEqual(["Type", "Running since", "Now"].map((k) => !!c.rows.find((x) => x[0] === k)), [true, true, true], r.id + ": agent rows"); }
   const ceo = C("orchestrator");
-  assert.deepStrictEqual(heads(ceo), ["Needs you", "Sessions", "Held files"]);
+  assert.deepStrictEqual(heads(ceo), ["Needs you", "Sessions"]);
   assert.deepStrictEqual(rowsOf(ceo, "Needs you").length, 1, "needs-you on the CEO card");
   assert.ok(!("recent" in M.panels) && !JSON.stringify(Object.values(M.who).filter((p) => !p.people).map((p) => F.card(p, NOW))).includes("Recent"), "Recent 24 h is gone (owner 2026-11-10)");
   ok("Next runs → staff card · Next run; Running now → agent card · Type, Running since, Now; needs-you → CEO card; Recent 24 h nowhere");
@@ -39,17 +39,17 @@ async function pure() {
   for (const c of M.panels.claims) assert.strictEqual(where((I) => I.claims.includes(c)), 1, c.who + ": held on one room card or the CEO's");
   ok("Sessions and Claims rows: each on exactly one room's card (by its owner) or the CEO's (no avatar)");
   const seat = C("tiny-epic-narrator"), room = C("room-tiny-epic-narrator");
-  assert.deepStrictEqual(heads(seat), ["Sessions", "Held files", "Sub-agents running"]);
+  assert.deepStrictEqual(heads(seat), ["Sessions", "Sub-agents running"]);
   assert.deepStrictEqual(seat.home, { id: "room-tiny-epic-narrator", text: "Team · Tiny Epic Narrator" });
-  assert.deepStrictEqual(rowsOf(seat, "Held files").map((x) => x[0]), ["T9001"], "the seat holds T9001's files (its worker's claim)");
+  assert.match((seat.rows.find((x) => x[0] === "Files held") || [])[1], /^\d+ · T9001$/, "the seat holds T9001's files (its worker's claim)");
   assert.deepStrictEqual(rowsOf(seat, "Sessions").map((x) => x[0]), ["agent-po-tiny-epic-narrator", "agent-T9001", "agent-T9004"]);
-  assert.deepStrictEqual([room.title, room.rank, heads(room)], ["Tiny Epic Narrator", "Project", ["Next runs", "Sessions", "Held files", "Sub-agents running"]]);
+  assert.deepStrictEqual([room.title, room.rank, heads(room)], ["Tiny Epic Narrator", "Project", ["Next runs", "Sessions", "Sub-agents running"]]);
   assert.deepStrictEqual(room.roll, ["tiny-epic-narrator", "pid1003", "pid1004"]);
   ok("seat card: its sessions, held files, sub-agents, the line to its room; the room card: members, next runs, sessions, held files, sub-agents");
   const pool = C("pool"), agent = C("a0000000000000002"), team = C("team-operations"), staff = C(M.panels.next[0].id);
   assert.deepStrictEqual(chipsOf(pool, "Sub-agents running").map((x) => x.name), ["T9002", "T9003-04"]);
   assert.ok(chipsOf(pool, "Sub-agents running").every((x) => /^since \S+ · /.test(x.note)), "a chip: running since and now");
-  assert.deepStrictEqual(rowsOf(pool, "Held files").map((x) => x[0]), ["T9003"], "a claim by a ticket's base goes to its agent's room");
+  assert.match((pool.rows.find((x) => x[0] === "Files held") || [])[1], /^\d+ · T9003$/, "a claim by a ticket's base goes to its agent's room");
   assert.deepStrictEqual([agent.home.id, heads(agent)], ["pool", ["Sub-agents running"]]);
   assert.ok(rowsOf(team, "Next runs").length > 0 && rowsOf(team, "Sessions").length === 0, "a team: its next runs, no sessions");
   assert.deepStrictEqual(team.parts.find((x) => x.h === "Sessions").empty, "no sessions", "an empty part has its one quiet line");
@@ -96,11 +96,11 @@ async function shoot(b, base, w, h) {
   let c = await card(p);
   assert.ok(c && c.who === "mooblox", `${w}: a click on the creature opens its card ${JSON.stringify(c)}`);
   assert.deepStrictEqual([c.x.label, c.x.w >= 44, c.x.h >= 44, c.x.top < 16, c.x.right < 16], ["Close", true, true, true, true], `${w}: the × top right ${JSON.stringify(c.x)}`);
-  assert.deepStrictEqual([c.home.who, c.heads], ["room-mooblox", ["Sessions", "Held files", "Sub-agents running"]], `${w}: seat card parts`);
+  assert.deepStrictEqual([c.home.who, c.heads], ["room-mooblox", ["Sessions", "Sub-agents running"]], `${w}: seat card parts`);
   ok(`${w}: a click on a creature opens its card: × (44 px, "Close") top right, its parts, the line to its room`);
   await p.click("#office-card .home [data-who]");
   c = await card(p);
-  assert.deepStrictEqual([c.who, c.heads, c.quiet], ["room-mooblox", ["Members", "Next runs", "Sessions", "Held files", "Sub-agents running"], 4], `${w}: the room card from the line`);
+  assert.deepStrictEqual([c.who, c.heads, c.quiet], ["room-mooblox", ["Members", "Next runs", "Sessions", "Sub-agents running"], 3], `${w}: the room card from the line`);
   await p.click("#office-card .cx");
   assert.strictEqual(await card(p), null, `${w}: × closes`);
   const sign = await onSign(p, "team-operations");
@@ -108,7 +108,7 @@ async function shoot(b, base, w, h) {
   assert.ok(sign, `${w}: the Operations sign is on screen`);
   await team();
   c = await card(p);
-  assert.deepStrictEqual([c && c.who, c && c.heads], ["team-operations", ["Members", "Next runs", "Sessions", "Held files", "Sub-agents running"]], `${w}: a click on the sign opens the team's card`);
+  assert.deepStrictEqual([c && c.who, c && c.heads], ["team-operations", ["Members", "Next runs", "Sessions", "Sub-agents running"]], `${w}: a click on the sign opens the team's card`);
   if (process.env.SHOTS && w === 1920) await p.screenshot({ path: path.join(process.env.SHOTS, "team-card-1920.png") });
   await p.keyboard.press("Escape");
   assert.strictEqual(await card(p), null, `${w}: Esc closes`);

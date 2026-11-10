@@ -8,6 +8,11 @@ const WAKE = { channel: "Always on; woken through its chat channel.", "po-inbox"
 const SAY = { working: "working", talking: "talking", error: "stuck on an error", idle: "idle", asleep: "asleep", off: "off", yours: "yours", done: "done", stale: "stopped" };
 const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
 const keep = (rows) => rows.filter((r) => r[1] != null && r[1] !== "");
+/* A card's text kept to one line: longer text is cut with an ellipsis. */
+const cut = (s, n = 80) => (s && s.length > n ? s.slice(0, n - 1).trimEnd() + "…" : s);
+/* A card's list kept short: the first 5, and how many more there are. */
+export const MAX = 5;
+const cap = (list) => ({ shown: list.slice(0, MAX), more: Math.max(0, list.length - MAX) });
 
 /* "Now <state>", with how long when awake (a protected seat shows its state only). */
 const now = (p, t) => "Now " + (SAY[p.state] || p.state) + (p.pose === "sleep" || p.state === "yours" || !p.since ? "" : " · " + ago(p.since, t));
@@ -42,8 +47,8 @@ function worker(p, t) {
 /* An agent the CEO runs: its ticket, label, type, what it is doing now and since when (or how it ended), the session it runs in. */
 function agent(p, t) {
   const a = p.raw, s = a.session, run = a.state === "working";
-  const rows = run ? [["Running since", when(a.started, t)], ["Now", a.doing || "starting"]]
-    : [["Ended", when(a.last, t)], ["Report", a.report || (a.state === "stale" ? "no report · last step · " + (a.doing || "—") : "")]];
+  const rows = run ? [["Running since", when(a.started, t)], ["Now", cut(a.doing) || "starting"]]
+    : [["Ended", when(a.last, t)], ["Report", cut(a.report || (a.state === "stale" ? "no report · last step · " + (a.doing || "—") : ""))]];
   return { ...base(p, t, rest(a.label)), rows: keep([["Type", a.type], ...rows, ...(s ? [["Session", "pid " + s.pid], ...where(s, t)] : [])]) };
 }
 
@@ -64,7 +69,7 @@ const exit = (l) => (l && l.exit != null && l.exit !== "" ? String(l.exit) : "�
 const next = (m, t, none) => (m.on && m.next ? "in " + until(m.next, t) + " · " + at(m.next, t) : none);
 
 /* A runner's last run, exit, length and report line: the 4 rows a staff card and a PO or manager seat's card share. */
-const last4 = (m, t, bad, L = ["Last run", "Last exit", "Report"]) => [[L[0], ran(m.last, t)], gold([L[1], exit(m.last)], bad), ["Took", took((m.last || {}).seconds)], [L[2], m.report || "no report yet"]];
+const last4 = (m, t, bad, L = ["Last run", "Last exit", "Report"]) => [[L[0], ran(m.last, t)], gold([L[1], exit(m.last)], bad), ["Took", took((m.last || {}).seconds)], [L[2], cut(m.report) || "no report yet"]];
 
 /* Per runner kind (the Roster's cards): its pill, its rows and what it does while it rests. A bash timer with no fallback is a plain timer. */
 const RUNNERS = {
@@ -79,7 +84,7 @@ const RUNNERS = {
     const u = m.runner || {}, pill = m.on ? "on" : bad ? "failed" : m.health === "warn" ? "down" : "off";
     return { pill, rest: m.on ? "Always on" : "Off", rows: [["Schedule", "always on"], ["Unit", u.unit || "—"], ["Up since", m.on && u.since ? when(u.since, t) : "—"],
       gold(["Unit state", (u.state || "—") + (u.sub ? " · " + u.sub : "")], u.state !== "active"),
-      ...(u.tmux ? [gold(["Tmux", u.tmux + " · " + (u.tmux_alive ? "alive" : "missing")], !u.tmux_alive)] : []), ["Report", m.report || "no report yet"]] };
+      ...(u.tmux ? [gold(["Tmux", u.tmux + " · " + (u.tmux_alive ? "alive" : "missing")], !u.tmux_alive)] : []), ["Report", cut(m.report) || "no report yet"]] };
   },
   "on-demand": (m, t, bad) => ({ pill: "off", rest: "Asleep until someone starts it", rows: [["Schedule", "on demand"], ...last4(m, t, bad)] }),
 };
@@ -95,20 +100,28 @@ function staff(p, t) {
 }
 
 const NOTE = { "team-unassigned": "Rostered agents that no team in staff.json names." };
-const part = (h, empty, rows, chips) => ({ h, empty, rows: rows || [], chips: chips || [] });
+/* One titled list of a card: at most 5 rows or chips, the rest counted in `more`. */
+function part(h, empty, rows, chips) {
+  const r = cap(rows || []), c = cap(chips || []);
+  return { h, empty, rows: r.shown, chips: c.shown, more: r.more + c.more };
+}
 /* Running sub-agents as chips: ticket, running since, what each does now. */
-const subs = (I, t) => part("Sub-agents running", "none running for this project", null, I.subs.map((a) => ({ id: a.id, name: a.ticket, note: "since " + at(a.started, t) + " · " + (a.doing || "starting"), pose: "working" })));
-const sessions = (I, t) => part("Sessions", "no sessions", I.sessions.map((x) => [x.session, [x.state, x.protected ? "" : x.folder, ago(x.since, t) + " ago"].filter(Boolean).join(" · ")]));
-/* Held files: who, short paths and note; a path cut short gets its full form on the row under it. */
-const held = (I) => part("Held files", "no files held", I.claims.flatMap((c) => [[c.who, [c.paths.map((x) => x.short).join(" "), c.note].filter(Boolean).join(" · ")],
-  ...c.paths.filter((x) => x.short !== x.full).map((x) => ["Full path", x.full])]));
+const subs = (I, t) => part("Sub-agents running", "none running for this project", null, I.subs.map((a) => ({ id: a.id, name: a.ticket, note: "since " + at(a.started, t) + " · " + (cut(a.doing, 60) || "starting"), pose: "working" })));
+/* Sessions as one line each: name, state, last active (the folder is on the session's own card). */
+const sessions = (I, t) => part("Sessions", "no sessions", I.sessions.map((x) => [x.session, x.state + " · " + ago(x.since, t) + " ago"]));
+/* Held files as one row: how many files and whose ("9 · T1616"); no paths; none held, no row. */
+function held(claims) {
+  if (!claims.length) return [];
+  const n = claims.reduce((s, c) => s + c.paths.length, 0), who = cap(claims.map((c) => c.who));
+  return [["Files held", n + " · " + who.shown.join(", ") + (who.more ? " +" + who.more + " more" : "")]];
+}
 const runs = (I, t) => part("Next runs", "no scheduled runs", I.next.map((n) => [n.name, "in " + until(n.next, t) + " · " + at(n.next, t) + (n.bad ? " · last run failed" : ""), n.bad ? "bad" : ""].filter(Boolean)));
 
-/* A room's info, its sign's card: who is in it with their state, its next runs, sessions, held files and running sub-agents; empty parts say so in one line. */
+/* A room's info, its sign's card: who is in it with their state (5, then +N more; a running sub-agent only once, in its own list), the files it holds in one row, its next runs, sessions and running sub-agents; empty parts say so in one line. */
 function room(r, t, sub, extra) {
-  const I = r.info;
-  return { title: I.name, rank: r.kind === "seat" ? "Project" : r.kind === "pool" ? r.rank : "Team", sub, ...extra, state: { pose: r.pose, text: r.busy + " working now" }, rows: [], actions: [], roll: r.people.map((p) => p.id),
-    parts: [runs(I, t), sessions(I, t), held(I), subs(I, t)] };
+  const I = r.info, run = new Set(I.subs.map((a) => a.id)), ids = r.people.map((p) => p.id).filter((id) => !run.has(id)), roll = cap(ids.length || !run.size ? ids : []);
+  return { title: I.name, rank: r.kind === "seat" ? "Project" : r.kind === "pool" ? r.rank : "Team", sub, ...extra, state: { pose: r.pose, text: r.busy + " working now" }, rows: held(I.claims), actions: [],
+    roll: ids.length || !run.size ? roll.shown : null, rollMore: roll.more, parts: [runs(I, t), sessions(I, t), subs(I, t)] };
 }
 /* A staff team's room; the Unassigned room says why they are there. */
 const team = (r, t) => room(r, t, r.people.length + " staff", NOTE[r.id] ? { lines: [NOTE[r.id]] } : {});
@@ -117,18 +130,18 @@ const pool = (r, t) => room(r, t, "Agents the CEO runs himself");
 /* A seat's room: its project, the seat and the workers at its desks. */
 const project = (r, t) => room(r, t, r.area || r.people[0].name + "'s room");
 
-/* A person's card gains the line naming its room (opens the room's card) and the room's running sub-agents; a seat also its room's sessions and held files. */
+/* A person's card gains the line naming its room (opens the room's card) and the room's running sub-agents; a seat also its room's sessions and the files it holds. */
 function homed(p, t, c) {
   const r = p.sign && p.info, lead = p.kind === "seat";
-  return r ? { ...c, home: { id: p.sign, text: "Team · " + r.name },
-    parts: [...(lead ? [sessions(r, t), held(r)] : []), subs(r, t)] } : c;
+  return r ? { ...c, rows: lead ? [...c.rows, ...held(r.claims)] : c.rows, home: { id: p.sign, text: "Team · " + r.name },
+    parts: [...(lead ? [sessions(r, t)] : []), subs(r, t)] } : c;
 }
 
-/* What only the CEO sees: needs-you, the sessions and claims no avatar holds. */
+/* What only the CEO sees: needs-you, the sessions and the files (one row) no avatar holds. */
 function loose(p, t, c) {
   const L = p.raw.loose || { sessions: [], claims: [] };
-  return { ...c, parts: [part("Needs you", "nothing needs you", L.needs ? [["Needs you", "yes · the status lamp is on"]] : []),
-    sessions(L, t), held(L)] };
+  return { ...c, rows: [...c.rows, ...held(L.claims)], parts: [part("Needs you", "nothing needs you", L.needs ? [["Needs you", "yes · the status lamp is on"]] : []),
+    sessions(L, t)] };
 }
 
 export const CARDS = { ceo, seat, worker, agent, staff, team, pool };

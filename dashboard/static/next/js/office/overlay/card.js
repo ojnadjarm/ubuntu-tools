@@ -21,9 +21,10 @@ const safe = (href) => (/^(#|https?:\/\/)/.test(href) ? href : "#");
 const chip = (p) => `<li><button type="button" class="chip ${esc(p.pose)}" data-who="${esc(p.id)}"><i></i>${esc(p.name)}<span>${esc(p.note ?? p.rank)}</span></button></li>`;
 const CLOSE = `<button type="button" class="cx" data-close aria-label="Close">×</button>`;
 const dl = (rows) => `<dl>${rows.map(([k, v, tone]) => `<dt>${esc(k)}</dt><dd${tone ? ` class="${esc(tone)}"` : ""}>${esc(v)}</dd>`).join("")}</dl>`;
-/* One titled part of a card: its rows, its chips, else its one quiet line. */
+const more = (n) => (n ? `<p class="more">+${n} more</p>` : "");
+/* One titled part of a card: its rows, its chips and how many more, else its one quiet line. */
 const part = (x) => `<section class="cpart"><h3>${esc(x.h)}</h3>` + (x.rows.length ? dl(x.rows) : "") + (x.chips.length ? `<ul class="roll">${x.chips.map(chip).join("")}</ul>` : "") +
-  (x.rows.length || x.chips.length ? "" : `<p class="quiet">${esc(x.empty)}</p>`) + `</section>`;
+  (x.rows.length || x.chips.length ? more(x.more) : `<p class="quiet">${esc(x.empty)}</p>`) + `</section>`;
 
 /* Markup of the card of p (a person or a room). */
 function html(p) {
@@ -35,7 +36,7 @@ function html(p) {
     (c.bar != null ? `<progress max="100" value="${Math.round(c.bar)}" aria-label="To the next run"></progress>` : "") +
     (c.rows.length ? dl(c.rows) : "") +
     (c.home ? `<p class="home"><button type="button" class="chip" data-who="${esc(c.home.id)}">${esc(c.home.text)}</button></p>` : "") +
-    (c.roll ? (c.parts ? `<h3>Members</h3>` : "") + (c.roll.length ? `<ul class="roll">${c.roll.map((id) => M.who[id]).filter(Boolean).map(chip).join("")}</ul>` : `<p class="quiet">nobody here</p>`) : "") +
+    (c.roll ? (c.parts ? `<h3>Members</h3>` : "") + (c.roll.length ? `<ul class="roll">${c.roll.map((id) => M.who[id]).filter(Boolean).map(chip).join("")}</ul>` + more(c.rollMore) : `<p class="quiet">nobody here</p>`) : "") +
     (c.parts || []).map(part).join("") +
     (c.actions || []).map((a) => `<a class="btn" href="${esc(safe(a.href))}">${esc(a.label)}</a>`).join("") + `</div>`;
 }

@@ -29,7 +29,7 @@ const ok = (name, fn) => { fn(); n++; console.log("ok " + n + " " + name); };
     assert.deepStrictEqual(c.lines, ["A narrated board-game helper.", ROLE_MGR, INBOX]);
     assert.strictEqual(c.state.text, "Now working · 30 min");
     assert.deepStrictEqual(c.rows, [["Workers", "2 workers, 1 working"], ["Folder", "~/agents/po-tiny-epic-narrator"], ["Started by", "po-tiny-epic-narrator"], ["Last active", "30 min ago"],
-      ["Last run", "13:10 · 1.8 h ago"], ["Last exit", "0"], ["Took", "640 s"], ["Report", "Two PRs open."]]);
+      ["Last run", "13:10 · 1.8 h ago"], ["Last exit", "0"], ["Took", "640 s"], ["Report", "Two PRs open."], ["Files held", "2 · T9001"]]);
     assert.deepStrictEqual(c.actions, [{ label: "Message Bramble", href: "#chat?ch=dm-owner--tiny-epic-narrator" }]);
   });
 
