@@ -55,7 +55,7 @@ const ok = (name, fn) => { fn(); n++; console.log("ok " + n + " " + name); };
     assert.deepStrictEqual([c.title, c.rank, c.sub], ["DarkSaddler", "CEO", ""]);
     assert.deepStrictEqual(c.lines, ["Runs the fleet.", ROLE_CEO, CHANNEL]);
     assert.strictEqual(c.state.text, "Now working · " + T.ago(1794320000, NOW));
-    assert.deepStrictEqual(c.rows, [["Agents working", "2"], ["At the desk pool", "2"], ["Folder", "~"], ["Started by", "owner"], ["Last active", ago(1794320000)]]);
+    assert.deepStrictEqual(c.rows, [["Agents", "2 working"], ["At the desk pool", "2"], ["Session", "DarkSaddler command center"], ["Folder", "~"], ["Started by", "owner"], ["Last active", ago(1794320000)]]);
     assert.deepStrictEqual(c.actions, [{ label: "Message DarkSaddler", href: "#chat?ch=dm-orchestrator--owner" }]);
   });
 
@@ -153,7 +153,7 @@ const ok = (name, fn) => { fn(); n++; console.log("ok " + n + " " + name); };
     Q.agents.subagents.push({ id: "e1", label: "T9006 broken", type: "worker", started: "2026-11-10T14:00:00Z", last: NOW / 1000 - 300, state: "error", doing: "", report: "red" });
     const c = F.card(Mo.build(Q, { now: NOW }).who.orchestrator, NOW);
     assert.deepStrictEqual([c.state.pose, c.state.text], ["error", "Now stuck on an error · " + T.ago(1794320000, NOW)]);
-    assert.deepStrictEqual(c.rows.slice(0, 3), [["Agents working", "2"], ["At the desk pool", "2"], ["Failed", "T9006 · 5 min ago", "bad"]]);
+    assert.deepStrictEqual(c.rows.slice(0, 3), [["Agents", "2 working"], ["At the desk pool", "2"], ["Failed", "T9006 · 5 min ago", "bad"]]);
   });
 
   ok("pure and small: no DOM, under 12 KB", () => {

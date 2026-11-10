@@ -20,11 +20,11 @@ const lines = (r) => [r.about, ROLE[r.role], WAKE[r.wake]].filter(Boolean);
 const where = (s, t) => (!s ? [] : !("pid" in s) ? [["Folder", "protected project"], ["Last active", ago(s.since, t) + " ago"]]
   : keep([["Folder", s.cwd], ["Started by", s.started_by], ["Last active", s.since ? ago(s.since, t) + " ago" : ""]]));
 
-/* The CEO: about, role and wake lines, how many agents work at the desk pool, the agent that just failed, its session, a message button. */
+/* The CEO: about, role and wake lines, how many agents work (every live one) and sit at the desk pool, the agent that just failed, its session by name, a message button. */
 function ceo(p, t) {
-  const r = p.raw, c = r.crew || { n: 0, on: 0 }, f = r.failing;
-  return { ...base(p, t, r.area), lines: lines(r), rows: [["Agents working", String(c.on)], ["At the desk pool", String(c.n)],
-    ...(f ? [["Failed", f.ticket + " · " + ago(f.last, t) + " ago", "bad"]] : []), ...where(r.session, t)], actions: message(p) };
+  const r = p.raw, c = r.crew || { n: 0, on: 0 }, f = r.failing, s = r.session;
+  return { ...base(p, t, r.area), lines: lines(r), rows: [["Agents", c.on + " working"], ["At the desk pool", String(c.n)],
+    ...(f ? [["Failed", f.ticket + " · " + ago(f.last, t) + " ago", "bad"]] : []), ...(s && "pid" in s ? [["Session", s.name || "pid " + s.pid]] : []), ...where(s, t)], actions: message(p) };
 }
 
 /* A product owner or manager seat: area, about, role and wake lines, workers, its session, its runner's 4 rows, a message button. */
@@ -99,7 +99,9 @@ const part = (h, empty, rows, chips) => ({ h, empty, rows: rows || [], chips: ch
 /* Running sub-agents as chips: ticket, running since, what each does now. */
 const subs = (I, t) => part("Sub-agents running", "none running for this project", null, I.subs.map((a) => ({ id: a.id, name: a.ticket, note: "since " + at(a.started, t) + " · " + (a.doing || "starting"), pose: "working" })));
 const sessions = (I, t) => part("Sessions", "no sessions", I.sessions.map((x) => [x.session, [x.state, x.protected ? "" : x.folder, ago(x.since, t) + " ago"].filter(Boolean).join(" · ")]));
-const held = (I) => part("Held files", "no files held", I.claims.map((c) => [c.who, [c.paths.map((x) => x.short).join(" "), c.note].filter(Boolean).join(" · ")]));
+/* Held files: who, short paths and note; a path cut short gets its full form on the row under it. */
+const held = (I) => part("Held files", "no files held", I.claims.flatMap((c) => [[c.who, [c.paths.map((x) => x.short).join(" "), c.note].filter(Boolean).join(" · ")],
+  ...c.paths.filter((x) => x.short !== x.full).map((x) => ["Full path", x.full])]));
 const runs = (I, t) => part("Next runs", "no scheduled runs", I.next.map((n) => [n.name, "in " + until(n.next, t) + " · " + at(n.next, t) + (n.bad ? " · last run failed" : ""), n.bad ? "bad" : ""].filter(Boolean)));
 
 /* A room's info, its sign's card: who is in it with their state, its next runs, sessions, held files and running sub-agents; empty parts say so in one line. */

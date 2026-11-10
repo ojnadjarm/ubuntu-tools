@@ -97,7 +97,7 @@ const ok = (name, fn) => { fn(); n++; console.log("ok " + n + " " + name); };
 
   ok("C5: the CEO card: name, rank, state, agents working; the failed agent while in the error pose", () => {
     const c = F.card(M.who.orchestrator, NOW);
-    assert.deepStrictEqual([c.title, c.rank, c.state.pose, c.rows[0]], ["DarkSaddler", "CEO", "working", ["Agents working", "2"]]);
+    assert.deepStrictEqual([c.title, c.rank, c.state.pose, c.rows[0]], ["DarkSaddler", "CEO", "working", ["Agents", "2 working"]]);
     const Q = copy(); Q.agents.subagents.push(ended("e1", "T9006 broken", "error", S - 120));
     const e = F.card(Mo.build(Q, { now: NOW }).who.orchestrator, NOW);
     assert.strictEqual(e.state.text.split(" · ")[0], "Now stuck on an error");

@@ -222,7 +222,7 @@ const ok = (name, fn) => { fn(); n++; console.log("ok " + n + " " + name); };
     assert.deepStrictEqual(Object.keys(F.CARDS).sort(), ["agent", "ceo", "pool", "seat", "staff", "team", "worker"]);
     const ceo = F.card(M.who.orchestrator, NOW); shape(ceo);
     assert.strictEqual(ceo.title, "DarkSaddler");
-    assert.strictEqual(rowOf(ceo, "Agents working"), "2");
+    assert.strictEqual(rowOf(ceo, "Agents"), "2 working");
     assert.deepStrictEqual(ceo.actions, [{ label: "Message DarkSaddler", href: "#chat?ch=dm-orchestrator--owner" }]);
     const seat = F.card(M.who["tiny-epic-narrator"], NOW); shape(seat);
     assert.deepStrictEqual([seat.title, seat.rank, seat.sub], ["Bramble", "Manager", "Tiny Epic Narrator"]);

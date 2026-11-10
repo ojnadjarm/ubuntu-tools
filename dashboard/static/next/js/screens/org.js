@@ -2,7 +2,7 @@
 import { esc } from "/static/js/core/fmt.js";
 import { getJSON } from "/static/js/core/api.js";
 import { cur, go } from "/static/js/core/router.js";
-import { watch } from "../familiars/talk.js";
+import { watch, talking } from "../familiars/talk.js";
 import { listen } from "../familiars/ear.js";
 import { sync } from "../ui/sync.js";
 import { dust } from "../shapes.js";
@@ -32,19 +32,23 @@ for (const href of ["/static/css/org.css", "/static/css/office.css"]) if (!docum
 
 const root = () => grid.querySelector(":scope > .nxs.office");
 
+/* Builds the model and its plan from the last read: the CEO's lamp from the store, the seats that talk now. */
+function model() {
+  M = build(P, { needs: verdict(store.D).bad, talk: talking }); plan = planOf(M);
+}
+
 /* Reads /api/office when the copy is missing or older than max ms; never while the tab is hidden. */
 function pull(max) {
   if (busy || document.hidden || (at && Date.now() - at < max)) return;
   busy = true;
-  getJSON("/api/office").then((j) => { P = j; M = build(P, { needs: verdict(store.D).bad }); plan = planOf(M); err = M.error; }, (e) => { err = e.message || "unreadable"; })
+  getJSON("/api/office").then((j) => { P = j; model(); err = M.error; }, (e) => { err = e.message || "unreadable"; })
     .finally(() => { busy = false; at = Date.now(); paint(); });
 }
 
 /* Rebuilds the model from the last read when the store's needs-you verdict no longer matches the CEO's lamp. */
 function relamp() {
-  const needs = verdict(store.D).bad;
-  if (!P || !M || !M.ceo || (M.ceo.live.lamp === "needs") === needs) return;
-  M = build(P, { needs }); plan = planOf(M);
+  if (!P || !M || !M.ceo || (M.ceo.live.lamp === "needs") === verdict(store.D).bad) return;
+  model();
   paint();
 }
 
@@ -113,8 +117,8 @@ function paint() {
   show(false);
 }
 
-/* A seat starts or stops talking: the list is patched in place. */
-watch(() => { const el = cur === "org" && M && root(); if (el) sync(el.querySelector(".olist"), list(M)); });
+/* A seat starts or stops talking: the model takes its pose, then list, card and scene follow. */
+watch(() => { if (cur === "org" && P && root()) { model(); paint(); } });
 
 export function render() {
   pull(STALE_MS);
