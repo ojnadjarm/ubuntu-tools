@@ -9,12 +9,15 @@ import shutil
 import subprocess
 import sys
 
+import aiohttp
 from discordbot.config import Config
-from discordbot.rest import Rest
+from discordbot.rest import Rest, RestError
 from discordbot.store import save_json
 
 from .cli import App
 from .runlock import run_lock
+
+UPLOAD_MAX = 10 * 1024 * 1024
 
 
 def po_home(env):
@@ -91,8 +94,10 @@ def home_path(env, path):
 
 async def relay(app, env):
     """Post each PO reply (`thread: <id>` line, `image: <path>` lines, then the text) with the liaison's own post; move it
-    to sent/ or refused/. Images must sit in the agent's own folder or its project clone."""
+    to sent/ or refused/ (a Discord error or an image over LIAISON_UPLOAD_MAX adds a `<name>.why` line). Images must sit
+    in the agent's own folder or its project clone."""
     n = 0
+    cap = int(env.get('LIAISON_UPLOAD_MAX') or UPLOAD_MAX)
     for f in outbox_files(app, env):
         with open(f) as fh:
             head, _, text = fh.read().partition('\n')
@@ -102,11 +107,19 @@ async def relay(app, env):
             images += ['--image', home_path(env, line.removeprefix('image:').strip())]
         app.media_roots = media_roots(app, env, os.path.basename(os.path.dirname(os.path.dirname(os.path.dirname(f)))))
         tid = head.removeprefix('thread:').strip()
-        ok = (head.startswith('thread:') and tid.isdigit() and text.strip()
-              and await app.post([tid, *images, text.strip()]) == 0)
+        big = [p for p in images[1::2] if os.path.isfile(p) and os.path.getsize(p) > cap]
+        ok, why = False, f'image over LIAISON_UPLOAD_MAX ({cap} bytes): {" ".join(big)}' if big else ''
+        try:
+            ok = (not big and head.startswith('thread:') and tid.isdigit() and text.strip()
+                  and await app.post([tid, *images, text.strip()]) == 0)
+        except (RestError, aiohttp.ClientError, OSError) as e:
+            why = f'{type(e).__name__}: {e}'
         dest = os.path.join(os.path.dirname(f), 'sent' if ok else 'refused')
         os.makedirs(dest, exist_ok=True)
         shutil.move(f, os.path.join(dest, os.path.basename(f)))
+        if why:
+            with open(os.path.join(dest, os.path.basename(f) + '.why'), 'w') as w:
+                w.write(why + '\n')
         n += bool(ok)
     return n
 

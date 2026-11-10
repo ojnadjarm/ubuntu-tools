@@ -9,10 +9,10 @@ import time
 import unittest
 from contextlib import redirect_stdout
 
-from liaison import po
-from liaison.cli import App
-
 from .test_liaison import Base
+from discordbot.rest import RestError  # noqa: E402
+from liaison import po  # noqa: E402
+from liaison.cli import App  # noqa: E402
 
 AGENTS = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -124,7 +124,40 @@ class TestPO(Base):
             ('Mira las capturas', [{'filename': 'shot.png', 'size': os.path.getsize(mine)}]),
             ('', [{'filename': 'render.gif', 'size': os.path.getsize(clone)}])])
         self.assertEqual(os.listdir(os.path.join(self.outbox, 'sent')), ['a.md'])
-        self.assertEqual(sorted(os.listdir(os.path.join(self.outbox, 'refused'))), sorted(bodies.keys() - {'a.md'}))
+        self.assertEqual(sorted(os.listdir(os.path.join(self.outbox, 'refused'))),
+                         sorted(bodies.keys() - {'a.md'} | {'g.md.why'}))
+
+    async def test_relay_rest_error_mid_reply_refuses_that_reply_and_goes_on(self):
+        self.env['HOME'] = self.tmp.name
+        shot = self.media(os.path.join(self.tmp.name, 'agents', 'po-other', 'state', 'shot.png'))
+
+        async def too_large(*a, **k):
+            raise RestError(413, 'Request entity too large')
+        self.rest.send_file = too_large
+        with open(os.path.join(self.outbox, 'a.md'), 'w') as f:
+            f.write(f'thread: 400\nimage: {shot}\n' + 'x' * 1899 + '\nfin')
+        with open(os.path.join(self.outbox, 'b.md'), 'w') as f:
+            f.write('thread: 400\nOtra respuesta')
+        for _ in range(2):
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(await po.amain(['relay'], self.env, self.rest), 0)
+        self.assertEqual(self.fake.sent('400'), ['x' * 1899, 'Otra respuesta'])
+        self.assertEqual(os.listdir(os.path.join(self.outbox, 'refused')).count('a.md'), 1)
+        self.assertEqual(os.listdir(os.path.join(self.outbox, 'sent')), ['b.md'])
+        with open(os.path.join(self.outbox, 'refused', 'a.md.why')) as f:
+            self.assertEqual(f.read(), 'RestError: discord rest 413\n')
+
+    async def test_relay_refuses_an_image_over_the_upload_max(self):
+        self.env['HOME'] = self.tmp.name
+        self.env['LIAISON_UPLOAD_MAX'] = '32'
+        shot = self.media(os.path.join(self.tmp.name, 'agents', 'po-other', 'state', 'shot.png'))
+        with open(os.path.join(self.outbox, 'a.md'), 'w') as f:
+            f.write(f'thread: 400\nimage: {shot}\nMira')
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(await po.amain(['relay'], self.env, self.rest), 0)
+        self.assertEqual(self.fake.sent('400'), [])
+        with open(os.path.join(self.outbox, 'refused', 'a.md.why')) as f:
+            self.assertEqual(f.read(), f'image over LIAISON_UPLOAD_MAX (32 bytes): {shot}\n')
 
 
 class TestRealRegistry(unittest.TestCase):
