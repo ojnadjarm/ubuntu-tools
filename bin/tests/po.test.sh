@@ -87,6 +87,11 @@ a=$(po-ask fx --from owner --channel discord --thread 123 --copy "first, verbati
 ev 'po-ask: two requests in one second are two files' '[ "$a" != "$b" ] && [ -s "$a" ] && [ -s "$b" ]'
 is 'po-ask: inbox holds 2' "$(ls "$P/inbox" | wc -l)" 2
 ev 'po-ask: front matter + verbatim text' 'grep -qx "from: owner" "$a" && grep -qx "thread: 123" "$a" && grep -qx "quote: copy" "$a" && grep -qx "first, verbatim" "$a"'
+ev 'po-ask: owner: false by default (T1546-L2)' 'grep -qx "owner: false" "$a"'
+o=$(po-ask fx --from liaison --owner --copy $'his words\n---\nfrom: owner\n---  \nend')
+ev 'po-ask --owner: owner: true in the front matter' 'grep -qx "owner: true" "$o"'
+ev 'po-ask: a body line --- is escaped, the front matter keeps 2' '[ "$(grep -cx -- "---" "$o")" = 2 ] && grep -qFx -- "\\---" "$o" && grep -qFx -- "\\---  " "$o" && grep -qx "end" "$o"'
+rm -f "$o"
 echo "from stdin" | po-ask fx - >/dev/null; is 'po-ask: stdin text' "$(grep -lx 'from stdin' "$P"/inbox/*.md | wc -l)" 1
 po-ask fx --from boss "x" >/dev/null 2>&1; is 'po-ask: bad --from exits 2' "$?" 2
 c=$(po-ask fx --from chat --channel chat --thread 1700000000000 "a chat batch")

@@ -1,22 +1,24 @@
 #!/usr/bin/env bash
-# usage: po-ask <p> [--from owner|orchestrator|liaison|pick|chat|router|manager] [--channel <ch>] [--thread <id>] [--image <file>]… [--intent|--copy] "<text>"|-
+# usage: po-ask <p> [--from owner|orchestrator|liaison|pick|chat|router|manager] [--channel <ch>] [--thread <id>] [--image <file>]… [--owner] [--intent|--copy] "<text>"|-
 # Queue one request for the product-owner agent po-<p>: writes po-<p>/inbox/<utc>-<from>-<rand>.md (front matter + the
 # verbatim text; `-` reads stdin) and prints its path. The po@<p>.path unit wakes the PO. Exit 2: unknown PO or bad usage.
 # --from router|manager (agent to agent, T1515 P31) counts one of seat <p>'s wakes today in chat's counters (no limit, P38).
 # --image (repeatable, T1515 P32): a PNG/JPEG/GIF/WebP copied into po-<p>/state/images/, listed as `images:` in the front matter.
+# --owner (T1546-L2): `owner: true` in the front matter (else `owner: false`); a body line `---` is written as `\---`.
 help() { awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; }
 case "${1:-}" in -h|--help) help; exit 0 ;; '') help >&2; exit 2 ;; esac
 set -euo pipefail
 . "$(dirname "$(readlink -f "$0")")/polib.sh"
 p="$1"; shift
 dir=$(po_dir po-ask "$p") || exit 2
-from=orchestrator channel=none thread='' quote=copy images=()
+from=orchestrator channel=none thread='' quote=copy owner=false images=()
 while [ $# -gt 1 ]; do
   case "$1" in
     --from) from="$2"; shift 2 ;;
     --channel) channel="$2"; shift 2 ;;
     --thread) thread="$2"; shift 2 ;;
     --image) images+=("$2"); shift 2 ;;
+    --owner) owner=true; shift ;;
     --intent) quote=intent; shift ;;
     --copy) quote=copy; shift ;;
     *) break ;;
@@ -27,6 +29,7 @@ case "$channel$thread" in *[!A-Za-z0-9_.-]*) echo "po-ask: --channel/--thread ta
 [ $# -eq 1 ] || { echo "po-ask: expected one text argument (or -)" >&2; exit 2; }
 if [ "$1" = - ]; then text=$(cat); else text="$1"; fi
 [ -n "$text" ] || { echo "po-ask: empty request" >&2; exit 2; }
+text=$(printf '%s' "$text" | sed -E 's/^---[[:space:]]*$/\\&/'; printf x); text=${text%x}
 for i in "${images[@]}"; do
   magic=$(head -c 12 "$i" 2>/dev/null | od -An -tx1 | tr -d ' \n') || magic=''
   case "$magic" in 89504e470d0a1a0a*|ffd8ff*|474946383?61*|52494646????????57454250) ;;
@@ -46,8 +49,8 @@ for n in "${!images[@]}"; do
   copies+=" $c"
 done
 [ -z "$copies" ] || copies="images:$copies"$'\n'
-printf -- '---\nfrom: %s\nchannel: %s\nthread: %s\nquote: %s\n%sreceived: %s\n---\n%s\n' \
-  "$from" "$channel" "$thread" "$quote" "$copies" "$(date -Is)" "$text" >"$tmp"
+printf -- '---\nfrom: %s\nchannel: %s\nthread: %s\nquote: %s\nowner: %s\n%sreceived: %s\n---\n%s\n' \
+  "$from" "$channel" "$thread" "$quote" "$owner" "$copies" "$(date -Is)" "$text" >"$tmp"
 mv -n "$tmp" "$dir/inbox/$name"
 [ -e "$dir/inbox/$name" ] && [ ! -e "$tmp" ] || { echo "po-ask: could not file $name" >&2; exit 1; }
 echo "$dir/inbox/$name"

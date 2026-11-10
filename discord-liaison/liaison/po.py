@@ -68,11 +68,13 @@ async def deliver(app, env, to, m, pid):
 
 
 def ask(env, to, m, pid, images=(), notes=''):
-    """The po-ask command that files one Discord message for agent `to` (the router also gets the thread's project)."""
+    """The po-ask command that files one Discord message for agent `to` (the router also gets the thread's project);
+    `--owner` only when its author id is DISCORD_OWNER_ID."""
     where = f'thread "{m["thread"]}"' + (f', project {pid or "none"}' if to != f'po-{pid}' else '')
+    owner = ['--owner'] if env.get('DISCORD_OWNER_ID') and m.get('author_id') == env['DISCORD_OWNER_ID'] else []
     return shlex.split(env.get('LIAISON_PO_ASK', 'po-ask')) + [
         to.removeprefix('po-'), '--from', 'liaison', '--channel', 'discord', '--thread', m['thread_id'],
-        *[a for p in images for a in ('--image', p)], '--copy',
+        *[a for p in images for a in ('--image', p)], *owner, '--copy',
         f'{m["author"]} (Discord, {where}, message {m["id"]}): {m["content"]}{notes}']
 
 
