@@ -98,6 +98,11 @@ w=$(sed -n 's/.*would run: //p' "$W/o2")
   case "$w" in *"--arm both"*"-n 3"*"--model opus"*"--require-away"*) [[ $w != *--tier* ]];; *) false;; esac
 } && ok || no "rc=$rc cmd='$w'"
 
+t "gate log prints the real force value"
+PATH="$FIX:$BIN:$PATH" PCFAKE_STATUS="$FIX/present-player.json" bash "$RUNNER" --dry-run --force >"$W/o4" 2>&1
+{ grep -q 'gate: away (force=0)' "$W/o2" && grep -q 'gate: present (.*), forced (force=1)' "$W/o4"; } &&
+  ok || no "$(grep gate: "$W/o2" "$W/o4")"
+
 t "a tree changed between arm build and run does not fail it"
 S="$W/race"; mkdir -p "$S/bin" "$S/bench" "$S/tree"; echo 1 >"$S/tree/v"
 cat >"$S/bin/pcbench" <<STUB

@@ -56,7 +56,8 @@ if [ "$present" != false ] && [ "$FORCE" = 0 ]; then
   [ "$n" = 3 ] && notify-owner -t pcbench "weekly bench skipped 3 weeks running: owner present. Run it by hand: pcbench-weekly --force" || true
   exit 0
 fi
-say "gate: away${FORCE:+ (force=$FORCE)}"
+[ "$present" = false ] && g=away || g="present (${why:-unknown}), forced"
+say "gate: $g (force=$FORCE)"
 
 # --tier is omitted on purpose: every tier runs, so the confirming C02/C04 re-run is included.
 cmd=(pcbench run --arm both -n "$TRIALS" --model "$MODEL" --set night)
