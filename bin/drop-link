@@ -10,7 +10,7 @@ usage() {
   cat <<'EOF'
 usage: drop-link <file|dir> <sub>    hard-link (copy across filesystems) into ~/drop/<sub>/, print the https URL, check it answers 200
        drop-link <path-in-drop>      print and check the URL of something already in ~/drop
-Folders and index.html get a trailing-slash URL; other .html files open as pages; any other file downloads.
+A folder with no index.html gets the dashboard Files link (:8498/#files?p=…, previews images); a folder with one and index.html get a trailing-slash URL; other .html files open as pages; any other file downloads.
 exit 0 link answers 200 · 1 link does not answer · 2 usage
 EOF
 }
@@ -35,7 +35,11 @@ case "$rel" in
   */index.html|index.html) rel=${rel%index.html} ;;
 esac
 [ -d "$dest" ] && rel="$rel/"
-url="$BASE/$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1]))' "$rel")"
+if [ -d "$dest" ] && [ ! -e "$dest/index.html" ]; then
+  url="${DROP_FILES_URL:-https://${HARNESS_TAILNET_FQDN:-$HARNESS_HOST}:8498}/#files?p=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1].rstrip("/"),safe=""))' "$rel")"
+else
+  url="$BASE/$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1]))' "$rel")"
+fi
 code=$(curl -s -o /dev/null -w '%{http_code}' -I --max-time 10 "$url")
 echo "$url"
 [ "$code" = 200 ] || { echo "drop-link: $url answered $code" >&2; exit 1; }
