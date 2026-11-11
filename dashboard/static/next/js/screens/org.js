@@ -31,6 +31,8 @@ for (const href of ["/static/css/org.css", "/static/css/office.css"]) if (!docum
 }
 
 const root = () => grid.querySelector(":scope > .nxs.office");
+/* The card lives with the screen: once the office leaves the grid (Message, a tab, back or forward), the card and its node go too. */
+new MutationObserver(() => { if (!root()) card.drop(); }).observe(grid, { childList: true });
 
 /* Builds the model and its plan from the last read: the CEO's lamp from the store, the seats that talk now. */
 function model() {

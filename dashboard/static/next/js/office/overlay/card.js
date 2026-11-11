@@ -6,16 +6,25 @@ import { sync } from "../../ui/sync.js";
 import { card } from "../fields.js";
 import { tiers } from "../tier.js";
 
-let M = null, el = null;
+let M = null, el = null, fits = null;
 
-/* The one card element, made on first use. */
+/* The one card element, made on first use: its × closes it and it stays inside the window as it grows. */
 function host() {
   if (el) return el;
   el = document.createElement("div");
   el.id = "office-card"; el.className = "ocard"; el.popover = "auto"; el.tabIndex = -1;
   el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "About");
+  el.addEventListener("click", (e) => { if (e.target.closest("[data-close]")) close(); });
+  fits = new ResizeObserver(fit); fits.observe(el);
   document.body.append(el);
   return el;
+}
+
+/* Moves a placed card up until its bottom is inside the window; taller than the window, it is capped and scrolls inside. */
+function fit() {
+  if (!isOpen() || !el.style.top) return;
+  const over = el.getBoundingClientRect().bottom - (innerHeight - 8);
+  if (over > 0) el.style.top = Math.max(8, parseFloat(el.style.top) - over) + "px";
 }
 
 const safe = (href) => (/^(#|https?:\/\/)/.test(href) ? href : "#");
@@ -73,3 +82,8 @@ watch(() => { if (M) refresh(M); });
 
 export const isOpen = () => !!el && el.matches(":popover-open");
 export function close() { if (isOpen()) el.hidePopover(); }
+/* Closes the card and removes its node and observer: the Office screen left the page. */
+export function drop() {
+  if (!el) return;
+  close(); fits.disconnect(); el.remove(); el = fits = null;
+}
