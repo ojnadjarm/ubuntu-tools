@@ -26,6 +26,11 @@ if { [ -n "${MEMORY_DOMAINS+set}" ] || grep -qs '^@.*/core/CORE\.md$' "$HOME/CLA
   mem="$(timeout 30 memory load 2>/dev/null)" || mem=""
 fi
 [ -n "$mem" ] && sys="${sys:+$sys$'\n\n'}$mem"
+# T1624: the brief's recall hints follow the memory; MEMORY_RECALL_DONE keeps the prompt hook silent in this run.
+hint=""
+[ -n "$mem" ] && { hint="$(CLAUDE_CODE_SESSION_ID='' timeout 10 memory recall --file "$PROMPT_FILE" 2>/dev/null)" || hint=""; }
+[ -n "$hint" ] && sys="${sys:+$sys$'\n\n'}$hint"
+export MEMORY_RECALL_DONE=1
 [ -n "$sys" ] && cmd+=(--append-system-prompt "$sys")
 cmd+=(--output-format stream-json --verbose)
 # AGENT_WRAP (agent.env): a command prefix such as a sandbox, e.g. "code-review-sandbox --".

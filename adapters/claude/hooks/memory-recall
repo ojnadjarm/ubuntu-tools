@@ -1,0 +1,142 @@
+#!/usr/bin/env -S python3 -S
+"""Claude Code carrier of `memory recall` (T1624): UserPromptSubmit and SubagentStart JSON in, the hint block out.
+
+UserPromptSubmit: the prompt goes to `memory_recall.recall` under `memory recall --hook`'s rules; the block is printed.
+SubagentStart: the stdin has no prompt, so the brief is the subagent's pending Agent call in the parent transcript;
+its block comes back as additionalContext JSON. Each hook call leaves one ids-only row (event, source, session hash,
+bytes) in $AGENT_WORK/memory-recall/hooks/<date>.tsv, none in a protected session. Any failure: 0 bytes, exit 0.
+"""
+import contextlib
+import fcntl
+import importlib.machinery
+import importlib.util
+import json
+import os
+import sys
+import time
+
+HERE = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "lib"))
+SPAWN_WAIT_S, SPAWN_TAIL, TAKEN_MAX = 0.5, 1 << 20, 200
+
+
+def carrier():
+    """adapters/claude/memory-carrier as a module (worker detection, the rule `memory load` uses)."""
+    path = os.path.join(HERE, "memory-carrier")
+    loader = importlib.machinery.SourceFileLoader("memory_carrier", path)
+    mod = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(mod)
+    return mod
+
+
+def context(store, hook):
+    """The recall Context of this hook JSON, by `memory recall --hook`'s rules: agent_id or a worker process blanks an owner seat."""
+    import memory_recall
+    import memory_route
+    worker = bool(hook.get("agent_id")) or carrier().is_worker()
+    seat = os.environ.get("CHAT_SEAT", "")
+    if worker and memory_route.owner_seat(seat, store):
+        seat = ""
+    return memory_recall.Context(hook.get("cwd") or os.getcwd(), seat, worker, hook.get("session_id"))
+
+
+def pending_calls(transcript):
+    """Agent tool calls in the transcript's tail that have no tool_result yet, oldest first."""
+    with open(transcript, "rb") as f:
+        f.seek(0, 2)
+        f.seek(max(0, f.tell() - SPAWN_TAIL))
+        rows = f.read().decode("utf-8", "replace").splitlines()
+    calls, done = [], set()
+    for row in rows:
+        if '"Agent"' not in row and '"tool_result"' not in row:
+            continue
+        try:
+            for c in json.loads(row)["message"]["content"]:
+                if c.get("type") == "tool_use" and c.get("name") == "Agent":
+                    calls.append(c)
+                elif c.get("type") == "tool_result":
+                    done.add(c.get("tool_use_id"))
+        except Exception:
+            continue
+    return [c for c in calls if c.get("id") not in done]
+
+
+def take_brief(hook, runtime):
+    """The prompt of this subagent's Agent call: the oldest pending one not taken yet (same subagent_type first)."""
+    calls = pending_calls(hook["transcript_path"])
+    ledger = os.path.join(runtime, "spawns.json")
+    with open(ledger + ".lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            with open(ledger, encoding="utf-8") as f:
+                taken = json.load(f)
+        except (OSError, ValueError):
+            taken = []
+        free = [c for c in calls if c.get("id") not in taken]
+        kind = str(hook.get("agent_type") or "")
+        pick = next((c for c in free if (c.get("input") or {}).get("subagent_type", "general-purpose") == kind),
+                    free[0] if free else None)
+        if not pick:
+            return None
+        with open(ledger + ".tmp", "w", encoding="utf-8") as f:
+            json.dump((taken + [pick["id"]])[-TAKEN_MAX:], f)
+        os.replace(ledger + ".tmp", ledger)
+    return str((pick.get("input") or {}).get("prompt") or "") or None
+
+
+def spawn_brief(hook):
+    """take_brief, polled SPAWN_WAIT_S since the Agent row can land just after the hook fires (0 s for a workflow)."""
+    tp = hook.get("transcript_path") or ""
+    runtime = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "memory-recall")
+    os.makedirs(runtime, mode=0o700, exist_ok=True)
+    workflow = os.path.isdir(os.path.join(tp[:-len(".jsonl")] if tp.endswith(".jsonl") else tp, "subagents", "workflows"))
+    end = time.monotonic() + (0 if workflow else SPAWN_WAIT_S)
+    while True:
+        brief = take_brief(hook, runtime)
+        if brief or time.monotonic() > end:
+            return brief
+        time.sleep(0.05)
+
+
+def log_row(store, ctx, event, hook, nbytes):
+    """One ids-only row per hook call: time, event, the input's `source` (prompt origin), session hash, bytes out."""
+    import memory_recall
+    if memory_recall.protected(store, ctx):
+        return
+    path = os.path.join(memory_recall.agent_work(), "memory-recall", "hooks", time.strftime("%Y-%m-%d") + ".tsv")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    source = str(hook.get("source") or "-").replace("\t", " ")[:40]
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')}\t{event}\t{source}\t{memory_recall.session_hash(ctx.session)}\t{nbytes}\n")
+
+
+def main():
+    hook = json.load(sys.stdin)
+    event = hook.get("hook_event_name") or "UserPromptSubmit"
+    payload = hook
+    if event == "SubagentStart":
+        if not hook.get("agent_id"):
+            return
+        brief = spawn_brief(hook)
+        if not brief:
+            return
+        os.environ.pop("MEMORY_RECALL_DONE", None)
+        payload = {"prompt": brief, "session_id": hook["agent_id"], "cwd": hook.get("cwd"), "agent_id": hook["agent_id"]}
+    import memory_recall
+    import memory_store
+    store = memory_store.Store(memory_store.home())
+    ctx = context(store, payload)
+    block = "" if os.environ.get("MEMORY_RECALL_DONE") else memory_recall.recall(store, str(payload.get("prompt") or ""), ctx).block
+    if block and event == "SubagentStart":
+        out = json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": block}})
+    else:
+        out = block
+    with contextlib.suppress(Exception):
+        log_row(store, ctx, event, hook, len(block.encode("utf-8")))
+    sys.stdout.write(out)
+
+
+if __name__ == "__main__":
+    with contextlib.suppress(BaseException):
+        main()
+    sys.exit(0)

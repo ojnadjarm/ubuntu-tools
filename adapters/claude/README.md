@@ -14,6 +14,7 @@ the other adapters are measured against it.
 | `settings.fragment.json` | the hooks this harness owns, with `@HARNESS_HOME@` substituted at install time |
 | `hooks/session-start.sh` | 2-line wrapper: `harness context --json` |
 | `hooks/audit-log.py` | maps Claude's PostToolUse event onto `hooks/audit-log.py`'s generic record |
+| `hooks/memory-recall` | T1624 recall carrier: UserPromptSubmit prompt (or, on SubagentStart, the brief of the pending Agent call in the parent transcript) → `memory_recall.recall` → hint block; ids-only row per call in `$AGENT_WORK/memory-recall/hooks/`; any failure 0 B, exit 0 |
 
 ## Flags `run` uses
 
@@ -22,10 +23,12 @@ the other adapters are measured against it.
 `--strict-mcp-config`, `--tools $AGENT_TOOLS` (default `Bash,Read,Edit,Write`; set per agent in `agent.env`),
 `--settings {"claudeMdExcludes":["$HOME/CLAUDE.md"]}`, env `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (TSP-013).
 Cost comes from `.total_cost_usd`, tokens from `.usage`, the result text from `.result`.
+After `memory load`, `run` appends `memory recall --file "$PROMPT_FILE"` (the brief's hints) to the system text and
+exports `MEMORY_RECALL_DONE=1`, so the prompt hook stays silent in the run (T1624).
 
 ## What `install` writes
 
-The `hooks` key of `~/.claude/settings.json`, only these four events, plus the fragment's
+The `hooks` key of `~/.claude/settings.json`, only these events, plus the fragment's
 `permissions.deny` power-verb rules (`systemctl reboot`, `reboot`, `shutdown`, … — FLEET.md §5.2, every
 session and subagent):
 
@@ -35,6 +38,7 @@ session and subagent):
 | `PostToolUse` | `adapters/claude/hooks/audit-log.py` | `~/.claude/hooks/audit-log.sh` (a symlink to the same file since GH09; `install` deletes it) |
 | `SubagentStart` / `SubagentStop` | `bin/orbit-hook start` / `stop` | — (the Eye's orbiters; Claude-only, see `~/the-dark-eye`) |
 | `PostCompact` | `hooks/image-reread.py` | — (resets the compacted context's image-read counts, T513) |
+| `UserPromptSubmit`, `SubagentStart` | `adapters/claude/hooks/memory-recall` (timeout 2) | — (T1624 recall hints; kill switch `MEMORY_RECALL=off`) |
 
 The rest of `permissions` (`defaultMode`, `allow`, the owner's own `deny` rules), `model`, `effortLevel`,
 `outputStyle`, the `Stop` hook owned by the Moodle harness and every other key are preserved

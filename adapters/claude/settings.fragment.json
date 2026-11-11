@@ -66,6 +66,18 @@
         "hooks": [
           { "type": "command", "command": "@HARNESS_HOME@/bin/orbit-hook start", "timeout": 5 }
         ]
+      },
+      {
+        "hooks": [
+          { "type": "command", "command": "@HARNESS_HOME@/adapters/claude/hooks/memory-recall", "timeout": 2 }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "@HARNESS_HOME@/adapters/claude/hooks/memory-recall", "timeout": 2 }
+        ]
       }
     ],
     "SubagentStop": [
