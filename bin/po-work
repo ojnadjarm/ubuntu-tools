@@ -7,7 +7,8 @@
 # from agent.env) and files its report once as `po-ask <p> --from worker`, which wakes the PO to relay it.
 # `reap` (unit ExecStopPost and every po-run) marks a worker whose runner died `lost` and files that once.
 # The image key (OPENROUTER_KEY_FILE) reaches a worker only when its brief has a line `AI image grant: "<quote>"`: the
-# requester's verbatim words asking for an AI image (T1632); otherwise the unit sets it to /dev/null.
+# requester's verbatim words asking for an AI image (T1632); otherwise the unit sets it to /dev/null and runs under
+# secret-mask, so the key file reads empty in the whole worker tree (T1633).
 # `list`: open work, one line per ticket. No cap on workers at once (owner 2026-11-11); start exits 3 when the same key
 # or ticket is open (nothing starts), 1 when the launch fails, 2 on bad usage.
 help() { awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; }
@@ -74,10 +75,11 @@ case "$verb" in
       '{ticket:$t, key:$k, brief:$b, channel:$c, thread:$th, asked_by:$a, model:$m, effort:$e, started:$s, unit:$u,
         status:"starting", filed:false}' >"$W/.$t.tmp" && mv "$W/.$t.tmp" "$W/$t.json"
     tmo=$(envkey WORK_TIMEOUT); tmo=${tmo:-14400}
-    nokey=(--setenv=OPENROUTER_KEY_FILE=/dev/null); grep -q '^AI image grant: "..*"' "$brief" && nokey=()
+    nokey=(--setenv=OPENROUTER_KEY_FILE=/dev/null); mask=("$(dirname "$SELF")/secret-mask" "$HARNESS_HOME/secrets/openrouter.key" --)
+    grep -q '^AI image grant: "..*"' "$brief" && nokey=() mask=()
     if ! systemd-run --user --quiet --collect --unit="po-work-$p-$t" --setenv=PATH="$PATH" "${nokey[@]}" \
          --property=RuntimeMaxSec=$((tmo + 300)) --property=ExecStopPost="$SELF $p reap" \
-         "$SELF" "$p" run "$t" </dev/null >>"$L/$t.log" 2>&1 7>&-; then
+         "${mask[@]}" "$SELF" "$p" run "$t" </dev/null >>"$L/$t.log" 2>&1 7>&-; then
       jset "$t" '.status = "failed" | .rc = "launch" | .filed = true'
       echo "po-work: launch of $t failed; see $L/$t.log" >&2; exit 1
     fi

@@ -26,7 +26,7 @@ bluetoothctl	bluez	pc-bt	advisory
 body-sandbox	-	sentinel-runaway	advisory
 bpftrace	bpftrace	pc-trace	advisory
 busctl	systemd	code-review-sandbox,pc-bt,pc-dbus,pc-doctor,pc-lid,pc-status	advisory
-bwrap	bubblewrap	code-review-sandbox	advisory
+bwrap	bubblewrap	code-review-sandbox,secret-mask	advisory
 caddy	caddy	sites.test.sh	test
 cc	gcc	godot-smoke.sh	optional:gamedev
 claude	-	agents-stop,pc-status	advisory

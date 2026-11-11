@@ -5,7 +5,6 @@ import base64
 import io
 import json
 import os
-import re
 import shlex
 import subprocess
 import sys
@@ -27,11 +26,9 @@ env: OPENROUTER_KEY_FILE (default ~/agents/secrets/openrouter.key; empty file = 
 exit 0 image written · 1 API error (402 = key out of credit) · 2 usage · 3 cap reached · 4 no grant or no key"""
 HEADER = "time\tmodel\tresolution\taspect\tout\tcost_delta\tkey_usage\ttotal\tasked\n"
 REFUSE = "concept-img: make it yourself by code; the image model needs the requester's own words asking for an AI image"
-GRANT = re.compile(r"(?i)\b(ai|ia|a\.i|i\.a|generated|generad[ao]s?|concept\w*|image model|modelo de imagen|openrouter|"
-                   r"nano banana|gemini|seedream|midjourney|dall-?e|stable diffusion|artificial intelligence|"
-                   r"inteligencia artificial)\b")
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
 from agent_work import _key  # noqa: E402
+from image_grant import GRANT  # noqa: E402
 
 
 def api(path, key, body=None):

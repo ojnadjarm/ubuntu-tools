@@ -207,5 +207,60 @@ class TestImageGrant(JobBase):
                                 repr((None, '/dev/null'))])
 
 
+class TestImageKeyMask(JobBase):
+    """T1633: a job whose messages ask for no AI image cannot read the image key file at all."""
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self.key, self.other = os.path.join(self.tmp.name, 'fx.key'), os.path.join(self.tmp.name, 'fx.other')
+        for path, text in ((self.key, 'FXKEY-T1633'), (self.other, 'other')):
+            with open(path, 'w') as f:
+                f.write(text)
+        self.env['LIAISON_ART_KEY_FILE'] = self.key
+
+    def test_selftest_the_key_is_the_fixture(self):
+        real = os.path.realpath(os.path.expanduser('~/agents/secrets/openrouter.key'))
+        self.assertNotEqual(os.path.realpath(self.key), real)
+        self.assertTrue(self.key.startswith(self.tmp.name + os.sep))
+
+    async def reads(self, text):
+        """Run one job for `text` whose worker reads the key three ways and one other file."""
+        (a,) = await self.inbox(text)
+        await self.run_cli('job', a, 'task')
+        o = os.path.join(self.tmp.name, 'out')
+        cmd = (f'wc -c < {self.key} > {o}.cat; {sys.executable} -c "import sys; print(len(open(sys.argv[1]).read()))" '
+               f'{self.key} > {o}.py; cp {self.key} {o}.copy; wc -c < {o}.copy > {o}.cp; cat {self.other} > {o}.other')
+        await self.run_cli('job-run', self.launches()[0], env={'LIAISON_WORKER_CMD': cmd})
+        got = []
+        for ext in ('cat', 'py', 'cp', 'other'):
+            with open(f'{o}.{ext}') as f:
+                got.append(f.read().strip())
+        return got
+
+    async def test_no_grant_job_reads_the_key_empty_three_ways_and_other_files_as_is(self):
+        self.assertEqual(await self.reads('dibuja una representación de ti'), ['0', '0', '0', 'other'])
+        with open(self.key) as f:
+            self.assertEqual(f.read(), 'FXKEY-T1633')
+
+    async def test_a_job_asking_for_an_ai_image_reads_the_key(self):
+        n = str(len('FXKEY-T1633'))
+        self.assertEqual(await self.reads('hazme una imagen con IA del héroe'), [n, n, n, 'other'])
+
+    async def test_refused_art_keeps_the_image_slot(self):
+        fake = os.path.join(self.tmp.name, 'refuse.py')
+        with open(fake, 'w') as f:
+            f.write('import sys\nsys.exit(int(sys.argv[1]))\n')
+        for rc in ('4', '3'):
+            out = await self.run_cli('art', 'hero', env={'LIAISON_ART_CMD': f'{sys.executable} {fake} {rc}'})
+            self.assertEqual(out[0], 1)
+            self.assertEqual(self.app_caps_used(), 0)
+        await self.run_cli('art', 'hero')
+        self.assertEqual(self.app_caps_used(), 1)
+
+    def app_caps_used(self):
+        from liaison.caps import Caps
+        return Caps(os.path.join(self.tmp.name, 'state', 'caps.json'), os.devnull, {'img': 1}).used('img')
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -35,6 +35,7 @@ GENERAL = '#general'
 ME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(ME), 'lib'))
 from agent_work import liaison_papers  # noqa: E402
+from image_grant import GRANT  # noqa: E402
 USAGE = ('usage: discord-liaison tick [--dry-run]|wake|check|inbox|done|post <thread> [--image <file>] [--reply <message>] <text…>|'
          'react <thread> <message> <emoji>|art [--asked <quote>] <prompt…>|escalate <message> <blocker> <what…>|map <thread> <project>|pr <project>|'
          'job <message> [--project <id>] <task…>|job-run <id>|status')
@@ -110,6 +111,7 @@ class App:
                          {'run': int(env.get('LIAISON_RUNS_PER_DAY', '30')), 'pr': int(env.get('LIAISON_PRS_PER_DAY', '3')),
                           'img': int(env.get('LIAISON_IMAGES_PER_DAY', '5'))})
         self.art_dir = os.path.join(self.papers, 'art')
+        self.art_key = env.get('LIAISON_ART_KEY_FILE', os.path.join(os.path.dirname(ME), 'secrets', 'openrouter.key'))
         self.work = os.path.join(self.papers, 'work')
         self.cdn = tuple(env.get('LIAISON_CDN_PREFIXES', ' '.join(CDN)).split())
         self.jobs = JobQueue(os.path.join(self.papers, 'jobs'))
@@ -446,7 +448,8 @@ class App:
         return 0
 
     def art(self, args):
-        """concept-img into art_dir; the key and --asked reach it only when the quote is in this job's messages (T1632)."""
+        """concept-img into art_dir; the key and --asked reach it only when the quote is in this job's messages (T1632);
+        a refusal (exit 3 or 4, before any call) hands the image slot back (T1633)."""
         asked = args[1] if args[:1] == ['--asked'] and len(args) > 1 else ''
         args = args[2:] if asked else args
         if not args:
@@ -466,8 +469,9 @@ class App:
             '--model', self.env.get('LIAISON_ART_MODEL', 'bytedance-seed/seedream-5-0-flash'),
             '--prompt-file', out + '.prompt', '--resolution', '1K', '--out', out,
             '--log', os.path.join(self.art_dir, 'spend.tsv')] + (['--asked', asked] if granted else [])
-        key = self.env.get('LIAISON_ART_KEY_FILE', os.path.join(os.path.dirname(ME), 'secrets', 'openrouter.key'))
-        rc = subprocess.call(cmd, stdin=subprocess.DEVNULL, env=dict(os.environ, OPENROUTER_KEY_FILE=key) if granted else None)
+        rc = subprocess.call(cmd, stdin=subprocess.DEVNULL, env=dict(os.environ, OPENROUTER_KEY_FILE=self.art_key) if granted else None)
+        if rc in (3, 4):
+            self.caps.give('img')
         if rc != 0 or not os.path.exists(out):
             print(f'art failed (concept-img exit {rc})')
             return 1
@@ -645,7 +649,8 @@ class App:
         return path
 
     async def job_run(self, args):
-        """The worker's runner: hold the job lock, run the agent (a failed run is retried once), then start the next job."""
+        """The worker's runner: hold the job lock, run the agent (a failed run is retried once), then start the next job.
+        No message of the job asks for an AI image: the agent runs under secret-mask, the image key reads empty (T1633)."""
         job = self.jobs.get(args[0]) if args else None
         if job is None or job['status'] not in ('queued', 'running'):
             print('refused: no queued or running job with that id')
@@ -658,6 +663,8 @@ class App:
             self.jobs.save(job)
             logs = os.path.join(self.home, 'logs', 'jobs')
             os.makedirs(logs, exist_ok=True)
+            mask = [] if any(GRANT.search(m.get('content', '')) for m in job.get('messages', [job['message']])) else [
+                os.path.join(os.path.dirname(ME), 'bin', 'secret-mask'), self.art_key, '--']
             while True:
                 q = {k: shlex.quote(v) for k, v in {
                     'prompt': self.job_prompt(job), 'id': job['id'], 'home': self.home, 'model': self.env.get('LIAISON_JOB_MODEL', self.env.get('MODEL', 'opus')),
@@ -667,7 +674,7 @@ class App:
                     'agent-exec --prompt-file {prompt} --system-file {preamble} --model {model} --cwd {home} '
                     '--name discord-liaison-job --timeout {timeout} --raw-out {logs}/{id}.json --meta-out {logs}/{id}.meta.json '
                     '>>{logs}/{id}.log 2>&1')).format(**q)
-                rc = subprocess.call(cmd, shell=True, stdin=subprocess.DEVNULL, env=dict(os.environ, LIAISON_JOB=job['id'], EFFORT=self.env.get('LIAISON_JOB_EFFORT', 'xhigh'), OPENROUTER_KEY_FILE='/dev/null'))
+                rc = subprocess.call(mask + ['/bin/sh', '-c', cmd], stdin=subprocess.DEVNULL, env=dict(os.environ, LIAISON_JOB=job['id'], EFFORT=self.env.get('LIAISON_JOB_EFFORT', 'xhigh'), OPENROUTER_KEY_FILE='/dev/null'))
                 job = self.jobs.get(job['id'])
                 if job['status'] == 'superseded':
                     print(f'job {job["id"]} superseded')

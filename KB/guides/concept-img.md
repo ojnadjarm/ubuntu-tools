@@ -1,6 +1,6 @@
 # Generate AI concept art (character sheets) through OpenRouter under a hard dollar cap
 
-Ticket: T1035, T1632 · Last verified: 2026-11-11 by bin/tests/concept-img.test.sh (mock); 9 real calls 2026-10-21
+Ticket: T1035, T1632, T1633 · Last verified: 2026-11-11 by bin/tests/concept-img.test.sh (mock), bin/tests/secret-mask.test.sh; 9 real calls 2026-10-21
 
 ## When to use
 Only when the requester's own words ask for an AI, generated or concept image (owner 2026-11-11, T1632): create / draw /
@@ -18,8 +18,13 @@ image-to-3D.
 - Caps (config keys, `config.example.env`): `CONCEPT_IMG_JOB_CAP` 2.00 a job (one `--log`) when no `--cap`;
   `CONCEPT_IMG_MONTH_CAP` 10.00 a calendar month over the ledger `CONCEPT_IMG_LEDGER` (~/agents/log/concept-img.tsv),
   both exit 3 before any POST; crossing 80 % of the month sends one `notify-owner` line.
-- Not a sandbox: an agent that reads the key file itself bypasses the gate; the prompts (manager template, JOB.md, art
-  skill heads) carry the rule.
+- The key file itself (T1633): a liaison job none of whose messages asks for an AI image (`GRANT`, `lib/image_grant.py`,
+  shared with `concept-img`) and a `po-work` worker without the grant line run under `secret-mask`: the key path reads
+  empty (cat, python open, a copy) in the whole process tree; other secrets read as before. A refused `art` (concept-img
+  exit 3 or 4) hands its daily image slot back.
+- Limits of the mask: `systemd-run --user` (not `--scope`) starts a process outside it that reads the real key; `sudo`
+  fails inside (no_new_privs) and bwrap cannot nest (AppArmor), so bwrap-based tools (`code-review-sandbox`, tests that
+  wrap themselves in bwrap) fail in a masked worker.
 
 ## The path we took
 No fleet image CLI existed. `concept-img` calls OpenRouter's dedicated Image API (`POST /api/v1/images`, base64 PNG in

@@ -62,7 +62,8 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
 - Ask first, then work (owner, T1411): a request that takes more than a quick answer gets a 👀 reaction (`react`) on
   receipt, a short Spanish text only when the wait is long, the result, then ✅ on the same message.
 - Images: `art [--asked "<quote>"]` runs `concept-img` (OpenRouter, `LIAISON_ART_MODEL`, default seedream-5-0-flash 1K)
-  into `state/art/` under `LIAISON_IMAGES_PER_DAY` (5); jobs run with `OPENROUTER_KEY_FILE=/dev/null`, and `art` passes
+  into `state/art/` under `LIAISON_IMAGES_PER_DAY` (5; a concept-img refusal, exit 3/4, gives the slot back, T1633); jobs run with
+  `OPENROUTER_KEY_FILE=/dev/null`, a job with no AI-image ask under `secret-mask` (the key file reads empty, T1633), and `art` passes
   the key and the quote only when the quote is in the job's own messages (T1632, guide concept-img); `post --image` attaches only a PNG/JPEG from that directory
   (realpath + magic bytes, ≤ 10 MB) or a PNG/JPEG/GIF/WebP/MP4 inside a job folder `state/jobs/<id>/…` (≤ 25 MB, T1415)
   as one multipart upload (`Rest.send_file`), so no other file can leave. `--reply <message-id>` sets `message_reference`.
