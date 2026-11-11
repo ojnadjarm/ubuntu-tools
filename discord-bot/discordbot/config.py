@@ -11,6 +11,11 @@ def _ids(raw):
     return frozenset(x for x in raw.replace(',', ' ').split() if x.isdigit())
 
 
+def friend_bots(env):
+    """DISCORD_FRIEND_BOTS: friends' bot user ids, handled like a friend's messages; never the owner (T1690)."""
+    return _ids(env.get('DISCORD_FRIEND_BOTS', '')) - {env.get('DISCORD_OWNER_ID', '')}
+
+
 @dataclass
 class Config:
     token_file: str
@@ -38,7 +43,7 @@ class Config:
             guild_id=e.get('DISCORD_GUILD_ID', ''),
             forum_id=e.get('DISCORD_FORUM_ID', ''),
             owner_id=e.get('DISCORD_OWNER_ID', ''),
-            allowlist=_ids(e.get('DISCORD_ALLOWLIST', '')),
+            allowlist=_ids(e.get('DISCORD_ALLOWLIST', '')) - friend_bots(e),
             requests_per_day=int(e.get('DISCORD_REQUESTS_PER_DAY', '10')),
             jobs_per_day=int(e.get('DISCORD_JOBS_PER_DAY', '3')),
             poll_seconds=float(e.get('DISCORD_POLL_SECONDS', '2')),

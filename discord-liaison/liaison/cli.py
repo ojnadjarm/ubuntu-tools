@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 import aiohttp
 from discordbot.cli import write_config
-from discordbot.config import Config
+from discordbot.config import Config, friend_bots
 from discordbot.rest import RestError
 from discordbot.runner import SECRET_KEYS
 from discordbot.sanitize import chunks, clean
@@ -21,6 +21,7 @@ from discordbot.vault import LEASE_ENV, make_rest
 
 from .caps import Caps
 from .context import ContextRenderer, self_line
+from .friendbots import MARK, Gate
 from .history import History
 from .jobs import JobQueue
 from .placement import NOTE_MAX, homes, misplaced
@@ -105,6 +106,7 @@ class App:
         self.forum, self.guild = env.get('DISCORD_FORUM_ID', ''), env.get('DISCORD_GUILD_ID', '')
         self.general = env.get('DISCORD_GENERAL_ID', '')
         self.owner = env.get('DISCORD_OWNER_ID', '')
+        self.friends = friend_bots(env)
         self.state = State(os.path.join(self.home, 'state'))
         self.registry = Registry(env.get('LIAISON_REGISTRY', os.path.join(ME, 'projects.json')))
         os.makedirs(os.path.join(self.home, 'logs'), exist_ok=True)
@@ -160,6 +162,8 @@ class App:
         if gid:
             mentions, cur[GENERAL] = await w.general(gid, self.state.cursor.get(GENERAL, ''))
             msgs += mentions
+        if save and self.friends:
+            msgs = await self.friend_gate(msgs, w.me)
         for m in msgs:
             if m.get('channel') == 'general':
                 continue
@@ -172,6 +176,19 @@ class App:
             self.state.add(msgs)
             self.state.save_cursor(cur)
         return msgs, cur
+
+    async def friend_gate(self, msgs, me):
+        """Friends' bots (T1690): a message under their limits counts as a person's, marked as data; the rest is dropped."""
+        gate = Gate(os.path.join(self.home, 'state', 'friend-bots.json'),
+                    os.path.join(self.home, 'logs', 'friend-bots.log'), self.env, me)
+        out = []
+        for m in msgs:
+            if m.get('author_id') in self.friends:
+                if not gate.admit(m, await self.rest.messages(m['thread_id'], 50)):
+                    continue
+                m = dict(m, bot=False, friend_bot=True, content=f'{MARK} {m["content"]}')
+            out.append(m)
+        return out
 
     async def tick(self, args):
         if args == ['--dry-run']:
@@ -761,6 +778,8 @@ class App:
               f'  jobs running {len(self.jobs.list("running"))}/{self.job_cap} queued {len(self.jobs.list("queued"))}')
         for p in self.registry.projects.values():
             print(f'project {p["id"]}  {p["repo"]}  route {self.registry.route(p["id"])}')
+        print(f'friend bots {" ".join(sorted(self.friends))}' if self.friends else
+              'friend bots none (DISCORD_FRIEND_BOTS empty: id needed)')
         return 0
 
 
