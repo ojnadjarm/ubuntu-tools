@@ -18,8 +18,9 @@
       {"id": "toolsmith", "name": "Soot", "rank": "Toolsmith"},
       {"id": "improve-meter", "name": "Dusk", "rank": "Meter Reader", "unit": "improve-meter.timer"}
     ]},
-    {"id": "finance", "name": "Financial Team", "members": [
-      {"id": "hacienda", "name": "Laurel", "rank": "Tax Clerk"}
+    {"id": "finance", "name": "Finance", "members": [
+      {"id": "hacienda", "name": "Laurel", "rank": "Tax Clerk"},
+      {"id": "finance-web", "name": "Thrift", "rank": "Bookkeeper", "unit": "finance-web.service"}
     ]}
   ],
   "hidden": ["hello"]
