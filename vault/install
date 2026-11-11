@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# vault/install — install the fleet-vault broker as root (T1634): user, code in /opt, registry in /etc, units.
+set -euo pipefail
+SRC=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+R=${FLEET_VAULT_ROOT:-}   # fixture root prefix (tests): file steps only, no systemd, no user
+UNITS="fleet-vault.service fleet-vault-seal.socket fleet-vault-seal@.service"
+
+usage() {
+  cat <<EOF
+usage: sudo -n $0 [--apply]            install or update (dry run without --apply)
+       sudo -n $0 --remove [--apply]   undo: units, code, config, user; the store and the audit log stay (listed)
+Installs: user fleet-vault (sysusers), /opt/fleet-vault/{bin,lib/vault}, /etc/fleet-vault/{registry.toml,vault.env},
+/etc/credstore.encrypted (700, kept out of etckeeper), units in /etc/systemd/system, enabled and started.
+A running broker keeps its old code: pc units restart fleet-vault --system --apply
+EOF
+}
+
+apply=0; remove=0
+for a in "$@"; do
+  case "$a" in
+    --apply) apply=1 ;; --remove) remove=1 ;; -h|--help) usage; exit 0 ;; *) usage >&2; exit 2 ;;
+  esac
+done
+[ -n "$R" ] || [ "$(id -u)" = 0 ] || { echo "vault/install: run as root (sudo -n $0 $*)" >&2; exit 1; }
+
+run() { if [ "$apply" = 1 ]; then "$@"; else echo "would: $*"; fi; }
+sysd() { if [ -n "$R" ]; then echo "skip (fixture root): $*"; else run "$@"; fi; }
+
+if [ "$remove" = 1 ]; then
+  sysd systemctl disable --now fleet-vault.service fleet-vault-seal.socket
+  for u in $UNITS; do run rm -f "$R/etc/systemd/system/$u"; done
+  sysd systemctl daemon-reload
+  run rm -rf "$R/opt/fleet-vault" "$R/etc/fleet-vault"
+  run rm -f "$R/etc/sysusers.d/fleet-vault.conf"
+  sysd userdel fleet-vault
+  echo "left: $R/etc/credstore.encrypted/fleet.* (sealed values) and $R/var/lib/fleet-vault (audit log)"
+  exit 0
+fi
+
+client=${FLEET_VAULT_CLIENTS:-${SUDO_USER:-}}
+[ -n "$client" ] || { echo "vault/install: no client user (run through sudo, or set FLEET_VAULT_CLIENTS)" >&2; exit 1; }
+python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); from vault import registry; registry.load(sys.argv[2])' \
+  "$SRC/lib" "$SRC/vault/registry.toml" || { echo "vault/install: registry.toml is invalid; nothing installed" >&2; exit 1; }
+
+run install -D -m644 "$SRC/vault/sysusers.conf" "$R/etc/sysusers.d/fleet-vault.conf"
+sysd systemd-sysusers /etc/sysusers.d/fleet-vault.conf
+run install -d -m755 "$R/opt/fleet-vault/bin" "$R/opt/fleet-vault/lib/vault"
+run install -m755 "$SRC/vault/fleet-vaultd" "$SRC/vault/fleet-vault-seal" "$R/opt/fleet-vault/bin/"
+run install -m644 "$SRC"/lib/vault/*.py "$R/opt/fleet-vault/lib/vault/"
+run install -D -m644 "$SRC/vault/registry.toml" "$R/etc/fleet-vault/registry.toml"
+if [ "$apply" = 1 ]; then
+  printf 'FLEET_VAULT_CLIENTS=%s\n' "$client" >"$R/etc/fleet-vault/vault.env"; chmod 644 "$R/etc/fleet-vault/vault.env"
+else echo "would: write $R/etc/fleet-vault/vault.env (FLEET_VAULT_CLIENTS=$client)"; fi
+run install -d -m700 "$R/etc/credstore.encrypted"
+if ! grep -qx '/credstore.encrypted/' "$R/etc/.gitignore" 2>/dev/null; then
+  if [ "$apply" = 1 ]; then printf '/credstore.encrypted/\n' >>"$R/etc/.gitignore"
+  else echo "would: add /credstore.encrypted/ to $R/etc/.gitignore"; fi
+fi
+for u in $UNITS; do run install -D -m644 "$SRC/vault/$u" "$R/etc/systemd/system/$u"; done
+sysd systemctl daemon-reload
+sysd systemctl enable --now fleet-vault-seal.socket fleet-vault.service
+command -v etckeeper >/dev/null && { sysd etckeeper commit "T1634: fleet-vault broker installed" || true; }
+echo "vault/install: done$([ "$apply" = 1 ] || echo ' (dry run)')"

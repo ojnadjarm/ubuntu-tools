@@ -1,0 +1,58 @@
+# fleet-vault registry (T1634): names only, never a value. Installed to /etc/fleet-vault/registry.toml.
+# class: free (any agent, logged) | ruled (inside its rules; outside them ask the orchestrator or the owner)
+#        | critical (each use approved by the orchestrator or the owner).
+# modes: proxy | op | exchange | unit. legacy: today's file under ~/agents/secrets, removed by its migration row.
+
+[secret.openrouter]
+class = "ruled"
+rules = "image model only on the requester's own words asking for it (concept-img --asked, T1632), within the job and month caps"
+used_in = "concept-img: AI concept images (OpenRouter)"
+modes = ["proxy"]
+hosts = ["openrouter.ai"]
+paths = ["/api/v1/"]
+legacy = "openrouter.key"
+reissue = "https://openrouter.ai/settings/keys"
+
+[secret.discord-bot-token]
+class = "free"
+used_in = "discord-bot daemon (gateway) and the liaison's REST poll"
+modes = ["proxy", "unit"]
+hosts = ["discord.com"]
+paths = ["/api/"]
+legacy = "discord-bot-token"
+reissue = "https://discord.com/developers/applications"
+
+[secret.ntfy]
+class = "free"
+used_in = "notify-owner and po-picks: pushes to his phone"
+modes = ["op"]
+legacy = "ntfy.env"
+
+[secret.spotify-client]
+class = "free"
+used_in = "pc spotify (Spotify Web API app)"
+modes = ["proxy"]
+hosts = ["api.spotify.com", "accounts.spotify.com"]
+paths = ["/v1/", "/api/token"]
+legacy = "spotify.env"
+reissue = "https://developer.spotify.com/dashboard"
+
+[secret.spotify-token]
+class = "free"
+used_in = "pc spotify: the signed-in user's access and refresh token"
+modes = ["proxy"]
+hosts = ["api.spotify.com", "accounts.spotify.com"]
+paths = ["/v1/", "/api/token"]
+legacy = "spotify-token.json"
+reissue = "https://developer.spotify.com/dashboard"
+
+[secret.salesforce]
+class = "free"
+used_in = "Salesforce sandbox (test org): work sessions by hand"
+legacy = "salesforce.env"
+
+[secret.fleet-backup-pass]
+class = "critical"
+used_in = "fleet-backup: the restic repository password"
+modes = ["unit"]
+legacy = "fleet-backup.pass"

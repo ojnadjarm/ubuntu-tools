@@ -1,0 +1,12 @@
+[Unit]
+Description=fleet-vault-seal: the broker's door to the sealed store (T1634)
+
+[Socket]
+ListenStream=/run/fleet-vault-seal.sock
+SocketUser=root
+SocketGroup=fleet-vault
+SocketMode=0660
+Accept=yes
+
+[Install]
+WantedBy=sockets.target

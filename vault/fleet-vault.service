@@ -1,0 +1,43 @@
+[Unit]
+Description=fleet-vault: the fleet's secrets broker (T1634); values unsealed once at start, never handed out
+Wants=fleet-vault-seal.socket
+After=fleet-vault-seal.socket
+
+[Service]
+Type=simple
+User=fleet-vault
+Group=fleet-vault
+EnvironmentFile=/etc/fleet-vault/vault.env
+ExecStart=/usr/bin/python3 -I /opt/fleet-vault/bin/fleet-vaultd
+ImportCredential=fleet.*
+StateDirectory=fleet-vault
+StateDirectoryMode=0700
+RuntimeDirectory=fleet-vault
+RuntimeDirectoryMode=0755
+UMask=0077
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

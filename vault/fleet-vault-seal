@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""fleet-vault-seal: root helper for one broker connection on stdin; seals, lists or removes fleet.* credentials."""
+import argparse
+import base64
+import json
+import os
+import pwd
+import re
+import socket
+import struct
+import subprocess
+import sys
+import tempfile
+
+NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+PREFIX = "fleet."
+
+
+def put(store, creds, name, value):
+    """Seal value to the TPM under fleet.<name> and publish it mode 600, atomically."""
+    fd, tmp = tempfile.mkstemp(prefix=f".{PREFIX}{name}.", dir=store)
+    os.close(fd)
+    try:
+        r = subprocess.run([creds, "encrypt", "--with-key=tpm2", f"--name={PREFIX}{name}", "-", tmp],
+                           input=value, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
+        if r.returncode != 0:
+            return {"ok": False, "error": f"systemd-creds encrypt exited {r.returncode}"}
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, os.path.join(store, PREFIX + name))
+        return {"ok": True}
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def serve(store, creds, peer_uid):
+    """Answer the one request waiting on stdin."""
+    conn = socket.socket(fileno=os.dup(0))
+    uid = struct.unpack("3i", conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))[1]
+    if uid not in (0, peer_uid):
+        return {"ok": False, "error": "refused: peer not allowed"}
+    try:
+        req = json.loads(sys.stdin.buffer.readline(1 << 20))
+    except ValueError:
+        return {"ok": False, "error": "bad request"}
+    if not isinstance(req, dict):
+        return {"ok": False, "error": "bad request"}
+    op, name = req.get("op"), req.get("name")
+    if op == "list":
+        return {"ok": True, "sealed": {f[len(PREFIX):]: os.stat(os.path.join(store, f)).st_mtime
+                                       for f in os.listdir(store) if f.startswith(PREFIX)}}
+    if not isinstance(name, str) or not NAME.match(name):
+        return {"ok": False, "error": "bad name"}
+    if op == "remove":
+        try:
+            os.unlink(os.path.join(store, PREFIX + name))
+        except FileNotFoundError:
+            return {"ok": False, "error": "not sealed"}
+        return {"ok": True}
+    if op == "put":
+        try:
+            value = base64.b64decode(req.get("value_b64") or "", validate=True)
+        except ValueError:
+            return {"ok": False, "error": "bad value encoding"}
+        if not value:
+            return {"ok": False, "error": "empty value"}
+        return put(store, creds, name, value)
+    return {"ok": False, "error": "unknown op"}
+
+
+def main():
+    p = argparse.ArgumentParser(description="fleet-vault-seal: one sealing request from the broker (socket on stdin)")
+    p.add_argument("--store", default="/etc/credstore.encrypted")
+    p.add_argument("--creds-bin", default="systemd-creds")
+    p.add_argument("--peer", default="fleet-vault", help="the one non-root user allowed to connect")
+    a = p.parse_args()
+    os.umask(0o077)
+    reply = serve(a.store, a.creds_bin, pwd.getpwnam(a.peer).pw_uid)
+    sys.stdout.buffer.write(json.dumps(reply).encode() + b"\n")
+    sys.stdout.buffer.flush()
+
+
+if __name__ == "__main__":
+    main()

@@ -18,7 +18,7 @@ TAG=nightly
 # --check and purge all read it. config.env holds passwords: a redacted copy goes to $STATE instead.
 never() {
   printf '%s\n' "$HARNESS_HOME/secrets" "$HOME/.config/pc-harness/private-values" "$CLAUDE/.credentials.json" \
-    "$CLAUDE/daemon/control.key" '*.env' '!*agent.env' '!*.example.env' '*.pass' '*.key' '*.pem' '*.p12' '*.pfx' '*.kdbx' '*.token' '.netrc' \
+    "$CLAUDE/daemon/control.key" /etc/credstore.encrypted /var/lib/fleet-vault '*.env' '!*agent.env' '!*.example.env' '*.pass' '*.key' '*.pem' '*.p12' '*.pfx' '*.kdbx' '*.token' '.netrc' \
     'id_rsa*' 'id_ed25519*' 'id_ecdsa*' '*credentials.json' 'Cookies' 'Cookies-journal' 'Login Data*' 'Web Data*'
   [ -r "$STATE/never.local" ] && grep -v '^#' "$STATE/never.local"  # this machine's files that hold a credential
   return 0

@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""fleet-vaultd: the secrets broker (T1634); wires registry, sealer, audit and the admin Unix socket."""
+import argparse
+import os
+import pwd
+import socketserver
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
+from vault import wire  # noqa: E402
+from vault.admin import Admin  # noqa: E402
+from vault.audit import Audit  # noqa: E402
+from vault.seal import SealError, SystemdCreds  # noqa: E402
+
+
+def main():
+    p = argparse.ArgumentParser(description="fleet-vaultd: the fleet's secrets broker (admin Unix socket)")
+    p.add_argument("--registry", default="/etc/fleet-vault/registry.toml")
+    p.add_argument("--state", default=os.environ.get("STATE_DIRECTORY", "/var/lib/fleet-vault"))
+    p.add_argument("--socket", default="/run/fleet-vault/admin.sock")
+    p.add_argument("--seal-socket", default="/run/fleet-vault-seal.sock")
+    p.add_argument("--cred-dir", default=os.environ.get("CREDENTIALS_DIRECTORY", ""))
+    p.add_argument("--clients", default=os.environ.get("FLEET_VAULT_CLIENTS", ""),
+                   help="comma list of user names allowed on the admin socket (root always)")
+    a = p.parse_args()
+
+    allowed = {0} | {pwd.getpwnam(u).pw_uid for u in a.clients.split(",") if u}
+    sealer = SystemdCreds(a.cred_dir, a.seal_socket)
+    audit = Audit(os.path.join(a.state, "uses.jsonl"))
+    admin = Admin(a.registry, os.path.join(a.state, "added.json"), sealer, audit)
+
+    class Handler(socketserver.StreamRequestHandler):
+        def handle(self):
+            _pid, uid, _gid = wire.peer(self.request)
+            try:
+                req = wire.read_msg(self.rfile)
+            except ValueError:
+                return wire.write_msg(self.wfile, {"ok": False, "error": "bad request"})
+            if uid not in allowed:
+                audit.log({"event": str(req.get("op", "?"))[:20], "secret": req.get("name"), "result": "refused",
+                           "uid": uid, "target": "admin socket: uid not allowed"})
+                return wire.write_msg(self.wfile, {"ok": False, "error": "refused: this user may not use the vault"})
+            try:
+                reply = admin.handle(req, uid)
+            except SealError as e:
+                reply = {"ok": False, "error": str(e)}
+            wire.write_msg(self.wfile, reply)
+
+    if os.path.exists(a.socket):
+        os.unlink(a.socket)
+    old = os.umask(0o111)
+    server = socketserver.UnixStreamServer(a.socket, Handler)
+    os.umask(old)
+    print(f"fleet-vaultd: {len(admin.entries)} names known, listening on {a.socket}", flush=True)
+    server.serve_forever()
+
+
+if __name__ == "__main__":
+    main()

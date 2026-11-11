@@ -1,0 +1,20 @@
+[Unit]
+Description=fleet-vault-seal: one sealing request from the broker (T1634)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /opt/fleet-vault/bin/fleet-vault-seal
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/etc/credstore.encrypted
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+RestrictNamespaces=yes
+LockPersonality=yes

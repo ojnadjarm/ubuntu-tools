@@ -86,6 +86,25 @@ git_check() {
   done
 }
 
+# vault_check <sudo args…> — T1634: no plain sudo route to the vault's store, unit, user, state or installed code;
+# reading its unit's state and restarting it stay open (`pc units restart fleet-vault --system`).
+vault_check() {
+  local a hit= pre= tool= verb=
+  for a in "$@"; do
+    case "$a" in *credstore*|*/run/credentials*|*fleet-vault*|*Credential*=*) hit=$a; [ -z "$tool" ] && pre=$a ;; esac
+    if [ -n "$tool" ]; then [ -z "$verb" ] && case "$a" in -*) ;; *) verb=$a ;; esac
+    else case "${a##*/}" in systemctl|systemd-creds|journalctl) tool=${a##*/} ;; esac
+    fi
+  done
+  case "$tool" in
+    systemd-creds) case "$verb" in decrypt|cat) hit="systemd-creds $verb" ;; esac ;;
+    journalctl) hit=$pre ;;
+    systemctl) case "$verb" in start|restart|try-restart|status|show|is-active|is-enabled|is-failed|cat|daemon-reload) hit=$pre ;; esac ;;
+  esac
+  [ -z "$hit" ] || refuse "T1634 vault — no sudo route to the secrets vault's store, unit, user or code (\`$hit\`)" \
+    "used \`secret list\` / \`secret log\` (names and events, never a value)" "the owner, by hand"
+}
+
 # guard_check <name> [args…] — the refusal rules for one command name.
 guard_check() {
   local me verb skip a n i sub unit
@@ -124,6 +143,7 @@ guard_check() {
   sudo)
     # sudo resets PATH through secure_path, so the wrapped command never meets its own
     # guard symlink: strip sudo's options and apply the same rules to what it would run.
+    vault_check "$@"
     n=$#; i=1; sub=
     while [ "$i" -le "$n" ]; do
       a=${!i}

@@ -8,6 +8,10 @@ The owner (or an agent relaying him) must hand over a password or token: send hi
 ## The path we took
 Survey: `systemd-ask-password` (no-echo prompt, prints to stdout), `pass`/`secret-tool` (keyring, not files), bash `read -rs`. Chosen: one bash CLI on `read -rs`, because consumers read plain files in `~/agents/secrets`. Flow: validate name → refuse an existing file unless `--replace` → read (no-echo on a tty, first line of stdin otherwise) → `mktemp` in the same dir, umask 077, mode 600 → publish with `mv -f` (`--replace`) or `ln` (atomic no-clobber).
 
+Vault names (T1634-V2): a name that is a row of the installed vault registry (`secret known <name>` exits 0) is not
+written to a file: `owner-secret` hands it to `secret add` (or `secret replace` with `--replace`), which seals it
+through the `fleet-vault` broker. Every other name keeps the file flow above.
+
 ## Exact commands
 ```bash
 owner-secret discord-bot-token            # prompts, no echo; exit 1 if it exists
