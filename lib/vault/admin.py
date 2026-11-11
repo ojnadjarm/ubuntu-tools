@@ -3,6 +3,7 @@ import base64
 import binascii
 import json
 import os
+import threading
 
 from . import registry
 from .seal import SealError
@@ -16,6 +17,7 @@ class Admin:
     def __init__(self, registry_path, added_path, sealer, audit, grants=None):
         self.registry_path, self.added_path = registry_path, added_path
         self.sealer, self.audit, self.grants = sealer, audit, grants
+        self._lock = threading.Lock()
         self.added = self._read_added()
         self.entries = registry.load(registry_path, self.added)
 
@@ -42,7 +44,8 @@ class Admin:
               "grant": self.op_grant, "revoke": self.op_revoke}.get(op)
         if fn is None:
             return {"ok": False, "error": "unknown op"}
-        return fn(req, uid)
+        with self._lock:
+            return fn(req, uid)
 
     def _event(self, req, uid, event, name, result):
         self.audit.log({"event": event, "secret": name, "ticket": req.get("ticket"), "agent": req.get("agent"),
@@ -68,7 +71,7 @@ class Admin:
         event = "replace" if replace else "add"
         if not isinstance(name, str) or not registry.NAME.match(name):
             return {"ok": False, "error": "bad name: lowercase letters, digits, '-'"}
-        meta = {k: req[k] for k in ("class", "used_in") if req.get(k) not in (None, "")}
+        meta = {k: req[k] for k in ("class", "used_in", "rules") if req.get(k) not in (None, "")}
         e = self.entries.get(name)
         if e is None and replace:
             return {"ok": False, "error": f"{name} is not in the vault; add it with a class"}

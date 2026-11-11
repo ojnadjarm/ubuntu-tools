@@ -10,7 +10,8 @@ usage() {
 usage: sudo -n $0 [--apply]            install or update (dry run without --apply)
        sudo -n $0 --remove [--apply]   undo: units, code, config, user; the store and the audit log stay (listed)
 Installs: user fleet-vault (sysusers), /opt/fleet-vault/{bin,lib/vault}, /etc/fleet-vault/{registry.toml,vault.env},
-/etc/credstore.encrypted (700, kept out of etckeeper), units in /etc/systemd/system, enabled and started.
+/etc/credstore.encrypted (700, kept out of etckeeper), units in /etc/systemd/system, enabled and started; the owner's
+Vault page mounted at /vault on the dashboard's https front (tailscale serve, FLEET_VAULT_PAGE_HTTPS, default 8498).
 A running broker keeps its old code: pc units restart fleet-vault --system --apply
 EOF
 }
@@ -26,7 +27,9 @@ done
 run() { if [ "$apply" = 1 ]; then "$@"; else echo "would: $*"; fi; }
 sysd() { if [ -n "$R" ]; then echo "skip (fixture root): $*"; else run "$@"; fi; }
 
+https=${FLEET_VAULT_PAGE_HTTPS:-8498}
 if [ "$remove" = 1 ]; then
+  sysd tailscale serve --https="$https" --set-path=/vault off
   sysd systemctl disable --now fleet-vault.service fleet-vault-seal.socket
   for u in $UNITS; do run rm -f "$R/etc/systemd/system/$u"; done
   sysd systemctl daemon-reload
@@ -39,6 +42,11 @@ fi
 
 client=${FLEET_VAULT_CLIENTS:-${SUDO_USER:-}}
 port=${FLEET_VAULT_PORT:-18480}
+login=${FLEET_VAULT_OWNER_LOGIN:-}
+if [ -z "$login" ] && [ -z "$R" ]; then
+  cfg="$(getent passwd "$client" | cut -d: -f6)/.config/pc-harness/config.env"
+  login=$(sed -n 's/^TERMINAL_OWNER_LOGIN=//p' "$cfg" 2>/dev/null | tail -n1 | tr -d "\"'")
+fi
 [ -n "$client" ] || { echo "vault/install: no client user (run through sudo, or set FLEET_VAULT_CLIENTS)" >&2; exit 1; }
 python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); from vault import registry; registry.load(sys.argv[2])' \
   "$SRC/lib" "$SRC/vault/registry.toml" || { echo "vault/install: registry.toml is invalid; nothing installed" >&2; exit 1; }
@@ -51,9 +59,10 @@ run install -m644 "$SRC"/lib/vault/*.py "$R/opt/fleet-vault/lib/vault/"
 run install -m644 "$SRC/lib/image_grant.py" "$R/opt/fleet-vault/lib/"
 run install -D -m644 "$SRC/vault/registry.toml" "$R/etc/fleet-vault/registry.toml"
 if [ "$apply" = 1 ]; then
-  printf 'FLEET_VAULT_CLIENTS=%s\nFLEET_VAULT_PORT=%s\n' "$client" "$port" >"$R/etc/fleet-vault/vault.env"
+  printf 'FLEET_VAULT_CLIENTS=%s\nFLEET_VAULT_PORT=%s\nFLEET_VAULT_OWNER_LOGIN=%s\n' "$client" "$port" "$login" \
+    >"$R/etc/fleet-vault/vault.env"
   chmod 644 "$R/etc/fleet-vault/vault.env"
-else echo "would: write $R/etc/fleet-vault/vault.env (FLEET_VAULT_CLIENTS=$client, FLEET_VAULT_PORT=$port)"; fi
+else echo "would: write $R/etc/fleet-vault/vault.env (FLEET_VAULT_CLIENTS=$client, FLEET_VAULT_PORT=$port, owner login $([ -n "$login" ] && echo set || echo "EMPTY: page off"))"; fi
 run install -d -m700 "$R/etc/credstore.encrypted"
 if ! grep -qx '/credstore.encrypted/' "$R/etc/.gitignore" 2>/dev/null; then
   if [ "$apply" = 1 ]; then printf '/credstore.encrypted/\n' >>"$R/etc/.gitignore"
@@ -62,5 +71,8 @@ fi
 for u in $UNITS; do run install -D -m644 "$SRC/vault/$u" "$R/etc/systemd/system/$u"; done
 sysd systemctl daemon-reload
 sysd systemctl enable --now fleet-vault-seal.socket fleet-vault.service
+if [ -z "$R" ] && tailscale serve status --json 2>/dev/null | grep -q '"unix:/run/fleet-vault/page.sock"'; then
+  echo "vault page: already at https :$https/vault"
+else sysd tailscale serve --bg --https="$https" --set-path=/vault unix:/run/fleet-vault/page.sock; fi
 command -v etckeeper >/dev/null && { sysd etckeeper commit "T1634: fleet-vault broker installed" || true; }
 echo "vault/install: done$([ "$apply" = 1 ] || echo ' (dry run)')"

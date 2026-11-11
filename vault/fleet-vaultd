@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fleet-vaultd: the secrets broker (T1634); wires registry, sealer, audit, leases, the admin socket and the loopback listener."""
+"""fleet-vaultd: the secrets broker (T1634); wires registry, sealer, audit, leases, the admin socket, the loopback listener and the owner page."""
 import argparse
 import os
 import pwd
@@ -13,6 +13,7 @@ from vault.audit import Audit  # noqa: E402
 from vault.gate import Gate  # noqa: E402
 from vault.grants import Grants  # noqa: E402
 from vault.leases import Leases  # noqa: E402
+from vault import page  # noqa: E402
 from vault.listener import serve  # noqa: E402
 from vault.proxy import Proxy  # noqa: E402
 from vault.seal import SealError, SystemdCreds  # noqa: E402
@@ -29,8 +30,14 @@ def main():
                    help="comma list of user names allowed on the admin socket (root always)")
     p.add_argument("--port", type=int, default=0,
                    help="loopback HTTP port for leased calls (default 0: any free port); written to <state>/port")
+    p.add_argument("--page-socket", default="",
+                   help="Unix socket of the owner's Vault page (default: page.sock beside --socket); tailscale serve "
+                        "mounts it at /vault on the dashboard front")
+    p.add_argument("--owner-login", default=os.environ.get("FLEET_VAULT_OWNER_LOGIN", ""),
+                   help="the owner's tailnet login; the only one the page lets in (empty: the page refuses everything)")
     p.add_argument("--upstream", default="", help="tests only: send every proxied call to this plain-HTTP base")
     a = p.parse_args()
+    a.page_socket = a.page_socket or os.path.join(os.path.dirname(a.socket), "page.sock")
 
     allowed = {0} | {pwd.getpwnam(u).pw_uid for u in a.clients.split(",") if u}
     sealer = SystemdCreds(a.cred_dir, a.seal_socket)
@@ -39,6 +46,7 @@ def main():
     admin = Admin(a.registry, os.path.join(a.state, "added.json"), sealer, audit, Grants(leases, audit))
     gate = Gate(lambda: admin.entries, sealer, leases, audit, {"proxy": Proxy(a.upstream)})
     web = serve(gate, "127.0.0.1", a.port)
+    page.serve(admin, a.page_socket, a.owner_login)
     with open(os.path.join(a.state, "port"), "w") as f:
         f.write(str(web.server_address[1]))
 
@@ -64,7 +72,8 @@ def main():
     old = os.umask(0o111)
     server = socketserver.UnixStreamServer(a.socket, Handler)
     os.umask(old)
-    print(f"fleet-vaultd: {len(admin.entries)} names known, listening on {a.socket} and 127.0.0.1:{web.server_address[1]}",
+    print(f"fleet-vaultd: {len(admin.entries)} names known, listening on {a.socket}, {a.page_socket} "
+          f"and 127.0.0.1:{web.server_address[1]}",
           flush=True)
     server.serve_forever()
 

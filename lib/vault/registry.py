@@ -11,7 +11,7 @@ LEGACY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 ROW_FIELDS = {"class", "used_in", "modes", "rules", "hosts", "paths", "legacy", "reissue", "max_age_days", "check",
               "cap_usd", "month_cap_usd", "cost"}
 CHECK = re.compile(r"^[a-z][a-z0-9-]{0,40}$")
-ADDED_FIELDS = {"class", "used_in"}
+ADDED_FIELDS = {"class", "used_in", "rules"}
 
 
 class RegistryError(ValueError):
