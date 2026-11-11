@@ -16,7 +16,8 @@
     ]},
     {"id": "improvement", "name": "Improvement", "members": [
       {"id": "toolsmith", "name": "Soot", "rank": "Toolsmith"},
-      {"id": "improve-meter", "name": "Dusk", "rank": "Meter Reader", "unit": "improve-meter.timer"}
+      {"id": "improve-meter", "name": "Dusk", "rank": "Meter Reader", "unit": "improve-meter.timer"},
+      {"id": "memory-keeper", "name": "Moss", "rank": "Memory Keeper"}
     ]},
     {"id": "finance", "name": "Finance", "members": [
       {"id": "hacienda", "name": "Laurel", "rank": "Tax Clerk"},
