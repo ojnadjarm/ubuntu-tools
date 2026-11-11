@@ -47,11 +47,11 @@ power_check() {
 
 # git_check <commit|push> [args…] — commit/push only in personal repos, collab pushes only to a feature branch, never force.
 git_check() {
-  local verb=$1 h top kind a d skip=0 all= g; local -a pos=() refs; shift
-  g=$(real git); h=$(readlink -f "$HOME")
+  local verb=$1 h m top kind a d skip=0 all= g; local -a pos=() refs; shift
+  g=$(real git); h=$(readlink -f "$HOME"); m=$(readlink -m "${MEMORY_HOME:-$h/memory}")
   top=$("$g" "${git_pre[@]}" rev-parse --show-toplevel 2>/dev/null)
   case "$top" in
-    "$h/agents"|"$h/the-dark-eye"|"$h/moodle-harness"|"$h/projects/personal/"?*) kind=personal ;;
+    "$h/agents"|"$h/the-dark-eye"|"$h/moodle-harness"|"$h/projects/personal/"?*|"$m") kind=personal ;;
     "$h/projects/collab/"?*) kind=collab ;;
     *) refuse "FLEET.md §5.1 — no \`git $verb\` in a user repo" \
               "left the work in the tree; \`git status\`/\`git diff\` show it" \

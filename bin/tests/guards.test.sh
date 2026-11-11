@@ -67,6 +67,22 @@ is 'collab: plain push on a tracked feature branch passes' "$(g -C "$C" commit -
 is 'collab: remote main untouched' "$(rc "$C")" 1
 is 'collab: push -f to a feature branch refused' "$(g -C "$C" push -f origin feat)" 3
 
+# 1c. T1625: the memory store ($MEMORY_HOME, default ~/memory) is personal; protected repos stay refused.
+S="$WORK/store"; mk "$FH/memory"; mk "$S"
+case "$S" in "$WORK"/*) ;; *) echo "FAIL fixture store outside the temp dir"; exit 1 ;; esac
+[ "$(readlink -f "$S")" != "$(readlink -f "${MEMORY_HOME:-$HOME/memory}")" ] && [ "$(readlink -f "$FH/memory")" != "$(readlink -f "$HOME/memory")" ] \
+  && ok 'selftest: fixture memory stores are not the real one' || { nok 'selftest: fixture memory stores' "$S"; exit 1; }
+gm() { local m=$1; shift; HOME="$FH" MEMORY_HOME="$m" git "$@" >/dev/null 2>&1; echo $?; }
+is 'memory default ~/memory: commit + push pass' "$(gm '' -C "$FH/memory" commit -q --allow-empty -m a)$(gm '' -C "$FH/memory" push -q)$(rc "$FH/memory")" 002
+is 'memory $MEMORY_HOME store: commit + push pass' "$(gm "$S" -C "$S" commit -q --allow-empty -m a)$(gm "$S" -C "$S" push -q)$(rc "$S")" 002
+is 'memory $MEMORY_HOME set: ~/memory is no longer allowed' "$(gm "$S" -C "$FH/memory" commit -q --allow-empty -m a)" 3
+is 'memory $MEMORY_HOME set: work repo commit and push refused' "$(gm "$S" -C "$FH/moodle-envs/vass" commit -q --allow-empty -m a)$(gm "$S" -C "$FH/moodle-envs/vass" push -q)" 33
+is 'memory $MEMORY_HOME set: unknown repo commit refused' "$(gm "$S" -C "$FH/other" commit -q --allow-empty -m a)" 3
+for f in --force -f --force-with-lease +main; do
+  is "memory push $f refused" "$(gm "$S" -C "$S" push "$f" origin main)" 3
+done
+is 'memory force-pushes changed no remote' "$(rc "$S")" 2
+
 # 2. every other git verb still works.
 out=$(git -C "$repo" status --porcelain 2>&1); is 'git status forwards' "$?" 0
 grep -q '^A  f' <<<"$out" && ok 'git status is the real answer' || nok 'git status is the real answer' "$out"
