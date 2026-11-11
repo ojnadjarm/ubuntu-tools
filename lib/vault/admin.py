@@ -1,4 +1,4 @@
-"""The broker's admin operations (list, put, remove, log): registry + sealer + audit, never a value out."""
+"""The broker's admin operations (list, put, remove, log, grant, revoke): registry + sealer + audit, never a value out."""
 import base64
 import binascii
 import json
@@ -13,9 +13,9 @@ MAX_VALUE = 64 * 1024
 class Admin:
     """Answers one admin request; the socket and the peer check live in the daemon."""
 
-    def __init__(self, registry_path, added_path, sealer, audit):
+    def __init__(self, registry_path, added_path, sealer, audit, grants=None):
         self.registry_path, self.added_path = registry_path, added_path
-        self.sealer, self.audit = sealer, audit
+        self.sealer, self.audit, self.grants = sealer, audit, grants
         self.added = self._read_added()
         self.entries = registry.load(registry_path, self.added)
 
@@ -38,7 +38,8 @@ class Admin:
     def handle(self, req, uid):
         """Dispatch one request dict; returns the reply dict."""
         op = req.get("op")
-        fn = {"list": self.op_list, "put": self.op_put, "remove": self.op_remove, "log": self.op_log}.get(op)
+        fn = {"list": self.op_list, "put": self.op_put, "remove": self.op_remove, "log": self.op_log,
+              "grant": self.op_grant, "revoke": self.op_revoke}.get(op)
         if fn is None:
             return {"ok": False, "error": "unknown op"}
         return fn(req, uid)
@@ -122,3 +123,15 @@ class Admin:
         if not isinstance(n, int):
             return {"ok": False, "error": "n must be a number"}
         return {"ok": True, "events": self.audit.tail(n, req.get("name"))}
+
+    def op_grant(self, req, uid):
+        """A lease on one secret for one ticket, under its class and rules."""
+        if self.grants is None:
+            return {"ok": False, "error": "leases are off in this broker"}
+        return self.grants.grant(self.entries.get(req.get("name")), req, uid)
+
+    def op_revoke(self, req, uid):
+        """Drop one lease."""
+        if self.grants is None:
+            return {"ok": False, "error": "leases are off in this broker"}
+        return self.grants.revoke(req, uid)

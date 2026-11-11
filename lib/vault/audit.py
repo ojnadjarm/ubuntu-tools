@@ -4,7 +4,7 @@ import os
 import time
 
 WEEK = 7 * 86400
-FIELDS = ("event", "secret", "ticket", "agent", "target", "result", "uid")
+FIELDS = ("event", "secret", "ticket", "agent", "target", "result", "uid", "lease", "status", "cost", "asked", "why")
 
 
 class Audit:
@@ -52,3 +52,9 @@ class Audit:
                 row["last_used"] = r.get("ts")
                 row["uses_7d"] += recent
         return out
+
+    def month_spend(self, name):
+        """Dollars logged on name's `use` events in this calendar month (local time)."""
+        start = time.mktime(time.localtime(self._clock())[:2] + (1, 0, 0, 0, 0, 0, -1))
+        return sum(float(r.get("cost") or 0) for r in self._rows()
+                   if r.get("secret") == name and r.get("event") == "use" and r.get("ts", 0) >= start)

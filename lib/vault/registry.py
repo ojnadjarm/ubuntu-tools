@@ -8,7 +8,9 @@ MODES = ("proxy", "op", "exchange", "unit")
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 HOST = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
 LEGACY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-ROW_FIELDS = {"class", "used_in", "modes", "rules", "hosts", "paths", "legacy", "reissue", "max_age_days"}
+ROW_FIELDS = {"class", "used_in", "modes", "rules", "hosts", "paths", "legacy", "reissue", "max_age_days", "check",
+              "cap_usd", "month_cap_usd", "cost"}
+CHECK = re.compile(r"^[a-z][a-z0-9-]{0,40}$")
 ADDED_FIELDS = {"class", "used_in"}
 
 
@@ -30,6 +32,10 @@ class Entry:
     reissue: str = ""
     max_age_days: int = 0
     added: bool = False
+    check: str = ""
+    cap_usd: float = 0.0
+    month_cap_usd: float = 0.0
+    cost: str = ""
 
 
 def _strs(name, row, key):
@@ -73,7 +79,18 @@ def entry(name, row, added=False):
     age = row.get("max_age_days", 0)
     if not isinstance(age, int) or age < 0:
         raise RegistryError(f"{name}: max_age_days must be a whole number of days")
-    return Entry(name, cls, used_in.strip(), modes, rules, hosts, paths, legacy, reissue, age, added)
+    check, cost = row.get("check", ""), row.get("cost", "")
+    if check and not (isinstance(check, str) and CHECK.match(check)):
+        raise RegistryError(f"{name}: check is a rule name")
+    if cost and not (isinstance(cost, str) and re.match(r"^[a-z_]+(\.[a-z_]+)*$", cost)):
+        raise RegistryError(f"{name}: cost is a dotted JSON path")
+    caps = []
+    for k in ("cap_usd", "month_cap_usd"):
+        v = row.get(k, 0)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0:
+            raise RegistryError(f"{name}: {k} must be a number of dollars")
+        caps.append(float(v))
+    return Entry(name, cls, used_in.strip(), modes, rules, hosts, paths, legacy, reissue, age, added, check, *caps, cost)
 
 
 def load(path, added=None):

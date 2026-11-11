@@ -2,6 +2,8 @@
 # class: free (any agent, logged) | ruled (inside its rules; outside them ask the orchestrator or the owner)
 #        | critical (each use approved by the orchestrator or the owner).
 # modes: proxy | op | exchange | unit. legacy: today's file under ~/agents/secrets, removed by its migration row.
+# check: the rule a lease request must pass (lib/vault/grants.py); cap_usd: most a lease may spend;
+# month_cap_usd: most all leases may spend in a calendar month; cost: the JSON path of a call's cost in the answer.
 
 [secret.openrouter]
 class = "ruled"
@@ -12,6 +14,10 @@ hosts = ["openrouter.ai"]
 paths = ["/api/v1/"]
 legacy = "openrouter.key"
 reissue = "https://openrouter.ai/settings/keys"
+check = "image-ask"
+cap_usd = 2.0
+month_cap_usd = 10.0
+cost = "usage.cost"
 
 [secret.discord-bot-token]
 class = "free"

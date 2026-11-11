@@ -183,5 +183,18 @@ PATH="$WORK/argstub:$PATH" po-work mg start T402 --brief "$AGENT_WORK/briefs/T40
 ev '(T1632) a brief without a grant: the worker unit gets no key' 'grep "po-work-mg-T401" "$WORK/args.log" | grep -q -- "--setenv=OPENROUTER_KEY_FILE=/dev/null"'
 ev '(T1632) a brief with a grant: the key file is left as is' 'grep -q "po-work-mg-T402" "$WORK/args.log" && ! grep "po-work-mg-T402" "$WORK/args.log" | grep -q OPENROUTER_KEY_FILE'
 
+# (T1634) a granted brief gets a vault lease on the image key, passed to the unit by name (never in its arguments)
+mkdir -p "$HARNESS_HOME/bin"; printf '#!/bin/sh\necho "$*" >>"%s/grant.log"\necho LEASE-FX\n' "$WORK" >"$HARNESS_HOME/bin/secret"
+chmod +x "$HARNESS_HOME/bin/secret"
+printf 'AI image grant: "hazme una imagen con IA"\n' >"$AGENT_WORK/briefs/T403-mg-lease.md"
+PATH="$WORK/argstub:$PATH" po-work mg start T403 --brief "$AGENT_WORK/briefs/T403-mg-lease.md" >/dev/null 2>&1
+echo 'draw him again' >"$AGENT_WORK/briefs/T404-mg-nolease.md"
+PATH="$WORK/argstub:$PATH" po-work mg start T404 --brief "$AGENT_WORK/briefs/T404-mg-nolease.md" >/dev/null 2>&1
+ev '(T1634) a grant: the vault is asked for a lease on openrouter with the ticket and the quote' \
+   'grep -q -- "^grant openrouter --ticket T403 --ttl [0-9]* --asked hazme una imagen con IA$" "$WORK/grant.log"'
+ev '(T1634) a grant: the unit inherits FLEET_LEASE_OPENROUTER; the lease is not in its arguments' \
+   'grep "po-work-mg-T403" "$WORK/args.log" | grep -q -- "--setenv=FLEET_LEASE_OPENROUTER " && ! grep -q LEASE-FX "$WORK/args.log"'
+ev '(T1634) no grant: no lease asked' '[ "$(grep -c . "$WORK/grant.log")" = 1 ] && grep "po-work-mg-T404" "$WORK/args.log" | grep -qv FLEET_LEASE'
+
 touch "$REAL_HOME/.po-test-probe" 2>/dev/null; is 'selftest: the real agents tree is read-only in the sandbox' "$?" 1
 exit $bad

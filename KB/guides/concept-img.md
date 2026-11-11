@@ -1,12 +1,22 @@
 # Generate AI concept art (character sheets) through OpenRouter under a hard dollar cap
 
-Ticket: T1035, T1632, T1633 · Last verified: 2026-11-11 by bin/tests/concept-img.test.sh (mock), bin/tests/secret-mask.test.sh; 9 real calls 2026-10-21
+Ticket: T1035, T1632, T1633, T1634-V3 · Last verified: 2026-11-11 by bin/tests/concept-img.test.sh (mock), bin/tests/vault-proxy.test.sh (fixture broker), bin/tests/secret-mask.test.sh; 9 real calls 2026-10-21
 
 ## When to use
 Only when the requester's own words ask for an AI, generated or concept image (owner 2026-11-11, T1632): create / draw /
 design / represent = make it yourself by code (/code-hero-render, /char3d, /pixel-avatar, /familiars-style,
 /cutaway-style, SVG, Blender by script). A generated image is a concept, never the delivered asset. Not for textures or
 image-to-3D.
+
+## The key is in the vault (T1634-V3)
+- No key file exists any more: the key is sealed in the fleet-vault broker (class ruled). concept-img needs
+  `FLEET_LEASE_OPENROUTER`, a lease from `secret grant openrouter --ticket T<n> --asked "<requester's words>"`; every
+  call then goes to `http://127.0.0.1:$FLEET_VAULT_PORT/<lease>/openrouter/api/v1/...` and the broker adds the key.
+- The broker grants only when the quote asks for an AI image (same words as the gate below), caps a lease at
+  2.00 USD and all leases at 10.00 USD a month (its own log, `usage.cost`); a refusal is HTTP 403, concept-img exit 4.
+- Launchers ask for the lease: `po-work start` on a brief line `AI image grant: "<quote>"`, `discord-liaison art
+  --asked` when the quote is in the job's messages (15 min). Nothing else does; `secret log openrouter` shows each.
+- New key: `secret replace openrouter` (no-echo paste), link https://openrouter.ai/settings/keys.
 
 ## The gate (T1632): one gate, in the tool
 - `--asked "<verbatim quote>"` is required; the quote must name an AI/IA, generated, concept or image-model ask, else

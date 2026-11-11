@@ -38,6 +38,7 @@ if [ "$remove" = 1 ]; then
 fi
 
 client=${FLEET_VAULT_CLIENTS:-${SUDO_USER:-}}
+port=${FLEET_VAULT_PORT:-18480}
 [ -n "$client" ] || { echo "vault/install: no client user (run through sudo, or set FLEET_VAULT_CLIENTS)" >&2; exit 1; }
 python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); from vault import registry; registry.load(sys.argv[2])' \
   "$SRC/lib" "$SRC/vault/registry.toml" || { echo "vault/install: registry.toml is invalid; nothing installed" >&2; exit 1; }
@@ -47,10 +48,12 @@ sysd systemd-sysusers /etc/sysusers.d/fleet-vault.conf
 run install -d -m755 "$R/opt/fleet-vault/bin" "$R/opt/fleet-vault/lib/vault"
 run install -m755 "$SRC/vault/fleet-vaultd" "$SRC/vault/fleet-vault-seal" "$R/opt/fleet-vault/bin/"
 run install -m644 "$SRC"/lib/vault/*.py "$R/opt/fleet-vault/lib/vault/"
+run install -m644 "$SRC/lib/image_grant.py" "$R/opt/fleet-vault/lib/"
 run install -D -m644 "$SRC/vault/registry.toml" "$R/etc/fleet-vault/registry.toml"
 if [ "$apply" = 1 ]; then
-  printf 'FLEET_VAULT_CLIENTS=%s\n' "$client" >"$R/etc/fleet-vault/vault.env"; chmod 644 "$R/etc/fleet-vault/vault.env"
-else echo "would: write $R/etc/fleet-vault/vault.env (FLEET_VAULT_CLIENTS=$client)"; fi
+  printf 'FLEET_VAULT_CLIENTS=%s\nFLEET_VAULT_PORT=%s\n' "$client" "$port" >"$R/etc/fleet-vault/vault.env"
+  chmod 644 "$R/etc/fleet-vault/vault.env"
+else echo "would: write $R/etc/fleet-vault/vault.env (FLEET_VAULT_CLIENTS=$client, FLEET_VAULT_PORT=$port)"; fi
 run install -d -m700 "$R/etc/credstore.encrypted"
 if ! grep -qx '/credstore.encrypted/' "$R/etc/.gitignore" 2>/dev/null; then
   if [ "$apply" = 1 ]; then printf '/credstore.encrypted/\n' >>"$R/etc/.gitignore"

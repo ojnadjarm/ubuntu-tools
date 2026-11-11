@@ -112,6 +112,9 @@ class App:
                           'img': int(env.get('LIAISON_IMAGES_PER_DAY', '5'))})
         self.art_dir = os.path.join(self.papers, 'art')
         self.art_key = env.get('LIAISON_ART_KEY_FILE', os.path.join(os.path.dirname(ME), 'secrets', 'openrouter.key'))
+        # The vault lease command (T1634); a fixture (LIAISON_HOME) asks no real broker unless it names one.
+        self.lease_cmd = env.get('LIAISON_LEASE_CMD', '' if 'LIAISON_HOME' in env else
+                                 os.path.join(os.path.dirname(ME), 'bin', 'secret') + ' grant')
         self.work = os.path.join(self.papers, 'work')
         self.cdn = tuple(env.get('LIAISON_CDN_PREFIXES', ' '.join(CDN)).split())
         self.jobs = JobQueue(os.path.join(self.papers, 'jobs'))
@@ -448,8 +451,8 @@ class App:
         return 0
 
     def art(self, args):
-        """concept-img into art_dir; the key and --asked reach it only when the quote is in this job's messages (T1632);
-        a refusal (exit 3 or 4, before any call) hands the image slot back (T1633)."""
+        """concept-img into art_dir; a vault lease (T1634) and --asked reach it only when the quote is in this job's
+        messages (T1632); a refusal (exit 3 or 4, before any call) hands the image slot back (T1633)."""
         asked = args[1] if args[:1] == ['--asked'] and len(args) > 1 else ''
         args = args[2:] if asked else args
         if not args:
@@ -469,7 +472,9 @@ class App:
             '--model', self.env.get('LIAISON_ART_MODEL', 'bytedance-seed/seedream-5-0-flash'),
             '--prompt-file', out + '.prompt', '--resolution', '1K', '--out', out,
             '--log', os.path.join(self.art_dir, 'spend.tsv')] + (['--asked', asked] if granted else [])
-        rc = subprocess.call(cmd, stdin=subprocess.DEVNULL, env=dict(os.environ, OPENROUTER_KEY_FILE=self.art_key) if granted else None)
+        lease = self.lease(asked) if granted else ''
+        env = dict(os.environ, OPENROUTER_KEY_FILE=self.art_key, **({'FLEET_LEASE_OPENROUTER': lease} if lease else {}))
+        rc = subprocess.call(cmd, stdin=subprocess.DEVNULL, env=env if granted else None)
         if rc in (3, 4):
             self.caps.give('img')
         if rc != 0 or not os.path.exists(out):
@@ -477,6 +482,14 @@ class App:
             return 1
         print(out)
         return 0
+
+    def lease(self, asked):
+        """A 15-minute vault lease on the image key for this job, '' when the vault gives none."""
+        if not self.lease_cmd:
+            return ''
+        r = subprocess.run(shlex.split(self.lease_cmd) + ['openrouter', '--ticket', self.env.get('LIAISON_JOB') or 'liaison',
+                           '--ttl', '900', '--asked', asked], stdin=subprocess.DEVNULL, capture_output=True, text=True)
+        return r.stdout.strip() if r.returncode == 0 else ''
 
     def pulse(self):
         subprocess.call(self.env.get('LIAISON_PULSE_CMD', 'orchestrator-pulse'), shell=True, stdin=subprocess.DEVNULL,

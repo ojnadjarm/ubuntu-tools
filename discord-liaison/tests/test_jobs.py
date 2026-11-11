@@ -207,6 +207,36 @@ class TestImageGrant(JobBase):
                                 repr((None, '/dev/null'))])
 
 
+class TestVaultLease(JobBase):
+    """T1634: `art` asks the vault for a lease only on a granted quote and hands it to concept-img; a fixture asks none."""
+
+    def test_selftest_a_fixture_names_no_lease_command(self):
+        self.assertEqual(App(self.env, None).lease_cmd, '')
+
+    async def test_art_gets_a_lease_only_with_the_quote(self):
+        (a,) = await self.inbox('Hazme una imagen con IA del héroe')
+        await self.run_cli('job', a, 'AI image of the hero')
+        jid = self.launches()[0]
+        asked, seen = os.path.join(self.tmp.name, 'lease.args'), os.path.join(self.tmp.name, 'art.seen')
+        fake_lease, fake_art = os.path.join(self.tmp.name, 'lease.py'), os.path.join(self.tmp.name, 'art.py')
+        with open(fake_lease, 'w') as f:
+            f.write(f'import sys\nopen({asked!r}, "a").write(repr(sys.argv[1:]) + "\\n")\nprint("LEASE-FX")\n')
+        with open(fake_art, 'w') as f:
+            f.write('import os, sys\na = sys.argv\nopen(a[a.index("--out") + 1], "wb").write(b"\\x89PNG\\r\\n\\x1a\\n")\n'
+                    f'open({seen!r}, "a").write(repr(os.environ.get("FLEET_LEASE_OPENROUTER")) + "\\n")\n')
+        env = {'LIAISON_JOB': jid, 'LIAISON_ART_CMD': f'{sys.executable} {fake_art}', 'LIAISON_IMAGES_PER_DAY': '5',
+               'LIAISON_LEASE_CMD': f'{sys.executable} {fake_lease}'}
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop('FLEET_LEASE_OPENROUTER', None)
+            await self.run_cli('art', '--asked', 'hazme una imagen con IA del héroe', 'hero', env=env)
+            await self.run_cli('art', '--asked', 'una imagen con IA de un dragón', 'dragon', env=env)
+        with open(seen) as f:
+            self.assertEqual(f.read().splitlines(), [repr('LEASE-FX'), repr(None)])
+        with open(asked) as f:
+            self.assertEqual(f.read().splitlines(), [repr(['openrouter', '--ticket', jid, '--ttl', '900', '--asked',
+                                                           'hazme una imagen con IA del héroe'])])
+
+
 class TestImageKeyMask(JobBase):
     """T1633: a job whose messages ask for no AI image cannot read the image key file at all."""
 

@@ -22,7 +22,10 @@ reserve > CONCEPT_IMG_MONTH_CAP (10.00). Crossing 80 % of the month cap sends on
 The key's usage lags a few seconds, so run calls one at a time; a .png out converts other formats to PNG.
 After: writes the image, appends model, size, cost delta, running total and the quote to the TSV log, and the cost to the
 month ledger (CONCEPT_IMG_LEDGER, default ~/agents/log/concept-img.tsv).
-env: OPENROUTER_KEY_FILE (default ~/agents/secrets/openrouter.key; empty file = no key, exit 4), CONCEPT_IMG_API
+The key lives in the vault (T1634): FLEET_LEASE_OPENROUTER, a lease from `secret grant openrouter --ticket T<n> --asked
+"<quote>"` (launchers ask for it), sends every call through the broker (FLEET_VAULT_URL, default
+http://127.0.0.1:<FLEET_VAULT_PORT>); without a lease only an explicit OPENROUTER_KEY_FILE works (empty = no key, exit 4).
+env: FLEET_LEASE_OPENROUTER, FLEET_VAULT_URL, OPENROUTER_KEY_FILE, CONCEPT_IMG_API (without a lease)
 exit 0 image written · 1 API error (402 = key out of credit) · 2 usage · 3 cap reached · 4 no grant or no key"""
 HEADER = "time\tmodel\tresolution\taspect\tout\tcost_delta\tkey_usage\ttotal\tasked\n"
 REFUSE = "concept-img: make it yourself by code; the image model needs the requester's own words asking for an AI image"
@@ -31,18 +34,34 @@ from agent_work import _key  # noqa: E402
 from image_grant import GRANT  # noqa: E402
 
 
-def api(path, key, body=None):
-    """Call the OpenRouter API and return parsed JSON."""
-    base = os.environ.get("CONCEPT_IMG_API", "https://openrouter.ai/api/v1")
+def endpoint():
+    """(base URL, auth headers, opener): the vault with a lease, else an explicit key file; None when neither."""
+    lease = os.environ.get("FLEET_LEASE_OPENROUTER", "")
+    if lease:
+        vault = os.environ.get("FLEET_VAULT_URL") or f"http://127.0.0.1:{_key('FLEET_VAULT_PORT') or 18480}"
+        return f"{vault}/{lease}/openrouter/api/v1", {}, urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        key = open(os.path.expanduser(os.environ.get("OPENROUTER_KEY_FILE") or "/dev/null")).read().strip()
+    except OSError:
+        key = ""
+    if not key:
+        return None
+    return (os.environ.get("CONCEPT_IMG_API", "https://openrouter.ai/api/v1"), {"Authorization": f"Bearer {key}"},
+            urllib.request.build_opener())
+
+
+def api(path, ep, body=None):
+    """Call the OpenRouter API at endpoint ep and return parsed JSON."""
+    base, auth, opener = ep
     req = urllib.request.Request(base + path, data=None if body is None else json.dumps(body).encode(),
-                                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=300) as r:
+                                 headers={**auth, "Content-Type": "application/json"})
+    with opener.open(req, timeout=300) as r:
         return json.load(r)
 
 
-def usage(key):
+def usage(ep):
     """Return the key's total spend in USD."""
-    return float(api("/key", key)["data"]["usage"])
+    return float(api("/key", ep)["data"]["usage"])
 
 
 def logged_total(log):
@@ -97,18 +116,19 @@ def main():
     if not GRANT.search(asked):
         print(REFUSE, file=sys.stderr)
         return 4
-    try:
-        key = open(os.path.expanduser(os.environ.get("OPENROUTER_KEY_FILE") or "~/agents/secrets/openrouter.key")).read().strip()
-    except OSError:
-        key = ""
-    if not key:
+    key = endpoint()
+    if key is None:
         print(REFUSE + " (no key in this environment)", file=sys.stderr)
         return 4
     job_cap = a.cap if a.cap is not None else cap("CONCEPT_IMG_JOB_CAP", 2.00)
     month_cap = cap("CONCEPT_IMG_MONTH_CAP", 10.00)
     ledger = os.path.expanduser(os.environ.get("CONCEPT_IMG_LEDGER") or "~/agents/log/concept-img.tsv")
 
-    before = usage(key)
+    try:
+        before = usage(key)
+    except urllib.error.HTTPError as e:
+        print(f"concept-img: HTTP {e.code}: {e.read().decode(errors='replace')[:400]}", file=sys.stderr)
+        return 4 if e.code == 403 else 1
     spent = max(before - a.start, logged_total(a.log)) if a.start is not None else logged_total(a.log)
     month = month_spent(ledger)
     if spent + a.reserve > job_cap:
