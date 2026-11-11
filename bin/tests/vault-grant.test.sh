@@ -126,9 +126,16 @@ HARNESS_AGENT=generic HARNESS_AGENT_CMD="sh -c 'echo \${FLEET_LEASE_SELFTEST_FRE
   --secrets-from "$W/agent-brief.md" --raw-out "$W/raw" --meta-out "$W/meta.json" >/dev/null 2>"$W/ae.err"; rc=$?
 is "agent-exec: exit 0" "$rc" 0
 is "agent-exec: the agent sees FLEET_LEASE_SELFTEST_FREE" "$(cat "$seen" 2>/dev/null)" has-lease
-ev "agent-exec: lease asked for ticket T77 with ttl timeout+600" \
+ev "agent-exec: lease asked for ticket T77" \
    'log | grep "\"event\": \"grant\"" | grep "\"ticket\": \"T77\"" | grep -q "\"result\": \"ok\""'
 is "agent-exec: the lease is revoked when the agent ends" "$(printf '%s\n' "$(cat "$W/agent.lease")" | "$S" revoke - 2>&1)" "secret: no such lease"
+printf 'AI image grant: "hazme una imagen con IA del faro"\n' >"$W/image-brief.md"
+HARNESS_AGENT=generic HARNESS_AGENT_CMD="sh -c 'echo \${FLEET_LEASE_OPENROUTER:+has-lease} >\"$W/image.seen\"'" \
+  "$A/bin/agent-exec" --prompt-file "$W/p.md" --cwd "$W/cwd" --name fx-img --ticket T79 --timeout 60 \
+  --secrets-from "$W/image-brief.md" --raw-out "$W/raw4" --meta-out "$W/meta4.json" >/dev/null 2>&1
+is "agent-exec: a brief with only \`AI image grant:\` gives the agent FLEET_LEASE_OPENROUTER" "$(cat "$W/image.seen" 2>/dev/null)" has-lease
+ev "agent-exec: that grant is logged for T79 with the quote as the asked words" \
+   'log | grep "\"ticket\": \"T79\"" | grep "\"secret\": \"openrouter\"" | grep "\"result\": \"ok\"" | grep -q "\"asked\": \"hazme una imagen con IA del faro\""'
 n=$(log | grep -c '"event": "grant"')
 HARNESS_AGENT=generic HARNESS_AGENT_CMD='true' "$A/bin/agent-exec" --prompt-file "$W/p.md" --cwd "$W/cwd" --name fx \
   --secrets-from "$W/none.md" --raw-out "$W/raw2" --meta-out "$W/meta2.json" >/dev/null 2>&1
