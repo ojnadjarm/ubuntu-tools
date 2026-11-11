@@ -6,6 +6,7 @@ import os
 import threading
 
 from . import registry
+from .mode import Request
 from .seal import SealError
 
 MAX_VALUE = 64 * 1024
@@ -14,9 +15,9 @@ MAX_VALUE = 64 * 1024
 class Admin:
     """Answers one admin request; the socket and the peer check live in the daemon."""
 
-    def __init__(self, registry_path, added_path, sealer, audit, grants=None):
+    def __init__(self, registry_path, added_path, sealer, audit, grants=None, standing=None):
         self.registry_path, self.added_path = registry_path, added_path
-        self.sealer, self.audit, self.grants = sealer, audit, grants
+        self.sealer, self.audit, self.grants, self.standing = sealer, audit, grants, standing
         self._lock = threading.Lock()
         self.added = self._read_added()
         self.entries = registry.load(registry_path, self.added)
@@ -40,12 +41,15 @@ class Admin:
     def handle(self, req, uid, pid=None):
         """Dispatch one request dict from peer uid (and pid, for grants); returns the reply dict."""
         op = req.get("op")
+        if op == "use":
+            return self.op_use(req, uid)
         fn = {"list": self.op_list, "put": self.op_put, "remove": self.op_remove, "log": self.op_log,
-              "grant": self.op_grant, "revoke": self.op_revoke, "used": self.op_used}.get(op)
+              "grant": self.op_grant, "revoke": self.op_revoke, "used": self.op_used, "approve": self.op_approve,
+              "deny": self.op_deny, "pending": self.op_pending}.get(op)
         if fn is None:
             return {"ok": False, "error": "unknown op"}
         with self._lock:
-            return self.op_grant(req, uid, pid) if op == "grant" else fn(req, uid)
+            return fn(req, uid, pid) if op in ("grant", "approve", "deny") else fn(req, uid)
 
     def _event(self, req, uid, event, name, result):
         self.audit.log({"event": event, "secret": name, "ticket": req.get("ticket"), "agent": req.get("agent"),
@@ -150,3 +154,41 @@ class Admin:
         if self.grants is None:
             return {"ok": False, "error": "leases are off in this broker"}
         return self.grants.revoke(req, uid)
+
+    def op_use(self, req, uid):
+        """A lease-free op on a free secret (notify, picks): the broker does it, the value stays inside."""
+        args = req.get("args") or {}
+        if self.standing is None or not isinstance(args, dict):
+            return {"ok": False, "error": "no standing ops in this broker" if self.standing is None else "bad args"}
+        who = str(req.get("agent") or f"uid {uid}")[:60]
+        r = self.standing.use(str(req.get("name") or ""), Request("POST", str(req.get("path") or ""),
+                                                                  body=json.dumps(args).encode()), who)
+        body = r.body.decode(errors="replace")
+        if r.status == 200:
+            return {"ok": True, "status": r.status, "body": body}
+        try:
+            why = json.loads(body).get("error") or body
+        except (ValueError, AttributeError):
+            why = body
+        return {"ok": False, "status": r.status, "error": f"{why} ({r.status})"}
+
+    def _decide(self, req, uid, pid, yes):
+        if not hasattr(self.grants, "decide"):
+            return {"ok": False, "error": "approvals are off in this broker"}
+        return self.grants.decide(req, uid, pid, yes)
+
+    def op_approve(self, req, uid, pid=None):
+        """Approve a pending critical lease by its ref (never from inside an agent)."""
+        return self._decide(req, uid, pid, True)
+
+    def op_deny(self, req, uid, pid=None):
+        """Deny a pending critical lease by its ref."""
+        return self._decide(req, uid, pid, False)
+
+    def op_pending(self, req, uid):
+        """Critical lease requests waiting for (or holding) an answer; the owner's taps are read first."""
+        a = getattr(self.grants, "approvals", None)
+        if a is None:
+            return {"ok": False, "error": "approvals are off in this broker"}
+        a.settle()
+        return {"ok": True, "pending": a.pending()}

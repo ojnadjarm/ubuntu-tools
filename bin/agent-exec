@@ -18,7 +18,8 @@ help() {
   echo 'worker, worker-max, planner are Agent-tool agent types, not commands.'
   echo '--secrets-from BRIEF: one vault lease per name on its `Secrets:` line (secret leases, ticket --ticket, else'
   echo '  --name), exported as FLEET_LEASE_<NAME> to the agent and revoked when it ends; asked here, outside the'
-  echo '  agent, because the vault refuses (and raises) a lease asked from inside an agent (agents.slice).'
+  echo '  agent, because the vault refuses (and raises) a lease asked from inside an agent (agents.slice). A class'
+  echo '  critical name waits up to SECRETS_APPROVAL_WAIT s (900) for the owner'"'"'s tap or `secret approve <ref>`.'
   exit 0
 }
 
@@ -69,7 +70,7 @@ if [ -n "$secrets_from" ] && grep -qE '^[[:blank:]]*([-*][[:blank:]]*)?Secrets:|
     [[ $k =~ ^FLEET_LEASE_[A-Z0-9_]+$ && -n $v ]] || continue
     export "$k=$v"; leases+=("$v")
   done < <("$HARNESS_HOME/bin/secret" leases --from "$secrets_from" --ticket "${ticket:-${name:-agent-exec}}" \
-             --ttl "$ttl" </dev/null)
+             --ttl "$ttl" --wait "${SECRETS_APPROVAL_WAIT:-900}" </dev/null)
 fi
 # scope_ok — a user-bus scope can start; a positive probe is cached per boot in $XDG_RUNTIME_DIR/pc-status/scope-ok (T1138).
 scope_ok() {
@@ -86,6 +87,9 @@ if [[ $cg == */user@"$UID".service/* && $cg != */agents.slice/* && ( $u == *.ser
    scope_ok; then
   place=(systemd-run --user --scope --quiet --slice=agents.slice -p "BindsTo=$u"
          -p "MemoryMax=${m/#max/infinity}")
+elif [[ $cg != */user@"$UID".service/* ]] && scope_ok; then
+  # Outside the user manager (an SSH session, cron) the agent still goes to agents.slice, so the vault sees it as one.
+  place=(systemd-run --user --scope --quiet --slice=agents.slice)
 fi
 "${place[@]}" "$adapter" </dev/null &
 child=$!

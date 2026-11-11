@@ -9,6 +9,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
 from vault import wire  # noqa: E402
 from vault.admin import Admin  # noqa: E402
+from vault.approvals import Approvals, Approving  # noqa: E402
 from vault.caller import Callers  # noqa: E402
 from vault.audit import Audit  # noqa: E402
 from vault.gate import Gate  # noqa: E402
@@ -17,8 +18,11 @@ from vault.leases import Leases  # noqa: E402
 from vault import page  # noqa: E402
 from vault.exchange import Exchange  # noqa: E402
 from vault.listener import serve  # noqa: E402
+from vault.op import Ntfy  # noqa: E402
+from vault.push import Push  # noqa: E402
 from vault.oauth import OAuthProxy  # noqa: E402
 from vault.seal import SealError, SystemdCreds  # noqa: E402
+from vault.standing import Standing  # noqa: E402
 
 
 def main():
@@ -39,7 +43,7 @@ def main():
                    help="the owner's tailnet login; the only one the page lets in (empty: the page refuses everything)")
     p.add_argument("--cgroup-root", default="/sys/fs/cgroup",
                    help="cgroupfs root; a grant from a pid in the caller's agents.slice is refused and raised")
-    p.add_argument("--upstream", default="", help="tests only: send every proxied call to this plain-HTTP base")
+    p.add_argument("--upstream", default="", help="tests only: send every proxied call and ntfy op to this plain-HTTP base")
     a = p.parse_args()
     a.page_socket = a.page_socket or os.path.join(os.path.dirname(a.socket), "page.sock")
 
@@ -47,8 +51,11 @@ def main():
     sealer = SystemdCreds(a.cred_dir, a.seal_socket)
     audit = Audit(os.path.join(a.state, "uses.jsonl"))
     leases = Leases(path=os.path.join(a.state, "leases.json"))
-    admin = Admin(a.registry, os.path.join(a.state, "added.json"), sealer, audit,
-                  Grants(leases, audit, Callers(a.cgroup_root)))
+    ntfy = Ntfy(a.upstream)
+    push = Push(lambda: admin.entries, sealer, ntfy)
+    grants = Approving(leases, audit, Callers(a.cgroup_root), Approvals(push, audit), push)
+    admin = Admin(a.registry, os.path.join(a.state, "added.json"), sealer, audit, grants,
+                  Standing(lambda: admin.entries, sealer, audit, {"ntfy": ntfy}))
     gate = Gate(lambda: admin.entries, sealer, leases, audit, {"proxy": OAuthProxy(sealer, audit, a.upstream),
                                                            "exchange": Exchange(a.upstream)})
     web = serve(gate, "127.0.0.1", a.port)
@@ -76,7 +83,8 @@ def main():
     if os.path.exists(a.socket):
         os.unlink(a.socket)
     old = os.umask(0o111)
-    server = socketserver.UnixStreamServer(a.socket, Handler)
+    server = socketserver.ThreadingUnixStreamServer(a.socket, Handler)
+    server.daemon_threads = True
     os.umask(old)
     print(f"fleet-vaultd: {len(admin.entries)} names known, listening on {a.socket}, {a.page_socket} "
           f"and 127.0.0.1:{web.server_address[1]}",

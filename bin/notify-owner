@@ -43,10 +43,14 @@ case "$prio" in min|low|default|high|urgent) ;; *) echo "notify-owner: bad prior
 msg="$*"
 [ "${#msg}" -le 200 ] || echo "notify-owner: message is ${#msg} chars (limit 200)" >&2
 
-[ -r "$ENV_FILE" ] || { echo "notify-owner: cannot read $ENV_FILE" >&2; exit 1; }
-# shellcheck source=/dev/null
-. "$ENV_FILE"
-: "${NTFY_URL:?}" "${NTFY_TOPIC:?}"
+# A readable env file (root alarm units, fixtures) is used as is; without one the vault broker sends (T1634-V6).
+via_vault=1
+if [ -r "$ENV_FILE" ]; then
+  via_vault=
+  # shellcheck source=/dev/null
+  . "$ENV_FILE"
+  : "${NTFY_URL:?}" "${NTFY_TOPIC:?}"
+fi
 
 mkdir -p "$(dirname "$LOG_FILE")" "$(dirname "$KEYS_FILE")"
 if [ "$prio" = high ]; then
@@ -77,20 +81,27 @@ PY
     exit 0
   fi
 fi
-args=(-fsS -m 15 -X POST -H "Title: $title" -H "Priority: $prio")
-if [ -n "$tags" ]; then args+=(-H "Tags: $tags"); fi
-if [ -n "$actions" ]; then
-  case "$actions" in *[,\"\']*) echo "notify-owner: -a labels and bodies take no commas or quotes" >&2; exit 2 ;; esac
-  IFS=';' read -ra acts <<<"$actions"; hdr=
-  for a in "${acts[@]:0:3}"; do
-    hdr="${hdr:+$hdr; }http, ${a%%=*}, $NTFY_URL/${NTFY_REPLY_TOPIC:-$NTFY_TOPIC-picks}, method=POST, body=${a#*=}, clear=true"
-  done
-  args+=(-H "Actions: $hdr")
-fi
-if printf '%s' "$msg" | curl "${args[@]}" --data-binary @- "$NTFY_URL/$NTFY_TOPIC" >/dev/null; then
-  status=ok
+case "$actions" in *[,\"\']*) echo "notify-owner: -a labels and bodies take no commas or quotes" >&2; exit 2 ;; esac
+if [ -n "$via_vault" ]; then
+  vargs=(-p "$prio" -t "$title")
+  if [ -n "$tags" ]; then vargs+=(-g "$tags"); fi
+  if [ -n "$actions" ]; then vargs+=(-a "$actions"); fi
+  if printf '%s' "$msg" | "$here/secret" notify "${vargs[@]}" >/dev/null; then status=ok; else status=fail; fi
 else
-  status=fail
+  args=(-fsS -m 15 -X POST -H "Title: $title" -H "Priority: $prio")
+  if [ -n "$tags" ]; then args+=(-H "Tags: $tags"); fi
+  if [ -n "$actions" ]; then
+    IFS=';' read -ra acts <<<"$actions"; hdr=
+    for a in "${acts[@]:0:3}"; do
+      hdr="${hdr:+$hdr; }http, ${a%%=*}, $NTFY_URL/${NTFY_REPLY_TOPIC:-$NTFY_TOPIC-picks}, method=POST, body=${a#*=}, clear=true"
+    done
+    args+=(-H "Actions: $hdr")
+  fi
+  if printf '%s' "$msg" | curl "${args[@]}" --data-binary @- "$NTFY_URL/$NTFY_TOPIC" >/dev/null; then
+    status=ok
+  else
+    status=fail
+  fi
 fi
 printf '%s\t%s\t%s\t%s\n' "$(date -Is)" "$status" "$prio" "${msg//$'\n'/\\n}" >> "$LOG_FILE"
 if [ "$prio" = high ] && [ "$status" = ok ]; then printf '%s\tsent\t%s\t%s\n' "$now" "$key" "${msg//$'\n'/\\n}" >> "$KEYS_FILE"; fi

@@ -2,16 +2,20 @@
 # usage: po-picks [--once] — files the owner's ntfy button taps as PO requests (no LLM; po-picks.service). Reads the reply topic
 # (NTFY_REPLY_TOPIC, else <topic>-picks) from the last seen id; a body `<p>:<pick-id>:<key>` that matches an unanswered
 # po-<p>/state/picks/<id>.json option becomes `po-ask <p> --from pick`; anything else is logged and dropped.
-# --once polls and exits (tests, catch-up); default streams (curl reconnects every hour; systemd restarts it).
+# --once polls and exits (tests, catch-up); default streams (curl reconnects every hour; systemd restarts it). With no
+# readable ntfy env file the vault broker reads the topic (`secret picks`), polled every PO_PICKS_EVERY s (15).
 case "${1:-}" in -h|--help) awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; exit 0 ;; ''|--once) ;;
   *) echo "po-picks: unknown argument '$1' (usage: po-picks [--once])" >&2; exit 2 ;; esac
 set -uo pipefail
 here=$(dirname "$(readlink -f "$0")")
 . "$here/polib.sh"
 ENV_FILE="${NTFY_ENV_FILE:-$HARNESS_HOME/secrets/ntfy.env}"
-# shellcheck source=/dev/null
-. "$ENV_FILE" || { echo "po-picks: cannot read $ENV_FILE" >&2; exit 1; }
-url="$NTFY_URL/${NTFY_REPLY_TOPIC:-$NTFY_TOPIC-picks}/json"
+url=
+if [ -r "$ENV_FILE" ]; then
+  # shellcheck source=/dev/null
+  . "$ENV_FILE" || { echo "po-picks: cannot read $ENV_FILE" >&2; exit 1; }
+  url="$NTFY_URL/${NTFY_REPLY_TOPIC:-$NTFY_TOPIC-picks}/json"
+fi
 SINCE="$HARNESS_HOME/state/po-picks.since"; LOG="$HARNESS_HOME/log/po-picks.log"
 mkdir -p "$(dirname "$SINCE")" "$(dirname "$LOG")"
 log() { printf '%s %s\n' "$(date -Is)" "$1" >>"$LOG"; }
@@ -38,6 +42,18 @@ handle() {
   fi
 }
 
+# Without the env file the vault broker reads the reply topic (T1634-V6): one poll per PO_PICKS_EVERY seconds.
+if [ -z "$url" ]; then
+  pull() { local s; s=$(cat "$SINCE" 2>/dev/null); "$here/secret" picks --since "${s:-10m}"; }
+  if [ "${1:-}" = --once ]; then
+    pull | while IFS= read -r line; do handle "$line"; done
+    exit "${PIPESTATUS[0]}"
+  fi
+  while :; do
+    pull | while IFS= read -r line; do handle "$line"; done
+    sleep "${PO_PICKS_EVERY:-15}"
+  done
+fi
 since=$(cat "$SINCE" 2>/dev/null); since=${since:-10m}
 if [ "${1:-}" = --once ]; then
   curl -fsS -m 30 "$url?poll=1&since=$since" | while IFS= read -r line; do handle "$line"; done

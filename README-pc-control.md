@@ -92,11 +92,13 @@
 ## Owner notifications (`notify-owner`)
 - `notify-owner [-p low|default|high|urgent] [-t title] [-g tags] "message"` -> push to the owner's phone via ntfy. Exit 0 = delivered.
   Works from any script, systemd timer or `agent-run`; no agent session needed.
-- Config: `~/agents/secrets/ntfy.env` (`NTFY_URL`, `NTFY_TOPIC`), mode 600 in a 700 dir. **Secrets live in `~/agents/secrets`; never echo, log or push them.**
+- Config: the topic is sealed in the vault (`ntfy`, T1634-V6): `notify-owner` and `po-picks` ask the broker (`secret notify`,
+  `secret picks`), which alone holds it. A readable `NTFY_ENV_FILE` (`NTFY_URL`, `NTFY_TOPIC`) is used directly instead: the root
+  alarm units keep `/etc/agents/ntfy.env` so a hardware alarm does not depend on the broker. Never echo, log or push a topic.
   The topic *is* the password of the channel (public ntfy.sh server): keep pushes under ~200 chars, no credentials, no tokens. Long content -> Gmail MCP or a local file path.
 - Every send is appended to `~/agents/log/notify.log` (`timestamp<TAB>ok|fail<TAB>priority<TAB>message`).
 - Phone setup: install the **ntfy** app (Android: Play Store / F-Droid; iOS: App Store), keep the default server `https://ntfy.sh`,
-  add a subscription with the topic from `~/agents/secrets/ntfy.env`, allow notifications. Test: `notify-owner -t test "hello"`.
+  add a subscription with the topic he chose (new topic: `secret replace ntfy`), allow notifications. Test: `notify-owner -t test "hello"`.
 
 ## Always-on desktop (T02)
 - Lock/blank/idle are off (`screensaver lock-enabled|idle-activation-enabled false`, `session idle-delay 0`, `lockdown disable-lock-screen true`, `power idle-dim false`), persisted as system defaults in `/etc/dconf/db/local.d/00-agents` (+ `/etc/dconf/profile/user`).

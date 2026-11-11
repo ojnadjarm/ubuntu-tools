@@ -36,6 +36,8 @@ reissue = "https://discord.com/developers/applications"
 class = "free"
 used_in = "notify-owner and po-picks: pushes to his phone"
 modes = ["op"]
+hosts = ["ntfy.sh"]
+reissue = "https://docs.ntfy.sh/subscribe/phone/"
 legacy = "ntfy.env"
 
 [secret.spotify-client]
