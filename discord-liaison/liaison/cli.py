@@ -36,7 +36,7 @@ ME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(ME), 'lib'))
 from agent_work import liaison_papers  # noqa: E402
 USAGE = ('usage: discord-liaison tick [--dry-run]|wake|check|inbox|done|post <thread> [--image <file>] [--reply <message>] <text…>|'
-         'react <thread> <message> <emoji>|art <prompt…>|escalate <message> <blocker> <what…>|map <thread> <project>|pr <project>|'
+         'react <thread> <message> <emoji>|art [--asked <quote>] <prompt…>|escalate <message> <blocker> <what…>|map <thread> <project>|pr <project>|'
          'job <message> [--project <id>] <task…>|job-run <id>|status')
 STALE = ('refused: stale: a newer message from the requester or the owner is waiting in this conversation; do not post '
          'or react. The triage run handles it (it may replace this job). End with `stale: <what you made>`.')
@@ -446,9 +446,15 @@ class App:
         return 0
 
     def art(self, args):
+        """concept-img into art_dir; the key and --asked reach it only when the quote is in this job's messages (T1632)."""
+        asked = args[1] if args[:1] == ['--asked'] and len(args) > 1 else ''
+        args = args[2:] if asked else args
         if not args:
             print(USAGE)
             return 2
+        job = self.jobs.get(self.env['LIAISON_JOB']) if self.env.get('LIAISON_JOB') else None
+        said = ' '.join(' '.join(m.get('content', '') for m in job['messages']).split()).lower() if job else ''
+        granted = bool(asked) and ' '.join(asked.split()).lower() in said
         if not self.caps.take('img'):
             print(f'refused: image cap reached ({self.caps.limits["img"]} per day); say so in the thread')
             return 3
@@ -459,8 +465,9 @@ class App:
         cmd = shlex.split(self.env.get('LIAISON_ART_CMD', 'concept-img')) + [
             '--model', self.env.get('LIAISON_ART_MODEL', 'bytedance-seed/seedream-5-0-flash'),
             '--prompt-file', out + '.prompt', '--resolution', '1K', '--out', out,
-            '--log', os.path.join(self.art_dir, 'spend.tsv'), '--start', '0']
-        rc = subprocess.call(cmd, stdin=subprocess.DEVNULL)
+            '--log', os.path.join(self.art_dir, 'spend.tsv')] + (['--asked', asked] if granted else [])
+        key = self.env.get('LIAISON_ART_KEY_FILE', os.path.join(os.path.dirname(ME), 'secrets', 'openrouter.key'))
+        rc = subprocess.call(cmd, stdin=subprocess.DEVNULL, env=dict(os.environ, OPENROUTER_KEY_FILE=key) if granted else None)
         if rc != 0 or not os.path.exists(out):
             print(f'art failed (concept-img exit {rc})')
             return 1
@@ -660,7 +667,7 @@ class App:
                     'agent-exec --prompt-file {prompt} --system-file {preamble} --model {model} --cwd {home} '
                     '--name discord-liaison-job --timeout {timeout} --raw-out {logs}/{id}.json --meta-out {logs}/{id}.meta.json '
                     '>>{logs}/{id}.log 2>&1')).format(**q)
-                rc = subprocess.call(cmd, shell=True, stdin=subprocess.DEVNULL, env=dict(os.environ, LIAISON_JOB=job['id'], EFFORT=self.env.get('LIAISON_JOB_EFFORT', 'xhigh')))
+                rc = subprocess.call(cmd, shell=True, stdin=subprocess.DEVNULL, env=dict(os.environ, LIAISON_JOB=job['id'], EFFORT=self.env.get('LIAISON_JOB_EFFORT', 'xhigh'), OPENROUTER_KEY_FILE='/dev/null'))
                 job = self.jobs.get(job['id'])
                 if job['status'] == 'superseded':
                     print(f'job {job["id"]} superseded')

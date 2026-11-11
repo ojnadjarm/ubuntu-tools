@@ -5,18 +5,33 @@ import base64
 import io
 import json
 import os
+import re
+import shlex
+import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
 
-USAGE = """usage: concept-img --model M (--prompt TEXT | --prompt-file F) --out out.png --log spend.tsv --start USD
-                   [--resolution 1K|2K|4K] [--aspect 3:4] [--ref img.png ...] [--cap USD [--reserve USD]]
-Before the call: spent = max(key usage - start, last logged total); with --cap, refuses (exit 3) when spent + reserve > cap (default: no cap).\nThe key's usage lags a few seconds, so run calls one at a time; a .png out converts other formats to PNG.
-After: writes the image, appends model, size, cost delta and the running total (last column) to the TSV log.
-env: OPENROUTER_KEY_FILE (default ~/agents/secrets/openrouter.key), CONCEPT_IMG_API (default https://openrouter.ai/api/v1)
-exit 0 image written · 1 API error (402 = key out of credit) · 2 usage · 3 cap reached"""
-HEADER = "time\tmodel\tresolution\taspect\tout\tcost_delta\tkey_usage\ttotal\n"
+USAGE = """usage: concept-img --asked "<requester's words>" --model M (--prompt TEXT | --prompt-file F) --out out.png
+                   --log spend.tsv [--start USD] [--resolution 1K|2K|4K] [--aspect 3:4] [--ref img.png ...] [--cap USD [--reserve USD]]
+Opt-in (T1632): runs only with --asked, the requester's verbatim sentence asking for an AI, generated or concept image;
+else exit 4 (make it yourself by code). The quote is logged. A generated image is a concept, never the delivered asset.
+Before the call: job spent = max(key usage - start, last logged total) (logged total only without --start); refuses
+(exit 3) when job spent + reserve > --cap (default CONCEPT_IMG_JOB_CAP, 2.00) or this calendar month's ledger spend +
+reserve > CONCEPT_IMG_MONTH_CAP (10.00). Crossing 80 % of the month cap sends one notify-owner line.
+The key's usage lags a few seconds, so run calls one at a time; a .png out converts other formats to PNG.
+After: writes the image, appends model, size, cost delta, running total and the quote to the TSV log, and the cost to the
+month ledger (CONCEPT_IMG_LEDGER, default ~/agents/log/concept-img.tsv).
+env: OPENROUTER_KEY_FILE (default ~/agents/secrets/openrouter.key; empty file = no key, exit 4), CONCEPT_IMG_API
+exit 0 image written · 1 API error (402 = key out of credit) · 2 usage · 3 cap reached · 4 no grant or no key"""
+HEADER = "time\tmodel\tresolution\taspect\tout\tcost_delta\tkey_usage\ttotal\tasked\n"
+REFUSE = "concept-img: make it yourself by code; the image model needs the requester's own words asking for an AI image"
+GRANT = re.compile(r"(?i)\b(ai|ia|a\.i|i\.a|generated|generad[ao]s?|concept\w*|image model|modelo de imagen|openrouter|"
+                   r"nano banana|gemini|seedream|midjourney|dall-?e|stable diffusion|artificial intelligence|"
+                   r"inteligencia artificial)\b")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
+from agent_work import _key  # noqa: E402
 
 
 def api(path, key, body=None):
@@ -34,11 +49,27 @@ def usage(key):
 
 
 def logged_total(log):
-    """Return the running total from the last row of the spend log, 0 if none."""
+    """Return the running total (the header's total column) from the last row of the spend log, 0 if none."""
     try:
-        return float(open(log).read().strip().splitlines()[-1].split("\t")[-1])
+        rows = open(log).read().strip().splitlines()
+        return float(rows[-1].split("\t")[rows[0].split("\t").index("total")])
     except (OSError, IndexError, ValueError):
         return 0.0
+
+
+def month_spent(ledger):
+    """Return this calendar month's spend from the ledger (time, cost, ...), 0 if none."""
+    month = time.strftime("%Y-%m")
+    try:
+        rows = [r.split("\t") for r in open(ledger).read().splitlines()]
+    except OSError:
+        return 0.0
+    return sum(float(r[1]) for r in rows if len(r) > 1 and r[0].startswith(month))
+
+
+def cap(name, default):
+    """A dollar cap from the environment or config.env, else the default."""
+    return float(_key(name) or default)
 
 
 def data_url(path):
@@ -51,7 +82,7 @@ def data_url(path):
 def main():
     p = argparse.ArgumentParser(usage=USAGE, add_help=False)
     p.add_argument("-h", "--help", action="store_true")
-    for a in ("--model", "--prompt", "--prompt-file", "--out", "--log", "--aspect", "--resolution"):
+    for a in ("--asked", "--model", "--prompt", "--prompt-file", "--out", "--log", "--aspect", "--resolution"):
         p.add_argument(a)
     p.add_argument("--start", type=float)
     p.add_argument("--cap", type=float)
@@ -62,15 +93,32 @@ def main():
         print(USAGE)
         return 0
     prompt = open(a.prompt_file).read().strip() if a.prompt_file else a.prompt
-    if extra or not (a.model and prompt and a.out and a.log) or a.start is None:
+    if extra or not (a.model and prompt and a.out and a.log):
         print(USAGE, file=sys.stderr)
         return 2
-    key = open(os.path.expanduser(os.environ.get("OPENROUTER_KEY_FILE", "~/agents/secrets/openrouter.key"))).read().strip()
+    asked = " ".join((a.asked or "").split())
+    if not GRANT.search(asked):
+        print(REFUSE, file=sys.stderr)
+        return 4
+    try:
+        key = open(os.path.expanduser(os.environ.get("OPENROUTER_KEY_FILE") or "~/agents/secrets/openrouter.key")).read().strip()
+    except OSError:
+        key = ""
+    if not key:
+        print(REFUSE + " (no key in this environment)", file=sys.stderr)
+        return 4
+    job_cap = a.cap if a.cap is not None else cap("CONCEPT_IMG_JOB_CAP", 2.00)
+    month_cap = cap("CONCEPT_IMG_MONTH_CAP", 10.00)
+    ledger = os.path.expanduser(os.environ.get("CONCEPT_IMG_LEDGER") or "~/agents/log/concept-img.tsv")
 
     before = usage(key)
-    spent = max(before - a.start, logged_total(a.log))
-    if a.cap is not None and spent + a.reserve > a.cap:
-        print(f"concept-img: cap: spent {spent:.4f} + reserve {a.reserve:.2f} > cap {a.cap:.2f}", file=sys.stderr)
+    spent = max(before - a.start, logged_total(a.log)) if a.start is not None else logged_total(a.log)
+    month = month_spent(ledger)
+    if spent + a.reserve > job_cap:
+        print(f"concept-img: cap: spent {spent:.4f} + reserve {a.reserve:.2f} > cap {job_cap:.2f}", file=sys.stderr)
+        return 3
+    if month + a.reserve > month_cap:
+        print(f"concept-img: month cap: spent {month:.4f} + reserve {a.reserve:.2f} > {month_cap:.2f}", file=sys.stderr)
         return 3
     body = {"model": a.model, "prompt": prompt, "n": 1}
     if a.resolution:
@@ -95,13 +143,21 @@ def main():
 
     after = usage(key)
     cost = float((res.get("usage") or {}).get("cost") or after - before)
-    total = max(after - a.start, logged_total(a.log) + cost)
+    total = max(after - a.start if a.start is not None else 0, logged_total(a.log) + cost)
+    now = time.strftime('%Y-%m-%dT%H:%M:%S')
     new = not os.path.exists(a.log)
     with open(a.log, "a") as f:
         if new:
             f.write(HEADER)
-        f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')}\t{a.model}\t{a.resolution or '-'}\t{a.aspect or '-'}\t"
-                f"{a.out}\t{cost:.4f}\t{after:.4f}\t{total:.4f}\n")
+        f.write(f"{now}\t{a.model}\t{a.resolution or '-'}\t{a.aspect or '-'}\t"
+                f"{a.out}\t{cost:.4f}\t{after:.4f}\t{total:.4f}\t{asked}\n")
+    os.makedirs(os.path.dirname(ledger), exist_ok=True)
+    with open(ledger, "a") as f:
+        f.write(f"{now}\t{cost:.4f}\t{a.out}\t{asked}\n")
+    if month < 0.8 * month_cap <= month + cost:
+        subprocess.call(shlex.split(os.environ.get("CONCEPT_IMG_NOTIFY", "notify-owner")) +
+                        [f"concept-img: ${month + cost:.2f} of the ${month_cap:.2f} monthly image cap spent (80 %)"],
+                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
     print(f"{a.out}\tcost {cost:.4f}\ttotal {total:.4f}")
     return 0
 

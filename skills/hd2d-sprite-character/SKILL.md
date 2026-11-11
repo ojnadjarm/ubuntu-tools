@@ -3,6 +3,8 @@ name: hd2d-sprite-character
 description: HD-2D battle sprites (Octopath / FFBE look) from a short spec - knight, caster, beast, kobold, wisp; 8-frame lit idle with normal and emissive maps for a Blender diorama. Use for "HD-2D / FFBE / Octopath sprite", "party / monster sprite". Not Godot walk sheets (/pixel-avatar).
 ---
 
+> Opt-in image model (T1632): create / draw / design / represent = make it yourself by code; an image model only when the requester asks for an AI image; a generated image is a concept, never the delivered asset.
+
 # hd2d-sprite-character: one spec file per character -> 8-frame lit battle idle
 
 Origin: T1414 (Tiny Epic Narrator, Gamelyn approved by the owner 2026-10-28, then the whole party). Guides:

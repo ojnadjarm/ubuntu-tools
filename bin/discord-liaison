@@ -5,7 +5,7 @@
 # a project with a `po` in projects.json: its messages go to that PO (po-ask), its outbox/discord/ replies are posted (T1412);
 # with a `router` set, tick hands them off by code before any LLM run; `manager <id>` makes po-<id> (T1515 P31);
 # `relay` posts the outbox replies now (discord-liaison-relay@<p>.path on each outbox write, T1515 P40).
-U='usage: discord-liaison tick [--dry-run]|wake|check|inbox|done|post <thread> [--image <file>] [--reply <message>] <text…>|react <thread> <message> <emoji>|art <prompt…>|escalate <message> <blocker> <what…>|map <thread> <project>|pr <project>|job <message> [--project <id>] <task…>|job-run <id>|status|manager <project-id>|relay|test'
+U='usage: discord-liaison tick [--dry-run]|wake|check|inbox|done|post <thread> [--image <file>] [--reply <message>] <text…>|react <thread> <message> <emoji>|art [--asked <quote>] <prompt…>|escalate <message> <blocker> <what…>|map <thread> <project>|pr <project>|job <message> [--project <id>] <task…>|job-run <id>|status|manager <project-id>|relay|test'
 case "${1:-}" in
   -h|--help) echo "$U"; exit 0 ;;
   -*) echo "discord-liaison: unknown option: $1" >&2; echo "$U" >&2; exit 2 ;;

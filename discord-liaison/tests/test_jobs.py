@@ -1,5 +1,6 @@
 """T1414: work requests become background jobs; a cap on concurrent jobs, a queue, and triage keeps running meanwhile."""
 import os
+import sys
 import unittest
 from unittest import mock
 
@@ -172,6 +173,38 @@ class TestJobCli(JobBase):
         await self.run_cli('tick')
         self.assertEqual((q.get(jid)['status'], q.get(jid)['why']), ('failed', 'lost'))
         self.assertIn('no he podido terminarlo', self.fake.sent('400')[0])
+
+
+class TestImageGrant(JobBase):
+    """T1632: a job holds no image key; `art --asked` gets it only with a quote from the job's own messages."""
+
+    async def test_job_worker_env_holds_no_key(self):
+        (a,) = await self.inbox('dibuja una representación de ti')
+        await self.run_cli('job', a, 'draw yourself')
+        seen = os.path.join(self.tmp.name, 'key.seen')
+        await self.run_cli('job-run', self.launches()[0], env={'LIAISON_WORKER_CMD': f'echo "$OPENROUTER_KEY_FILE" > {seen}'})
+        with open(seen) as f:
+            self.assertEqual(f.read().strip(), '/dev/null')
+
+    async def test_art_passes_key_and_quote_only_when_the_quote_is_in_the_job(self):
+        (a,) = await self.inbox('Hazme   una imagen con IA del héroe, porfa')
+        await self.run_cli('job', a, 'AI image of the hero')
+        jid = self.launches()[0]
+        seen, fake = os.path.join(self.tmp.name, 'art.seen'), os.path.join(self.tmp.name, 'art.py')
+        with open(fake, 'w') as f:
+            f.write('import os, sys\na = sys.argv\nopen(a[a.index("--out") + 1], "wb").write(b"\\x89PNG\\r\\n\\x1a\\n")\n'
+                    f'open({seen!r}, "a").write(repr((a[a.index("--asked") + 1] if "--asked" in a else None, '
+                    'os.environ.get("OPENROUTER_KEY_FILE"))) + "\\n")\n')
+        env = {'LIAISON_JOB': jid, 'LIAISON_ART_CMD': f'{sys.executable} {fake}', 'LIAISON_IMAGES_PER_DAY': '5',
+               'LIAISON_ART_KEY_FILE': '/fx/key'}
+        with mock.patch.dict(os.environ, {'OPENROUTER_KEY_FILE': '/dev/null'}):
+            await self.run_cli('art', '--asked', 'hazme una imagen con IA del héroe', 'hero', env=env)
+            await self.run_cli('art', '--asked', 'una imagen con IA de un dragón', 'dragon', env=env)
+            await self.run_cli('art', 'hero', env=env)
+        with open(seen) as f:
+            rows = f.read().splitlines()
+        self.assertEqual(rows, [repr(('hazme una imagen con IA del héroe', '/fx/key')), repr((None, '/dev/null')),
+                                repr((None, '/dev/null'))])
 
 
 if __name__ == '__main__':

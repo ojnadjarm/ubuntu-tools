@@ -61,8 +61,9 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
   open or done escalation of the same message is refused (KB/orchestrator.md "Pulse").
 - Ask first, then work (owner, T1411): a request that takes more than a quick answer gets a 👀 reaction (`react`) on
   receipt, a short Spanish text only when the wait is long, the result, then ✅ on the same message.
-- Images: `art` runs `concept-img` (OpenRouter, `LIAISON_ART_MODEL`, default seedream-5-0-flash 1K) into
-  `state/art/` under `LIAISON_IMAGES_PER_DAY` (5); `post --image` attaches only a PNG/JPEG from that directory
+- Images: `art [--asked "<quote>"]` runs `concept-img` (OpenRouter, `LIAISON_ART_MODEL`, default seedream-5-0-flash 1K)
+  into `state/art/` under `LIAISON_IMAGES_PER_DAY` (5); jobs run with `OPENROUTER_KEY_FILE=/dev/null`, and `art` passes
+  the key and the quote only when the quote is in the job's own messages (T1632, guide concept-img); `post --image` attaches only a PNG/JPEG from that directory
   (realpath + magic bytes, ≤ 10 MB) or a PNG/JPEG/GIF/WebP/MP4 inside a job folder `state/jobs/<id>/…` (≤ 25 MB, T1415)
   as one multipart upload (`Rest.send_file`), so no other file can leave. `--reply <message-id>` sets `message_reference`.
   `--image` repeats (at most 10, all checked before anything posts): the first rides on the last text part, each
@@ -114,7 +115,7 @@ discord-liaison wake                # what the path unit runs on a bot nudge (ch
 discord-liaison inbox | done        # what the LLM run sees; done clears only what inbox showed
 discord-liaison post <thread> [--image <file>] [--reply <msg>] <texto…>   # forum threads or #general, sanitized; LIAISON_DRY_RUN=1 prints
 discord-liaison react <thread> <message-id> 👀|✅       # ack on receipt, done when the result is posted
-discord-liaison art "<prompt>"     # concept-img into state/art/, prints the path; daily image cap
+discord-liaison art --asked "<quote>" "<prompt>"   # AI image only when asked (T1632); concept-img into state/art/, prints the path; daily image cap
 discord-liaison escalate <message-id> <permission|owner|secret|attempts> "<asked; tried>"   # -> state/escalations/, pulses the orchestrator
 discord-liaison map <thread> <project> | pr <project>   # pr = registry + route + daily PR cap gate
 discord-liaison job <message-id> "<task>"   # triage: hand a work request to a background worker (queued over the cap)

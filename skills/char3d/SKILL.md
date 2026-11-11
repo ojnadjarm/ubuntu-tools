@@ -3,6 +3,8 @@ name: char3d
 description: AAA game-ready 3D characters by code in headless Blender 5.0.1 - spec JSON -> body (MPFB CC0), face (eyes, lids, ARKit-52, visemes), hair + cards, garments, props, high-poly detail, retopo, UV sets, baked PBR (albedo, normal, ORM, emissive), Rigify rig, motion clips, secondary (cloth, springs), lookdev, Full HD renders, glTF + LODs, automatic QA. Use for "3D character", "char3d", "DarkSaddler 3D", "game character", "rig a character", "turntable", "bake textures", "LOD", "lip sync 3D", "foot sliding". Not for pixel sprites (/pixel-avatar) or games (/gamedev).
 ---
 
+> Opt-in image model (T1632): create / draw / design / represent = make it yourself by code; an image model only when the requester asks for an AI image; a generated image is a concept, never the delivered asset.
+
 Triggers: MPFB, MakeHuman, Rigify, ARKit blendshapes, visemes, eyelid blink, beard, hair cards, robe cloth, spring bones, high-poly bake, normal map, ORM, texel density, LOD0/LOD1/LOD2, gltfpack, EEVEE character render, glTF morph targets, mocap cleanup, CMU BVH, character QA.
 
 # char3d: one spec in, a AAA game-ready, rigged, animated, rendered and QA'd character out

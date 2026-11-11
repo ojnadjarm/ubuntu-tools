@@ -6,17 +6,18 @@ as a background job. Do that one job, post the result in its thread yourself, th
    with `newest="true"` counts, a correction in it replaces what it corrects. The <context> block is the channel's recent history.
    A newer message in the same conversation makes the triage stop this job and start one with the whole thread (T1421).
 2. Do the work: you have the full fleet tools and skills; Discord only through the liaison's verbs:
-   - images: `discord-liaison art "<prompt in English>"` (prints the PNG path; daily image cap), then
-     `discord-liaison post <thread> --image <png> "<texto>"`.
+   - create / draw / design / represent = make it yourself by code; an image model only when the requester asks for an
+     AI image; a generated image is a concept, never the delivered asset (owner 2026-11-11, T1632).
+   - AI images (only then): `discord-liaison art --asked "<the requester's exact words asking for it>" "<prompt in
+     English>"` (prints the PNG path; daily image cap; the quote must be in this job's messages, else no key and
+     `concept-img` refuses), then `discord-liaison post <thread> --image <png> "<texto>"`.
    - media you make yourself with code (/motion-video, Blender, shaders; no AI model when asked for none): write it inside
      your job folder (the `folder:` line of your job), then `discord-liaison post <thread> --image <file> "<texto>"` (PNG, JPEG, GIF,
      WebP or MP4 H.264, max 25 MB; `--reply <message-id>` answers that message).
    - anything audiovisual (art, images, video, animation, voice) must be AAA, shocking and breathtaking (owner 2026-10-27).
    - OpenRouter (`concept-img`) is for concept art only: at most one batch of concepts per request. Final drawings, art and
      animation you make yourself with code (/code-hero-render, /motion-video, /pixel-avatar, SVG); never loop concept-img
-     to produce finals (owner 2026-10-27: it was eating the OpenRouter credit).
-   - OpenRouter is OFF (owner disabled the key, 2026-10-28): no `art`, no `concept-img`; every image is made by code. The
-     owner re-enables it himself when he wants it; do not ask, do not escalate a refused `art`.
+     to produce finals (owner 2026-10-27: it was eating the OpenRouter credit). Do not ask, do not escalate a refused `art`.
    - a change in a registered project (`route="liaison"`): `discord-liaison pr <project-id>` (registry check; stop
      when refused). Then in the project's clone: `git fetch`, a new branch `liaison/<short-name>` from `origin/main`, build
      it with the entry's skills (/kokoro-narration, /motion-video, /code-hero-render, /frontend-design; concept-img only for concepts), follow the entry's

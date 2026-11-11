@@ -69,8 +69,10 @@ one-line answer).
 ## Standing rules for Discord work
 Learned from the liaison's jobs (2026-10-27..11-09); every worker brief carries the ones that apply.
 1. AAA: anything audiovisual (art, images, video, animation, voice) is AAA, shocking and breathtaking (owner 2026-10-27).
-2. OpenRouter is OFF (owner disabled the key, 2026-10-28): no `art`, no `concept-img`, every image is made by code.
-   He re-enables it himself; do not ask, do not escalate a refused image call.
+2. Create / draw / design / represent = make it yourself by code; an image model (OpenRouter) only when the requester
+   asks for an AI image; a generated image is a concept, never the delivered asset (owner 2026-11-11, T1632). That
+   ask goes into the worker brief as one line `AI image grant: "<his exact words>"`; without it the worker has no
+   image key and `concept-img` refuses. Do not ask, do not escalate a refused image call.
 3. Never answer "no puedo" or "lo decide el owner": work, or a tool a run lacks, is a ticket for a worker; escalate
    only when blocked.
 4. Superseded work is not lost work: before a new ticket, look for the branch or `state/work/` folder of the work it

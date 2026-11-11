@@ -174,5 +174,14 @@ printf 'You are po-rt, the Discord router.\n' >"$HARNESS_HOME/po-rt/BRIEF.md"
 po-new rt --refresh >/dev/null 2>&1; is 'refresh: a hand-written brief (router) exits 2' "$?" 2
 is 'refresh: the hand-written brief is untouched' "$(cat "$HARNESS_HOME/po-rt/BRIEF.md")" 'You are po-rt, the Discord router.'
 
+# (T1632) the image key reaches a worker only when its brief carries the requester's grant
+mkdir -p "$WORK/argstub"; printf '#!/bin/sh\necho "$*" >>"$WORK/args.log"\n' >"$WORK/argstub/systemd-run"; chmod +x "$WORK/argstub/systemd-run"
+echo 'draw him' >"$AGENT_WORK/briefs/T401-mg-nogrant.md"
+printf 'AI image grant: "hazme una imagen con IA"\n' >"$AGENT_WORK/briefs/T402-mg-grant.md"
+PATH="$WORK/argstub:$PATH" po-work mg start T401 --brief "$AGENT_WORK/briefs/T401-mg-nogrant.md" >/dev/null 2>&1
+PATH="$WORK/argstub:$PATH" po-work mg start T402 --brief "$AGENT_WORK/briefs/T402-mg-grant.md" >/dev/null 2>&1
+ev '(T1632) a brief without a grant: the worker unit gets no key' 'grep "po-work-mg-T401" "$WORK/args.log" | grep -q -- "--setenv=OPENROUTER_KEY_FILE=/dev/null"'
+ev '(T1632) a brief with a grant: the key file is left as is' 'grep -q "po-work-mg-T402" "$WORK/args.log" && ! grep "po-work-mg-T402" "$WORK/args.log" | grep -q OPENROUTER_KEY_FILE'
+
 touch "$REAL_HOME/.po-test-probe" 2>/dev/null; is 'selftest: the real agents tree is read-only in the sandbox' "$?" 1
 exit $bad

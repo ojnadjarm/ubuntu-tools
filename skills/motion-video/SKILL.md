@@ -3,6 +3,8 @@ name: motion-video
 description: Headless motion videos (Remotion, Motion Canvas, Blender EEVEE, Manim, ffmpeg encodes). Use for "motion video", "animation video", "promo", "explainer video", "render a clip", "3D shot", "encode", "captions", "vertical video", "color grade", "film", "trailer".
 ---
 
+> Opt-in image model (T1632): create / draw / design / represent = make it yourself by code; an image model only when the requester asks for an AI image; a generated image is a concept, never the delivered asset.
+
 Triggers: title card, kinetic type, product video, AV1, 4K60, voice-over mix, H.264, HEVC, VP9-alpha, VA-API drafts, loudnorm, 3D camera moves, motion blur, LUT grades, 10-bit masters, CC0 music/SFX library, ducking, burned or sidecar captions, 16:9/9:16/1:1 variants, diagrams, code.
 
 # motion-video: pick the tool, render headless, encode with a preset
