@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""memory — load the core card plus domain cards, drop a note in the inbox, check the store, install the carriers, or run the keeper's verbs (sources, stage, apply); the store is $MEMORY_HOME (T1599)."""
+"""memory — load the core card plus domain cards, drop a note in the inbox, check the store, install the carriers, run the keeper's verbs (sources, stage, apply), or recall and show what a prompt stirs; the store is $MEMORY_HOME (T1599)."""
 import argparse
 import importlib.machinery
 import importlib.util
@@ -214,6 +214,58 @@ def net(store, seat_, args):
     print(f"net · {src} · " + " · ".join(f"{k} {v}" for k, v in memory_net.stats(g).items()))
 
 
+def recall(store, seat_, args):
+    """Print the hints a prompt stirs (`--hook`: Claude Code's stdin JSON, any failure is silence and exit 0)."""
+    import memory_recall
+    if args.hook:
+        try:
+            if os.environ.get("MEMORY_RECALL_DONE"):
+                return
+            d = json.load(sys.stdin)
+            worker = bool(d.get("agent_id")) or carrier().is_worker()
+            s = "" if worker and memory_route.owner_seat(seat_, store) else seat_
+            ctx = memory_recall.Context(d.get("cwd") or os.getcwd(), s, worker, d.get("session_id"))
+            block = memory_recall.recall(store, d.get("prompt") or "", ctx).block
+        except (Exception, SystemExit):
+            return
+        sys.stdout.write(block)
+        return
+    if args.file:
+        with open(args.file, encoding="utf-8") as f:
+            text = f.read()
+    else:
+        text = " ".join(args.words)
+    ctx = memory_recall.Context(os.getcwd(), seat_, carrier().is_worker(),
+                                os.environ.get("CLAUDE_CODE_SESSION_ID") if args.file else None)
+    r = memory_recall.recall(store, text, ctx, write=bool(args.file) and not (args.explain or args.json))
+    if args.json:
+        print(json.dumps({"block": r.block, "cues": [c for c, _ in r.cues], "hints": [
+            {"id": f.id, "place": f.place, "activation": f.activation, "why": None if f.id in r.private else list(f.path)}
+            for f in r.firings]}))
+        return
+    sys.stdout.write(r.block)
+    if args.explain:
+        print("cues · " + (" ".join(c for c, _ in r.cues) or "-"))
+        for f in r.firings:
+            print(f"^{f.id} · {f.place} · {f.activation}" + ("" if f.id in r.private else " · " + " | ".join(f.path)))
+
+
+def show(store, seat_, args):
+    """Print a memory's line and page; a PRIVATE page only to its seats, as `memory load` does."""
+    mid = args.id.lstrip("^")
+    for page in store.pages():
+        seats = memory_route.seats_of(store, page)
+        if seats is not None and seat_ not in seats:
+            continue
+        for n, l in enumerate(store.lines(page), 1):
+            if l.id == mid:
+                print(f"^{mid} · {page}:{n}\n{memory_store.strip_ids(l.raw).strip()}")
+                if l.topic:
+                    print(f"→ {os.path.dirname(page)}/{l.topic}.md")
+                return
+    die(f"no memory ^{mid} you may read")
+
+
 def main():
     ap = argparse.ArgumentParser(prog="memory", description=__doc__.split("— ", 1)[1])
     sub = ap.add_subparsers(dest="verb", required=True)
@@ -243,12 +295,20 @@ def main():
     nv = p.add_subparsers(dest="net", required=True)
     nv.add_parser("build", help="compile net/graph.json + graph.private.json (git-ignored)").add_argument("folder", nargs="?")
     nv.add_parser("stats", help="nodes and links of the public graph (built, else compiled in memory)")
+    p = sub.add_parser("recall", help="the hints a prompt stirs in the network (at most 3 lines, or nothing)")
+    src = p.add_mutually_exclusive_group()
+    src.add_argument("--hook", action="store_true", help="read Claude Code's UserPromptSubmit JSON on stdin; never fails")
+    src.add_argument("--file", help="the prompt is this file (headless runs)")
+    p.add_argument("--explain", action="store_true", help="also print the cues and each firing's activation and paths")
+    p.add_argument("--json", action="store_true", help="the block, cues and firings as JSON")
+    p.add_argument("words", nargs="*", help="the prompt (a dry run: no session state, no event row)")
+    sub.add_parser("show", help="a memory's line and page").add_argument("id")
     args = ap.parse_args()
     store = memory_store.Store(memory_store.home())
     if args.verb == "check" and args.domains:
         unknown(store, args.domains)
     {"load": load, "note": note, "check": check, "install": install, "sources": sources, "stage": stage,
-     "apply": apply, "net": net}[args.verb](store, seat(store), args)
+     "apply": apply, "net": net, "recall": recall, "show": show}[args.verb](store, seat(store), args)
 
 
 if __name__ == "__main__":
