@@ -18,7 +18,7 @@ A document's quarter and month come from its own date (invoice date, charge date
 4. Owner's hand-ins: files in `state/inbox/` (bank PDF, receipts). Read each (`pdftotext`), file it by content, then move it to `state/filed/`.
 5. Email (Gmail connector, `mcp__claude_ai_Gmail__*`; load the tools with ToolSearch). Search both months for invoices and receipts with a PDF (`factura`, `invoice`, `receipt`, `recibo`).
    - Vendor listed in `state/vendors.md`: save the PDF to `state/mail/`, upload to `02`.
-   - Any other invoice that looks like a business expense (software, hardware, services, with VAT): do NOT upload; add one line to `state/candidates.md` (date, sender, subject, amount) for the owner to accept. On his yes the vendor goes into `state/vendors.md`.
+   - Any other invoice that looks like a business expense (software, hardware, services, with VAT): do NOT upload; add one line to `state/candidates.md` (date, sender, subject, amount) for the owner to accept. On his yes the vendor goes into `state/vendors.md`. A receipt listed in `state/rejected.md` (his no) is never proposed again.
    - No Gmail tools, or only `authenticate`: write "Gmail not connected" in the report and go on.
 6. Read back every upload (list the folder, check name and size).
 
