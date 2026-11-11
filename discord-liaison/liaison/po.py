@@ -14,7 +14,8 @@ from contextlib import redirect_stdout
 
 import aiohttp
 from discordbot.config import Config
-from discordbot.rest import Rest, RestError
+from discordbot.rest import RestError
+from discordbot.vault import make_rest
 from discordbot.store import save_json
 
 from .cli import App
@@ -216,7 +217,7 @@ async def amain(argv, env=None, rest=None):
         own = rest is None
         if own:
             cfg = Config.from_env(env)
-            rest = Rest(cfg.api_base, cfg.token())
+            rest = make_rest(cfg, env, 'discord-liaison')
         try:
             n, kept = 0, set()
             while any(f not in kept for f in outbox_files(probe, env)):

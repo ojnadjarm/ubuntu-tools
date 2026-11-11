@@ -1,0 +1,45 @@
+[Unit]
+Description=discord-bot gateway: the forum bot under its own user, token from the vault's store (T1634-V8)
+Requires=discord-bot-netproxy.service
+After=discord-bot-netproxy.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fleet-discord
+Group=fleet-discord
+WorkingDirectory=/opt/discord-bot
+EnvironmentFile=/etc/discord-bot/bot.env
+Environment=DISCORD_TOKEN_FILE=%d/fleet.discord-bot-token DISCORD_STATE_DIR=/var/lib/discord-bot DISCORD_PROXY=http://127.0.0.1:18471 HOME=/nonexistent LANG=C.UTF-8
+ExecStart=/opt/discord-bot/.venv/bin/python -E -s -B -m discordbot gateway /run/discord-bot/proxy.sock
+LoadCredentialEncrypted=fleet.discord-bot-token
+BindPaths=@STATE@:/var/lib/discord-bot
+UMask=0002
+Restart=on-failure
+RestartSec=60
+SuccessExitStatus=143
+MemoryMax=400M
+PrivateNetwork=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

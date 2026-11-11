@@ -14,10 +14,16 @@ class RestError(Exception):
 
 
 class Rest:
-    def __init__(self, base, token, proxy=''):
-        self.base, self.proxy = base.rstrip('/'), proxy or None
-        self._headers = {'Authorization': f'Bot {token}', 'User-Agent': 'DiscordBot (agents, 1.0)'}
+    def __init__(self, base, token, proxy='', lease=None):
+        self.base, self.proxy, self.lease = base.rstrip('/'), proxy or None, lease
+        self._headers = {'User-Agent': 'DiscordBot (agents, 1.0)'}
+        if token:
+            self._headers['Authorization'] = f'Bot {token}'
         self._session = None
+
+    def url(self, path):
+        """The full URL for an API path: Discord itself, or the vault broker when a lease source is set."""
+        return (self.lease.base(self.base) if self.lease else self.base) + path
 
     async def close(self):
         if self._session:
@@ -28,7 +34,7 @@ class Rest:
         if self._session is None:
             self._session = aiohttp.ClientSession(headers=self._headers)
         for _ in range(5):
-            async with self._session.request(method, self.base + path, json=json, params=params,
+            async with self._session.request(method, self.url(path), json=json, params=params,
                                              data=form() if form else None, proxy=self.proxy) as r:
                 try:
                     body = await r.json(content_type=None) if r.status != 204 else None

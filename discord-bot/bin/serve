@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# serve — discord-bot.service: store the guild owner in config.env, then run the job runner (outside) and the bot
-# (inside bin/sandbox); when either exits, both stop.
+# serve — discord-bot.service: store the guild owner in config.env, then run the job runner (outside) and, until the
+# system unit discord-bot-gateway.service is installed (discord-bot/install, T1634-V8), the bot inside bin/sandbox;
+# when either exits, both stop. With the gateway unit enabled the bot runs there, under its own user.
 set -uo pipefail
 ME="$(cd "$(dirname "$0")/.." && pwd)"
 . "$HOME/agents/bin/env.sh"
 "$HOME/agents/bin/discord-bot" setup || exit $?
 set -a; . "$HARNESS_CONFIG"; set +a
+if systemctl --system is-enabled --quiet discord-bot-gateway.service 2>/dev/null; then
+  PYTHONPATH="$ME" exec "$ME/.venv/bin/python" -m discordbot runner
+fi
 PYTHONPATH="$ME" "$ME/.venv/bin/python" -m discordbot runner & runner=$!
 "$ME/bin/sandbox" -- -m discordbot bot & bot=$!
 trap 'kill -TERM "$runner" "$bot" 2>/dev/null' TERM INT

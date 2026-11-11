@@ -105,6 +105,10 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
 - Eval (`discord-liaison/eval/`): `run_eval.py <brief> --model opus --context liaison|none --out r.jsonl` (tool-less
   `claude -p`, one JSON decision per fixture, ~$0.04 and ~5 s per opus call, `--show` prints prompts) and
   `score.py r.jsonl` (deterministic regex/field checks, per-class %). Change the brief → run both, twice each.
+- Token (T1634-V8): REST goes through the vault broker with a lease (`discordbot.vault.make_rest`, guide `discord-bot`):
+  `tick`, `wake`, `relay` and `job-run` ask their own (they run outside agents.slice); the triage run gets it from
+  `Secrets: discord-bot-token` in BRIEF.md; `job-run` mints one per job worker (`FLEET_LEASE_DISCORD_BOT_TOKEN`, job time
+  limit + 10 min) and revokes it. A lease asked from inside an agent is refused: the error names the brief line.
 - Split with discord-bot: `DISCORD_FORUM_REPLIES=liaison` in config.env. The bot only tags posts and nudges; it no longer
   sends its English ACK or tool-less answers, and since T1546-M2 runs no approved jobs (his ✅ goes to the manager). Its sandbox is unchanged.
 

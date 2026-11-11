@@ -1,6 +1,6 @@
 # Discord forum bot: requests from family and friends (and their agents) in a Forum channel
 
-Ticket: T348, T361, T448, T1546-M2 · Last verified: 2026-11-10 by 36 fixture tests (T1546-M2: liaison mode + owner ✅ leaves `pending/` empty, writes one approval record); 2026-10-20 by T846 read-only audit (`--help`, paths, code); before: 2026-10-19 by 28 fixture tests (29 `test_` functions now), sandbox selftest, a live gateway connect through the sandbox
+Ticket: T348, T361, T448, T1546-M2, T1634-V8 · Last verified: 2026-11-11 (T1634-V8: 9 vault REST fixture tests, vault-unit.test.sh: a throwaway unit with the gateway's hardening reads a fake sealed credential, 5 routes read 0 bytes from the agents' user, a same-user control fails); 2026-11-10 by 36 fixture tests (T1546-M2: liaison mode + owner ✅ leaves `pending/` empty, writes one approval record); 2026-10-20 by T846 read-only audit (`--help`, paths, code); before: 2026-10-19 by 28 fixture tests (29 `test_` functions now), sandbox selftest, a live gateway connect through the sandbox
 
 ## When to use
 Run, check, change or debug the `agents` Discord bot, post into its forum, or build another sandboxed chat bot.
@@ -26,6 +26,19 @@ channel plugin (`--channels`), which gives the chat that session's tools.
   latter counted again by the runner. Every reply passes `sanitize.clean` (paths, IPs, hosts, emails, tokens,
   config values) twice.
 
+- Vault (T1634-V8): the token is the vault secret `discord-bot-token` (class free). The gateway runs as the system unit
+  `discord-bot-gateway.service` under its own user `fleet-discord` (V1: a same-user unit leaks its credential by the
+  host path), code and venv copied root-owned to `/opt/discord-bot`, `LoadCredentialEncrypted=fleet.discord-bot-token`,
+  `PrivateNetwork=yes` with the in-process relay to `discord-bot-netproxy.service` (same user, `/run/discord-bot/proxy.sock`,
+  443 to Discord hosts only), state bound from `discord-bot/state` (ACL: fleet-discord and the owner, default ACL on new
+  files). Every other caller (runner, `discord-bot` CLI, discord-liaison, its relay and job workers) calls REST through
+  the broker: `make_rest` → `LeaseSource` (the launcher's `FLEET_LEASE_DISCORD_BOT_TOKEN`, else its own grant from the
+  admin socket, renewed 5 min before it ends) → `http://127.0.0.1:<FLEET_VAULT_PORT>/<lease>/discord-bot-token/api/v10/…`,
+  the broker adds `Authorization: Bot …` (registry `scheme = "Bot"`, methods GET/POST/PUT/DELETE, path `/api/v10/`).
+  The triage run gets its lease by `Secrets: discord-bot-token` in its BRIEF.md; a liaison job worker gets one minted by
+  `job-run` for the job's time limit, revoked at the end. A replaced token reaches the gateway at its next start: the old
+  one fails with 4004, the unit exits and restarts after 60 s with the new sealed value.
+
 ## Exact commands
 ```bash
 discord-bot status            # unit, uptime, API readiness (guilds, intent), guild, forum, tags
@@ -34,11 +47,15 @@ discord-bot invite            # OAuth invite URL with the needed permissions
 discord-bot read [thread-id]  # forum posts, or the last 20 messages of one
 discord-bot post <thread-id> <text…> | discord-bot post --new <title> <text…>
 discord-bot test              # fixture tests (fake Discord REST, recorded gateway payloads)
-discord-bot selftest          # sandbox proof: other secrets unreadable, no writes outside state/, net only Discord
-journalctl --user -u discord-bot -n 50
+discord-bot selftest          # gateway unit proof: other uid, own network namespace, its credential reads 0 bytes here by 5 routes
+sudo -n ~/agents/discord-bot/install [--apply|--remove]   # gateway + netproxy system units, /opt copy, bot.env, state ACL
+pc units restart discord-bot-gateway --system --apply     # start or reload the gateway after an install
+journalctl --user -u discord-bot -n 50; journalctl -u discord-bot-gateway -n 50
 ```
 
 ## Pitfalls (measured)
+- systemd-run checks ExecStart on the host before the unit's mounts: a path only visible through BindPaths= fails
+  "Failed to find executable"; wrap it in `/bin/sh -c` (T1634-V8). BindPaths= from /home works under ProtectHome=yes.
 - `claude -p` with a `--system-prompt-file` still gets an automatic note with the account e-mail: the sanitizer
   strips every e-mail address. `--bare` would hide it but needs an API key (OAuth is never read).
 - The fleet adapter treats `AGENT_TOOLS=""` as unset (`${AGENT_TOOLS:-…}` → Bash,Read,Edit,Write), so tool-less

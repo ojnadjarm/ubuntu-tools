@@ -8,8 +8,9 @@ import sys
 import time
 
 from .config import Config
-from .rest import Rest, RestError
+from .rest import RestError
 from .sanitize import chunks, clean
+from .vault import make_rest
 
 ME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONTENT_FLAGS = (1 << 18) | (1 << 19)
@@ -17,8 +18,8 @@ PERMS = 1024 | 2048 | 64 | 32768 | 65536 | 16 | 128 | (1 << 34) | (1 << 35) | (1
 FORUM = 15
 
 
-def unit_state():
-    r = subprocess.run(['systemctl', '--user', 'show', 'discord-bot.service', '-p', 'ActiveState',
+def unit_state(unit='discord-bot.service', scope='--user'):
+    r = subprocess.run(['systemctl', scope, 'show', unit, '-p', 'ActiveState',
                         '-p', 'ActiveEnterTimestampMonotonic'], capture_output=True, text=True)
     d = dict(line.split('=', 1) for line in r.stdout.splitlines() if '=' in line)
     up = None
@@ -81,8 +82,9 @@ async def status(cfg, rest):
         st = json.load(open(os.path.join(cfg.state_dir, 'status.json')))
     except (OSError, ValueError):
         st = {}
-    state, up = unit_state()
-    print(f'unit      discord-bot.service {state}' + (f', uptime {int(up // 3600)}h{int(up % 3600 // 60):02d}m' if up else ''))
+    for unit, scope in (('discord-bot.service', '--user'), ('discord-bot-gateway.service', '--system')):
+        state, up = unit_state(unit, scope)
+        print(f'unit      {unit} {state}' + (f', uptime {int(up // 3600)}h{int(up % 3600 // 60):02d}m' if up else ''))
     guilds, problem = await readiness(rest)
     print(f'api       {len(guilds)} guild(s)' + (f'; {problem}' if problem else '; intent on'))
     g, f = st.get('guild') or {}, st.get('forum') or {}
@@ -127,12 +129,12 @@ async def read(cfg, rest, args):
 async def amain(argv):
     cmd, args = (argv[0] if argv else 'status'), argv[1:]
     if cmd == 'selftest':
-        return subprocess.call([os.path.join(ME, 'bin', 'sandbox'), '--selftest'])
+        return subprocess.call([os.path.join(ME, 'bin', 'gateway-selftest')])
     if cmd == 'test':
         return subprocess.call([sys.executable, '-m', 'unittest', 'discover', '-s', os.path.join(ME, 'tests'), '-t', ME],
                                cwd=ME)
     cfg = Config.from_env()
-    rest = Rest(cfg.api_base, cfg.token())
+    rest = make_rest(cfg, os.environ, 'discord-bot')
     try:
         if cmd == 'invite':
             app = (await rest.call('GET', '/applications/@me'))['id']

@@ -9,10 +9,11 @@ NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 HOST = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
 LEGACY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 ROW_FIELDS = {"class", "used_in", "modes", "rules", "hosts", "paths", "legacy", "reissue", "max_age_days", "check",
-              "cap_usd", "month_cap_usd", "cost", "routes", "methods", "oauth"}
+              "cap_usd", "month_cap_usd", "cost", "routes", "methods", "oauth", "scheme"}
 METHODS = ("GET", "POST", "PUT", "DELETE")
 OAUTH_KEYS = {"client", "token", "authorize"}
 CHECK = re.compile(r"^[a-z][a-z0-9-]{0,40}$")
+SCHEMES = ("Bearer", "Bot")
 ADDED_FIELDS = {"class", "used_in", "rules"}
 
 
@@ -41,6 +42,7 @@ class Entry:
     routes: tuple = ()
     methods: tuple = ()
     oauth: dict = None
+    scheme: str = "Bearer"
 
 
 def _strs(name, row, key):
@@ -98,8 +100,11 @@ def entry(name, row, added=False):
     routes, methods, oauth = _routes(name, row, hosts), _strs(name, row, "methods"), _oauth(name, row, paths)
     if set(methods) - set(METHODS):
         raise RegistryError(f"{name}: methods must be among {', '.join(METHODS)}")
+    scheme = row.get("scheme", "Bearer")
+    if scheme not in SCHEMES:
+        raise RegistryError(f"{name}: scheme must be one of {', '.join(SCHEMES)}")
     return Entry(name, cls, used_in.strip(), modes, rules, hosts, paths, legacy, reissue, age, added, check, *caps, cost,
-                 routes, methods, oauth)
+                 routes, methods, oauth, scheme)
 
 
 def _routes(name, row, hosts):

@@ -7,7 +7,7 @@ import urllib.parse
 from .mode import Mode, Response
 
 METHODS = ("GET", "POST")
-PASS_IN = ("content-type", "accept")
+PASS_IN = ("content-type", "accept", "user-agent")
 PASS_OUT = ("content-type",)
 REDACTED = b"[redacted]"
 
@@ -93,4 +93,4 @@ class Proxy(Mode):
 
     def handle(self, request, entry, value, lease):
         self.check(request, entry)
-        return self.forward(request, entry, "Bearer " + value.decode(), [value])
+        return self.forward(request, entry, f"{entry.scheme} {value.decode()}", [value])

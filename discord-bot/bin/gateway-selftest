@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# gateway-selftest [--unit U] [--cred NAME] [--store FILE] — prove from this user that the bot's gateway unit runs under
+# its own user, in its own network namespace, and that its credential reads 0 bytes here by 5 routes (T1634-V8).
+# Prints counts only, never a value. Exit 0 when every check holds.
+set -uo pipefail
+unit=discord-bot-gateway.service; cred=fleet.discord-bot-token; store=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --unit) unit=$2; shift 2 ;; --cred) cred=$2; shift 2 ;; --store) store=$2; shift 2 ;;
+    -h|--help) sed -n '2,4p' "$0" | sed 's/^# //'; exit 0 ;; *) echo "gateway-selftest: unknown $1" >&2; exit 2 ;;
+  esac
+done
+store=${store:-/etc/credstore.encrypted/$cred}
+bad=0; say() { echo "FAIL $1"; bad=1; }
+props=$(systemctl show "$unit" -p ActiveState -p MainPID -p User -p DynamicUser -p PrivateNetwork 2>/dev/null)
+get() { sed -n "s/^$1=//p" <<<"$props"; }
+[ "$(get ActiveState)" = active ] || { echo "FAIL $unit is $(get ActiveState)"; exit 1; }
+pid=$(get MainPID); me=$(id -u)
+puid=$(awk '/^Uid:/ {print $2}' "/proc/$pid/status" 2>/dev/null)
+[ -n "$puid" ] && [ "$puid" != "$me" ] || say "main process runs as this user (uid ${puid:-?})"
+[ "$(get PrivateNetwork)" = yes ] || say "no own network namespace"
+host="/run/credentials/$unit/$cred"
+n1=$(cat "$host" 2>/dev/null | wc -c)
+n2=$(cat "/proc/$pid/root$host" 2>/dev/null | wc -c)
+n3=$(cat "/proc/$pid/environ" 2>/dev/null | wc -c)
+n4=$(systemd-run --user --quiet --wait --pipe --collect cat "$host" 2>/dev/null </dev/null | wc -c)
+n5=$(systemd-creds decrypt --name="$cred" "$store" - 2>/dev/null </dev/null | wc -c)
+routes="host path $n1, /proc/pid/root $n2, /proc/pid/environ $n3, systemd-run --user $n4, systemd-creds $n5"
+[ "$n1$n2$n3$n4$n5" = 00000 ] || say "a route read bytes ($routes)"
+[ "$bad" = 0 ] || exit 1
+echo "gateway-selftest ok — $unit as uid $puid, own network namespace, 5 routes read 0 bytes ($routes)"

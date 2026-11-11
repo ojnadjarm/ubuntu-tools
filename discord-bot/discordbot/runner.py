@@ -9,9 +9,10 @@ import re
 from .approval import tag_added_by
 from .config import APPROVE_EMOJI, APPROVED_TAG, Config
 from .jobs import Spool
-from .rest import Rest, RestError
+from .rest import RestError
 from .sanitize import clean
 from .store import RateLimiter
+from .vault import make_rest
 
 log = logging.getLogger('discordbot.runner')
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -189,7 +190,7 @@ class Runner:
 
 async def main():
     cfg = Config.from_env()
-    rest = Rest(cfg.api_base, cfg.token())
+    rest = make_rest(cfg, os.environ, 'discord-bot')
     own = os.path.join(HERE, 'runner-state')
     os.makedirs(own, exist_ok=True)
     runner = Runner(cfg, rest, Spool(f'{cfg.state_dir}/jobs'), ClaudeLlm(os.path.join(own, 'answer')),

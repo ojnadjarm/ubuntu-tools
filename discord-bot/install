@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# discord-bot/install — install the bot's gateway as root (T1634-V8): user fleet-discord, code in /opt, settings, units.
+set -euo pipefail
+SRC=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+R=${DISCORD_BOT_ROOT:-}   # fixture root prefix (tests): file steps only, no systemd, user or ACL
+UNITS="discord-bot-netproxy.service discord-bot-gateway.service"
+KEYS='GUILD_ID|FORUM_ID|OWNER_ID|ALLOWLIST|REQUESTS_PER_DAY|JOBS_PER_DAY|POLL_SECONDS|FORUM_REPLIES'
+
+usage() {
+  cat <<EOF
+usage: sudo -n $0 [--apply]            install or update (dry run without --apply)
+       sudo -n $0 --remove [--apply]   undo: units, code, settings, ACL, user
+Installs: user fleet-discord (sysusers), /opt/discord-bot/{discordbot,.venv} (root, read-only), /etc/discord-bot/bot.env
+(the DISCORD_* settings of config.env: ids and limits, no token), an ACL on the bot's state/ for fleet-discord and the
+owner, units in /etc/systemd/system (enabled, not started). The token comes from the vault's store
+(/etc/credstore.encrypted/fleet.discord-bot-token, LoadCredentialEncrypted=). Start or reload:
+pc units restart discord-bot-gateway --system --apply
+EOF
+}
+
+apply=0; remove=0
+for a in "$@"; do
+  case "$a" in
+    --apply) apply=1 ;; --remove) remove=1 ;; -h|--help) usage; exit 0 ;; *) usage >&2; exit 2 ;;
+  esac
+done
+[ -n "$R" ] || [ "$(id -u)" = 0 ] || { echo "discord-bot/install: run as root (sudo -n $0 $*)" >&2; exit 1; }
+
+run() { if [ "$apply" = 1 ]; then "$@"; else echo "would: $*"; fi; }
+sysd() { if [ -n "$R" ]; then echo "skip (fixture root): $*"; else run "$@"; fi; }
+
+owner=${DISCORD_BOT_OWNER:-${SUDO_USER:-}}
+[ -n "$owner" ] || { echo "discord-bot/install: no owner user (run through sudo, or set DISCORD_BOT_OWNER)" >&2; exit 1; }
+state=${DISCORD_BOT_STATE:-$(getent passwd "$owner" | cut -d: -f6)/agents/discord-bot/state}
+cfg=${DISCORD_BOT_CONFIG:-$(getent passwd "$owner" | cut -d: -f6)/.config/pc-harness/config.env}
+acl="u:fleet-discord:rwX,d:u:fleet-discord:rwX,d:u:$owner:rwX"
+
+if [ "$remove" = 1 ]; then
+  sysd systemctl disable --now $UNITS
+  for u in $UNITS; do run rm -f "$R/etc/systemd/system/$u"; done
+  sysd systemctl daemon-reload
+  sysd setfacl -R -x u:fleet-discord,d:u:fleet-discord "$state"
+  run rm -rf "$R/opt/discord-bot" "$R/etc/discord-bot"
+  run rm -f "$R/etc/sysusers.d/discord-bot.conf"
+  sysd userdel fleet-discord
+  exit 0
+fi
+
+[ -d "$state" ] || { echo "discord-bot/install: no state folder $state" >&2; exit 1; }
+[ -x "$SRC/.venv/bin/python" ] || { echo "discord-bot/install: no venv at $SRC/.venv" >&2; exit 1; }
+env=$(grep -E "^DISCORD_($KEYS)=[A-Za-z0-9 ,._-]*$" "$cfg" 2>/dev/null | tr -d "\"'" || true)
+
+run install -D -m644 "$SRC/sysusers.conf" "$R/etc/sysusers.d/discord-bot.conf"
+sysd systemd-sysusers /etc/sysusers.d/discord-bot.conf
+run rm -rf "$R/opt/discord-bot"
+run install -d -m755 "$R/opt/discord-bot/discordbot"
+run install -m644 "$SRC"/discordbot/*.py "$R/opt/discord-bot/discordbot/"
+run cp -a "$SRC/.venv" "$R/opt/discord-bot/.venv"
+[ -n "$R" ] || run chown -R -h root:root "$R/opt/discord-bot"
+run chmod -R go-w "$R/opt/discord-bot"
+run find "$R/opt/discord-bot" -name __pycache__ -prune -exec rm -rf {} +
+if [ "$apply" = 1 ]; then
+  install -d -m755 "$R/etc/discord-bot"
+  printf '%s\n' "$env" >"$R/etc/discord-bot/bot.env"
+  chmod 644 "$R/etc/discord-bot/bot.env"
+else echo "would: write $R/etc/discord-bot/bot.env ($(grep -c . <<<"$env") DISCORD_* settings from config.env)"; fi
+run install -d -m755 "$R/var/lib/discord-bot"
+sysd setfacl -R -m "$acl" "$state"
+run install -d -m755 "$R/etc/systemd/system"
+for u in $UNITS; do
+  if [ "$apply" = 1 ]; then
+    sed "s|@STATE@|$state|" "$SRC/units/$u" >"$R/etc/systemd/system/$u.tmp" && chmod 644 "$R/etc/systemd/system/$u.tmp"
+    mv "$R/etc/systemd/system/$u.tmp" "$R/etc/systemd/system/$u"
+  else echo "would: install $R/etc/systemd/system/$u (state $state)"; fi
+done
+sysd systemctl daemon-reload
+sysd systemctl enable $UNITS
+command -v etckeeper >/dev/null && { sysd etckeeper commit "T1634-V8: discord-bot gateway installed" || true; }
+echo "discord-bot/install: done$([ "$apply" = 1 ] || echo ' (dry run)')"

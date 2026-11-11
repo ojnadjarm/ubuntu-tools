@@ -53,6 +53,11 @@ async def handle_relay(sock, r, w):
     await asyncio.gather(pipe(r, uw), pipe(ur, w))
 
 
+async def relay(sock, port):
+    """127.0.0.1:<port> -> the netproxy socket (inside the bot's sandbox or its own network namespace)."""
+    return await asyncio.start_server(lambda r, w: handle_relay(sock, r, w), '127.0.0.1', int(port))
+
+
 async def main(argv):
     if len(argv) == 2 and argv[0] == 'serve':
         if os.path.exists(argv[1]):
@@ -60,7 +65,7 @@ async def main(argv):
         srv = await asyncio.start_unix_server(handle_connect, argv[1])
         os.chmod(argv[1], 0o600)
     elif len(argv) == 3 and argv[0] == 'relay':
-        srv = await asyncio.start_server(lambda r, w: handle_relay(argv[1], r, w), '127.0.0.1', int(argv[2]))
+        srv = await relay(argv[1], argv[2])
     else:
         sys.exit(__doc__.splitlines()[0])
     async with srv:

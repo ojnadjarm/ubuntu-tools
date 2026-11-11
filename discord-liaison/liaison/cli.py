@@ -14,9 +14,10 @@ from urllib.parse import quote
 import aiohttp
 from discordbot.cli import write_config
 from discordbot.config import Config
-from discordbot.rest import Rest, RestError
+from discordbot.rest import RestError
 from discordbot.runner import SECRET_KEYS
 from discordbot.sanitize import chunks, clean
+from discordbot.vault import LEASE_ENV, make_rest
 
 from .caps import Caps
 from .context import ContextRenderer, self_line
@@ -664,7 +665,8 @@ class App:
     async def job_run(self, args):
         """The worker's runner: hold the job lock, run the agent (a failed run is retried once), then start the next job.
         No message of the job asks for an AI image: the agent runs under secret-mask, the image key reads empty (T1633).
-        One does: its words go in the job's grant file, from which agent-exec asks the image lease (T1634-V5)."""
+        One does: its words go in the job's grant file, from which agent-exec asks the image lease (T1634-V5).
+        Through the vault, the worker gets its own Discord lease for the job's time limit, revoked at the end (T1634-V8)."""
         job = self.jobs.get(args[0]) if args else None
         if job is None or job['status'] not in ('queued', 'running'):
             print('refused: no queued or running job with that id')
@@ -679,6 +681,8 @@ class App:
             os.makedirs(logs, exist_ok=True)
             asks = [m.get('content', '') for m in job.get('messages', [job['message']]) if GRANT.search(m.get('content', ''))]
             mask = [] if asks else [os.path.join(os.path.dirname(ME), 'bin', 'secret-mask'), self.art_key, '--']
+            src = getattr(self.rest, 'lease', None)
+            worker = src.mint(job['id'], min(int(self.env.get('LIAISON_JOB_TIMEOUT', '1800')) + 600, 86400)) if src else None
             while True:
                 q = {k: shlex.quote(v) for k, v in {
                     'prompt': self.job_prompt(job), 'id': job['id'], 'home': self.home, 'model': self.env.get('LIAISON_JOB_MODEL', self.env.get('MODEL', 'opus')),
@@ -689,15 +693,19 @@ class App:
                     'agent-exec --prompt-file {prompt} --system-file {preamble} --model {model} --cwd {home} '
                     '--name discord-liaison-job --timeout {timeout} --raw-out {logs}/{id}.json --meta-out {logs}/{id}.meta.json '
                     '--secrets-from {secrets} --ticket {id} >>{logs}/{id}.log 2>&1')).format(**q)
-                rc = subprocess.call(mask + ['/bin/sh', '-c', cmd], stdin=subprocess.DEVNULL, env=dict(os.environ, LIAISON_JOB=job['id'], EFFORT=self.env.get('LIAISON_JOB_EFFORT', 'xhigh'), OPENROUTER_KEY_FILE='/dev/null'))
+                rc = subprocess.call(mask + ['/bin/sh', '-c', cmd], stdin=subprocess.DEVNULL, env=dict(os.environ, **({LEASE_ENV: worker} if worker else {}), LIAISON_JOB=job['id'], EFFORT=self.env.get('LIAISON_JOB_EFFORT', 'xhigh'), OPENROUTER_KEY_FILE='/dev/null'))
                 job = self.jobs.get(job['id'])
                 if job['status'] == 'superseded':
+                    if worker:
+                        src.revoke(worker)
                     print(f'job {job["id"]} superseded')
                     return 0
                 if rc == 0 or job.get('stale') or after_failure(job.get('attempt', 1)) == 'escalate':
                     break
                 job['attempt'] = job.get('attempt', 1) + 1
                 self.jobs.save(job)
+            if worker:
+                src.revoke(worker)
             if job.get('stale'):
                 self.jobs.finish(job, 'stale', 'a newer message came; result not posted')
             else:
@@ -764,7 +772,7 @@ async def amain(argv, env=None, rest=None):
     own = rest is None
     if own:
         cfg = Config.from_env(env)
-        rest = Rest(cfg.api_base, cfg.token())
+        rest = make_rest(cfg, env, 'discord-liaison')
     app = App(env, rest)
     try:
         if cmd in ('tick', 'post', 'react'):
