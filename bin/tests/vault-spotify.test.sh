@@ -38,6 +38,23 @@ for extra in bad:
     try: registry.entry("x", {**base, **extra})
     except registry.RegistryError: n += 1
 print(n, len(bad))
+from vault.oauth import OAuthProxy; from vault.seal import MemorySealer; from vault.mode import Request
+import json, types
+class Audit:
+    def log(self, ev): pass
+sealer = MemorySealer(); sealer.put("spotify-client", b"c:s"); sealer.put("spotify-token", b"r0")
+clock, calls = [0.0], []
+p = OAuthProxy(sealer, Audit(), clock=lambda: clock[0])
+def send(method, host, url, body, headers):
+    calls.append(url)
+    if url == "/api/token":
+        return 200, [], json.dumps({"access_token": f"a{len(calls)}", "expires_in": 3600}).encode()
+    return 200, [], b"{}"
+p.send = send
+lease = types.SimpleNamespace(ticket="T1", agent="", ref="x")
+go = lambda: p.handle(Request("GET", "/v1/me"), t, b"r0", lease).status
+r = [go(), go()]; clock[0] = 3600 - 60 - 1; r.append(go()); clock[0] = 3600 - 60 + 1; r.append(go())
+print(*r, calls.count("/api/token"))
 EOF
 )
 is "routes: /v1/ api, /api/token and /authorize accounts; a one-host row keeps its host" "$(sed -n 1p <<<"$unit")" \
@@ -46,13 +63,15 @@ is "spotify-token: GET,POST,PUT, client spotify-client; no lease for the client,
    "$(sed -n 2p <<<"$unit")" "GET,POST,PUT spotify-client True None"
 is "rows: route to an unpinned host, bad prefix, bad method, oauth path not allowed, oauth incomplete: all refused" \
    "$(sed -n 3p <<<"$unit")" "5 5"
+is "expiry: the cached access token serves until expires_in - 60 s, then one refresh (2 in all)" \
+   "$(sed -n 4p <<<"$unit")" "200 200 200 200 2"
 
 # 2. Fake Spotify: token endpoint (Basic client) rotates the refresh token; API wants the current access token.
-printf '%s' "$REFRESH" >"$W/creds/fleet.spotify-token"
+printf '%s\n' "$REFRESH" >"$W/refresh0"
 printf '%s:%s' "$CID" "$CSEC" >"$W/client"
 cat >"$W/up.py" <<'PY'
 import base64, http.server, json, sys, urllib.parse
-w = sys.argv[1]; st = {"n": 0, "refresh": open(f"{w}/creds/fleet.spotify-token").read(), "access": "", "stale": False}
+w = sys.argv[1]; st = {"n": 0, "refresh": open(f"{w}/refresh0").read().strip(), "access": "", "stale": False}
 basic = "Basic " + base64.b64encode(open(f"{w}/client", "rb").read()).decode()
 class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -97,7 +116,6 @@ cat >"$W_SEALED.$(echo "${3#--name=}")"
 printf 'FAKESEAL %s\n' "${3#--name=}" >"$5"
 EOF
 chmod +x "$W/fake-creds"
-printf 'FAKESEAL fleet.spotify-token\n' >"$W/store/fleet.spotify-token"
 W_SEALED="$W/sealed" systemd-socket-activate -l "$W/seal.sock" --inetd -a -E W_SEALED \
   python3 -I "$A/vault/fleet-vault-seal" --store "$W/store" --creds-bin "$W/fake-creds" --peer "$me" 2>/dev/null &
 PIDS+=($!)
@@ -118,9 +136,19 @@ L=$("$S" grant spotify-token --ticket T9101 2>"$W/g1"); r1=$?
 is "grant: spotify-token 0, spotify-client refused 1" "$r1 $r2" "0 1"
 B="$FLEET_VAULT_URL/$L/spotify-token"
 
-# 4. No client in the vault yet: the call says so (503), nothing reaches the token endpoint.
+# 4. Nothing sealed: not signed in (503, pc spotify auth); then a token but no client: 503 naming spotify-client and the
+#    helper's setup steps; nothing reaches the token endpoint.
+H="$W/home"; mkdir -p "$H"
+helper() { HOME="$H" PATH="$A/bin:$PATH" python3 "$A/bin/spotify_api.py" "$@" 2>&1; }
+is "no token sealed: 503 saying pc spotify auth" "$(code "$B/v1/me/playlists") $(grep -c 'not signed in.*pc spotify auth' "$W/body")" "503 1"
+out=$(FLEET_LEASE_SPOTIFY_TOKEN="$L" helper library); r=$?
+is "no token sealed: the helper exits 2 and says pc spotify auth" "$r $(grep -c 'pc spotify auth' <<<"$out")" "2 1"
+"$S" add spotify-token <"$W/refresh0" >"$W/a0" 2>&1
+is "secret add spotify-token: sealed through the helper" "$? $(cat "$W/sealed.fleet.spotify-token")" "0 $REFRESH"
 is "no client sealed: 503 naming spotify-client, no upstream call" \
    "$(code "$B/v1/me/playlists") $(grep -c 'spotify-client is not in the vault' "$W/body") $(cat "$W/up.log" 2>/dev/null | wc -l)" "503 1 0"
+out=$(FLEET_LEASE_SPOTIFY_TOKEN="$L" helper library); r=$?
+is "no client sealed: the helper exits 2 with the setup steps" "$r $(grep -c 'developer.spotify.com/dashboard' <<<"$out")" "2 1"
 "$S" add spotify-client <"$W/client" >"$W/a1" 2>&1
 is "secret add spotify-client: sealed through the helper" "$? $(cat "$W/sealed.fleet.spotify-client" | head -c 10)" "0 ${CID:0:10}"
 
@@ -157,8 +185,7 @@ is "token path refuses a refresh grant from a caller (400) and calls nothing" \
    "$(code -X POST -d "grant_type=refresh_token&refresh_token=x" "$B/api/token") $(wc -l <"$W/up.log")" "400 1"
 
 # 8. pc spotify's helper against the broker: a lease from `secret grant`, a library listing, no secret file read.
-H="$W/home"; mkdir -p "$H"
-out=$(HOME="$H" PATH="$A/bin:$PATH" python3 "$A/bin/spotify_api.py" library 2>&1)
+out=$(helper library)
 is "spotify_api.py library through the broker (own lease)" "$? $out" "0 playlist: Mine (3 tracks)  spotify:playlist:9"
 ev "log: a pc-spotify grant, a token use and a client use at accounts.spotify.com" \
    'lg=$("$S" log -n 200 2>&1); grep -qE "grant +spotify-token +ok +ticket=pc-spotify" <<<"$lg" && grep -qE "use +spotify-token +ok" <<<"$lg" && grep -qE "use +spotify-client +ok.*accounts.spotify.com/api/token" <<<"$lg"'
@@ -166,7 +193,7 @@ last=$("$S" list --json | python3 -c 'import json,sys; r={x["name"]: x for x in 
 is "list: last use set for spotify-token and spotify-client" "$last" "True True"
 
 # 9. No value anywhere the caller or a log can see.
-all="$(cat "$W"/g? "$W"/a1 "$W"/b1 "$W/d.out" "$W/state/uses.jsonl"; "$S" log -n 200 2>&1; echo "$out $loc")"
+all="$(cat "$W"/g? "$W"/a0 "$W"/a1 "$W"/b1 "$W/d.out" "$W/state/uses.jsonl"; "$S" log -n 200 2>&1; echo "$out $loc")"
 ev "values: client secret, refresh and access tokens never in an output, a log or an answer" \
    '! grep -qF -e "$CSEC" -e "$REFRESH" -e fixture-access -e fixture-refresh <<<"$all"'
 exit $bad
