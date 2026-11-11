@@ -6,9 +6,10 @@
 # The unit's `run` holds state/work/T<n>.lock, runs agent-exec on the brief (MODEL opus, EFFORT high, WORK_TIMEOUT 14400
 # from agent.env) and files its report once as `po-ask <p> --from worker`, which wakes the PO to relay it.
 # `reap` (unit ExecStopPost and every po-run) marks a worker whose runner died `lost` and files that once.
-# The image key reaches a worker only when its brief has a line `AI image grant: "<quote>"`: the requester's verbatim
-# words asking for an AI image (T1632); then `start` asks the vault for a lease on it (T1634, `secret grant openrouter`,
-# FLEET_LEASE_OPENROUTER in the unit). Otherwise the unit sets OPENROUTER_KEY_FILE to /dev/null and runs under
+# Secrets: `run` hands the brief to agent-exec --secrets-from, which asks the vault for one lease per name on its line
+# `Secrets: <name>[, <name>]` (FLEET_LEASE_<NAME> in the worker, T1634-V5). The image key needs a line
+# `AI image grant: "<quote>"`: the requester's verbatim words asking for an AI image (T1632; it counts as
+# `Secrets: openrouter` with that quote). Without it the unit sets OPENROUTER_KEY_FILE to /dev/null and runs under
 # secret-mask (T1633).
 # `list`: open work, one line per ticket. No cap on workers at once (owner 2026-11-11); start exits 3 when the same key
 # or ticket is open (nothing starts), 1 when the launch fails, 2 on bad usage.
@@ -77,15 +78,9 @@ case "$verb" in
         status:"starting", filed:false}' >"$W/.$t.tmp" && mv "$W/.$t.tmp" "$W/$t.json"
     tmo=$(envkey WORK_TIMEOUT); tmo=${tmo:-14400}
     nokey=(--setenv=OPENROUTER_KEY_FILE=/dev/null); mask=("$(dirname "$SELF")/secret-mask" "$HARNESS_HOME/secrets/openrouter.key" --)
-    lease=(); quote=$(sed -n 's/^AI image grant: "\(..*\)"$/\1/p' "$brief" | head -1)
-    if [ -n "$quote" ]; then
-      nokey=() mask=()
-      if [ -x "$HARNESS_HOME/bin/secret" ] && FLEET_LEASE_OPENROUTER=$("$HARNESS_HOME/bin/secret" grant openrouter \
-           --ticket "$t" --ttl $((tmo + 600)) --asked "$quote" 2>>"$L/$t.log" </dev/null); then
-        export FLEET_LEASE_OPENROUTER; lease=(--setenv=FLEET_LEASE_OPENROUTER)
-      fi
-    fi
-    if ! systemd-run --user --quiet --collect --unit="po-work-$p-$t" --setenv=PATH="$PATH" "${nokey[@]}" "${lease[@]}" \
+    quote=$(sed -n 's/^AI image grant: "\(..*\)"$/\1/p' "$brief" | head -1)
+    [ -z "$quote" ] || nokey=() mask=()
+    if ! systemd-run --user --quiet --collect --unit="po-work-$p-$t" --setenv=PATH="$PATH" "${nokey[@]}" \
          --property=RuntimeMaxSec=$((tmo + 300)) --property=ExecStopPost="$SELF $p reap" \
          "${mask[@]}" "$SELF" "$p" run "$t" </dev/null >>"$L/$t.log" 2>&1 7>&-; then
       jset "$t" '.status = "failed" | .rc = "launch" | .filed = true'
@@ -103,6 +98,7 @@ case "$verb" in
     tmo=$(envkey WORK_TIMEOUT)
     MODEL="$(jget "$t" model)" EFFORT="$(jget "$t" effort)" agent-exec --prompt-file "$W/$t.prompt.md" \
       --system-file "$HARNESS_HOME/AGENT-PREAMBLE.md" --cwd "$dir" --name "po-$p-$t" --timeout "${tmo:-14400}" \
+      --secrets-from "$(jget "$t" brief)" --ticket "$t" \
       --raw-out "$L/$t.json" --meta-out "$L/$t.meta.json" >"$L/$t.out" 2>>"$L/$t.log"
     rc=$?
     if [ "$rc" = 0 ]; then jset "$t" ".status = \"done\" | .rc = 0 | .ended = \"$(date -Is)\""

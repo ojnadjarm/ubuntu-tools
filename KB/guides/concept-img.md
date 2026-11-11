@@ -1,6 +1,6 @@
 # Generate AI concept art (character sheets) through OpenRouter under a hard dollar cap
 
-Ticket: T1035, T1632, T1633, T1634-V3 · Last verified: 2026-11-11 by bin/tests/concept-img.test.sh (mock), bin/tests/vault-proxy.test.sh (fixture broker), bin/tests/secret-mask.test.sh; 9 real calls 2026-10-21
+Ticket: T1035, T1632, T1633, T1634-V3, T1634-V5 · Last verified: 2026-11-11 by bin/tests/concept-img.test.sh (mock), bin/tests/vault-proxy.test.sh (fixture broker), bin/tests/vault-grant.test.sh, bin/tests/secret-mask.test.sh; 9 real calls 2026-10-21
 
 ## When to use
 Only when the requester's own words ask for an AI, generated or concept image (owner 2026-11-11, T1632): create / draw /
@@ -14,8 +14,10 @@ image-to-3D.
   call then goes to `http://127.0.0.1:$FLEET_VAULT_PORT/<lease>/openrouter/api/v1/...` and the broker adds the key.
 - The broker grants only when the quote asks for an AI image (same words as the gate below), caps a lease at
   2.00 USD and all leases at 10.00 USD a month (its own log, `usage.cost`); a refusal is HTTP 403, concept-img exit 4.
-- Launchers ask for the lease: `po-work start` on a brief line `AI image grant: "<quote>"`, `discord-liaison art
-  --asked` when the quote is in the job's messages (15 min). Nothing else does; `secret log openrouter` shows each.
+- Launchers ask for the lease, never the agent (T1634-V5: a grant asked from inside agents.slice is refused and pushed
+  to the owner): `agent-exec --secrets-from <brief>` on a line `AI image grant: "<quote>"` (= `Secrets: openrouter`
+  with that quote) — `po-work run` passes its brief, a liaison job its `grant.md` (the first message asking for an AI
+  image); `discord-liaison art` hands that inherited lease to concept-img. `secret log openrouter` shows each.
 - New key: `secret replace openrouter` (no-echo paste), link https://openrouter.ai/settings/keys.
 
 ## The gate (T1632): one gate, in the tool

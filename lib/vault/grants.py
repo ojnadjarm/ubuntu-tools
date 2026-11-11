@@ -15,6 +15,8 @@ RULES = {
 }
 OUTSIDE = "outside its rules: ask the orchestrator or the owner"
 CRITICAL = "class critical: each use needs the orchestrator's or the owner's approval (not built yet)"
+INSIDE = ("asked from inside an agent ({unit}): a lease comes only from a launcher reading the brief's `Secrets:` line; "
+          "raised to the owner")
 
 
 def refusal(entry, req):
@@ -33,17 +35,22 @@ def refusal(entry, req):
 class Grants:
     """Mint and revoke leases under the policy; the admin socket calls this."""
 
-    def __init__(self, leases, audit):
-        self.leases, self.audit = leases, audit
+    def __init__(self, leases, audit, callers=None):
+        self.leases, self.audit, self.callers = leases, audit, callers
 
-    def _log(self, req, uid, name, result, why="", lease=None):
+    def _log(self, req, uid, name, result, why="", lease=None, target=None):
         self.audit.log({"event": "grant", "secret": name, "ticket": req.get("ticket"), "agent": req.get("agent"),
                         "result": result, "uid": uid, "why": why, "lease": lease.ref if lease else None,
-                        "asked": str(req.get("asked") or "")[:200]})
+                        "asked": str(req.get("asked") or "")[:200], "target": target})
 
-    def grant(self, entry, req, uid):
-        """A lease reply for one request, or a refusal reply."""
+    def grant(self, entry, req, uid, pid=None):
+        """A lease reply for one request, or a refusal reply (`raise` set when the caller is an agent itself)."""
         name, ticket = req.get("name"), req.get("ticket")
+        unit = self.callers.agent_unit(pid, uid) if self.callers else None
+        if unit:
+            why = INSIDE.format(unit=unit)
+            self._log(req, uid, name, "refused", why, target=unit)
+            return {"ok": False, "error": f"{name}: {why}", "raise": True}
         if entry is None:
             return {"ok": False, "error": f"{name} is not in the vault"}
         if not isinstance(ticket, str) or not TICKET.match(ticket):

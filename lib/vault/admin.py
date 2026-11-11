@@ -37,15 +37,15 @@ class Admin:
         self.added = added
         self.entries = registry.load(self.registry_path, added)
 
-    def handle(self, req, uid):
-        """Dispatch one request dict; returns the reply dict."""
+    def handle(self, req, uid, pid=None):
+        """Dispatch one request dict from peer uid (and pid, for grants); returns the reply dict."""
         op = req.get("op")
         fn = {"list": self.op_list, "put": self.op_put, "remove": self.op_remove, "log": self.op_log,
               "grant": self.op_grant, "revoke": self.op_revoke}.get(op)
         if fn is None:
             return {"ok": False, "error": "unknown op"}
         with self._lock:
-            return fn(req, uid)
+            return self.op_grant(req, uid, pid) if op == "grant" else fn(req, uid)
 
     def _event(self, req, uid, event, name, result):
         self.audit.log({"event": event, "secret": name, "ticket": req.get("ticket"), "agent": req.get("agent"),
@@ -127,11 +127,11 @@ class Admin:
             return {"ok": False, "error": "n must be a number"}
         return {"ok": True, "events": self.audit.tail(n, req.get("name"))}
 
-    def op_grant(self, req, uid):
-        """A lease on one secret for one ticket, under its class and rules."""
+    def op_grant(self, req, uid, pid=None):
+        """A lease on one secret for one ticket, under its class and rules; never for a caller inside an agent."""
         if self.grants is None:
             return {"ok": False, "error": "leases are off in this broker"}
-        return self.grants.grant(self.entries.get(req.get("name")), req, uid)
+        return self.grants.grant(self.entries.get(req.get("name")), req, uid, pid)
 
     def op_revoke(self, req, uid):
         """Drop one lease."""

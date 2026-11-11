@@ -77,7 +77,7 @@ finish() {
 if [ -n "${HARNESS_AGENT:-}" ]; then
   cmd=(agent-exec --prompt-file "$dir/BRIEF.md" --system-file "$HOME/agents/AGENT-PREAMBLE.md"
        --model "$MODEL" --cwd "$dir" --name "$name" --timeout "$TIMEOUT"
-       --raw-out "$out" --meta-out "$meta" --pid-file "$dir/state/pid")
+       --raw-out "$out" --meta-out "$meta" --pid-file "$dir/state/pid" --secrets-from "$dir/BRIEF.md")
 else
   cmd=(timeout "$TIMEOUT" claude -p "$(cat "$dir/BRIEF.md")"
        --model "$MODEL" --permission-mode bypassPermissions --name "agent-$name"

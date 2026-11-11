@@ -46,6 +46,11 @@ out=$(fx "$WORK/agents/bin/tests" "$WORK/skill/scripts" --deps "$WORK/DEPS.tsv")
 is "a test or skill script calling a tool with no row fails (rc)" "$rc" 1
 is "the failure names the test, its python3 -m module and the skill script, not the bin verb" \
   "$(grep -oE '(python3:)?zzfx[-a-z]* - .*' <<<"$out" | tr '\n' ' ')" "python3:zzfxmod - fx.test.sh zzfx-f - fx.test.sh zzfx-g - fx-skill "
+printf '#!/usr/bin/env python3\nimport subprocess\nREG = """modes = ["zzfx-n11"]"""\nrow = {"modes": ["zzfx-n12"]}\nsubprocess.run(["zzfx-e"])\n' \
+  >"$WORK/agents/bin/fx-modes"; printf '#!/bin/sh\n' >"$WORK/stubs/zzfx-n11"; cp "$WORK/stubs/zzfx-n11" "$WORK/stubs/zzfx-n12"
+chmod +x "$WORK/stubs/zzfx-n11" "$WORK/stubs/zzfx-n12"
+is "scanner reads a vault 'modes' list (TOML or dict) as data, not a command (T1634-V5)" \
+  "$(fx | grep -c 'zzfx-n1[12]') $(fx | grep -c '^zzfx-e')" "0 1"
 
 # The real manifest.
 D="$BIN/DEPS.tsv"

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Lint agent briefs: every brief needs a CHECK command, file claims, a report cap (T381) and the test-changes line (T1591); warn when it names a project but not its decisions ledger (T396), feeds /dev/zero into script/tmux (T401) or sets a time limit (T1631); `--backlog` checks a planner BACKLOG.md (T913)."""
+"""Lint agent briefs: every brief needs a CHECK command, file claims, a report cap (T381) and the test-changes line (T1591); warn when it names a project but not its decisions ledger (T396), feeds /dev/zero into script/tmux (T401), sets a time limit (T1631) or has a `Secrets:` line the vault will not lease (T1634-V5); `--backlog` checks a planner BACKLOG.md (T913)."""
 import argparse, os, re, sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
 import decisions  # noqa: E402
 import memory_store  # noqa: E402
+from vault import briefline, registry, wire  # noqa: E402
 
 RULES = [
     ('check', re.compile(r'^\s*(?:[-*]\s*)?CHECK:\s*\S', re.M)),
@@ -181,6 +182,41 @@ def time_limits(text):
             if not NEGATED.search(text[text.rfind('\n', 0, m.start()) + 1:m.start()])]
 
 
+def vault_classes():
+    """{name: class} from the broker's list (hand-added names too), else the installed or repo registry; None if neither."""
+    try:
+        r = wire.call(os.environ.get('FLEET_VAULT_SOCKET', '/run/fleet-vault/admin.sock'), {'op': 'list'}, timeout=5)
+        if r.get('ok'):
+            return {x['name']: x['class'] for x in r['secrets']}
+    except (OSError, ValueError):
+        pass
+    for path in (os.environ.get('FLEET_VAULT_REGISTRY', '/etc/fleet-vault/registry.toml'),
+                 os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'vault', 'registry.toml')):
+        try:
+            return {n: e.cls for n, e in registry.load(path).items()}
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def secret_warns(text):
+    """What the vault will refuse on the brief's `Secrets:` line (names only; the launcher asks the leases)."""
+    names, asked, bad = briefline.parse(text)
+    if not names and not bad:
+        return []
+    known = vault_classes()
+    out = [f'"{b}" on the Secrets: line is not a vault name' for b in bad]
+    for n in names:
+        cls = known.get(n) if known is not None else None
+        if known is not None and cls is None:
+            out.append(f'Secrets: {n} is not in the vault (`secret list`)')
+        elif cls == 'critical':
+            out.append(f'Secrets: {n} is class critical: no lease until the orchestrator or the owner approves each use')
+        elif cls == 'ruled' and not asked:
+            out.append(f'Secrets: {n} is class ruled: add the requester\'s own words, `AI image grant: "<quote>"`')
+    return out
+
+
 def devzero_hits(path):
     """Line numbers where /dev/zero feeds script or tmux (T399: 34 GB OOM)."""
     with open(path, encoding='utf-8', errors='replace') as f:
@@ -235,6 +271,8 @@ def main():
             doms = memory_domains(text_of(p))
             if doms:
                 print(f"WARN {p}: names the {', '.join(doms)} project but has no `Memory:` line; add `Memory: memory load {' '.join(doms)}`")
+            for w in secret_warns(text_of(p)):
+                print(f'WARN {p}: {w}')
             full = tier_warn(text_of(p))
             if full:
                 print(f"WARN {p}: CHECK runs {full} but the brief has no `Class: engine` line; test at the change's tier (change-class)")

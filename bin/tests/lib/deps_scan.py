@@ -28,6 +28,7 @@ PYCALL = [
     re.compile(r'(?<![\w\])\]])\[\s*["\'](?:timeout["\']\s*,\s*["\'][\d.]+["\']\s*,\s*["\'])?([A-Za-z][\w.+-]*)["\']\s*[,\]]'),
     re.compile(r'\b(?:which|system|getoutput|getstatusoutput|check_output|run|Popen|call)\(\s*f?["\']([A-Za-z][\w.+-]*)'),
 ]
+DATA_LIST = re.compile(r'\bmodes["\']?\s*[:=]\s*$')  # vault registry delivery modes ("proxy", "op"), not commands
 PYIMPORT = re.compile(r'^\s*(?:import|from)\s+(\w+)', re.M)
 SHIMPORT = re.compile(r'python3 -c\s*["\'][^"\']*?\bimport\s+(\w+)|python3 -m\s+(\w+)')
 HEREDOC = re.compile(r'<<-?\s*([\'"]?)(\w+)\1')
@@ -147,7 +148,8 @@ def shell_words(text):
 
 
 def py_words(text):
-    return {w for r in PYCALL for w in r.findall(text)}
+    return {m.group(1) for r in PYCALL for m in r.finditer(text)
+            if not (r is PYCALL[0] and DATA_LIST.search(text[max(0, m.start() - 20):m.start()]))}
 
 
 def scan(paths):

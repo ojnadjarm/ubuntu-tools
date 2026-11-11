@@ -472,7 +472,7 @@ class App:
             '--model', self.env.get('LIAISON_ART_MODEL', 'bytedance-seed/seedream-5-0-flash'),
             '--prompt-file', out + '.prompt', '--resolution', '1K', '--out', out,
             '--log', os.path.join(self.art_dir, 'spend.tsv')] + (['--asked', asked] if granted else [])
-        lease = self.lease(asked) if granted else ''
+        lease = (self.env.get('FLEET_LEASE_OPENROUTER') or self.lease(asked)) if granted else ''
         env = dict(os.environ, OPENROUTER_KEY_FILE=self.art_key, **({'FLEET_LEASE_OPENROUTER': lease} if lease else {}))
         rc = subprocess.call(cmd, stdin=subprocess.DEVNULL, env=env if granted else None)
         if rc in (3, 4):
@@ -663,7 +663,8 @@ class App:
 
     async def job_run(self, args):
         """The worker's runner: hold the job lock, run the agent (a failed run is retried once), then start the next job.
-        No message of the job asks for an AI image: the agent runs under secret-mask, the image key reads empty (T1633)."""
+        No message of the job asks for an AI image: the agent runs under secret-mask, the image key reads empty (T1633).
+        One does: its words go in the job's grant file, from which agent-exec asks the image lease (T1634-V5)."""
         job = self.jobs.get(args[0]) if args else None
         if job is None or job['status'] not in ('queued', 'running'):
             print('refused: no queued or running job with that id')
@@ -676,17 +677,18 @@ class App:
             self.jobs.save(job)
             logs = os.path.join(self.home, 'logs', 'jobs')
             os.makedirs(logs, exist_ok=True)
-            mask = [] if any(GRANT.search(m.get('content', '')) for m in job.get('messages', [job['message']])) else [
-                os.path.join(os.path.dirname(ME), 'bin', 'secret-mask'), self.art_key, '--']
+            asks = [m.get('content', '') for m in job.get('messages', [job['message']]) if GRANT.search(m.get('content', ''))]
+            mask = [] if asks else [os.path.join(os.path.dirname(ME), 'bin', 'secret-mask'), self.art_key, '--']
             while True:
                 q = {k: shlex.quote(v) for k, v in {
                     'prompt': self.job_prompt(job), 'id': job['id'], 'home': self.home, 'model': self.env.get('LIAISON_JOB_MODEL', self.env.get('MODEL', 'opus')),
                     'timeout': self.env.get('LIAISON_JOB_TIMEOUT', '1800'), 'logs': logs,
-                    'preamble': os.path.join(os.path.dirname(ME), 'AGENT-PREAMBLE.md')}.items()}
+                    'preamble': os.path.join(os.path.dirname(ME), 'AGENT-PREAMBLE.md'),
+                    'secrets': self.grant_file(job, asks)}.items()}
                 cmd = self.env.get('LIAISON_WORKER_CMD', (
                     'agent-exec --prompt-file {prompt} --system-file {preamble} --model {model} --cwd {home} '
                     '--name discord-liaison-job --timeout {timeout} --raw-out {logs}/{id}.json --meta-out {logs}/{id}.meta.json '
-                    '>>{logs}/{id}.log 2>&1')).format(**q)
+                    '--secrets-from {secrets} --ticket {id} >>{logs}/{id}.log 2>&1')).format(**q)
                 rc = subprocess.call(mask + ['/bin/sh', '-c', cmd], stdin=subprocess.DEVNULL, env=dict(os.environ, LIAISON_JOB=job['id'], EFFORT=self.env.get('LIAISON_JOB_EFFORT', 'xhigh'), OPENROUTER_KEY_FILE='/dev/null'))
                 job = self.jobs.get(job['id'])
                 if job['status'] == 'superseded':
@@ -711,6 +713,13 @@ class App:
         await self.dispatch()
         print(f'job {job["id"]} {job["status"]} (exit {rc})')
         return rc
+
+    def grant_file(self, job, asks):
+        """The job's grant lines for agent-exec, rewritten before each attempt: the first message asking for an AI image."""
+        path = os.path.join(self.jobs.dir, job['id'], 'grant.md')
+        with open(path, 'w') as f:
+            f.write(f'AI image grant: "{" ".join(asks[0].split())[:500]}"\n' if asks else '')
+        return path
 
     def map(self, args):
         if len(args) != 2 or self.registry.get(args[1]) is None:

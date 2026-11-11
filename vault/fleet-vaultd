@@ -9,6 +9,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
 from vault import wire  # noqa: E402
 from vault.admin import Admin  # noqa: E402
+from vault.caller import Callers  # noqa: E402
 from vault.audit import Audit  # noqa: E402
 from vault.gate import Gate  # noqa: E402
 from vault.grants import Grants  # noqa: E402
@@ -35,6 +36,8 @@ def main():
                         "mounts it at /vault on the dashboard front")
     p.add_argument("--owner-login", default=os.environ.get("FLEET_VAULT_OWNER_LOGIN", ""),
                    help="the owner's tailnet login; the only one the page lets in (empty: the page refuses everything)")
+    p.add_argument("--cgroup-root", default="/sys/fs/cgroup",
+                   help="cgroupfs root; a grant from a pid in the caller's agents.slice is refused and raised")
     p.add_argument("--upstream", default="", help="tests only: send every proxied call to this plain-HTTP base")
     a = p.parse_args()
     a.page_socket = a.page_socket or os.path.join(os.path.dirname(a.socket), "page.sock")
@@ -42,8 +45,9 @@ def main():
     allowed = {0} | {pwd.getpwnam(u).pw_uid for u in a.clients.split(",") if u}
     sealer = SystemdCreds(a.cred_dir, a.seal_socket)
     audit = Audit(os.path.join(a.state, "uses.jsonl"))
-    leases = Leases()
-    admin = Admin(a.registry, os.path.join(a.state, "added.json"), sealer, audit, Grants(leases, audit))
+    leases = Leases(path=os.path.join(a.state, "leases.json"))
+    admin = Admin(a.registry, os.path.join(a.state, "added.json"), sealer, audit,
+                  Grants(leases, audit, Callers(a.cgroup_root)))
     gate = Gate(lambda: admin.entries, sealer, leases, audit, {"proxy": Proxy(a.upstream)})
     web = serve(gate, "127.0.0.1", a.port)
     page.serve(admin, a.page_socket, a.owner_login)
@@ -52,7 +56,7 @@ def main():
 
     class Handler(socketserver.StreamRequestHandler):
         def handle(self):
-            _pid, uid, _gid = wire.peer(self.request)
+            pid, uid, _gid = wire.peer(self.request)
             try:
                 req = wire.read_msg(self.rfile)
             except ValueError:
@@ -62,7 +66,7 @@ def main():
                            "uid": uid, "target": "admin socket: uid not allowed"})
                 return wire.write_msg(self.wfile, {"ok": False, "error": "refused: this user may not use the vault"})
             try:
-                reply = admin.handle(req, uid)
+                reply = admin.handle(req, uid, pid)
             except SealError as e:
                 reply = {"ok": False, "error": str(e)}
             wire.write_msg(self.wfile, reply)
