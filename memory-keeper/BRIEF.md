@@ -35,6 +35,10 @@ reaches the store. Your tools: the `memory` verbs, Bash, Read, Edit, Write. No w
 9. Never edit, move or delete an inbox note, a page file or `.git`; never touch `INDEX.md` or `checks/*.tsv` views:
    `memory apply` files the notes and rebuilds the views.
 10. `REVIEW.md` (store root): at most 10 lines, `- yy-mm-dd · inbox/<file> · why held`.
+11. Recall concepts: each new or changed id line (any domain) gets one row in `net/concepts.d/<d>.tsv` (`id gist
+    concepts when es`, at most 200 characters; a PRIVATE page's id in `private-<d>.tsv`): a gist of at most 6 words in
+    your own words, 3-6 English paraphrase concepts not already in the line, 2 situations it should come to mind in,
+    3-6 Spanish aliases; a retired id loses its row. `memory check` flags a live id without one.
 
 ## Steps (orient, gather, consolidate, prune and index)
 1. Orient: `S=$(memory stage)`. Read `$S/INDEX.md`, `$S/domains.map`, the cards, `ls $S/inbox`. Sunday

@@ -6,38 +6,40 @@ import os
 import re
 from collections import namedtuple
 
+import memory_concepts
 import memory_route
 import memory_store
 from memory_cue import tokens
 
-SPREAD, STEPS, PRIME, PLACE_W, CC_W = 0.6, 2, 0.5, 0.5, 0.5
+SPREAD, STEPS, PRIME, PLACE_W, CC_W = 0.6, 2, 0.5, 0.5, 0.0
 BASE_W, DEFAULT_AGE, THETA, MIN_PATHS, S_ASSOC, W_MIN = 0.1, 365, 0.5, 2, 6.5, 0.05
 FAN_SHARE, FAN_FLOOR = 0.05, 8
 RESIDUAL_N, RESIDUAL_MIN = 10, 0.05
 NET, PUBLIC, PRIVATE = "net", "net/graph.json", "net/graph.private.json"
-IGNORED = ("graph.json", "graph.private.json", "links.private.tsv")
+IGNORED = ("graph.json", "graph.private.json", "links.private.tsv", "concepts.d/private-*.tsv")
 RIVAL = re.compile(r"\^([A-Za-z0-9-]+)\s*(?:→|->)\s*\^([A-Za-z0-9-]+)")
 Firing = namedtuple("Firing", "id place activation path")
 
 
 class Graph:
-    """mem: id -> [place, base level, threshold]; links: node -> {node: weight} ("c:" concept, "m:" memory); places; rivals."""
+    """mem: id -> [place, base level, threshold]; links: node -> {node: weight} ("c:" concept, "m:" memory); places; rivals; keeper gists."""
 
-    def __init__(self, mem=None, links=None, places=None, rivals=None):
+    def __init__(self, mem=None, links=None, places=None, rivals=None, gists=None):
         self.mem, self.links = mem or {}, links or {}
-        self.places, self.rivals = places or {}, rivals or []
+        self.places, self.rivals, self.gists = places or {}, rivals or [], gists or {}
 
     def fan(self, node):
         return sum(n.startswith("m:") for n in self.links.get(node, ()))
 
     def to_json(self):
-        return json.dumps({"v": 1, "mem": self.mem, "links": self.links, "places": self.places, "rivals": self.rivals},
+        return json.dumps({"v": 1, "mem": self.mem, "links": self.links, "places": self.places, "rivals": self.rivals,
+                           "gists": self.gists},
                           separators=(",", ":"), sort_keys=True)
 
     @classmethod
     def from_json(cls, text):
         d = json.loads(text)
-        return cls(d["mem"], d["links"], d["places"], d["rivals"])
+        return cls(d["mem"], d["links"], d["places"], d["rivals"], d.get("gists"))
 
 
 def merge(a, b):
@@ -48,7 +50,7 @@ def merge(a, b):
     places = {k: list(v) for k, v in a.places.items()}
     for k, v in b.places.items():
         places.setdefault(k, []).extend(v)
-    return Graph({**a.mem, **b.mem}, links, places, a.rivals + b.rivals)
+    return Graph({**a.mem, **b.mem}, links, places, a.rivals + b.rivals, {**a.gists, **b.gists})
 
 
 def base_level(dates, today):
@@ -94,7 +96,7 @@ def _links(nodes, keep):
              for w, ms in fan.items() if len(ms) <= cap}
     for mid, _, _, _, kw, _ in nodes:
         kw = [w for w in dict.fromkeys(kw) if "c:" + w in links]
-        for a in kw if mid in keep else ():
+        for a in kw if mid in keep and CC_W else ():
             for b in kw:
                 if a != b:
                     row = links["c:" + a]
@@ -102,24 +104,33 @@ def _links(nodes, keep):
     return {k: v for k, v in links.items() if v}
 
 
-def _part(nodes, keep, rivals, today):
+def _part(nodes, keep, rivals, today, gists):
     mem = {m: [p, round(base_level(d, today), 3), THETA] for m, p, _, d, _, _ in nodes if m in keep}
     places = {}
     for m, (p, _, _) in mem.items():
         places.setdefault(p, []).append(m)
-    return Graph(mem, _links(nodes, keep), places, [list(r) for r in rivals if keep & set(r)])
+    return Graph(mem, _links(nodes, keep), places, [list(r) for r in rivals if keep & set(r)],
+                 {m: g for m, g in gists.items() if m in keep})
 
 
 def born(store, concepts=None, today=None, private=True):
-    """(public graph, private graph) of the store; the public part never depends on a PRIVATE page."""
-    nodes, rivals = _memories(store, concepts or {}, private)
+    """(public graph, private graph) of the store; the public part never depends on a PRIVATE page.
+
+    concepts: {id: [phrases]}; None reads the keeper's net/concepts.d (its private files only when private).
+    """
+    gists = {}
+    if concepts is None:
+        rows = memory_concepts.read(store, private)
+        concepts = {i: memory_concepts.phrases(r) for i, r in rows.items()}
+        gists = {i: r.gist for i, r in rows.items() if r.gist}
+    nodes, rivals = _memories(store, concepts, private)
     today = today or datetime.date.today()
     pub = [n for n in nodes if not n[5]]
     pub_ids, priv_ids = {n[0] for n in pub}, {n[0] for n in nodes if n[5]}
     every = pub_ids | priv_ids
     rivals = [r for r in rivals if set(r) <= every]
-    return (_part(pub, pub_ids, [r for r in rivals if set(r) <= pub_ids], today),
-            _part(nodes, priv_ids, [r for r in rivals if not set(r) <= pub_ids], today))
+    return (_part(pub, pub_ids, [r for r in rivals if set(r) <= pub_ids], today, gists),
+            _part(nodes, priv_ids, [r for r in rivals if not set(r) <= pub_ids], today, gists))
 
 
 def build(store, concepts=None, today=None):
@@ -186,7 +197,7 @@ def fire(graph, cues, session=None):
             for n, w in graph.links.get(m, {}).items():
                 nxt[n] = nxt.get(n, 0.0) + SPREAD * a * w
                 hop = m.startswith("c:") and n.startswith("c:")
-                paths.setdefault(n, set()).update(l + ">" + n[2:] if hop else l for l in paths.get(m, ()))
+                paths.setdefault(n, set()).update(l.split(">")[0] + ">" + n[2:] if hop else l for l in paths.get(m, ()))
             if m.startswith("m:") and m[2:] in graph.mem:
                 mates = graph.places.get(graph.mem[m[2:]][0], [])
                 for x in mates:

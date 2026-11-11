@@ -122,7 +122,7 @@ def recall(store, text, ctx, write=True):
     g = scope(graph, pages, loaded(store, ctx, pages) | set(state.get("shown", [])))
     cues = memory_cue.cues(text, g)
     fired = memory_net.fire(g, cues, state)[:memory_hint.MAX_HINTS]
-    gists = {f.id: memory_hint.gist(body(store, f.id, f.place)) for f in fired if not pages[f.place]}
+    gists = {f.id: graph.gists.get(f.id) or memory_hint.gist(body(store, f.id, f.place)) for f in fired if not pages[f.place]}
     if write:
         if ctx.session:
             state["shown"] = state.get("shown", []) + [f.id for f in fired]

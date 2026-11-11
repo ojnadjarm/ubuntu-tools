@@ -251,7 +251,43 @@ def quiz_changed(store, before):
     return memory_quiz.check(store, before, only_changed=True)
 
 
-CHECKERS = [budgets, ids, line_format, secrets, machine_values, untrusted, provenance, experience_only]
+def concepts(store, before):
+    """net/concepts.d (once it exists): header, 5 columns, row <= 200 characters, gist <= 6 words, a live id once, in its
+    domain's file, a PRIVATE page's id only in a git-ignored private-<d>.tsv, a row for every live public id."""
+    import memory_concepts as mc
+    import memory_route
+    if not os.path.isdir(store.path(mc.DIR)):
+        return []
+    live = {}
+    for page in fact_pages(store.pages()):
+        dom = "core" if page.startswith("core/") else page.split("/")[1]
+        live.update({l.id: (dom, memory_route.seats_of(store, page) is not None) for l in store.lines(page) if l.id})
+    out, seen = [], set()
+    for rel in mc.files(store, private=True):
+        name = os.path.basename(rel)[:-4]
+        priv_file, dom = name.startswith(mc.PRIVATE_PREFIX), name.removeprefix(mc.PRIVATE_PREFIX)
+        head, rows = mc.rows(store, rel)
+        if head != mc.HEADER:
+            out.append(Finding("concepts", rel, 1, "header is not: " + mc.HEADER.replace("\t", " <tab> ")))
+        for r in rows:
+            what = ("not 5 tab-separated columns" if r.raw.count("\t") != len(mc.COLS) - 1
+                    else f"{len(r.raw)} characters, the limit is {mc.ROW_MAX}" if len(r.raw) > mc.ROW_MAX
+                    else f"gist over {mc.GIST_WORDS} words" if not 0 < len(r.gist.split()) <= mc.GIST_WORDS
+                    else "no concepts or no Spanish aliases" if not (r.concepts.strip() and r.es.strip())
+                    else f"^{r.id} is not a live id" if r.id not in live
+                    else f"^{r.id} has a row already" if r.id in seen
+                    else f"^{r.id} lives in domain {live[r.id][0]}, not {dom}" if live[r.id][0] != dom
+                    else f"^{r.id} is on a PRIVATE page: its row goes in {mc.DIR}/{mc.PRIVATE_PREFIX}{dom}.tsv"
+                    if live[r.id][1] and not priv_file else None)
+            seen.add(r.id)
+            if what:
+                out.append(Finding("concepts", rel, r.line, what))
+    out += [Finding("concepts", f"{mc.DIR}/{d}.tsv", 0, f"^{i} has no concepts row")
+            for i, (d, priv) in sorted(live.items()) if not priv and i not in seen]
+    return out
+
+
+CHECKERS = [budgets, ids, line_format, secrets, machine_values, untrusted, provenance, experience_only, concepts]
 ON_DEMAND = {"quiz": quiz, "quiz-changed": quiz_changed}
 
 
