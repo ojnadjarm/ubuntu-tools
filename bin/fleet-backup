@@ -14,13 +14,26 @@ STATE="$HARNESS_HOME/state/fleet-backup"
 CLAUDE="$HARNESS_CONTEXT_DIR"
 TAG=nightly
 
+# never — the never-back-up list (owner 2026-11-11: no keys, secrets or passwords), restic exclude patterns; the run,
+# --check and purge all read it. config.env holds passwords: a redacted copy goes to $STATE instead.
+never() {
+  printf '%s\n' "$HARNESS_HOME/secrets" "$HOME/.config/pc-harness/private-values" "$CLAUDE/.credentials.json" \
+    "$CLAUDE/daemon/control.key" '*.env' '!*agent.env' '!*.example.env' '*.pass' '*.key' '*.pem' '*.p12' '*.pfx' '*.kdbx' '*.token' '.netrc' \
+    'id_rsa*' 'id_ed25519*' 'id_ecdsa*' '*credentials.json' 'Cookies' 'Cookies-journal' 'Login Data*' 'Web Data*'
+  [ -r "$STATE/never.local" ] && grep -v '^#' "$STATE/never.local"  # this machine's files that hold a credential
+  return 0
+}
+
 usage() {
   cat <<EOF
 usage: fleet-backup run       back up tier 1 + tier 2 (newest first, within the budget), then forget/prune
-       fleet-backup --check   restic, password file (600), stick mounted and writable, repo readable; exit 1 if not
+       fleet-backup --check   restic, password file (600), stick mounted and writable, repo readable, key on the
+                              stick, 0 never-back-up paths in any snapshot; exit 1 if not
+       fleet-backup purge [--apply]   remove never-back-up paths from every snapshot (plan only without --apply)
        fleet-backup list      the snapshots
        fleet-backup restore <snapshot|latest> <path> <dest>   restore one absolute path under <dest>
-Stick: FLEET_BACKUP_MOUNT or FLEET_BACKUP_LABEL (config.env); repo <stick>/fleet-backup/restic.
+Stick: FLEET_BACKUP_MOUNT or FLEET_BACKUP_LABEL (config.env); repo <stick>/fleet-backup/restic, its password
+<stick>/fleet-backup/restic-key.txt (owner 2026-11-11: the stick opens without the laptop). Never backed up: never().
 Absent stick: run logs "skip" and exits 0. Budget ${BUDGET_MB} MB; keep: $KEEP. Log: $STATE/run.log.
 EOF
 }
@@ -74,7 +87,7 @@ kids() {
 # tier1 — the paths that must fit every night.
 tier1() {
   local p d f
-  for p in "$HOME/finance" "$HOME/invoices" "$HARNESS_HOME/secrets" "$HOME/.config/pc-harness" "$HARNESS_HOME/state" "$CLAIMS_SNAP" \
+  for p in "$HOME/finance" "$HOME/invoices" "$HOME/.config/pc-harness" "$HARNESS_HOME/state" "$CLAIMS_SNAP" \
            "$AGENT_WORK/history.md" "$AGENT_WORK/README.md" "$AGENT_WORK/briefs" "$AGENT_WORK/decisions" "$AGENT_WORK/owner" \
            "$MEMORY_HOME"; do
     [ -e "$p" ] && printf '%s\n' "$p"
@@ -175,6 +188,26 @@ excludes() {
   rels | while read -r q; do printf -- '--exclude=**/%s\n' "$q"; done
   for w in "${P_WORDS[@]}"; do [ -n "$w" ] && while read -r q; do printf -- '--iexclude=%s/**/*%s*\n' "$q" "$w"; done <"$W/t2"; done
   printf -- '--exclude=%s\n' node_modules .venv venv __pycache__ .godot
+  printf -- '--exclude-file=%s\n' "$W/never"
+}
+
+# stick_key <mount> — the password and a README beside the repo, so the stick alone opens the backup.
+stick_key() {
+  local d="$1/fleet-backup"
+  cmp -s "$RESTIC_PASSWORD_FILE" "$d/restic-key.txt" || { cp "$RESTIC_PASSWORD_FILE" "$d/restic-key.txt" && log "key: wrote $d/restic-key.txt"; }
+  [ -s "$d/README.txt" ] || cat >"$d/README.txt" <<EOF
+fleet-backup: restic backup of the laptop's fleet data (finance, invoices, memory, papers); never keys or secrets.
+restic-key.txt is its password: whoever holds this stick can read the backup (owner's choice, 2026-11-11).
+Restore everything from this folder (needs restic: sudo apt install restic):
+  restic -r restic --password-file restic-key.txt restore latest --target ~/restore
+Written by fleet-backup on $(date +%F).
+EOF
+}
+
+# hits — "<snapshot> <n>" per snapshot holding never-back-up paths (restic's own matcher, dry run); rc 1 on error.
+hits() {
+  restic rewrite --dry-run -v --exclude-file "$W/never" >"$W/plan" 2>"$W/err" || return 1
+  awk '/^snapshot /{s=$2} /^excluding /{n[s]++} END{for (k in n) print k, n[k]}' "$W/plan"
 }
 
 mb() { echo $(( ($1 + 524287) / 1048576 )); }
@@ -195,6 +228,9 @@ cmd_run() {
     restic init -q >/dev/null 2>"$W/err" || { log "FAIL: restic init: $(tail -1 "$W/err")"; return 1; }
     log "repo: initialised $repo"
   fi
+  stick_key "$m"; mkdir -p "$STATE"
+  [ -r "$HOME/.config/pc-harness/config.env" ] && sed -E 's/^([A-Za-z0-9_]*(PASSWORD|TOKEN|SECRET|KEY)[A-Za-z0-9_]*=).*/\1<redacted>/' \
+    "$HOME/.config/pc-harness/config.env" >"$STATE/config-redacted.txt"
   read -r t1 t2 sk skn <<<"$(select_paths)"
   cat "$W/t1" "$W/t2" | tr '\n' '\0' >"$W/files"
   mapfile -t ex < <(excludes)
@@ -216,7 +252,7 @@ cmd_run() {
 }
 
 cmd_check() {
-  local m bad=0 mode
+  local m bad=0 mode h
   command -v restic >/dev/null || { echo "FAIL restic not installed"; bad=1; }
   if [ -s "$RESTIC_PASSWORD_FILE" ]; then
     mode=$(stat -c %a "$RESTIC_PASSWORD_FILE"); [ "$mode" = 600 ] || { echo "FAIL password file mode $mode (want 600)"; bad=1; }
@@ -224,18 +260,60 @@ cmd_check() {
   if m=$(locate); then
     export RESTIC_REPOSITORY="$m/fleet-backup/restic"
     restic cat config >/dev/null 2>&1 && echo "ok repo $RESTIC_REPOSITORY" || { echo "FAIL repo unreadable: $RESTIC_REPOSITORY"; bad=1; }
+    cmp -s "$RESTIC_PASSWORD_FILE" "$m/fleet-backup/restic-key.txt" && [ -s "$m/fleet-backup/README.txt" ] &&
+      echo "ok key and README on the stick" || { echo "FAIL key or README missing on the stick (next run writes them)"; bad=1; }
+    if h=$(hits); then
+      [ -z "$h" ] && echo "ok 0 never-back-up paths in the snapshots" ||
+        { echo "FAIL never-back-up paths in snapshots: $(tr '\n' ' ' <<<"$h")(fleet-backup purge)"; bad=1; }
+    else echo "FAIL hits: $(tail -1 "$W/err")"; bad=1; fi
   else echo "FAIL stick absent (label '${LABEL}' mount '${MOUNT}')"; bad=1; fi
   [ -r "$STATE/last-ok" ] && read -r ts snap _ <"$STATE/last-ok" && echo "ok last snapshot $snap $(( ($(date +%s) - ts) / 3600 )) h ago"
   return "$bad"
 }
 
+# paths <snapshot> — every path in a snapshot, sorted.
+paths() { restic ls --json "$1" | jq -r 'select(.struct_type == "node") | .path' | LC_ALL=C sort; }
+
+# cmd_purge [--apply] — remove the never-back-up paths from every snapshot. Without --apply: the plan and hits per
+# snapshot. With it: rewrite --forget, then read back (same count, each snapshot = before minus the plan's paths,
+# 0 hits, restic check) and prune only when all match.
+cmd_purge() {
+  local h t id n0 n1 bad=0
+  repo_or_die
+  exec 9>"${XDG_RUNTIME_DIR:-/tmp}/fleet-backup.lock"; flock -n 9 || { echo "purge: a run holds the lock" >&2; return 1; }
+  h=$(hits) || { echo "FAIL rewrite dry run: $(tail -1 "$W/err")"; return 1; }
+  grep -v '^excluding ' "$W/plan"; echo "hits per snapshot: ${h:-none}"
+  [ "${1:-}" = --apply ] || { echo "dry run: rerun with --apply to rewrite, forget and prune"; return 0; }
+  [ -n "$h" ] || { echo "nothing to purge"; return 0; }
+  awk '/^excluding /{print substr($0, 11)}' "$W/plan" | LC_ALL=C sort -u >"$W/ex"
+  restic snapshots --json | jq -r '.[] | .time + "\t" + .id' | sort >"$W/before"
+  while IFS=$'\t' read -r t id; do paths "$id" >"$W/b.$t"; done <"$W/before"
+  restic rewrite --forget --exclude-file "$W/never" >"$W/rw" 2>&1 || { echo "FAIL rewrite: $(tail -1 "$W/rw")"; return 1; }
+  restic snapshots --json | jq -r '.[] | .time + "\t" + .id' | sort >"$W/after"
+  n0=$(wc -l <"$W/before"); n1=$(wc -l <"$W/after")
+  [ "$n0" = "$n1" ] && echo "ok snapshots $n0 -> $n1" || { echo "FAIL snapshots $n0 -> $n1"; bad=1; }
+  while IFS=$'\t' read -r t id; do
+    awk 'NR == FNR {x[$0]; next} {p = $0; while (p != "") {if (p in x) next; sub(/\/[^\/]*$/, "", p)} print}' \
+      "$W/ex" "$W/b.$t" >"$W/want"
+    if paths "$id" | cmp -s - "$W/want"; then echo "ok ${id:0:8} $(wc -l <"$W/b.$t") -> $(wc -l <"$W/want") paths"
+    else echo "FAIL ${id:0:8} paths differ from before minus the plan"; bad=1; fi
+  done <"$W/after"
+  h=$(hits) && [ -z "$h" ] && echo "ok 0 hits" || { echo "FAIL hits after rewrite: ${h:-error}"; bad=1; }
+  restic check -q >/dev/null 2>"$W/err" && echo "ok restic check" || { echo "FAIL restic check: $(tail -1 "$W/err")"; bad=1; }
+  [ "$bad" = 0 ] || { echo "stopped before prune"; return 1; }
+  restic prune -q >/dev/null 2>"$W/err" || { echo "FAIL prune: $(tail -1 "$W/err")"; return 1; }
+  restic check -q >/dev/null 2>"$W/err" && echo "ok pruned, restic check clean" || { echo "FAIL restic check after prune: $(tail -1 "$W/err")"; return 1; }
+}
+
 repo_or_die() { local m; m=$(locate) || { echo "fleet-backup: stick absent" >&2; exit 1; }; export RESTIC_REPOSITORY="$m/fleet-backup/restic"; }
 
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
+never >"$W/never"
 case "${1:-}" in
   run) cmd_run ;;
   --check) cmd_check ;;
   list) repo_or_die; restic snapshots --compact ;;
+  purge) cmd_purge "${2:-}" ;;
   restore)
     [ $# -eq 4 ] || { usage >&2; exit 2; }
     repo_or_die; restic restore "$2" --include "$3" --target "$4" ;;

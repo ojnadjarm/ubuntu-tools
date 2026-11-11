@@ -54,6 +54,13 @@ mkdir -p "$H/agent-work/claims-snap/T9/files${H}/moodle-envs/secretproj" "$H/age
 echo base >"$H/agent-work/claims-snap/T9/manifest.tsv"
 echo SECRET >"$H/agent-work/claims-snap/T9/files${H}/moodle-envs/secretproj/x"; echo SECRET >"$H/agent-work/T9/copy/SecretProj-dump/y"
 echo keep >"$H/agent-work/T9/copy/ok.txt"
+# T1623: credential stores the never-back-up list must keep out (fake values), and a redactable config.env.
+echo tok >"$H/agents/secrets/x.key"; echo lit >"$H/.config/pc-harness/private-values"; echo '{}' >"$H/.claude/.credentials.json"
+printf 'FLEET_X=1\nAPI_TOKEN=fake-T1623\n' >"$H/.config/pc-harness/config.env"
+mkdir -p "$H/agent-work/T9/prof/Default" "$H/agents/state/fleet-backup"
+echo e >"$H/agent-work/T9/copy/.env"; echo k >"$H/agent-work/T9/copy/config.example.env"; echo p >"$H/agent-work/T9/copy/a.pass"; echo c >"$H/agent-work/T9/prof/Default/Cookies"
+echo c >"$H/agent-work/T9/prof/Default/Login Data"; echo t >"$H/agent-work/T9/copy/leak.jsonl"
+echo "$H/agent-work/T9/copy/leak.jsonl" >"$H/agents/state/fleet-backup/never.local"
 cat >"$WORK/config.env" <<EOF
 FLEET_BACKUP_LABEL=$LBL
 FLEET_BACKUP_BUDGET_MB=6
@@ -107,6 +114,31 @@ ok "restore: byte-equal" 'cmp -s "$H/finance/a.bin" "$WORK/r$H/finance/a.bin"'
 # second run keeps one group (retention by tag) and lists 2 snapshots
 fx "$FB" run >/dev/null 2>&1
 ok "list: 2 snapshots" '[ "$(restic snapshots --json 2>/dev/null | jq length)" = 2 ]'
+
+# T1623: never backed up, key on the stick, --check red on a hit, purge removes it from old snapshots.
+restic ls latest >"$WORK/ls2" 2>/dev/null
+ok "never: secrets, private-values, credentials, *.env, *.pass, browser logins, never.local all out" \
+  '[ "$(grep -cE "^/.*(/agents/secrets|private-values|credentials\.json|/copy/\.env$|\.pass$|/Cookies$|/Login Data$|leak\.jsonl$)" "$WORK/ls2")" = 0 ]'
+ok "never: siblings of excluded files and credential-free *.example.env stay in" 'grep -q "/T9/copy/ok.txt$" "$WORK/ls2" && grep -q "/T9/copy/config.example.env$" "$WORK/ls2" && grep -q "/finance/a.bin$" "$WORK/ls2" && grep -q "/invoices/i.txt$" "$WORK/ls2"'
+ok "never: config.env goes in redacted" 'grep -q "/agents/state/fleet-backup/config-redacted.txt$" "$WORK/ls2" && grep -qx "API_TOKEN=<redacted>" "$H/agents/state/fleet-backup/config-redacted.txt" && grep -qx "FLEET_X=1" "$H/agents/state/fleet-backup/config-redacted.txt"'
+ok "key: restic-key.txt equals the password, README names the restore command" 'cmp -s "$H/agents/secrets/fleet-backup.pass" "$M/fleet-backup/restic-key.txt" && [ "$(wc -l <"$M/fleet-backup/README.txt")" = 5 ] && grep -q "password-file restic-key.txt restore latest" "$M/fleet-backup/README.txt"'
+mkdir -p "$WORK/empty" "$WORK/r2"
+stickonly() { env -i PATH="$PATH" HOME="$WORK/empty" restic -r "$M/fleet-backup/restic" --password-file "$M/fleet-backup/restic-key.txt" "$@"; }
+ok "key: stick alone (empty HOME) lists snapshots and restores a file" 'stickonly snapshots >/dev/null 2>&1 && stickonly restore latest --include "$H/invoices/i.txt" --target "$WORK/r2" >/dev/null 2>&1 && cmp -s "$H/invoices/i.txt" "$WORK/r2$H/invoices/i.txt"'
+rm "$M/fleet-backup/restic-key.txt" "$M/fleet-backup/README.txt"; fx "$FB" run >/dev/null 2>&1
+ok "key: run re-creates key and README when missing" '[ -s "$M/fleet-backup/restic-key.txt" ] && [ -s "$M/fleet-backup/README.txt" ]'
+restic backup -q --tag nightly "$H/agents/secrets" "$H/invoices" >/dev/null 2>&1  # an old snapshot made before T1623
+n_before=$(restic snapshots --json 2>/dev/null | jq length)
+fx "$FB" --check >"$WORK/chk" 2>&1; rc=$?
+ok "--check: red on a planted secret path in a snapshot" '[ $rc = 1 ] && grep -q "^FAIL never-back-up paths in snapshots" "$WORK/chk"'
+fx "$FB" purge >"$WORK/plan" 2>&1; rc=$?
+restic ls latest >"$WORK/ls3" 2>/dev/null
+ok "purge: dry run prints the plan, changes nothing" '[ $rc = 0 ] && grep -q "would modify 1 snapshots" "$WORK/plan" && [ "$(restic snapshots --json 2>/dev/null | jq length)" = "$n_before" ] && grep -q "/agents/secrets/x.key$" "$WORK/ls3"'
+fx "$FB" purge --apply >"$WORK/purge" 2>&1; rc=$?
+restic ls latest >"$WORK/ls4" 2>/dev/null
+ok "purge: rewrite removes the planted path, count same, prune ran" '[ $rc = 0 ] && grep -q "ok pruned, restic check clean" "$WORK/purge" && [ "$(restic snapshots --json 2>/dev/null | jq length)" = "$n_before" ] && [ "$(grep -c "^/.*/agents/secrets" "$WORK/ls4")" = 0 ] && grep -q "/invoices/i.txt$" "$WORK/ls4"'
+ok "--check: green after the purge" 'fx "$FB" --check >/dev/null 2>&1'
+ok "secrets: no fixture secret value printed" '! grep -qF "$(cat "$H/agents/secrets/fleet-backup.pass")" "$WORK/plan" "$WORK/purge" "$WORK/chk"'
 
 # full stick: free-space gate, then ENOSPC during the backup
 sed "s/^FLEET_BACKUP_MIN_FREE_MB=.*/FLEET_BACKUP_MIN_FREE_MB=999999/" "$WORK/config.env" >"$WORK/gate.env"
