@@ -17,6 +17,9 @@
     {"id": "improvement", "name": "Improvement", "members": [
       {"id": "toolsmith", "name": "Soot", "rank": "Toolsmith"},
       {"id": "improve-meter", "name": "Dusk", "rank": "Meter Reader", "unit": "improve-meter.timer"}
+    ]},
+    {"id": "finance", "name": "Financial Team", "members": [
+      {"id": "hacienda", "name": "Laurel", "rank": "Tax Clerk"}
     ]}
   ],
   "hidden": ["hello"]
