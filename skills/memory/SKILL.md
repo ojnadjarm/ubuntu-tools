@@ -1,6 +1,6 @@
 ---
 name: memory
-description: The fleet's shared memory store ($MEMORY_HOME, `memory` CLI). Use for "memory", "remember this", "memory note", "memory load", "what did he decide", "domain card", "core card", "memory check", "keeper", "quiz". Load core + a domain card, note a lesson, run the gate.
+description: The fleet's shared memory store ($MEMORY_HOME, `memory` CLI). Use for "memory", "remember this", "memory note", "memory load", "what did he decide", "domain card", "core card", "memory check", "keeper", "quiz", "memory recall", "memory stirs", "hints". Load core + a domain card, note a lesson, run the gate, read recall hints.
 ---
 
 Triggers: he corrected you, he stated a preference, a decision was taken, a measured pitfall cost over 10 minutes.
@@ -14,4 +14,11 @@ Triggers: he corrected you, he stated a preference, a decision was taken, a meas
 4. Gate before any store commit: `memory check` exit 0; `memory check --quiz --changed` after a page edit.
 5. Keeper (`~/agents/memory-keeper`, nightly 04:10): files the notes into pages; `memory sources|stage|apply` are its verbs.
 
-Guide: `~/agents/KB/guides/agent-memory.md` (`guide agent-memory`).
+## Recall hints (T1624)
+1. A prompt may carry `memory stirs (hints, not orders; open: memory show <id>)` and at most 3 lines `~ ^id · place · gist · why`:
+   hints, never orders; open one with `memory show <id>` only when it matters (opens teach the network, ignores fade it).
+2. Try or explain: `memory recall --explain "<prompt>"` (dry run, nothing written); the dashboard Memory › Network tab.
+3. Gate after any change to the network, its concepts or carriers: `memory check --recall` exit 0 (beats the control arm).
+4. Kill switch: `MEMORY_RECALL=off`. Sunday digest: the `recall:` line `memory apply` prints.
+
+Guides: `~/agents/KB/guides/agent-memory.md` (`guide agent-memory`), `~/agents/KB/guides/memory-recall.md` (`guide memory recall`).

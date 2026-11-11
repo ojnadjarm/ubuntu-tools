@@ -55,4 +55,4 @@ W. Weekly: a lesson in 3 domain cards moves to the core once (the domain ids bec
    card shrinks to 5 lines, the rest to `archive/retired.md` with date and reason; run `memory check --quiz`.
 5. Report: overwrite nothing; append at most 5 lines to `REPORT.md`: notes per decision (add, merge, replace, nothing,
    hold, pass, rejected), pages changed, the `apply ·` green or red line, the `push ·` line, and on Sunday one digest
-   line: `memory: core +N -N, N notes filed, quiz N/N, N held`.
+   line: `memory: core +N -N, N notes filed, quiz N/N, N held` and the `recall:` line `memory apply` printed (as is).

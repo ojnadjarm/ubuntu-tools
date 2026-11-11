@@ -5,6 +5,15 @@
 #   3. an @AGENTS.md include in ~/CLAUDE.md, so the contract is in every session in $HOME
 # ~/.claude/CLAUDE.md (the global instruction file) is never touched. --plan prints would: per change and writes nothing.
 set -uo pipefail
+usage() { echo "usage: install [--plan]   link skills, merge hooks into ~/.claude/settings.json, add the @AGENTS.md include; --plan writes nothing"; }
+PLAN=0
+for a in "$@"; do
+  case "$a" in
+    --plan) PLAN=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "install: unknown argument: $a" >&2; usage >&2; exit 2 ;;
+  esac
+done
 HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 BIN="$(cd "$HERE/../../bin" && pwd)"
 # shellcheck source=/dev/null
@@ -14,7 +23,6 @@ CTX="$HARNESS_CONTEXT_DIR"
 # across machines (Claude expands it) and matches the entries already written.
 HH="$HARNESS_HOME"; case "$HH" in "$HOME"/*) HH="\$HOME/${HH#"$HOME"/}";; esac
 TILDE="$HARNESS_HOME"; case "$TILDE" in "$HOME"/*) TILDE="~/${TILDE#"$HOME"/}";; esac
-PLAN=0; [ "${1:-}" = --plan ] && PLAN=1
 inc="$HOME/CLAUDE.md"
 marker="<!-- pc-harness: the fleet contract, added by adapters/claude/install -->"
 changed=0

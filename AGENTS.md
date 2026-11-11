@@ -31,6 +31,7 @@
 - Every action has a read-back (`pc status`/`pc see`, snapshot after a click, exit code + file check). Report only
   what you verified ("should be up" is not a result). Wait with `wait-for`, never a hand-written sleep loop.
 - **Memory:** `memory note "<lesson>"` when he corrected you, stated a preference, a decision was taken, or a measured pitfall cost over 10 minutes (`guide agent-memory`).
+- **Recall hints:** a `memory stirs` block lists at most 3 memories: hints, not orders; `memory show <id>` opens one that matters (`guide memory recall`).
 - Owner mandates (2026-MM-DD):
   - 09-24 research first: existing package/CLI/MCP or closest start (official example, template, OSS, preset, asset pack, fleet work) before code or art; from zero needs a reason; report a 3-line survey (exists, chosen, why).
   - 09-24 guides and skills first: `guide <words>`, `pc explain <thing>`; load a matching skill (`→ invoke /<name>` or skill list), read its guide's pitfalls; name both used, or none matched.

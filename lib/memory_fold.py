@@ -128,5 +128,30 @@ def run(store, root=None, now=None):
     hints = [e for e in evs if isinstance(e, memory_learn.Hint)]
     opened = {(e.session, e.id) for e in evs if isinstance(e, memory_learn.Open)} & {(h.session, m) for h in hints for m in h.ids}
     grown = sum(l.count > old.get(k, memory_learn.Link(0.0, "", 0)).count for k, l in live.items())
-    return (f"net · learned · {len(hints)} hints, {len(opened)} opened, {grown} links grown, "
-            f"{len(set(old) - set(live))} faded")
+    nums = (len(hints), len(opened), grown, len(set(old) - set(live)))
+    _log(since, now, nums)
+    return "net · learned · {} hints, {} opened, {} links grown, {} faded".format(*nums)
+
+
+def _folds():
+    return os.path.join(agent_work(), "memory-recall", "folds.tsv")
+
+
+def _log(since, now, nums):
+    os.makedirs(os.path.dirname(_folds()), exist_ok=True)
+    with open(_folds(), "a", encoding="utf-8") as f:
+        f.write("\t".join([since.strftime(FMT), now.strftime(FMT), *map(str, nums)]) + "\n")
+
+
+def week(now=None, days=7):
+    """The Sunday digest line: the folds of the last `days` days summed (a re-fold from the same cursor counts once)."""
+    now = now or datetime.datetime.now().astimezone()
+    rows = {}
+    if os.path.isfile(_folds()):
+        for line in open(_folds(), encoding="utf-8"):
+            f = line.rstrip("\n").split("\t")
+            until = _time(f[1]) if len(f) == 6 else None
+            if until and now - datetime.timedelta(days=days) < until <= now:
+                rows[f[0]] = [int(n) for n in f[2:]]
+    h, o, g, x = (sum(c) for c in zip(*rows.values())) if rows else (0, 0, 0, 0)
+    return f"recall: {h} hints, {o} opened, {g} links grown, {x} faded ({days} days)"
