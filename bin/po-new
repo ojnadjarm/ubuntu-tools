@@ -3,6 +3,8 @@
 # BRIEF.md (fill its "## Project" block next), agent.env, inbox/ current/ outbox/discord/, $PO_PAPERS/<p>/done/,, state/PROJECT|BACKLOG|RUNS|HISTORY.md.
 # --parent: a manager under that PO seat (MANAGER.tmpl.md, PARENT=<seat> in agent.env; `{{PROJECT}}` left to fill, T1515 P31).
 # Refuses (exit 3) when po-<p> exists. Prints the unit command that wakes it on a request.
+# po-new <p> --refresh (T1626): re-render BRIEF.md above "## Project" from the current template (MANAGER.tmpl.md when
+# agent.env has PARENT=), keeping its name and project block; exit 2 for a brief not made from a template (po-discord).
 help() { awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; }
 case "${1:-}" in -h|--help) help; exit 0 ;; '') help >&2; exit 2 ;; esac
 set -euo pipefail
@@ -13,10 +15,22 @@ case "$parent" in *[!a-z0-9-]*) echo "po-new: --parent takes a seat id [a-z0-9-]
 case "$p" in -*|*[!a-z0-9-]*|template) echo "po-new: name must be [a-z0-9-] and not 'template'" >&2; exit 2 ;; esac
 case "$name" in *[\|\&\\]*) echo "po-new: project name may not contain | & or \\" >&2; exit 2 ;; esac
 tpl="$HARNESS_HOME/po-template"; dir="$HARNESS_HOME/po-$p"
+fill() { sed -e "s|{{P}}|$p|g" -e "s|{{NAME}}|$name|g" -e "s|{{PARENT}}|po-$parent|g" "$1"; }
+if [ "${2:-}" = --refresh ]; then
+  dir=$(po_dir po-new "$p") || exit 2
+  parent=$(sed -n 's/^PARENT=\([a-z0-9-]*\).*/\1/p' "$dir/agent.env" 2>/dev/null | tail -1)
+  brief="$tpl/BRIEF.tmpl.md"; [ -z "$parent" ] || brief="$tpl/MANAGER.tmpl.md"
+  name=$(head -1 "$dir/BRIEF.md" | sed -n "s/^You are po-$p, the \(manager\|product owner\) of \(.*\) only[,.].*/\2/p")
+  [ -n "$name" ] && grep -qx '## Project' "$dir/BRIEF.md" ||
+    { echo "po-new: $dir/BRIEF.md was not made from a template; edit it by hand" >&2; exit 2; }
+  { fill "$brief" | sed '/^## Project$/,$d'; sed -n '/^## Project$/,$p' "$dir/BRIEF.md"; } >"$dir/.BRIEF.md.tmp"
+  mv "$dir/.BRIEF.md.tmp" "$dir/BRIEF.md"
+  echo "refreshed $dir/BRIEF.md from $(basename "$brief"); a running PO reads it on its next run"
+  exit 0
+fi
 brief="$tpl/BRIEF.tmpl.md"; [ -z "$parent" ] || brief="$tpl/MANAGER.tmpl.md"
 [ -r "$brief" ] || { echo "po-new: no template at $tpl" >&2; exit 1; }
 [ ! -e "$dir" ] || { echo "po-new: $dir exists" >&2; exit 3; }
-fill() { sed -e "s|{{P}}|$p|g" -e "s|{{NAME}}|$name|g" -e "s|{{PARENT}}|po-$parent|g" "$1"; }
 mkdir -p "$dir/inbox" "$dir/current" "$(po_done "$p")" "$dir/outbox/discord" "$dir/state/picks" "$dir/logs"
 fill "$brief" >"$dir/BRIEF.md"
 cp "$tpl/agent.env" "$dir/agent.env"

@@ -8,6 +8,7 @@
 # `po-ask <seat> --from manager` once: state/escalated keeps a sha1 per sent line (newest 50). A manager's run is
 # wrapped by `po-context repo <p>` before (state/REPO.md) and `po-context check <p>` after: each miss becomes one
 # `context: ...` line at the end of REPORT.md, which the next run reads and fixes first (T1557-C3).
+# Workers run detached (`po-work`, T1626): each po-run starts with `po-work <p> reap`, which files a dead worker's end once.
 help() { awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; }
 case "${1:-}" in -h|--help) help; exit 0 ;; '') help >&2; exit 2 ;; esac
 { # one block: bash parses it whole before running, so an edit of this file cannot break a running po-run
@@ -38,6 +39,7 @@ exec 9>"$dir/.po-run.lock"
 flock -n 9 || { echo "po-run: $name is already running; that run picks up new requests"; exit 0; }
 shopt -s nullglob
 rc=0
+po-work "$1" reap >/dev/null 2>&1 9>&-
 for _ in $(seq "${PO_MAX_LOOPS:-5}"); do
   reqs=("$dir"/inbox/*.md)
   [ ${#reqs[@]} -gt 0 ] || break

@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# usage: po-work <p> start T<n> --brief <path> [--key <slug>] [--channel <ch>] [--thread <id>] [--asked-by <who>] [--model M] [--effort E]
+#        po-work <p> list | run T<n> | reap
+# Detached workers for PO/manager po-<p> (T1626): `start` records state/work/T<n>.json and launches a transient unit
+# po-work-<p>-T<n> (systemd-run, not a child of the PO run), so the PO run ends and its lock frees while the worker runs.
+# The unit's `run` holds state/work/T<n>.lock, runs agent-exec on the brief (MODEL opus, EFFORT high, WORK_TIMEOUT 14400
+# from agent.env) and files its report once as `po-ask <p> --from worker`, which wakes the PO to relay it.
+# `reap` (unit ExecStopPost and every po-run) marks a worker whose runner died `lost` and files that once.
+# `list`: open work, one line per ticket. No cap on workers at once (owner 2026-11-11); start exits 3 when the same key
+# or ticket is open (nothing starts), 1 when the launch fails, 2 on bad usage.
+help() { awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; }
+case "${1:-}" in -h|--help) help; exit 0 ;; '') help >&2; exit 2 ;; esac
+set -uo pipefail
+SELF=$(readlink -f "$0")
+. "$(dirname "$SELF")/polib.sh"
+p="$1"; verb="${2:-}"
+dir=$(po_dir po-work "$p") || exit 2
+W="$dir/state/work"; L="$dir/logs/work"
+mkdir -p "$W" "$L"
+envkey() { sed -n "s/^$1=\([0-9]*\).*/\1/p" "$dir/agent.env" 2>/dev/null | tail -1; }
+jget() { jq -r ".$2 // empty" "$W/$1.json" 2>/dev/null; }
+jset() { jq "$2" "$W/$1.json" >"$W/.$1.tmp" && mv "$W/.$1.tmp" "$W/$1.json"; }
+open() { local f; for f in "$W"/T*.json; do [ -e "$f" ] || continue
+  case "$(jq -r .status "$f")" in starting|running) basename "$f" .json ;; esac; done; }
+held() { ! flock -n "$W/$1.lock" true 2>/dev/null; }
+
+# file_one T<n>: the ended ticket's one request to po-<p>; caller holds $W/.lock.
+file_one() {
+  local t="$1" st rc secs text
+  [ "$(jget "$t" filed)" = true ] && return 0
+  st=$(jget "$t" status); rc=$(jget "$t" rc)
+  secs=$(( $(date +%s) - $(date -d "$(jget "$t" started)" +%s) ))
+  case "$st" in done) ;; failed) st="failed (exit $rc)" ;; lost) st="lost (its runner died; no report)" ;; *) return 0 ;; esac
+  text=$(tail -c 3000 "$L/$t.out" 2>/dev/null)
+  printf 'po-work: worker %s (%s) %s after %s s; asked by %s; brief %s\nReport:\n%s\n' "$t" "$(jget "$t" key)" "$st" \
+    "$secs" "$(jget "$t" asked_by)" "$(jget "$t" brief)" "${text:-(none; log $L/$t.log)}" |
+    po-ask "$p" --from worker --channel "$(jget "$t" channel)" --thread "$(jget "$t" thread)" --copy - >/dev/null || return 1
+  jset "$t" '.filed = true'
+}
+
+case "$verb" in
+  list)
+    for t in $(open); do
+      jq -r '[.ticket, .status, .key, "started " + .started, "asked by " + .asked_by, "thread " + (.thread // ""), .model] | join("  ")' "$W/$t.json"
+    done ;;
+
+  start)
+    t="${3:-}"; shift 3 2>/dev/null || { help >&2; exit 2; }
+    brief='' key='' channel=none thread='' asked=unknown model=opus effort=high
+    while [ $# -gt 0 ]; do
+      [ $# -ge 2 ] || { echo "po-work: $1 needs a value" >&2; exit 2; }
+      case "$1" in
+        --brief) brief="$2" ;; --key) key="$2" ;; --channel) channel="$2" ;; --thread) thread="$2" ;;
+        --asked-by) asked="$2" ;; --model) model="$2" ;; --effort) effort="$2" ;;
+        *) echo "po-work: unknown option $1" >&2; exit 2 ;;
+      esac; shift 2
+    done
+    [[ $t =~ ^T[0-9]+$ ]] || { echo "po-work: ticket must be T<n>, got '$t'" >&2; exit 2; }
+    [ -r "$brief" ] || { echo "po-work: cannot read brief '$brief'" >&2; exit 2; }
+    brief=$(readlink -f "$brief")
+    [ -n "$key" ] || key=$(basename "$brief" .md | sed -E "s/^T[0-9]+-($p-)?//")
+    [[ $key =~ ^[a-z0-9-]+$ && $channel$thread =~ ^[A-Za-z0-9_.-]*$ ]] ||
+      { echo "po-work: --key takes [a-z0-9-], --channel/--thread [A-Za-z0-9_.-]" >&2; exit 2; }
+    exec 7>"$W/.lock"; flock 7
+    for o in $(open); do
+      [ "$o" = "$t" ] || [ "$(jget "$o" key)" = "$key" ] || [ "$(jget "$o" brief)" = "$brief" ] || continue
+      echo "po-work: already running: $o ($(jget "$o" key)) since $(jget "$o" started), asked by $(jget "$o" asked_by); nothing started"
+      exit 3
+    done
+    jq -n --arg t "$t" --arg k "$key" --arg b "$brief" --arg c "$channel" --arg th "$thread" --arg a "$asked" \
+      --arg m "$model" --arg e "$effort" --arg s "$(date -Is)" --arg u "po-work-$p-$t" \
+      '{ticket:$t, key:$k, brief:$b, channel:$c, thread:$th, asked_by:$a, model:$m, effort:$e, started:$s, unit:$u,
+        status:"starting", filed:false}' >"$W/.$t.tmp" && mv "$W/.$t.tmp" "$W/$t.json"
+    tmo=$(envkey WORK_TIMEOUT); tmo=${tmo:-14400}
+    if ! systemd-run --user --quiet --collect --unit="po-work-$p-$t" --setenv=PATH="$PATH" \
+         --property=RuntimeMaxSec=$((tmo + 300)) --property=ExecStopPost="$SELF $p reap" \
+         "$SELF" "$p" run "$t" </dev/null >>"$L/$t.log" 2>&1 7>&-; then
+      jset "$t" '.status = "failed" | .rc = "launch" | .filed = true'
+      echo "po-work: launch of $t failed; see $L/$t.log" >&2; exit 1
+    fi
+    echo "started $t ($key) as po-work-$p-$t: its report comes back as a from: worker request" ;;
+
+  run)
+    t="${3:-}"; [ -e "$W/$t.json" ] || { echo "po-work: no ticket $t" >&2; exit 2; }
+    exec 9>"$W/$t.lock"; flock -n 9 || { echo "po-work: $t runs already" >&2; exit 0; }
+    [ "$(jget "$t" status)" = starting ] || exit 0
+    jset "$t" '.status = "running"'
+    printf 'You are a worker for po-%s, ticket %s, started detached: nobody waits on you.\nYour brief: %s. Read it and follow it.\nYour last message is your report (max 6 lines, numbers only); po-work files it to po-%s, who relays it.\n' \
+      "$p" "$t" "$(jget "$t" brief)" "$p" >"$W/$t.prompt.md"
+    tmo=$(envkey WORK_TIMEOUT)
+    MODEL="$(jget "$t" model)" EFFORT="$(jget "$t" effort)" agent-exec --prompt-file "$W/$t.prompt.md" \
+      --system-file "$HARNESS_HOME/AGENT-PREAMBLE.md" --cwd "$dir" --name "po-$p-$t" --timeout "${tmo:-14400}" \
+      --raw-out "$L/$t.json" --meta-out "$L/$t.meta.json" >"$L/$t.out" 2>>"$L/$t.log"
+    rc=$?
+    if [ "$rc" = 0 ]; then jset "$t" ".status = \"done\" | .rc = 0 | .ended = \"$(date -Is)\""
+    else jset "$t" ".status = \"failed\" | .rc = $rc | .ended = \"$(date -Is)\""; fi
+    exec 7>"$W/.lock"; flock 7
+    file_one "$t" 9>&- ;;
+
+  reap)
+    exec 7>"$W/.lock"; flock 7
+    for f in "$W"/T*.json; do
+      [ -e "$f" ] || continue; t=$(basename "$f" .json)
+      case "$(jget "$t" status)" in
+        running) held "$t" || jset "$t" ".status = \"lost\" | .ended = \"$(date -Is)\"" ;;
+        starting) [ $(( $(date +%s) - $(date -d "$(jget "$t" started)" +%s) )) -lt "${PO_WORK_GRACE:-120}" ] || held "$t" ||
+                    jset "$t" ".status = \"lost\" | .ended = \"$(date -Is)\"" ;;
+      esac
+      file_one "$t" || echo "po-work: could not file $t; the next reap tries again" >&2
+    done ;;
+
+  *) help >&2; exit 2 ;;
+esac

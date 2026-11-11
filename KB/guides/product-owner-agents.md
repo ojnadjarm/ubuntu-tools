@@ -1,7 +1,7 @@
 # Product-owner agents: one PO per busy project (po-ask, po-run, po-status, po-push, deploy-lock)
 
-Ticket: T1412 (plan T1410), T1515 P31 (managers), P32 (images), P36 (reply images), T1547 (discord-hire), T1557 (manager context) · Last
-verified: 2026-11-10 by `po-context check` ok for the 4 managers, po-discord and po-mooblox (0.09-0.14 s each), after the C5-C8 migration; by
+Ticket: T1412 (plan T1410), T1515 P31 (managers), P32 (images), P36 (reply images), T1547 (discord-hire), T1557 (manager context), T1626
+(detached workers) · Last verified: 2026-11-11 by `po-work.test.sh` (46 ok) and `po.test.sh` (88 ok), a live po-mosaico proof; before: 2026-11-10 by `po-context check` ok for the 4 managers, po-discord and po-mooblox (0.09-0.14 s each), after the C5-C8 migration; by
 `discord-liaison/tests` (85, `test_hire.py` 4) and a live hire of po-narrador-interactivo-ia; before: `po.test.sh` (71 ok) and
 `discord-liaison/tests` (77, `test_managers.py`); before: 2026-10-27 by `bin/tests/po.test.sh` (52 ok), pulse test (30 ok), liaison suite
 (40 tests) and two live po-mooblox runs (dry run 54 s, budget stop 18 s)
@@ -15,6 +15,19 @@ orchestrator relays with `po-ask`. Not for fleet tooling, work repos (Vass) or r
   manager roles; file state chosen over subagent `memory:` because it works headless and survives `agents-stop`).
 - Wake: `po@<p>.path` (`DirectoryNotEmpty=inbox/`) starts `po@<p>.service` = `po-run <p>`: inbox → `current/`, one
   `agent-run`, leftovers → `$PO_PAPERS/<p>/done/` (`~/agent-work/po/<p>/done`, T1603; `po_done` in polib.sh) with an outcome line, loop while the inbox refills; a second po-run exits 0. 0 tokens idle.
+- Detached workers (T1626, owner 2026-11-11: "you request as many workers as you need but you are always available"):
+  a PO or manager never works and never waits. Its run answers, writes a brief and runs `po-work <p> start T<n> --brief
+  <path> --channel --thread --asked-by` (exit 3 = same key or ticket open, nothing starts; no cap on workers at once),
+  then ends: the lock frees and the next message gets its own short run. `start` records `state/work/T<n>.json`
+  (ticket, key = brief slug, asked_by, thread, started, status starting|running|done|failed|lost, filed) and launches
+  the transient unit `po-work-<p>-T<n>` (systemd-run, `ExecStopPost=po-work <p> reap`, RuntimeMaxSec WORK_TIMEOUT+300):
+  `run` holds `state/work/T<n>.lock`, runs `agent-exec` (opus/high, or `--model claude-fable-5-2 --effort medium`)
+  in the PO folder with the fleet preamble, logs `logs/work/T<n>.{out,log,json}`, then files the report once as
+  `po-ask <p> --from worker` (that wakes the PO to relay it). `reap` (ExecStopPost + start of every po-run) turns a
+  `running` job whose lock is free into `lost` and files that once. `po-work <p> list` = open work; `po-status`
+  shows `workers N`. Rule in both templates: "## Delegate, never work" (a few-line task under 1-2 min excepted).
+  Roll a template change out with `po-new <p> --refresh` (re-renders BRIEF.md above "## Project"; po-discord is
+  hand-written and refused, exit 2; it spawns no workers). ARCH: `$AGENT_WORK/research/2026-11-11/T1626/done.md`.
 - Clean context every run: BRIEF + `state/PROJECT.md` (≤ 80 lines, 6 KB), `BACKLOG.md`, `RUNS.md`, the ledger
   `~/agent-work/decisions/<p>.md`. Requests keep his words verbatim (`quote: copy|intent`).
 - Budget: po-run passes `PO_BUDGET=stop` when `plan-usage --check 95` exits 1; the PO then spawns nothing and writes
@@ -83,7 +96,10 @@ po-ask <p> --image <png|jpg|gif|webp> … "<text>"  # copies each into po-<p>/st
 po-context check <p>                    # ok <p>, else miss: lines, exit 1 (layout + caps)
 po-context repo <p>                     # rewrite state/REPO.md from the clone (read-only)
 wait-for --label po-lock --until 'flock -n ~/agents/po-<p>/.po-run.lock true'   # before swapping state files
-po-status                               # last run, inbox, running, open items, pushes today, ESCALATE lines
+po-status                               # last run, inbox, running, open items, pushes today, workers, ESCALATE lines
+po-work <p> start T<n> --brief <path> --channel discord --thread <tid> --asked-by <who>   # detached worker (T1626)
+po-work <p> list | reap                 # open work; mark dead runners lost and file them once
+po-new <p> --refresh                    # re-render BRIEF.md from the current template, keep the project block
 po-push <p> --pick 'A=Dimensioned;B=Plain' "pick a look <link>"
 deploy-lock 5.2 --version '<read live version>' -- <deploy cmd>
 bash ~/agents/bin/tests/po.test.sh      # fixture: bwrap no-net, fake ntfy, fake agent-run
@@ -121,8 +137,18 @@ bash ~/agents/bin/tests/po.test.sh      # fixture: bwrap no-net, fake ntfy, fake
 - A project with no clone (narrador-interactivo-ia) has no REPO.md and `check` still passes; spidey's 5 unpushed
   branches show only in REPO.md (`commits on no remote`), so BACKLOG holds 1 row for them, not 5.
 
+- Before T1626 a manager ran its workers inside its own run (`agent-exec` in Bash, or a background task the run
+  waited on): the run and `.po-run.lock` lasted 15-47 min (tiny-epic-narrator 2026-11-10: 2801 s, 1805 s, 980 s), so
+  every new message waited in `inbox/` for the worker to finish. Managers ran with Bash/Read/Edit/Write only, never
+  the Agent tool (`subagent_stats.spawned` 0).
+- po-work fixture: a transient unit inherits no fds, but a plain child does: `start` closes its `.lock` fd (`7>&-`)
+  for the launch, else the runner deadlocks on the lock its own launcher still holds (measured: the first test hung).
+- po-work fixture: a fake unit must run ExecStopPost after the whole job is gone; killing only the runner right
+  after `status: running` raced the agent-exec fork (1 of 4 runs saw the lock still held). Real systemd kills the
+  unit's cgroup first.
+
 ## Links
-- Code: `~/agents/bin/po-{ask,run,new,status,push,picks,context}`, `bin/polib.sh`, `lib/po_cap.py`, `discord-liaison/liaison/managers.py`, `bin/discord-hire`, `bin/deploy-lock`, `units/po@.{path,service}`,
+- Code: `~/agents/bin/po-{ask,run,new,status,push,picks,context,work}`, `bin/polib.sh`, `lib/po_cap.py`, `discord-liaison/liaison/managers.py`, `bin/discord-hire`, `bin/deploy-lock`, `units/po@.{path,service}`,
   `units/po-picks.service`, `po-template/` (`MANAGER.tmpl.md`), `discord-liaison/liaison/po.py`
-- Tests: `bin/tests/po.test.sh`, `bin/tests/po-context.test.sh`, `discord-liaison/tests/test_po.py`, `test_hire.py` (`bin/tests/discord-liaison.test.sh`), `bin/tests/orchestrator-pulse.test.sh`
+- Tests: `bin/tests/po.test.sh`, `bin/tests/po-work.test.sh` (T1626), `bin/tests/po-context.test.sh`, `discord-liaison/tests/test_po.py`, `test_hire.py` (`bin/tests/discord-liaison.test.sh`), `bin/tests/orchestrator-pulse.test.sh`
 - Design: `~/agent-work/research/2026-10-27/T1410/PLAN.md`; manager context `~/agent-work/research/2026-11-10/T1557/PLAN.md`; pilot `~/agents/po-mooblox/`
