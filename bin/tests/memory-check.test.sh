@@ -105,5 +105,23 @@ sed -i "s/^session: .*/session: ffff0000-dead-beef-0000-000000000000/" "$C/inbox
 out=$(env -i PATH="$PATH" HOME="$H" HARNESS_CONFIG="$H/.config/pc-harness/config.env" MEMORY_HOME="$C" "$MEM" check inbox 2>&1)
 has "owner note without a transcript → provenance" '^provenance · inbox/20260110-owner\.md:0 · source owner: no transcript'
 
+# Transcript shapes (T1629): his words in a user turn or a queued mid-turn prompt; never tool output, peers, channels,
+# task notifications, system reminders, compaction summaries, headless prompts, sidechains or the raw queue log.
+SID2=0000bbbb-1111-2222-3333-444455556666
+cp "$FX/shapes.jsonl" "$H/.claude/projects/-fake-proj/$SID2.jsonl"
+said() { fx python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import memory_check as m; w = m.owner_words(sys.argv[2]); print("yes" if m._norm(sys.argv[3]) in w else "no")' "$LIB" "$SID2" "$1"; }
+for q in "amber kites fly at dusk" "copper bells ring twice" "velvet otters nap at noon" "granite owls hum softly" "cobalt herons wade slowly"; do
+  is "shape: his words accepted: $q" "$(said "$q")" yes
+done
+for q in "saffron moths circle lamps" "crimson lynx guards the gate" "ochre snails race uphill" "indigo crows count coins" "teal badgers dig tunnels" \
+         "olive geckos climb walls" "maroon foxes sing" "silver whales whistle" "ivory bison roam north" "lemon wasps build nests" "pearl newts swim deep" "jade beetles roll dung"; do
+  is "shape: not his words refused: $q" "$(said "$q")" no
+done
+D="$WORK/shapes"; cp -r "$FX/store" "$D"; rm -f "$D"/inbox/*.md
+printf 'source: owner\nseat: boss\ndomain: zebra\ndate: 2026-01-13\nsession: %s\ntext: Otters nap at noon.\nquote: "velvet otters nap at noon"\n' "$SID2" >"$D/inbox/20260113-midturn.md"
+printf 'source: owner\nseat: boss\ndomain: zebra\ndate: 2026-01-13\nsession: %s\ntext: The lynx guards the gate.\nquote: "crimson lynx guards the gate"\n' "$SID2" >"$D/inbox/20260113-peer.md"
+out=$(env -i PATH="$PATH" HOME="$H" HARNESS_CONFIG="$H/.config/pc-harness/config.env" MEMORY_HOME="$D" "$MEM" check inbox 2>&1)
+is "mid-turn quote passes, peer quote is the one provenance finding" "$out" "provenance · inbox/20260113-peer.md:0 · source owner: the quote is not in the owner's turns of its transcript"
+
 [ "$bad" = 0 ] && echo "all memory-check cases pass"
 exit $bad

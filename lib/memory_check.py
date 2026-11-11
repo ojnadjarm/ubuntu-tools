@@ -175,6 +175,26 @@ def untrusted(store, before):
     return out
 
 
+def human_text(e):
+    """The text a human typed in one transcript record: a user turn or a queued mid-turn prompt of origin human
+    (a turn without an origin only outside headless runs); [] for tool output, peers, channels, meta and summaries."""
+    if e.get("isSidechain"):
+        return []
+    if e.get("type") == "user" and not any(e.get(k) for k in ("isMeta", "isCompactSummary")):
+        kind = (e.get("origin") or {}).get("kind")
+        if kind != "human" and (kind or str(e.get("entrypoint", "")).startswith("sdk")):
+            return []
+        c = (e.get("message") or {}).get("content")
+    elif e.get("type") == "attachment" and (e.get("attachment") or {}).get("type") == "queued_command" \
+            and ((e["attachment"].get("origin") or {}).get("kind") == "human"):
+        c = e["attachment"].get("prompt")
+    else:
+        return []
+    parts = [c] if isinstance(c, str) else [b.get("text", "") for b in c or [] if isinstance(b, dict) and b.get("type") == "text"]
+    parts = [re.sub(r"<system-reminder>.*?</system-reminder>", "", p, flags=re.S) for p in parts]
+    return [p for p in parts if not p.lstrip().startswith("<task-notification>")]
+
+
 def owner_words(session):
     """The owner's own turns in a transcript, normalised; None when no transcript has that session id."""
     if not SESSION.match(session or ""):
@@ -189,14 +209,8 @@ def owner_words(session):
                 e = json.loads(raw)
             except ValueError:
                 continue
-            if e.get("type") != "user" or any(e.get(k) for k in ("isMeta", "isSidechain", "isCompactSummary")):
-                continue
-            c = (e.get("message") or {}).get("content")
-            parts = [c] if isinstance(c, str) else [b.get("text", "") for b in c or [] if isinstance(b, dict) and b.get("type") == "text"]
-            for p in parts:
-                p = re.sub(r"<system-reminder>.*?</system-reminder>", "", p, flags=re.S)
-                if not p.lstrip().startswith("<task-notification>"):
-                    said.append(p)
+            if isinstance(e, dict):
+                said += human_text(e)
     return _norm(" ".join(said))
 
 

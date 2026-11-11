@@ -1,0 +1,19 @@
+{"type":"user","origin":{"kind":"human"},"entrypoint":"cli","message":{"role":"user","content":"amber kites fly at dusk"}}
+{"type":"user","origin":{"kind":"human"},"entrypoint":"cli","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}},{"type":"text","text":"copper bells ring twice"}]}}
+{"type":"queue-operation","operation":"enqueue","content":"velvet otters nap at noon"}
+{"type":"attachment","isSidechain":false,"attachment":{"type":"queued_command","prompt":"velvet otters nap at noon","commandMode":"prompt","origin":{"kind":"human"},"humanTurn":true},"rendered":[{"content":"<system-reminder>\nThe user sent a new message while you were working:\nvelvet otters nap at noon\n</system-reminder>"}],"renderedRole":"system"}
+{"type":"attachment","isSidechain":false,"attachment":{"type":"queued_command","prompt":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}},{"type":"text","text":"granite owls hum softly"}],"commandMode":"prompt","origin":{"kind":"human"},"humanTurn":true}}
+{"type":"user","entrypoint":"cli","message":{"role":"user","content":"[Request interrupted by user] cobalt herons wade slowly"}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"saffron moths circle lamps"}]},"toolUseResult":{"stdout":"saffron moths circle lamps"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"he said saffron moths circle lamps"}]}}
+{"type":"attachment","attachment":{"type":"queued_command","prompt":"[Subagent hand-back] crimson lynx guards the gate","commandMode":"prompt","origin":{"kind":"peer","from":"a1","name":"worker"}}}
+{"type":"attachment","attachment":{"type":"queued_command","prompt":"<task-notification>ochre snails race uphill</task-notification>","commandMode":"task-notification","origin":{"kind":"task-notification","producer":"session-task"}}}
+{"type":"attachment","attachment":{"type":"queued_command","prompt":"<channel source=\"eye-main\">VOICE: indigo crows count coins</channel>","commandMode":"prompt","origin":{"kind":"channel","server":"eye-main"}}}
+{"type":"queue-operation","operation":"enqueue","content":"teal badgers dig tunnels"}
+{"type":"user","origin":{"kind":"peer","from":"a2"},"message":{"role":"user","content":"olive geckos climb walls"}}
+{"type":"user","isMeta":true,"message":{"role":"user","content":[{"type":"text","text":"<system-reminder>\nmaroon foxes sing\n</system-reminder>"}]}}
+{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"hello <system-reminder>silver whales whistle</system-reminder>"}}
+{"type":"user","isCompactSummary":true,"isVisibleInTranscriptOnly":true,"message":{"role":"user","content":"Summary: the owner said ivory bison roam north"}}
+{"type":"user","entrypoint":"sdk-cli","message":{"role":"user","content":"Your brief: lemon wasps build nests"}}
+{"type":"attachment","isSidechain":true,"attachment":{"type":"queued_command","prompt":"pearl newts swim deep","origin":{"kind":"human"}}}
+{"type":"user","isSidechain":true,"origin":{"kind":"human"},"message":{"role":"user","content":"jade beetles roll dung"}}
