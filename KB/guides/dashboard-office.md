@@ -1,6 +1,6 @@
 # Dashboard office: add a team, a member, a name; the 3D Org page (`staff.json`, `/api/office`)
 
-Ticket: T1601 (01-18), T1658 · Last verified: 2026-11-11 by T1658 (`bin/tests/dashboard-office-chat.test.sh`); 2026-11-10 by T1601-16 (`staff.load()` 3 teams 12 members, live `GET /api/office`
+Ticket: T1601 (01-18), T1658, T1666 · Last verified: 2026-11-11 by T1666 (`bin/tests/dashboard-office-drag.test.sh`), T1658 (`bin/tests/dashboard-office-chat.test.sh`); 2026-11-10 by T1601-16 (`staff.load()` 3 teams 12 members, live `GET /api/office`
 4 teams incl. Unassigned 1 (`memory-keeper`), `test_office_*.js` green, `GPU=1 tools/shots.mjs` margins at 5 widths)
 
 ## When to use
@@ -31,6 +31,12 @@ Ticket: T1601 (01-18), T1658 · Last verified: 2026-11-11 by T1658 (`bin/tests/d
   takes the callbacks of whichever view shows it); its own 3 s read of `/api/chat?ch=` while open, `/api/org` every 20 s,
   `/seen` like Chat. ×, Esc, a click outside close it (camera untouched); "Open in Chat" goes to `#chat?ch=`; a modified
   click on Message still opens Chat. CSS `static/css/office-talk.css`.
+- Moving the talk panel (T1666, owner 2026-11-11: "move the chat window freely"): from 900 px its header drags it
+  (mouse, touch, pen; `static/next/js/ui/drag.js` `movable(box, {handle, when, spot})` → `{place}`: pointer capture on
+  the dialog, sets `left/top`, clamps to `documentElement.clientWidth/Height`, re-clamps on `resize`, swallows the click
+  that ends a move). `talk.js` keeps the spot in a module object, so the next panel opens there until a reload. Below
+  900 px the bottom sheet stays (it follows `visualViewport` so the keyboard never covers the composer; a free window on
+  a 400 px phone would cover the office or the composer). Links and buttons in the header never start a drag.
 - Full screen (T1658): `overlay/full.js` + `#office-full` (stage top right): `html.ofill` lays the stage over the chrome and,
   where element fullscreen exists, the page (`documentElement`) goes full screen too; iPhone Safari has none, so it only
   fills the window. Esc / the button leave; leaving the office leaves it.
@@ -59,11 +65,15 @@ python3 -m pytest tests/test_staff.py tests/test_office_api.py -q
 for t in model build fields gl screen signs gap touch keys avatar_only patch workers_drawn; do node tests/test_office_$t.js || break; done
 node tests/test_office_parity_org.js && node tests/test_office_parity_court.js && node tests/test_office_parity_roster.js
 bash ~/agents/bin/tests/dashboard-office-chat.test.sh      # talk panel + full screen, sandboxed (ONLY=desktop|full|phone|widths)
+bash ~/agents/bin/tests/dashboard-office-drag.test.sh      # talk panel drag, sandboxed (ONLY=desktop|touch|phone)
 GPU=1 node tools/shots.mjs ~/drop/T<n>/after org        # 3D shots at 400/768/1366/1920/2560 (without GPU=1: the still picture)
 node tools/office-measure.mjs --gate                     # CPU rest < 2 %, 3 working ≤ 5.7 %, hidden 0 frames; exit 3 = machine not quiet
 ```
 
 ## Pitfalls (measured)
+- Before T1666 a drag on the talk panel's header closed it: without pointer capture the click lands on the common
+  ancestor (the dialog) at a point outside its box, which the outside-click rule reads as "close". `ui/drag.js` captures
+  the pointer and eats the click that ends a move; a move clamped at the window edge leaves the pointer outside the box.
 - Element fullscreen on `.office .stage` hid the card popover: Chrome drew the stage's canvas over the later-opened
   popover (`elementFromPoint` on the card hit the canvas; the click on Message timed out). Fullscreen on `documentElement`
   plus the fill CSS keeps the card and the talk dialog on top (T1658).

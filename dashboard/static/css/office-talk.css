@@ -1,5 +1,5 @@
 /* Agents › Office talk panel (T1658): a seat's direct message in a modal dialog over the live office; from 900 px a floating panel at the
-   bottom right, below a bottom sheet (60 % of the screen, up to 90 % while the keyboard is up) that keeps to the visual viewport (--vvh, --vvt from talk.js) so the keyboard never covers the composer.
+   bottom right that its header moves (ui/drag.js sets left/top), below a bottom sheet (60 % of the screen, up to 90 % while the keyboard is up) that keeps to the visual viewport (--vvh, --vvt from talk.js) so the keyboard never covers the composer.
    Rows and composer keep chat.css and chat-compose.css; eye.css tokens only. */
 .otalk { --gap: clamp(.5rem, 1.5vw, 1.5rem); position: fixed; inset: auto var(--gap) var(--gap) auto; margin: 0; padding: 0;
   width: clamp(22rem, 32vw, 38rem); max-width: calc(100vw - 2 * var(--gap)); height: min(48rem, calc(100svh - 2 * var(--gap))); max-height: none;
@@ -20,6 +20,11 @@
 .otalk .cx { grid-area: x; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid var(--line2); background: var(--bg1); color: var(--mid); font: inherit; font-size: 1.4rem; line-height: 1; cursor: pointer; }
 .otalk .cx:hover { color: var(--g2); background: var(--w08); }
 .otalk :focus-visible { outline: 1px solid var(--g); outline-offset: 2px; }
+@media (min-width: 900px) {
+  .otalk .ohead { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+  .otalk .ohead:active { cursor: grabbing; }
+  .otalk .ohead :is(a, button) { cursor: pointer; }
+}
 @media (max-width: 899px) {
   .otalk { --vh: var(--vvh, 100svh); --sh: min(var(--vh) * .9, max(var(--vh) * .6, 30rem)); inset: auto 0; top: calc(var(--vvt, 0px) + var(--vh) - var(--sh));
     width: 100%; max-width: 100%; height: var(--sh); border-width: 1px 0 0; }

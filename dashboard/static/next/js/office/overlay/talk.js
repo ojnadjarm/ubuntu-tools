@@ -10,11 +10,14 @@ import { rows, thinking, busyLine } from "../../screens/chat-thread.js";
 import { composer, bind, forget } from "../../screens/chat-compose.js";
 import { bindActions } from "../../screens/chat-actions.js";
 import { rich } from "../../screens/chat-text.js";
+import { movable } from "../../ui/drag.js";
 
 const POLL_MS = 3000, ORG_MS = 20000;
 const LINE = { working: "working now", idle: "idle", asleep: "asleep, wakes on its name", off: "off", yours: "your session" };
+const WIDE = matchMedia("(min-width: 900px)");
 const DOTS = `<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>`;
-let el = null, ch = "", msgs = [], T = [], more = false, ready = false, err = "", O = null, oat = 0, timer = 0, busy = false, early = false, seen = 0, follow = false;
+const spot = {};
+let el = null, mover = null, ch = "", msgs = [], T = [], more = false, ready = false, err = "", O = null, oat = 0, timer = 0, busy = false, early = false, seen = 0, follow = false;
 
 for (const href of ["/static/css/chat.css", "/static/css/office-talk.css"]) if (!document.querySelector(`link[href="${href}"]`)) {
   const l = document.createElement("link");
@@ -30,7 +33,7 @@ const view = () => ({ ch, q: "", name, stateOf, roleOf, label: (c) => "# " + c }
 const other = () => ch.slice(3).split("--").find((s) => s !== "owner") || "";
 const atEnd = (box) => !box.clientHeight || box.scrollHeight - box.scrollTop - box.clientHeight < 40;
 
-/* The one dialog, made on first use: ×, a click outside it, Esc (the dialog's own cancel) and Open in Chat close it. */
+/* The one dialog, made on first use: ×, a click outside it, Esc (the dialog's own cancel) and Open in Chat close it; from 900 px its header moves it, to the spot kept for the page's life. */
 function host() {
   if (el) return el;
   el = document.createElement("dialog");
@@ -42,6 +45,7 @@ function host() {
   });
   el.addEventListener("close", stop);
   document.body.append(el);
+  mover = movable(el, { handle: ".ohead", when: () => WIDE.matches, spot });
   return el;
 }
 
@@ -140,6 +144,7 @@ export function open(c) {
   if (!d.open) d.showModal();
   if (window.visualViewport) { visualViewport.addEventListener("resize", fitKeys); visualViewport.addEventListener("scroll", fitKeys); fitKeys(); }
   paint();
+  mover.place();
   if (!matchMedia("(pointer: coarse)").matches) { const box = d.querySelector("#say"); if (box) box.focus(); }
   pull();
 }
@@ -149,7 +154,7 @@ export function close() { if (isOpen()) el.close(); }
 /* Closes the panel and removes its node: the Office screen left the page. */
 export function drop() {
   if (!el) return;
-  close(); el.remove(); el = null;
+  close(); el.remove(); el = mover = null;
 }
 
 document.addEventListener("visibilitychange", () => { if (!document.hidden && isOpen() && !timer && !busy) pull(); });
