@@ -14,7 +14,7 @@ const NOW = Date.parse("2026-11-10T15:00:00Z"), ONLY = process.env.ONLY || "";
 const JS = path.join(process.env.STATIC_ROOT || path.join(__dirname, "..", "static"), "next", "js");
 const load = (f) => import(pathToFileURL(path.join(JS, f)).href);
 const LONG = "reads every file of the office overlay and rewrites the card layout so that nothing wraps past two lines on a phone screen ".repeat(3).trim();
-const deep = (p) => "/home/someone/projects/collab/a-very-long-worktree-name-for-the-test/" + p;
+const deep = (p) => "~/projects/collab/a-very-long-worktree-name-for-the-test/" + p;
 /* The fixture made heavy: 9 sub-agents in the pool, 9 files held by one ticket with long paths, a loose claim, long reports and steps. */
 const HEAVY = JSON.parse(JSON.stringify(FIX));
 for (let i = 0; i < 9; i++) HEAVY.agents.subagents.push({ id: "a00000000000001" + i, label: "T95" + i + " heavy worker", type: "general-purpose", started: "2026-11-10T14:" + (10 + i) + ":00Z", last: NOW / 1000 - 20, state: "working", doing: LONG, report: "" });
