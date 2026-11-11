@@ -32,7 +32,7 @@ export function go(to,force){
   grid.dataset.live=D?"1":"";if(!force)board.scrollTop=0;board.classList.add("on");
   document.querySelectorAll("[data-go]").forEach(function(b){b.setAttribute("aria-current",b.dataset.go===to?"true":"false");});
   document.getElementById("crumb").textContent="0"+(ORDER.indexOf(to)+1)+" · "+to;
-  var want=O.hash(to);if(location.hash!==want)history.replaceState(null,"",want);
+  var want=O.hash(to);if(location.hash!==want)history.replaceState(history.state,"",want);
   O.enter(to,force);
 }
 export function focusKey(el){var a=["data-cd","data-tog","data-file","data-full","data-sort","data-close","id"];for(var i=0;i<a.length;i++){var v=el.getAttribute(a[i]);if(v!=null)return "["+a[i]+'="'+v.replace(/"/g,'\\"')+'"]';}return null;}

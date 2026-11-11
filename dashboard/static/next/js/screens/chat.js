@@ -25,7 +25,7 @@ const LINE = { working: "working now", idle: "idle", asleep: "asleep, wakes on i
 const ROOMS = ["harness", "org"];
 let C = null, msgs = [], ch = "", err = "", busy = false, timer = 0, O = null, oat = 0, follow = false, W = null;
 let more = false, jump = true, early = false, io = null, watched = null, T = [];
-let listing = true, pushed = false, listY = 0, fresh = 0, shown = "", ready = false;
+let listing = true, atList = false, listY = 0, fresh = 0, shown = "", ready = false;
 let q = "", hits = null, asked = "", serr = "", from = ["", true], spushed = false, deg = "", paused = false;
 const phone = matchMedia("(max-width: 899px)");
 const seen = {};
@@ -66,7 +66,7 @@ function look() {
 function seek(v) {
   if (v.trim().length < 2) { if (q) leave(); return; }
   if (v === q) return;
-  if (!q) { from = [ch, listing]; open("", false); q = v; history.pushState(null, "", hash()); spushed = true; }
+  if (!q) { from = [ch, listing]; open("", false); q = v; history.pushState(over(from[1]), "", hash()); spushed = true; }
   else { q = v; history.replaceState(null, "", hash()); }
   paint();
 }
@@ -173,17 +173,31 @@ function fit() {
 }
 
 onTalk(() => paint());
-phone.addEventListener("change", () => paint());
+phone.addEventListener("change", () => { stack(false); paint(); });
 addEventListener("resize", fit);
 /* Scrolled down to the newest line by hand: the pill goes. */
 document.addEventListener("scroll", (e) => { if (fresh && e.target.matches && e.target.matches("#grid .chat .msgs") && atEnd(e.target)) { fresh = 0; paint(); } }, true);
-/* Browser back and forward between the phone list and a conversation. */
+/* Browser back and forward between the phone list and a conversation; a link into a conversation gets the list under it. */
 addEventListener("hashchange", () => {
   if (cur !== "chat" || !location.hash.startsWith("#chat")) return;
   read(location.hash.slice(6));
-  if (listing) pushed = false;
+  stack(atList);
   if (shown !== ch + "|" + listing + "|" + q) show();
 });
+
+/* The history state of a phone view with the conversation list one entry below it. */
+const over = (list) => (list && phone.matches ? { overList: true } : null);
+const isOver = () => !!(history.state && history.state.overList);
+/* On the phone a conversation (or Recent) always sits one entry above the list, so Back shows the list and Back again leaves Chat:
+   reached from the list the entry is only marked, from anywhere else the list is put under it. */
+function stack(fromList) {
+  if (cur !== "chat" || !phone.matches || listing || q || isOver()) return;
+  const h = hash();
+  if (!fromList) { history.replaceState(null, "", "#chat"); history.pushState(over(true), "", h); }
+  else history.replaceState(over(true), "", h);
+}
+/* Entering Chat (a cold open, a reload, a link or the tab reopening the last conversation). */
+export function enter() { stack(false); }
 
 const names = () => Object.fromEntries(((O && O.seats) || []).map((s) => [s.id, s.name]));
 const nameOf = (id, N) => (id === "owner" ? "You" : N[id] || id);
@@ -278,7 +292,7 @@ export function render() {
   bindSearch(seek, () => { if (q) leave(); });
   bindActions((c, id) => { const m = (q ? hits || [] : msgs).find((x) => x.id === id && x.ch === c); return m ? { ch: m.ch, id: m.id, name: nameOf(m.from, names()), text: m.text } : null; });
   if (q && q.trim() !== asked) look();
-  shown = ch + "|" + listing + "|" + q;
+  shown = ch + "|" + listing + "|" + q; atList = listing && !q;
   const N = names(), L = listed(), rooms = byActivity(L.rooms), dms = byActivity(L.dms);
   const unread = C.filter((c) => c.unread && c.ch !== ch), n = msgs.filter((m) => m.kind !== "system").length;
   const sum = (q ? `<b>Search</b>${hits ? ", " + plural(hits.length, "result") : ""}` : `<b>${esc(label(ch, N))}</b>, ${plural(n, "message")}`) + (unread.length ? ` · <span class="gold">${unread.map((c) => `${c.unread} new in ${esc(label(c.ch, N))}`).join(", ")}</span>` : "");
@@ -293,7 +307,7 @@ export function render() {
 /* Paints the view the state names, in place when Chat is on screen (a newly opened one at its newest line), and reads it at once; back on the phone list, at the scroll he left it. */
 function show() {
   clearTimeout(timer); timer = 0;
-  if (cur === "chat" && document.querySelector("#grid > .nxs.chat")) { paint(); if (location.hash !== hash()) history.replaceState(null, "", hash()); }
+  if (cur === "chat" && document.querySelector("#grid > .nxs.chat")) { paint(); if (location.hash !== hash()) history.replaceState(history.state, "", hash()); stack(false); }
   else go("chat", true);
   fill(q);
   if (listing && phone.matches) scrollTo(0, listY);
@@ -308,7 +322,7 @@ export function click(e) {
   if (e.target.closest(".chat [data-back]")) {
     e.preventDefault();
     if (q) { leave(); return true; }
-    if (pushed) { history.back(); return true; }
+    if (isOver()) { history.back(); return true; }
     open("", true); history.replaceState(null, "", hash()); show();
     return true;
   }
@@ -318,7 +332,7 @@ export function click(e) {
   const was = q;
   if (q) { q = ""; hits = null; asked = ""; spushed = false; }
   if (a.dataset.ch === ch && !listing && !was) return true;
-  if (phone.matches && listing && a.closest(".chans")) { listY = scrollY; open(a.dataset.ch, false); history.pushState(null, "", hash()); pushed = true; }
+  if (phone.matches && listing && a.closest(".chans")) { listY = scrollY; open(a.dataset.ch, false); history.pushState(over(true), "", hash()); }
   else open(a.dataset.ch, false);
   show();
   return true;
