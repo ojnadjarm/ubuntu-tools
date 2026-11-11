@@ -139,7 +139,7 @@ if [ "${MEMORY_LIVE:-}" = 1 ]; then
 fi
 
 # 6. brief-lint: a brief naming a domains.map project folder and no Memory: line warns; rc unchanged.
-bl() { printf '# %s\nClaims on FILE-CLAIMS, time box 1 h, test changes none. Report: max 5 lines.\n%s\nCHECK: true\n' "$1" "$2" >"$WORK/$1.md"
+bl() { printf '# %s\nClaims on FILE-CLAIMS, test changes none. Report: max 5 lines.\n%s\nCHECK: true\n' "$1" "$2" >"$WORK/$1.md"
        fx "$BIN/brief-lint" "$WORK/$1.md"; }
 out=$(bl B1 'Edit ~/proj/zebra/src/a.py.'); rc=$?
 ev "brief-lint: project named, no Memory: line -> WARN, rc 0" \

@@ -61,8 +61,8 @@ Every web page, screen or component, for every agent and ticket (exception: aile
 - **Pick relay.** Read the letter back with its name ("B = Dimensioned?"). Write `PICK.md` after his yes or 60 s; collect
   a sketch conversation until he says it is final, then relay it once as a direction.
 - **Every brief:** owner quotes marked *intent* or *copy*; every budget names its source; test order is `tsc` + node
-  tests before the drop, `test:changed` after his OK; one time box per size, a check-in, not a limit (at 2× the agent reports and
-  stops; never put his time estimate in a brief, 10-26); browser line "headless or Xvfb, `--mute-audio`, never headed".
+  tests before the drop, `test:changed` after his OK; no time limit, time box or time estimate in a brief (owner
+  11-11: tokens are the only cap); browser line "headless or Xvfb, `--mute-audio`, never headed".
 - **Follow-up on the same symptom:** ask him to retest the fresh drop first. Read UX changes back as trigger → effect, in his words.
 - **Scope = the named object (T392 #5).** For a voice line, or when the work reaches past the object he named, restate the
   intent in one line before briefing; the brief lists what is out of scope.

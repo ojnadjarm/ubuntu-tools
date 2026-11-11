@@ -1,4 +1,3 @@
 - Declare files in `~/agents/FILE-CLAIMS.md` before editing.
-- Time box ~40 min.
 - Report: max 6 lines, numbers only.
 - Test changes: existing tests are frozen; a changed one needs a `Test changes` note, reviewed before done.

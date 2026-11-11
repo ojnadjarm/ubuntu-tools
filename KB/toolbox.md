@@ -226,7 +226,7 @@ read-only without `--apply`; the ledger, `pc undo` and the guard exits are in
 Briefs and tickets:
 - `harness context [--worker|--full]` — the session entry point: brief, output rules, guidelines.
 - `ticket-id next [-n N] [--reserve slug] | check T<n> | dups | release` — free ticket ids, double uses.
-- `brief-lint <brief…> [--backlog F]` — a brief needs a CHECK, claims, a time box and a report cap.
+- `brief-lint <brief…> [--backlog F]` — a brief needs a CHECK, claims, a report cap and a test-changes line; warns on a time limit.
 - `agent-verify <brief>` — runs the brief's `CHECK:` and records the verdict in `$AGENT_WORK/evidence/<ticket>/check.json`.
 - `claims add|done|list|expire` — the file-claims board `~/agents/FILE-CLAIMS.md`; read `claims list` before editing.
 - `change-class` — maps a git diff to its highest-risk change class and the checks it needs (guide `change-tiers`).

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# T381: brief-lint flags the four rules (T396: and warns on a missing decisions ledger; T401: and on /dev/zero fed to script/tmux); agent-verify writes green/red check.json into a temp AGENT_WORK only.
+# T381: brief-lint flags the required rules (T396: and warns on a missing decisions ledger; T401: and on /dev/zero fed to script/tmux); agent-verify writes green/red check.json into a temp AGENT_WORK only.
 set -uo pipefail
 BIN="$HOME/agents/bin"
 FIX="$BIN/tests/fixtures/brief-check"
@@ -7,11 +7,11 @@ WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 export AGENT_WORK="$WORK" MEMORY_HOME="$WORK/memory"
 . "$HOME/agents/bin/tests/lib/assert.sh"
 
-# 1. lint: green (rules via _common include) and red pass; bare misses all five.
+# 1. lint: green (rules via _common include) and red pass; bare misses all four.
 "$BIN/brief-lint" "$FIX/T901-green.md" "$FIX/T902-red.md" >/dev/null && ok 'lint passes complete briefs' || nok 'lint complete' 'rc != 0'
 out=$("$BIN/brief-lint" "$FIX/T903-bare.md"); rc=$?
-[ "$rc" = 1 ] && grep -q 'missing check, claims, timebox, report-cap, test-changes' <<<"$out" && ok 'lint flags 5/5 on bare brief' || nok 'lint bare' "rc=$rc $out"
-[ "$("$BIN/brief-lint" --summary "$FIX"/T90*.md)" = 'pass 2/3 · check 2/3 · claims 2/3 · timebox 2/3 · report-cap 2/3 · test-changes 2/3' ] \
+[ "$rc" = 1 ] && grep -q 'missing check, claims, report-cap, test-changes$' <<<"$out" && ok 'lint flags 4/4 on bare brief' || nok 'lint bare' "rc=$rc $out"
+[ "$("$BIN/brief-lint" --summary "$FIX"/T90*.md)" = 'pass 2/3 · check 2/3 · claims 2/3 · report-cap 2/3 · test-changes 2/3' ] \
   && ok 'summary counts' || nok 'summary' "$("$BIN/brief-lint" --summary "$FIX"/T90*.md)"
 
 # 2. verify green: rc 0, backticks stripped, json ok=true under the temp AGENT_WORK.
@@ -58,8 +58,16 @@ out=$("$BIN/brief-lint" --tests "$WORK/tests"); rc=$?
   && ok 'lint --tests warns once, rc 0' || nok 'devzero tests' "rc=$rc $out"
 out=$("$BIN/brief-lint" --tests); [ -z "$out" ] && ok 'bin/tests has no /dev/zero feed' || nok 'bin/tests devzero' "$out"
 
+# 6a. time limits (T1631, owner 2026-11-11: no time limits in briefs): each one warns, rc stays 0; a negated mention is quiet.
+out=$("$BIN/brief-lint" "$FIX/T913-timelimit.md"); rc=$?
+[ "$rc" = 0 ] && [ "$(grep -c '^WARN .*T913-timelimit.md: sets a time limit' <<<"$out")" = 3 ] \
+  && grep -q '"Time box"' <<<"$out" && grep -q '"You have 1 hour"' <<<"$out" && grep -q '"At 45 min, report what you have and stop"' <<<"$out" \
+  && ok 'lint warns on 3 time limits, rc 0' || nok 'time limit warn' "rc=$rc $out"
+out=$("$BIN/brief-lint" "$FIX/T914-notimelimit.md"); rc=$?
+[ "$rc" = 0 ] && ! grep -q WARN <<<"$out" && ok 'lint quiet on "no time limit, time box"' || nok 'time limit quiet' "rc=$rc $out"
+
 # 6b. change tiers (T1399): a CHECK at the full tier (perf gate, whole run.sh) without `Class: engine` warns, rc stays 0.
-tb() { printf '# %s\nFILE-CLAIMS, time box 1 h, test changes noted. Report: max 5 lines.\n%sCHECK: %s\n' "$1" "$2" "$3" >"$WORK/$1.md"; "$BIN/brief-lint" "$WORK/$1.md"; }
+tb() { printf '# %s\nFILE-CLAIMS, test changes noted. Report: max 5 lines.\n%sCHECK: %s\n' "$1" "$2" "$3" >"$WORK/$1.md"; "$BIN/brief-lint" "$WORK/$1.md"; }
 out=$(tb T1 '' 'cd ~/m/client && npm run test:perf'); rc=$?
 [ "$rc" = 0 ] && grep -q "^WARN .*T1.md: CHECK runs test:perf but the brief has no \`Class: engine\` line" <<<"$out" && ok 'tier: test:perf without Class warns' || nok 'tier perf' "rc=$rc $out"
 out=$(tb T2 '' 'bash ~/agents/bin/tests/run.sh -j 8'); grep -q 'CHECK runs tests/run.sh without --only' <<<"$out" && ok 'tier: full run.sh warns' || nok 'tier run.sh' "$out"

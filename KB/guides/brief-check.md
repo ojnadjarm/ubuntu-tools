@@ -1,6 +1,6 @@
-# Brief check: lint a brief for CHECK/claims/time box/report cap, run its CHECK before handback
+# Brief check: lint a brief for CHECK/claims/report cap/test changes, run its CHECK before handback
 
-Ticket: T381, T419, T488, T633, T913 · Last verified: 2026-10-20 (T947: `brief-lint --help`, `unniced_heavy` code read, `--backlog` on 2 live backlogs); before: 2026-10-20 by `bin/tests/brief-check.test.sh` (13/13), `bin/tests/agent-verify.test.sh` (37/37), `adapters/claude/hooks/subagent-stop-gate.test.py` (13/13) and a lint of the 50 newest briefs
+Ticket: T381, T419, T488, T633, T913, T1631 · Last verified: 2026-11-11 (T1631: `bin/tests/brief-check.test.sh` all green, 60 newest briefs linted); before: 2026-10-20 (T947: `brief-lint --help`, `unniced_heavy` code read, `--backlog` on 2 live backlogs); before: 2026-10-20 by `bin/tests/brief-check.test.sh` (13/13), `bin/tests/agent-verify.test.sh` (37/37), `adapters/claude/hooks/subagent-stop-gate.test.py` (13/13) and a lint of the 50 newest briefs
 
 ## When to use
 Writing a brief (orchestrator): `brief-lint` it before spawning. Finishing a ticket (agent): `agent-verify` the brief
@@ -20,7 +20,7 @@ before handback. Not a test runner: the CHECK line names the real test or probe.
 
 ## Exact commands
 ```bash
-brief-lint ~/agent-work/briefs/T381-*.md          # ok / FAIL: missing check, claims, timebox, report-cap
+brief-lint ~/agent-work/briefs/T381-*.md          # ok / FAIL: missing check, claims, report-cap, test-changes
 brief-lint --summary ~/agent-work/briefs/T3*.md   # pass N/M plus per-rule counts
 brief-lint --backlog BACKLOG.md [--min 20] [--top 8]   # planner backlog: one line per problem, `backlog: N tickets, P problems`, rc 1 on any (T913)
 agent-verify ~/agent-work/briefs/T381-*.md        # green rc=0 → ~/agent-work/evidence/T381/check.json; exit 0/1, 2 = no CHECK
@@ -46,6 +46,7 @@ Brief line shape: `CHECK: <command>` at line start (optionally `- ` and backtick
   matches RE; `drift{file,regex,line}`) or `real` (red when quiet). Gate timed out and no drift: no verdict, printed `busy`.
 - T913 `--backlog FILE [--min N] [--top K]` (defaults 20, 8): per `## [k.] T<n>` section it needs `- Size S|M`, `auto-ok|owner-go`, `- Files:`, `- Success:` and exactly one `CHECK:`; ids unique and consecutive; ≥ N CHECKs; the first K tickets' Files pairwise disjoint (brace lists expanded, `(new)`/`(after …)` stripped, a dir covers its children); a heavy command (`run.sh`, `blender`, `cpp-ci`, `mv-render`, `godot`, `build.sh`, `ffmpeg`, `make.sh`, any `--measure`) in command position needs `nice -n 19` or `ci-window &&` (a grep naming make.sh is not a call). Live 2026-10-20 (T947): T893 and T939 backlogs, 20 tickets, 0 problems each.
 - T396: a brief naming ailearning/portfolio/vass/fleet without its ledger prints `WARN`; rc unchanged. See `decisions-ledger.md`.
+- T1631 (owner 2026-11-11: tokens are the only cap): a brief needs no time box; one that sets a time limit (`time box`, `you have N h`, `at N min … stop`) prints `WARN <file>: sets a time limit "…"`, rc unchanged; a negated mention (`no time limit, time box`) is quiet. 2026-11-11: 40/60 newest briefs still set one.
 - T401: `/dev/zero` fed into `script`/`tmux` prints `WARN <file>:<line>`; `brief-lint --tests` scans `bin/tests/*.sh`. See `runaway-guard.md`.
 - T419: the gate blocks once only: on the retry `stop_hook_active` is true, so a CHECK the agent cannot make green
   still hands back (report it red). Gate has its own SubagentStop group: inside the orbit-hook group a re-run of
