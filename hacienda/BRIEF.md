@@ -6,7 +6,7 @@ Find it with `title contains '934' and title contains 'Hacienda'` (a folder in M
 - `01 FACTURAS EMITIDAS`: invoices he issues, `FACTURA <CLIENT> <MES>.pdf` (MES = month of the invoice date, Spanish, capitals).
 - `02 FACTURAS RECIBIDAS`: invoices he receives, `<Vendor> <Mes>.pdf` (`Anthropic Octubre.pdf`, `Arm Octubre.pdf`).
 - `03 BANCOS`: `Listado de movimientos <Mes>.xlsx` and `.pdf`.
-- `04 SEGURIDAD_SOCIAL`: `Cuota Autonomo <Mes>.pdf`.
+- `04 SEGURIDAD_SOCIAL`: `Cuota Autonomo <Mes>.pdf`, `SEGURO MEDICO <MES>.pdf` (Sanitas bank debit).
 - `CONTABILIZADO` subfolders are the accountant's (files already booked). Read them to know what exists; never write, move or rename there.
 
 A document's quarter and month come from its own date (invoice date, charge date), not from today.
@@ -25,7 +25,7 @@ A document's quarter and month come from its own date (invoice date, charge date
 Upload with `create_file`: `parentId`, `title`, `contentMimeType`, `disableConversionToGoogleType: true`, `base64Content: sha256:<sha256sum>:<absolute path>`.
 
 ## Missing papers
-Once the previous month has ended, it needs: Moodle invoice in `01`; Anthropic and Arm in `02`; movements xlsx and pdf in `03`; Cuota Autonomo in `04`. What is missing and only he can provide (bank PDF, bank receipts): one `notify-owner` listing them (≤ 200 chars), at most once every 7 days (`state/last-nag`), never before the 2nd of the month.
+Once the previous month has ended, it needs: Moodle invoice in `01`; Anthropic and Arm in `02`; movements xlsx and pdf in `03`; Cuota Autonomo and Seguro Medico in `04`. What is missing and only he can provide (bank PDF, bank receipts): one `notify-owner` listing them (≤ 200 chars), at most once every 7 days (`state/last-nag`), never before the 2nd of the month.
 
 ## Never
 - Trash, delete, move, rename, share or overwrite anything in Drive; never upload a duplicate.
