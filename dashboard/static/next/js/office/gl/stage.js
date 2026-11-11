@@ -33,6 +33,14 @@ export function stage(canvas, { still = false } = {}) {
   }
   S.invalidate = () => { if (document.hidden) return; if (timer) { clearTimeout(timer); timer = 0; } if (!raf) raf = requestAnimationFrame(frame); };
   S.ticker = (fn) => { ticker = fn; };
+  /* Draws the scene now and returns the canvas's RGBA pixels (null without a context); for tests. */
+  S.grab = () => {
+    if (!r) return null;
+    r.render(scene, cam);
+    const g = r.getContext(), px = new Uint8Array(g.drawingBufferWidth * g.drawingBufferHeight * 4);
+    g.readPixels(0, 0, g.drawingBufferWidth, g.drawingBufferHeight, g.RGBA, g.UNSIGNED_BYTE, px);
+    return px;
+  };
   S.project = (p) => { v.set(p[0], p[1], p[2]).project(cam); return { x: (v.x * 0.5 + 0.5) * W, y: (0.5 - v.y * 0.5) * H, ok: v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1 }; };
 
   /* Puts the camera at the home azimuth and elevation, as close as keeps the box lo..hi whole on screen. */

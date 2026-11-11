@@ -75,6 +75,8 @@ export function creatures(scene) {
         c.U.uLight.value.set(...(a.light || [1, 1, 1]).map((v) => Math.min(1.15, v))); c.U.uInk.value = 0.018 * a.scale;
       }
     },
+    /* The meshes of creature id (body and hull), [] when it is not in the scene. */
+    parts: (id) => (all.has(id) ? all.get(id).meshes : []),
     /* Advances every creature that acts or still blends; true while one of them needs another frame. */
     step(t, dt) {
       let busy = false;

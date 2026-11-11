@@ -48,17 +48,23 @@ function trace(ctx, R, w, d) {
 function rug(ctx, R, tint, h) {
   ctx.B.model(h % 2 ? "rugRounded" : "rugRectangle", { z: 0.45, s: [1.25, 1, 1.7], tint: { carpet: tint, carpetDarker: mul(tint, 0.7), carpetWhite: mul(CREAM, 0.8), carpetBlue: mul(tint, 1.2) } });
 }
-/* The desks along both side walls: one station per person, decor (or a bare desk) where nobody sits; tags adds a small label per person. */
-function places(ctx, R, list, tint, w, d, slots, tags, bare) {
+/* The desks along both side walls: one station per person, decor where nobody sits (a bare desk when bare, or when clear and a worker sits behind it on that wall, so decor never hides one), people beyond the desks standing in the aisle; tags adds a small label per person. */
+function places(ctx, R, list, tint, w, d, slots, tags, bare, clear) {
   const B = ctx.B, h = hash(R.id);
   for (let k = 0; k < slots; k++) {
     const side = k % 2 ? 1 : -1, wk = list[k];
     B.push({ x: side * (w / 2 - 0.3), z: -d / 2 + 1.15 + (k >> 1) * 0.82, r: -side * Math.PI / 2 });
     if (wk) { const p = station(ctx, wk, mul(tint, 0.85), false); if (tags) ctx.labels.push({ id: wk.id, pos: [p.x, p.y + 0.6, p.z], near: 78 }); }
-    else if (bare) B.model("desk", { z: 0.37, r: Math.PI });
+    else if (bare || (clear && list[k % 2])) B.model("desk", { z: 0.37, r: Math.PI });
     else DECOR[(h + k * 3) % DECOR.length](ctx, R.busy > 0);
     B.pop();
   }
+  list.slice(slots).forEach((wk, i) => {
+    B.push({ x: ((i % 3) - 1) * 0.45, z: -0.45 + Math.floor(i / 3) * 0.45 });
+    const p = B.at(0, 0, 0);
+    ctx.actors.push({ id: wk.id, role: wk.role, pose: wk.pose, x: p.x, y: p.y, z: p.z, yaw: p.r, scale: SCALE });
+    B.pop();
+  });
 }
 /* The furnished size of a room, its desk count, its tint and its hash, from its cell of the plan. */
 function frame(ctx, R, k) {
@@ -66,14 +72,14 @@ function frame(ctx, R, k) {
   return { w: c.w, d: c.d, slots: c.slots, h, tint: mul(ctx.th.tints[Math.max(0, R.team) % ctx.th.tints.length], k(h)) };
 }
 
-/* A seat's room: the seat at the lead desk under the room's name board, its workers at the side desks. */
+/* A seat's room: the seat at the lead desk under the room's name board, its workers at the side desks with nothing tall before them. */
 export function seatRoom(ctx, R) {
   const { B } = ctx, { w, d, slots, h, tint } = frame(ctx, R, (h) => 0.86 + (h % 5) * 0.07), lead = R.people[0];
   trace(ctx, R, w, d); rug(ctx, R, tint, h);
   B.push({ z: -d / 2 + 0.5 });
   const p = station(ctx, lead, tint, true);
   B.pop();
-  places(ctx, R, R.people.slice(1), tint, w, d, slots, false);
+  places(ctx, R, R.people.slice(1), tint, w, d, slots, false, false, true);
   B.push({ z: d / 2 - 0.75 }); LOUNGE[h % LOUNGE.length](B, mul(tint, 0.9)); B.pop();
   const lit = R.awake || ctx.night;
   B.model("lampRoundFloor", { x: -0.8, z: -d / 2 + 0.6, glow: { lamp: lit ? glow(ctx, [1, 0.82, 0.5, 1]) : 0 } });

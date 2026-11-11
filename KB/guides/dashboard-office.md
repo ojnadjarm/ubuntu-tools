@@ -44,7 +44,7 @@ python3 -c 'import sys; sys.path.insert(0, "lib"); import staff; d = staff.load(
 curl -s http://127.0.0.1:19998/api/office | python3 -c 'import sys,json; d=json.load(sys.stdin); print([(t["id"], len(t["members"])) for t in d["staff"]], d.get("error"))'
 cd dashboard
 python3 -m pytest tests/test_staff.py tests/test_office_api.py -q
-for t in model build fields gl screen signs gap touch keys avatar_only patch; do node tests/test_office_$t.js || break; done
+for t in model build fields gl screen signs gap touch keys avatar_only patch workers_drawn; do node tests/test_office_$t.js || break; done
 node tests/test_office_parity_org.js && node tests/test_office_parity_court.js && node tests/test_office_parity_roster.js
 GPU=1 node tools/shots.mjs ~/drop/T<n>/after org        # 3D shots at 400/768/1366/1920/2560 (without GPU=1: the still picture)
 node tools/office-measure.mjs --gate                     # CPU rest < 2 %, 3 working ≤ 5.7 %, hidden 0 frames; exit 3 = machine not quiet
@@ -56,6 +56,12 @@ node tools/office-measure.mjs --gate                     # CPU rest < 2 %, 3 wor
   the worker sat in the Desk pool (T1627). `office.crews()` moves any session started by `<seat folder>-T<n>` under its
   seat (Worker, named by ticket) and drops its sub-agent row; the model makes a seat with only working workers
   `available` ("Free to talk · N workers running", part "Workers running"). Only the Office: /api/agents and chat untouched.
+- A worker in the model is not a worker he sees (T1630): Aplicación Coche's T1636 sat at the back-left desk behind a
+  1.3 m decor rack in the next desk place (16-18 % of its pixels on screen at 1366/1920). Seat rooms now put a bare desk
+  in every place in front of a worker on that wall, and people beyond the 6 desks stand in the aisle; card count = the
+  room's crew (`raw.crew.n`, idle workers too). `tests/test_office_workers_drawn.js` checks pixels (`__office.seen(id)`:
+  seen vs alone, ≥ 50 %) at 1920/1366/400, not only the model. Front desks first was tried and failed: the next row's
+  1.85 m name board hid row-1 front workers (32-42 %).
 - Owner rejections (2026-11-10): name tags flying over the scene, room names on the floor, and boards beside the scene
   were all removed (17, 17c); the name sits on a rack-and-screen board inside each room. Do not bring any of them back.
 - Rest CPU 4.8 % (gate < 2) came from the list's Familiar CSS loops (`familiars.css`, 6.3 of 7.8 % at rest), not

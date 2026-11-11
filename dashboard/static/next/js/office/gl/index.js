@@ -134,6 +134,17 @@ export function createRenderer(canvas, opts) {
       lit(a ? [{ x: a.x, y: a.y + 0.3 * a.scale / 0.36, z: a.z, col, r: 0.7, halo: 0.9 }] : b ? [{ x: b.pos[0], y: b.pos[1], z: b.pos[2], col, r: b.r, halo: 0.6 }] : []);
       S.invalidate();
     },
+    /* Pixels of creature id that the scene leaves on screen at the current view (seen) and that it covers with nothing else drawn (alone); for tests. */
+    seen(id) {
+      const own = fam.parts(id), kids = S.scene.children, was = kids.map((k) => k.visible), grab = S.grab();
+      if (!own.length || !grab) return { seen: 0, alone: 0 };
+      const diff = (a, b) => { let n = 0; for (let i = 0; i < a.length; i += 4) if (a[i] !== b[i] || a[i + 1] !== b[i + 1] || a[i + 2] !== b[i + 2]) n++; return n; };
+      own.forEach((m) => (m.visible = false)); const without = S.grab();
+      kids.forEach((k) => (k.visible = false)); const empty = S.grab();
+      own.forEach((m) => (m.visible = true)); const alone = S.grab();
+      kids.forEach((k, i) => (k.visible = was[i])); S.invalidate();
+      return { seen: diff(grab, without), alone: diff(alone, empty) };
+    },
     reset: S.reset,
     zoom: S.zoom,
     /* rebuilt, relit and ms count the last apply; pending is its jobs still queued. */

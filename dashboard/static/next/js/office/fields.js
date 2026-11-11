@@ -32,14 +32,14 @@ function ceo(p, t) {
     ...(f ? [["Failed", f.ticket + " · " + ago(f.last, t) + " ago", "bad"]] : []), ...(s && "pid" in s ? [["Session", s.name || "pid " + s.pid]] : []), ...where(s, t)], actions: message(p) };
 }
 
-/* A free seat's working workers, one row each: ticket, since when, how long; none while the seat itself works. */
+/* A free seat's live workers, one row each: ticket, since when, how long; none while the seat itself works. */
 const crew = (p, t) => p.state !== "available" ? [] : [part("Workers running", "no workers running", p.raw.crew.list.map((w) => [w.name, "since " + at(w.since, t) + " · " + ago(w.since, t)]))];
 
 /* A product owner or manager seat: area, about, role and wake lines, workers, its session, its runner's 4 rows, a message button; free to talk while only its workers run. */
 function seat(p, t) {
   const r = p.raw, c = r.crew || { n: 0, on: 0 };
   const run = r.runner ? last4(r.runner, t, r.runner.health === "bad") : [];
-  const b = base(p, t, r.area), state = p.state === "available" ? { ...b.state, text: "Free to talk · " + plural(c.on, "worker") + " running" } : b.state;
+  const b = base(p, t, r.area), state = p.state === "available" ? { ...b.state, text: "Free to talk · " + plural(c.n, "worker") + " running" } : b.state;
   return { ...b, state, lines: lines(r), rows: [["Workers", c.n ? plural(c.n, "worker") + ", " + c.on + " working" : "no workers"], ...where(r.session, t), ...run], parts: crew(p, t), actions: message(p) };
 }
 
