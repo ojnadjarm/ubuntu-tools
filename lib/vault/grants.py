@@ -10,6 +10,7 @@ except ImportError:
 
 TICKET = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 DEFAULT_TTL = 3600
+LEASED = {"proxy", "exchange"}
 RULES = {
     "image-ask": lambda req: bool(GRANT and GRANT.search(" ".join(str(req.get("asked") or "").split()))),
 }
@@ -21,7 +22,7 @@ INSIDE = ("asked from inside an agent ({unit}): a lease comes only from a launch
 
 def refusal(entry, req):
     """Why entry gets no lease for req, or None."""
-    if "proxy" not in entry.modes:
+    if not LEASED & set(entry.modes):
         return "no lease mode for this secret"
     if entry.cls == "critical":
         return CRITICAL

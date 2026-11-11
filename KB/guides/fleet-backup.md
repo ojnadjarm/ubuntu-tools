@@ -1,6 +1,6 @@
 # Back up the laptop to the USB stick, restore it, turn it off (fleet-backup)
 
-Ticket: T1580, T1597, T1603, T1623 · Last verified: 2026-11-11 by bin/tests/fleet-backup.test.sh (36/36) and a stick-only restore
+Ticket: T1580, T1597, T1603, T1623, T1634-V9 · Last verified: 2026-11-11 by bin/tests/fleet-backup.test.sh (36/36) and a stick-only restore
 
 ## When to use
 Restore a file or the whole fleet state from the USB stick, check the nightly backup, change what it keeps.
@@ -53,10 +53,18 @@ restic -r restic --password-file restic-key.txt restore latest --target ~/restor
 pc units disable fleet-backup.timer --user --apply       # rollback: the pc undo id it prints
 pc units enable fleet-backup.timer --user --now --apply
 ```
-The password lives in `~/agents/secrets/fleet-backup.pass` (600, never printed) and on the stick as
-`fleet-backup/restic-key.txt` (T1623); `run` re-creates the stick copy and README when missing.
+The password (T1634-V9, unit mode): sealed in the vault as `fleet-backup-pass` (critical, never leased) and on the stick
+as `fleet-backup/restic-key.txt` (T1623). The timer runs `fleet-backup nightly`, which starts the system unit
+`fleet-backup-run.service` (installed by `sudo -n ~/agents/vault/install-backup --apply`; runs as the owner,
+`LoadCredentialEncrypted=fleet.fleet-backup-pass`) and logs one vault use per run; without that unit it runs in place.
+Password order: `FLEET_BACKUP_PASSWORD_FILE`, the unit's credential, the old `~/agents/secrets/fleet-backup.pass`
+while it exists, else the stick's key once the repo exists. `run` re-creates the stick copy and README when missing;
+it never makes a new password for an existing repo.
 
 ## Pitfalls (measured)
+- Unit mode under the owner's user (T1634-V9): V1 measured that a same-user unit's credential is readable by that user
+  during the run (`/run/credentials/<unit>/`); the stick's key is world-readable on vfat anyway (owner's choice), so an
+  own-user unit (which could not read the home) buys nothing here. The vault removes the laptop file, not the stick copy.
 - Stick absent = `skip: stick absent` in run.log, exit 0: the unit never fails for it; `backup_age` grows instead.
 - A session started before `FLEET_BACKUP_LABEL` was added still had `HARNESS_ENV_LOADED=1`: the first real run
   skipped as "absent" (label ''). fleet-backup now always sources env.sh.

@@ -9,7 +9,9 @@ MOUNT="${FLEET_BACKUP_MOUNT:-}"
 BUDGET_MB="${FLEET_BACKUP_BUDGET_MB:-18432}"
 MIN_FREE_MB="${FLEET_BACKUP_MIN_FREE_MB:-512}"
 KEEP="${FLEET_BACKUP_KEEP---keep-daily 7 --keep-weekly 4}"  # empty = no forget/prune
-export RESTIC_PASSWORD_FILE="${FLEET_BACKUP_PASSWORD_FILE:-$HARNESS_HOME/secrets/fleet-backup.pass}"
+OLD_PASS="${FLEET_BACKUP_PASSWORD_FILE:-$HARNESS_HOME/secrets/fleet-backup.pass}"
+VAULT_PASS="${CREDENTIALS_DIRECTORY:+$CREDENTIALS_DIRECTORY/fleet.fleet-backup-pass}"  # unit mode (T1634-V9)
+SYSUNIT="${FLEET_BACKUP_UNIT:-fleet-backup-run.service}"
 STATE="$HARNESS_HOME/state/fleet-backup"
 CLAUDE="$HARNESS_CONTEXT_DIR"
 TAG=nightly
@@ -26,7 +28,9 @@ never() {
 
 usage() {
   cat <<EOF
-usage: fleet-backup run       back up tier 1 + tier 2 (newest first, within the budget), then forget/prune
+usage: fleet-backup nightly   the timer's verb: start the system unit $SYSUNIT (the vault hands it the password)
+                              when installed, else run
+       fleet-backup run       back up tier 1 + tier 2 (newest first, within the budget), then forget/prune
        fleet-backup --check   restic, password file (600), stick mounted and writable, repo readable, key on the
                               stick, 0 never-back-up paths in any snapshot; exit 1 if not
        fleet-backup purge [--apply]   remove never-back-up paths from every snapshot (plan only without --apply)
@@ -34,7 +38,8 @@ usage: fleet-backup run       back up tier 1 + tier 2 (newest first, within the 
        fleet-backup restore <snapshot|latest> <path> <dest>   restore one absolute path under <dest>
 Stick: FLEET_BACKUP_MOUNT or FLEET_BACKUP_LABEL (config.env); repo <stick>/fleet-backup/restic, its password
 <stick>/fleet-backup/restic-key.txt (owner 2026-11-11: the stick opens without the laptop). Never backed up: never().
-Absent stick: run logs "skip" and exits 0. Budget ${BUDGET_MB} MB; keep: $KEEP. Log: $STATE/run.log.
+Password: FLEET_BACKUP_PASSWORD_FILE, else the vault's credential (unit mode), else the old file
+$HARNESS_HOME/secrets/fleet-backup.pass, else the stick's key once its repo exists. Absent stick: run logs "skip" and exits 0. Budget ${BUDGET_MB} MB; keep: $KEEP. Log: $STATE/run.log.
 EOF
 }
 
@@ -46,6 +51,21 @@ locate() {
   [ -n "$m" ] || { [ -n "$LABEL" ] && m=$(findmnt -n -o TARGET --source "LABEL=$LABEL" 2>/dev/null | head -1); }
   [ -n "$m" ] && mountpoint -q "$m" 2>/dev/null && [ -w "$m" ] && printf '%s\n' "$m"
 }
+
+# password [<mount>] — export RESTIC_PASSWORD_FILE: an explicit FLEET_BACKUP_PASSWORD_FILE, else the vault's credential
+# in unit mode, else the old file when it exists, else the stick's key once its repo exists, else the old path.
+password() {
+  local k="${1:+$1/fleet-backup/restic-key.txt}"
+  if [ -n "${FLEET_BACKUP_PASSWORD_FILE:-}" ]; then RESTIC_PASSWORD_FILE=$OLD_PASS
+  elif [ -n "$VAULT_PASS" ] && [ -s "$VAULT_PASS" ]; then RESTIC_PASSWORD_FILE=$VAULT_PASS
+  elif [ -s "$OLD_PASS" ]; then RESTIC_PASSWORD_FILE=$OLD_PASS
+  elif [ -n "$k" ] && [ -s "$k" ] && [ -e "$1/fleet-backup/restic/config" ]; then RESTIC_PASSWORD_FILE=$k
+  else RESTIC_PASSWORD_FILE=$OLD_PASS; fi
+  export RESTIC_PASSWORD_FILE
+}
+
+# same_key <a> <b> — true when both files hold the same password (a trailing newline does not count).
+same_key() { [ -r "$2" ] && cmp -s <(tr -d '\r\n' <"$1") <(tr -d '\r\n' <"$2"); }
 
 # Protected paths, words and env-dir globs, read once. Paths are expanded lexically: `protected entries path`
 # runs readlink -m, which stats the protected paths themselves.
@@ -194,7 +214,7 @@ excludes() {
 # stick_key <mount> — the password and a README beside the repo, so the stick alone opens the backup.
 stick_key() {
   local d="$1/fleet-backup"
-  cmp -s "$RESTIC_PASSWORD_FILE" "$d/restic-key.txt" || { cp "$RESTIC_PASSWORD_FILE" "$d/restic-key.txt" && log "key: wrote $d/restic-key.txt"; }
+  same_key "$RESTIC_PASSWORD_FILE" "$d/restic-key.txt" || { cp "$RESTIC_PASSWORD_FILE" "$d/restic-key.txt" && log "key: wrote $d/restic-key.txt"; }
   [ -s "$d/README.txt" ] || cat >"$d/README.txt" <<EOF
 fleet-backup: restic backup of the laptop's fleet data (finance, invoices, memory, papers); never keys or secrets.
 restic-key.txt is its password: whoever holds this stick can read the backup (owner's choice, 2026-11-11).
@@ -218,8 +238,9 @@ cmd_run() {
   m=$(locate) || { log "skip: stick absent (label '${LABEL}' mount '${MOUNT}')"; return 0; }
   free=$(df -Pm "$m" | awk 'NR==2{print $4}')
   [ "$free" -ge "$MIN_FREE_MB" ] || { log "FAIL: stick full ($free MB free < $MIN_FREE_MB)"; return 1; }
-  repo="$m/fleet-backup/restic"; export RESTIC_REPOSITORY="$repo"
+  repo="$m/fleet-backup/restic"; export RESTIC_REPOSITORY="$repo"; password "$m"
   if [ ! -s "$RESTIC_PASSWORD_FILE" ]; then
+    [ ! -e "$repo/config" ] || { log "FAIL: no password for the existing repo (vault credential, old file and stick key all absent)"; return 1; }
     (umask 077; mkdir -p "${RESTIC_PASSWORD_FILE%/*}"; head -c 32 /dev/urandom | base64 >"$RESTIC_PASSWORD_FILE.tmp" &&
       mv "$RESTIC_PASSWORD_FILE.tmp" "$RESTIC_PASSWORD_FILE")
     log "password: generated $RESTIC_PASSWORD_FILE (600)"
@@ -248,19 +269,25 @@ cmd_run() {
     >"$STATE/last-ok.tmp" && mv "$STATE/last-ok.tmp" "$STATE/last-ok"
   cp "$W/skip" "$STATE/last-skipped.txt"
   log "ok: snapshot ${snap:0:8} rc=$rc tier1=$(mb "$t1")MB tier2=$(mb "$t2")MB skipped=$(mb "$sk")MB/$skn repo=$(mb "$repob")MB budget=${BUDGET_MB}MB"
+  if [ "$RESTIC_PASSWORD_FILE" = "$VAULT_PASS" ]; then
+    "$BIN/secret" used fleet-backup-pass --target "$SYSUNIT" --ticket nightly >/dev/null 2>&1 || log "warn: vault use not logged"
+  fi
   [ "$repob" -le $(( BUDGET_MB * 1048576 )) ] || { log "FAIL: repo over budget"; return 1; }
 }
 
 cmd_check() {
   local m bad=0 mode h
   command -v restic >/dev/null || { echo "FAIL restic not installed"; bad=1; }
-  if [ -s "$RESTIC_PASSWORD_FILE" ]; then
+  m=$(locate); password "$m"
+  if [ ! -s "$RESTIC_PASSWORD_FILE" ]; then echo "FAIL no password file (first run creates it)"; bad=1
+  elif [ "$RESTIC_PASSWORD_FILE" = "$OLD_PASS" ]; then
     mode=$(stat -c %a "$RESTIC_PASSWORD_FILE"); [ "$mode" = 600 ] || { echo "FAIL password file mode $mode (want 600)"; bad=1; }
-  else echo "FAIL no password file (first run creates it)"; bad=1; fi
-  if m=$(locate); then
+  elif [ "$RESTIC_PASSWORD_FILE" = "$VAULT_PASS" ]; then echo "ok password: the vault's credential (unit mode)"
+  else echo "ok password: the stick's key (the nightly unit gets the vault's copy)"; fi
+  if [ -n "$m" ]; then
     export RESTIC_REPOSITORY="$m/fleet-backup/restic"
     restic cat config >/dev/null 2>&1 && echo "ok repo $RESTIC_REPOSITORY" || { echo "FAIL repo unreadable: $RESTIC_REPOSITORY"; bad=1; }
-    cmp -s "$RESTIC_PASSWORD_FILE" "$m/fleet-backup/restic-key.txt" && [ -s "$m/fleet-backup/README.txt" ] &&
+    same_key "$RESTIC_PASSWORD_FILE" "$m/fleet-backup/restic-key.txt" && [ -s "$m/fleet-backup/README.txt" ] &&
       echo "ok key and README on the stick" || { echo "FAIL key or README missing on the stick (next run writes them)"; bad=1; }
     if h=$(hits); then
       [ -z "$h" ] && echo "ok 0 never-back-up paths in the snapshots" ||
@@ -305,12 +332,15 @@ cmd_purge() {
   restic check -q >/dev/null 2>"$W/err" && echo "ok pruned, restic check clean" || { echo "FAIL restic check after prune: $(tail -1 "$W/err")"; return 1; }
 }
 
-repo_or_die() { local m; m=$(locate) || { echo "fleet-backup: stick absent" >&2; exit 1; }; export RESTIC_REPOSITORY="$m/fleet-backup/restic"; }
+repo_or_die() { local m; m=$(locate) || { echo "fleet-backup: stick absent" >&2; exit 1; }; export RESTIC_REPOSITORY="$m/fleet-backup/restic"; password "$m"; }
 
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 never >"$W/never"
 case "${1:-}" in
   run) cmd_run ;;
+  nightly)
+    if [ -e "/etc/systemd/system/$SYSUNIT" ]; then /usr/bin/sudo -n /usr/bin/systemctl start --wait "$SYSUNIT"
+    else cmd_run; fi ;;
   --check) cmd_check ;;
   list) repo_or_die; restic snapshots --compact ;;
   purge) cmd_purge "${2:-}" ;;

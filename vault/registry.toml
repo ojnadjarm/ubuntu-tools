@@ -56,7 +56,10 @@ reissue = "https://developer.spotify.com/dashboard"
 
 [secret.salesforce]
 class = "free"
-used_in = "Salesforce sandbox (test org): work sessions by hand"
+used_in = "Salesforce sandbox (test org): a work session asks POST /session and gets a session token, never the password"
+modes = ["exchange"]
+hosts = ["login.salesforce.com"]
+paths = ["/services/Soap/u/59.0"]
 legacy = "salesforce.env"
 
 [secret.fleet-backup-pass]

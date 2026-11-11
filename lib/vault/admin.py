@@ -1,4 +1,4 @@
-"""The broker's admin operations (list, put, remove, log, grant, revoke): registry + sealer + audit, never a value out."""
+"""The broker's admin operations (list, put, remove, log, grant, revoke, used): registry + sealer + audit, never a value out."""
 import base64
 import binascii
 import json
@@ -41,7 +41,7 @@ class Admin:
         """Dispatch one request dict from peer uid (and pid, for grants); returns the reply dict."""
         op = req.get("op")
         fn = {"list": self.op_list, "put": self.op_put, "remove": self.op_remove, "log": self.op_log,
-              "grant": self.op_grant, "revoke": self.op_revoke}.get(op)
+              "grant": self.op_grant, "revoke": self.op_revoke, "used": self.op_used}.get(op)
         if fn is None:
             return {"ok": False, "error": "unknown op"}
         with self._lock:
@@ -126,6 +126,18 @@ class Admin:
         if not isinstance(n, int):
             return {"ok": False, "error": "n must be a number"}
         return {"ok": True, "events": self.audit.tail(n, req.get("name"))}
+
+    def op_used(self, req, uid):
+        """Log one use of a unit-mode secret that systemd handed to its consumer's unit (target: that unit)."""
+        name, target = req.get("name"), str(req.get("target") or "")[:80]
+        e = self.entries.get(name)
+        if e is None or "unit" not in e.modes:
+            return {"ok": False, "error": f"{name} is not a unit-mode secret"}
+        if not target:
+            return {"ok": False, "error": "used needs --target <unit>"}
+        self.audit.log({"event": "use", "secret": name, "ticket": req.get("ticket"), "agent": req.get("agent"),
+                        "result": "ok", "uid": uid, "target": target})
+        return {"ok": True, "name": name}
 
     def op_grant(self, req, uid, pid=None):
         """A lease on one secret for one ticket, under its class and rules; never for a caller inside an agent."""

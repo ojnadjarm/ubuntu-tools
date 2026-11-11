@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# vault/install-backup — install fleet-backup's system unit (T1634-V9): the vault's sealed password reaches the run by
+# LoadCredentialEncrypted; the user timer's `fleet-backup nightly` starts it.
+set -euo pipefail
+SRC=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+R=${FLEET_VAULT_ROOT:-}   # fixture root prefix (tests): file steps only, no systemd
+UNIT=fleet-backup-run.service
+
+usage() {
+  cat <<USAGE
+usage: sudo -n $0 [--apply]            install or update /etc/systemd/system/$UNIT (dry run without --apply)
+       sudo -n $0 --remove [--apply]   remove it; fleet-backup nightly then runs in the user unit again
+The unit runs as the user who ran sudo (FLEET_BACKUP_USER overrides); seal the password first:
+secret add fleet-backup-pass < <password file>
+USAGE
+}
+
+apply=0; remove=0
+for a in "$@"; do
+  case "$a" in
+    --apply) apply=1 ;; --remove) remove=1 ;; -h|--help) usage; exit 0 ;; *) usage >&2; exit 2 ;;
+  esac
+done
+[ -n "$R" ] || [ "$(id -u)" = 0 ] || { echo "vault/install-backup: run as root (sudo -n $0 $*)" >&2; exit 1; }
+run() { if [ "$apply" = 1 ]; then "$@"; else echo "would: $*"; fi; }
+sysd() { if [ -n "$R" ]; then echo "skip (fixture root): $*"; else run "$@"; fi; }
+
+dest="$R/etc/systemd/system/$UNIT"
+if [ "$remove" = 1 ]; then
+  run rm -f "$dest"; sysd systemctl daemon-reload; exit 0
+fi
+user=${FLEET_BACKUP_USER:-${SUDO_USER:-}}
+[ -n "$user" ] || { echo "vault/install-backup: no user (run through sudo, or set FLEET_BACKUP_USER)" >&2; exit 1; }
+IFS=: read -r _ _ uid _ _ home _ < <(getent passwd "$user") || { echo "vault/install-backup: unknown user $user" >&2; exit 1; }
+if [ "$apply" = 1 ]; then
+  mkdir -p "${dest%/*}"
+  sed -e "s|@USER@|$user|g" -e "s|@HOME@|$home|g" -e "s|@UID@|$uid|g" "$SRC/vault/$UNIT" >"$dest.tmp"
+  chmod 644 "$dest.tmp"; mv "$dest.tmp" "$dest"
+else echo "would: write $dest (User=$user, uid $uid)"; fi
+sysd systemctl daemon-reload
+echo "vault/install-backup: done$([ "$apply" = 1 ] || echo ' (dry run)')"

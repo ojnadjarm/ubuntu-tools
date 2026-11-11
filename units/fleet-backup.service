@@ -1,5 +1,5 @@
 [Unit]
-Description=Nightly encrypted restic backup of laptop-only data to the USB stick (fleet-backup run; absent stick = logged skip; T1580)
+Description=Nightly encrypted restic backup of laptop-only data to the USB stick (fleet-backup nightly: the system unit fleet-backup-run.service gets the password from the vault, T1634-V9; absent stick = logged skip; T1580)
 
 [Service]
 Type=oneshot
@@ -9,4 +9,4 @@ Nice=19
 CPUSchedulingPolicy=idle
 IOSchedulingClass=idle
 Environment=PATH=%h/agents/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=%h/agents/bin/fleet-backup run
+ExecStart=%h/agents/bin/fleet-backup nightly
