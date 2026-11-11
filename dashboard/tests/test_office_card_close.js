@@ -1,5 +1,5 @@
 // Office card lifetime and fit (T1601-23, owner 2026-11-11: "it took me to the chat now I can not close the modal ... I cannot scroll down the modal"):
-// the card closes and its node goes on every way out of the Office (Message, a tab, back/forward, a hash change); ×, Esc and a click outside close it
+// the card closes and its node goes on every way out of the Office (Message then the talk panel's Open in Chat (T1658), a tab, back/forward, a hash change); ×, Esc and a click outside close it
 // after every open path; with Details open, every card kind at 1366x768, 400x800 and 1366x480 stays inside the window, scrolls inside (wheel, keyboard), keeps × in view
 // and the page behind does not scroll.
 // Run: node tests/test_office_card_close.js   (fixture API only, no GPU; ONLY=leave|close|1366|400|1366x480)
@@ -43,6 +43,7 @@ async function leave(b, base) {
   const p = await office(b, base, 1366, 768);
   assert.ok(await openFromList(p, "orchestrator"), "the CEO card opens");
   await p.click("#office-card a.btn");
+  await p.click("dialog.otalk[open] [data-full]");
   await screen(p, "chat");
   assert.strictEqual(await cards(p), 0, "Message DarkSaddler: Chat shows and no card node remains");
   await p.evaluate(() => document.querySelector('a[data-nav="org"]').click());

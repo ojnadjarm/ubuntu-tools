@@ -1,28 +1,27 @@
 /* Chat: Recent (every channel, newest last), a channel's stream or a search over every channel (newest 50, older on scroll-up), the channels and direct messages, a composer with attachments, who is in it, who is thinking and today's wakes, from GET /api/chat; below 900 px a messenger: the conversation list, then one conversation full screen. */
-import { esc, p2 } from "/static/js/core/fmt.js";
+import { esc } from "/static/js/core/fmt.js";
 import { getJSON, postJSON } from "/static/js/core/api.js";
 import { cur, go } from "/static/js/core/router.js";
 import { familiar } from "../familiars/alive.js";
-import { heard, talking, watch as onTalk } from "../familiars/talk.js";
+import { heard, watch as onTalk } from "../familiars/talk.js";
 import { dust } from "../shapes.js";
 import { fitEye } from "../gl/cam.js";
 import { sync } from "../ui/sync.js";
 import { plural } from "../summary.js";
 import { seatState, dmOf } from "./org.js";
 import { composer, bind, forget } from "./chat-compose.js";
-import { attachments } from "./chat-files.js";
 import { store } from "../store.js";
 import { note, seed, lastIn, byActivity, peek, when } from "./chat-list.js";
 import { box, bindSearch, mark, words, fill, focusBox } from "./chat-search.js";
-import { actions, grouped, opened, bindActions } from "./chat-actions.js";
+import { bindActions } from "./chat-actions.js";
+import { rows, thinking, busyLine } from "./chat-thread.js";
 import { keep, take } from "./chat-cache.js";
 
 export const own = true;
-const POLL_MS = 3000, ORG_MS = 20000, QUOTE = 44;
+const POLL_MS = 3000, ORG_MS = 20000;
 const DESC = { harness: "Product owners ask how the machine works. The orchestrator answers.", org: "The whole org: the orchestrator and every product owner." };
 const PILL = { working: "running", idle: "idle", asleep: "off", off: "off", yours: "his" };
 const LINE = { working: "working now", idle: "idle", asleep: "asleep, wakes on its name", off: "off", yours: "your session" };
-const TAG = { ask: `<span class="ctag">question</span>`, answer: `<span class="ctag ans">answer</span>` };
 const ROOMS = ["harness", "org"];
 let C = null, msgs = [], ch = "", err = "", busy = false, timer = 0, O = null, oat = 0, follow = false, W = null;
 let more = false, jump = true, early = false, io = null, watched = null, T = [];
@@ -211,72 +210,31 @@ function stateOf(id) {
   return seat ? seatState(seat, O.sessions || []) : "";
 }
 
-const time = (m) => { const d = new Date(m.ts); return p2(d.getHours()) + ":" + p2(d.getMinutes()); };
-/* The <time> of m: its hours and minutes, the full local date and time as its title. */
-const stamp = (m, cls = "") => `<time${cls ? ` class="${cls}"` : ""} datetime="${esc(m.ts)}" title="${esc(new Date(m.ts).toLocaleString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }))}">${time(m)}</time>`;
-function day(m) {
-  const d = new Date(m.ts), now = new Date(), y = new Date(now - 864e5);
-  if (d.toDateString() === now.toDateString()) return "Today";
-  if (d.toDateString() === y.toDateString()) return "Yesterday";
-  return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
-}
 /* Message text is data: escaped, only `code` spans become markup. */
 const text = (t) => esc(t).replace(/`([^`\n]+)`/g, "<code>$1</code>");
 /* Message text to HTML: text() until chat-text.js's rich loads (absent: text() stays). */
 let rich = text;
 import("./chat-text.js").then((m) => { rich = m.rich; paint(); }, () => {});
-const clip = (t) => (t.length > QUOTE ? t.slice(0, QUOTE).trimEnd() + "…" : t);
+/* The open view as chat-thread.js draws it. */
+const view = (N) => ({ ch, q, name: (id) => nameOf(id, N), stateOf, roleOf, label: (c) => label(c, N) });
 
-/* One row: a group's first row carries the Familiar and header (talking when mid is being said), a grouped row a gutter time; both the actions. */
-function msg(m, byId, N, fmt = rich, grp = false, mid = m.id) {
-  if (m.kind === "system") return `<li class="csys">${fmt(m.text)}</li>`;
-  const him = m.from === "owner", r = m.re != null ? byId[m.re] : null;
-  const li = `<li class="msg${him ? " him" : ""}${grp ? " grp" : ""}${opened(m) ? " open" : ""}" data-mch="${esc(m.ch)}" data-mid="${esc(String(m.id))}">`;
-  const body = `${m.text ? `<div class="tx">${fmt(m.text)}</div>` : ""}${attachments(m.files)}`, acts = actions(m, !!ch && !q);
-  if (grp) return `${li}${stamp(m, "gt")}<div>${body}</div>${acts}</li>`;
-  const av = him ? `<i class="dia"></i>` : familiar(m.from, stateOf(m.from), roleOf(m.from), mid);
-  const re = m.re == null ? "" : `<p class="re">${r ? esc(nameOf(r.from, N) + " " + time(r) + ": " + clip(r.text)) : "a reply to an earlier message"}</p>`;
-  const where = ch ? "" : `<a class="chtag" href="#chat?ch=${esc(m.ch)}" data-ch="${esc(m.ch)}">${esc(label(m.ch, N))}</a>`;
-  return `${li}<span class="av" aria-hidden="true">${av}</span><div><p class="who"><b>${esc(nameOf(m.from, N))}</b>${where}${TAG[m.kind] || ""}${stamp(m)}</p>${re}${body}</div>${acts}</li>`;
-}
-/* "<seat> is thinking" (or "woken, starting") for an agent woken from channel c and still running. */
-const busyLine = (t, N) => esc(nameOf(t.seat, N)) + (t.state === "thinking" ? " is thinking" : " woken, starting");
-function thinking(N) {
-  return T.filter((t) => !ch || t.ch === ch).map((t) => {
-    const where = ch ? "" : `<a class="chtag" href="#chat?ch=${esc(t.ch)}" data-ch="${esc(t.ch)}">${esc(label(t.ch, N))}</a>`;
-    return `<li class="thinking"><span class="av" aria-hidden="true">${familiar(t.seat, "working", roleOf(t.seat))}</span><p><b>${busyLine(t, N)}</b><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>${where}</p></li>`;
-  }).join("");
-}
-/* Rows of list with a day line before each new day, one sender's run grouped under its first row; fmt turns text to HTML. */
-function rows(list, N, fmt) {
-  const byId = Object.fromEntries(list.map((m) => [m.id, m])), g = list.map((m, i) => grouped(list[i - 1], m));
-  let last = "", out = "";
-  list.forEach((m, i) => {
-    const d = day(m);
-    if (d !== last) { out += `<li class="cday">${esc(d)}</li>`; last = d; }
-    let mid = m.id;
-    for (let j = i + 1; !g[i] && j < list.length && g[j]; j++) if (talking(m.from, list[j].id)) mid = list[j].id;
-    out += msg(m, byId, N, fmt, g[i], mid);
-  });
-  return out;
-}
 /* The search view's rows: Recent's rows with each word marked, or why there are none. */
 function found(N) {
   if (serr) return `<li class="csys">Search failed: ${esc(serr)}</li>`;
   if (!hits) return `<li class="csys">Searching…</li>`;
   if (!hits.length) return `<li class="csys">No message has ${esc(q.trim())}.</li>`;
   const ws = words(q);
-  return rows(hits, N, (t) => mark(rich(t), ws));
+  return rows(hits, view(N), (t) => mark(rich(t), ws));
 }
 function stream(N) {
-  const out = rows(msgs, N, rich);
+  const out = rows(msgs, view(N), rich);
   return ((more ? `<li class="older"><button type="button" class="btn" data-older>Older messages</button></li>` : "") + out ||
-    `<li class="csys">${ready ? `No messages ${ch ? "in this channel" : "anywhere"} yet.` : "reading…"}</li>`) + thinking(N);
+    `<li class="csys">${ready ? `No messages ${ch ? "in this channel" : "anywhere"} yet.` : "reading…"}</li>`) + thinking(T, view(N));
 }
 
 function chanLink(c, N) {
   const who = c.ch.startsWith("dm-") ? pair(c.ch).find((s) => s !== "owner") || "" : "", st = who ? stateOf(who) : "";
-  const think = T.filter((t) => t.ch === c.ch).map((t) => `<span class="think" title="${busyLine(t, N)}"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></span>`).join("");
+  const think = T.filter((t) => t.ch === c.ch).map((t) => `<span class="think" title="${busyLine(t, view(N))}"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></span>`).join("");
   const tail = c.unread ? `<span class="unread" title="${plural(c.unread, "unread message")}">${c.unread}</span>` : st && !think ? `<span class="pill ${PILL[st] || "idle"}">${esc(st)}</span>` : "";
   const m = lastIn(c.ch), dm = c.ch.startsWith("dm-"), glyph = who ? "" : `<span class="glyph" aria-hidden="true">${c.ch ? "#" : "◆"}</span>`;
   const pv = `<span class="pv">${m ? esc(peek(m, (id) => nameOf(id, N), dm)) : !c.ch ? "Every channel, newest first" : C.some((x) => x.ch === c.ch) ? "" : "No messages yet"}</span>${m ? `<time class="tm" datetime="${esc(m.ts)}">${esc(when(m))}</time>` : ""}`;
@@ -309,7 +267,7 @@ function head(N) {
   const area = who && (((O && O.seats) || []).find((s) => s.id === who) || {}).area;
   const desc = dm ? "Direct messages between " + pair(ch).map((s) => nameOf(s, N)).join(" and ") + "." + (area ? " " + nameOf(who, N) + " works on " + area + "." : "") : DESC[ch] || (N[ch] ? N[ch] + "'s channel." : "");
   const busyNow = T.filter((t) => t.ch === ch), av = who ? familiar(who, st, roleOf(who)) : `<span class="glyph" aria-hidden="true">#</span>`;
-  const line = busyNow.length ? busyNow.map((t) => busyLine(t, N)).join(", ") + `<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>` : esc(who ? LINE[st] || "" : desc);
+  const line = busyNow.length ? busyNow.map((t) => busyLine(t, view(N))).join(", ") + `<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>` : esc(who ? LINE[st] || "" : desc);
   return `<header>${back}<span class="hav" aria-hidden="true">${av}</span><h2>${esc(label(ch, N))}</h2>${desc ? `<p class="desc">${esc(desc)}</p>` : ""}<p class="st">${line}</p></header>`;
 }
 

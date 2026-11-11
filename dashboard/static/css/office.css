@@ -16,14 +16,14 @@
 .ocard .idle i { background: var(--mid); }
 .ocard .error i { background: var(--gold); box-shadow: 0 0 .7em var(--gold); }
 .office .hud { position: absolute; right: .7rem; bottom: .7rem; display: flex; gap: .3rem; z-index: 3; }
-.office .hud button { display: inline-flex; align-items: center; justify-content: center; min-width: 2.5rem; min-height: 2.5rem; padding: .3rem .9rem; border: 1px solid var(--line2); background: color-mix(in srgb, var(--bg1) 82%, transparent); color: var(--mid); font: inherit; font-size: max(11px, .8rem); letter-spacing: .14em; text-transform: uppercase; white-space: nowrap; cursor: pointer; }
-.office .hud button:hover { color: var(--g2); background: var(--w08); }
+.office .hud button, .office .ofs button { display: inline-flex; align-items: center; justify-content: center; min-width: 2.5rem; min-height: 2.5rem; padding: .3rem .9rem; border: 1px solid var(--line2); background: color-mix(in srgb, var(--bg1) 82%, transparent); color: var(--mid); font: inherit; font-size: max(11px, .8rem); letter-spacing: .14em; text-transform: uppercase; white-space: nowrap; cursor: pointer; }
+.office .hud button:hover, .office .ofs button:hover { color: var(--g2); background: var(--w08); }
 .office .hint, .office .still { position: absolute; left: 1rem; bottom: .9rem; margin: 0; max-width: calc(100% - 17rem); color: var(--mute); font-size: max(11px, .75rem); letter-spacing: .08em; pointer-events: none; }
-.office .still, .office .stage[data-still="1"] .hint, .office .stage[data-still="1"] .hud { display: none; }
+.office .still, .office .stage[data-still="1"] .hint, .office .stage[data-still="1"] .hud, .office .stage[data-still="1"] .ofs { display: none; }
 .office .stage[data-still="1"] .still { display: block; max-width: calc(100% - 2rem); color: var(--gold); text-shadow: 0 0 2px var(--bg), 0 0 10px var(--bg); }
 .office .who { display: inline-flex; align-items: center; min-width: 32px; min-height: 32px; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .office .who:hover, .office .who:hover b { color: var(--g2); }
-.office .who:focus-visible, .office .hud button:focus-visible, .ocard :focus-visible { outline: 1px solid var(--g); outline-offset: 2px; }
+.office .who:focus-visible, .office .hud button:focus-visible, .office .ofs button:focus-visible, .ocard :focus-visible { outline: 1px solid var(--g); outline-offset: 2px; }
 .office .crew li, .office .folded li { display: block; padding: 0; }
 .office .crew .who, .office .folded .who, .office .mem .who { display: grid; grid-template-columns: 1.7rem minmax(0, 1fr) auto; gap: .5rem; align-items: center; width: 100%; }
 .office .teams { display: grid; gap: 1rem 1.6rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); list-style: none; margin: 0; padding: 0; }
@@ -75,8 +75,15 @@
 .ocard .cdet[open] > summary::before { content: "▾"; }
 .ocard .cdet > summary:hover { color: var(--txt); }
 @media (max-width: 899px), (pointer: coarse) {
-  .office .hud button, .office .who, .ocard .chip, .ocard .btn { min-width: 44px; min-height: 44px; }
+  .office .hud button, .office .ofs button, .office .who, .ocard .chip, .ocard .btn { min-width: 44px; min-height: 44px; }
 }
 @media (max-width: 700px) { .office .stage { height: min(70svh, 125vw); } .office .hint { display: none; } }
 @media (max-width: 600px) { .ocard { left: 8px; right: 8px; bottom: 8px; top: auto; width: auto; max-height: 70svh; } .ocard .cfig { flex-basis: 4rem; } .ocard p, .ocard dl { font-size: max(var(--fs-min), 1.08rem); } }
 .office .crew b, .office .folded b { font-size: max(11px, .82rem); }
+.office .ofs { position: absolute; right: .7rem; top: .7rem; z-index: 3; }
+/* Full screen (T1658): html.ofill lays the stage over the dashboard chrome (the page is the fullscreen element where one exists). */
+html.ofill, html.ofill body { overflow: hidden; }
+html.ofill #board { z-index: 50; }
+html.ofill .office .stage { position: fixed; inset: 0; height: auto; border: 0; }
+html.ofill .office .ofs { top: max(.7rem, env(safe-area-inset-top)); }
+html.ofill .office .hud { bottom: max(.7rem, env(safe-area-inset-bottom)); }

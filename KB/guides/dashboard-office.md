@@ -1,6 +1,6 @@
 # Dashboard office: add a team, a member, a name; the 3D Org page (`staff.json`, `/api/office`)
 
-Ticket: T1601 (01-18) · Last verified: 2026-11-10 by T1601-16 (`staff.load()` 3 teams 12 members, live `GET /api/office`
+Ticket: T1601 (01-18), T1658 · Last verified: 2026-11-11 by T1658 (`bin/tests/dashboard-office-chat.test.sh`); 2026-11-10 by T1601-16 (`staff.load()` 3 teams 12 members, live `GET /api/office`
 4 teams incl. Unassigned 1 (`memory-keeper`), `test_office_*.js` green, `GPU=1 tools/shots.mjs` margins at 5 widths)
 
 ## When to use
@@ -24,6 +24,18 @@ Ticket: T1601 (01-18) · Last verified: 2026-11-10 by T1601-16 (`staff.load()` 3
   tailnet only). Client (`static/next/js/office/`): pure core under node (`model.js` build + keyed `diff`, `layout.js`
   bay grid, one `GAP` 1.4 m, `fields.js` cards, `time.js`, `build/*` chunks), WebGL only in `gl/*` (one context, draw on
   demand, 0 frames hidden), HTML in `overlay/{list,card}.js`, composition root `screens/org.js`.
+- Talk panel (T1658, owner 2026-11-11: talk to an agent without leaving the office): a card's "Message <name>" or the list's
+  message button opens `overlay/talk.js`, a modal `<dialog class="otalk">` over the live office (floating panel bottom right
+  from 900 px, bottom sheet below that sizes to `visualViewport` so the keyboard never covers the composer). It reuses
+  Chat's own rows (`screens/chat-thread.js`, extracted from chat.js) and composer (`chat-compose.js`, whose `bind()` now
+  takes the callbacks of whichever view shows it); its own 3 s read of `/api/chat?ch=` while open, `/api/org` every 20 s,
+  `/seen` like Chat. ×, Esc, a click outside close it (camera untouched); "Open in Chat" goes to `#chat?ch=`; a modified
+  click on Message still opens Chat. CSS `static/css/office-talk.css`.
+- Full screen (T1658): `overlay/full.js` + `#office-full` (stage top right): `html.ofill` lays the stage over the chrome and,
+  where element fullscreen exists, the page (`documentElement`) goes full screen too; iPhone Safari has none, so it only
+  fills the window. Esc / the button leave; leaving the office leaves it.
+- Unread mark in the 3D office: left out (T1658). The data is cheap (`/api/chat` `channels[].unread` per `dmOf(id)`), but a
+  mark over a creature needs a per-creature lamp or halo in `model.js` + `gl/` (Room.key, diff, rebuild), not a few lines.
 
 `GET /api/office` (tailnet only, 403 from the LAN):
 ```
@@ -46,11 +58,17 @@ cd dashboard
 python3 -m pytest tests/test_staff.py tests/test_office_api.py -q
 for t in model build fields gl screen signs gap touch keys avatar_only patch workers_drawn; do node tests/test_office_$t.js || break; done
 node tests/test_office_parity_org.js && node tests/test_office_parity_court.js && node tests/test_office_parity_roster.js
+bash ~/agents/bin/tests/dashboard-office-chat.test.sh      # talk panel + full screen, sandboxed (ONLY=desktop|full|phone|widths)
 GPU=1 node tools/shots.mjs ~/drop/T<n>/after org        # 3D shots at 400/768/1366/1920/2560 (without GPU=1: the still picture)
 node tools/office-measure.mjs --gate                     # CPU rest < 2 %, 3 working ≤ 5.7 %, hidden 0 frames; exit 3 = machine not quiet
 ```
 
 ## Pitfalls (measured)
+- Element fullscreen on `.office .stage` hid the card popover: Chrome drew the stage's canvas over the later-opened
+  popover (`elementFromPoint` on the card hit the canvas; the click on Message timed out). Fullscreen on `documentElement`
+  plus the fill CSS keeps the card and the talk dialog on top (T1658).
+- The office reads `/api/office` every 4.5 s only while `/api/agents` shows someone working; with the default empty
+  fixture the read is every 30 s, so a "keeps updating" test must serve working agents (T1658).
 - A po-work worker (`po-work-<p>-T<n>`, session `agent-po-<p>-T<n>`, cwd = the PO folder) was placed on the seat by
   `lib/sessions.py` (exact folder) and listed by `agents.job_rows` as a pool sub-agent: the manager read "Now working" and
   the worker sat in the Desk pool (T1627). `office.crews()` moves any session started by `<seat folder>-T<n>` under its

@@ -15,6 +15,7 @@ import { plan as planOf } from "../office/layout.js";
 import { until } from "../office/time.js";
 import { list } from "../office/overlay/list.js";
 import * as card from "../office/overlay/card.js";
+import * as full from "../office/overlay/full.js";
 
 export { seatState, titled, dmOf } from "../seats.js";
 export const own = true, keep = true;
@@ -22,7 +23,7 @@ const STALE_MS = 20000, FAST_MS = 4500, DRAG_PX = 6;
 const NOTE = "Still picture: this browser has no graphics acceleration. The list below is live.";
 const grid = document.getElementById("grid"), canvas = document.createElement("canvas");
 canvas.setAttribute("aria-hidden", "true");
-let P = null, M = null, plan = null, applied = null, R = null, starting = false, at = 0, busy = false, err = "", down = null, over = null;
+let talk = null, P = null, M = null, plan = null, applied = null, R = null, starting = false, at = 0, busy = false, err = "", down = null, over = null;
 
 for (const href of ["/static/css/org.css", "/static/css/office.css"]) if (!document.querySelector(`link[href="${href}"]`)) {
   const l = document.createElement("link");
@@ -31,8 +32,14 @@ for (const href of ["/static/css/org.css", "/static/css/office.css"]) if (!docum
 }
 
 const root = () => grid.querySelector(":scope > .nxs.office");
-/* The card lives with the screen: once the office leaves the grid (Message, a tab, back or forward), the card and its node go too. */
-new MutationObserver(() => { if (!root()) card.drop(); }).observe(grid, { childList: true });
+/* The card, the talk panel and full screen live with the screen: once the office leaves the grid (Open in Chat, a tab, back or forward), they go too. */
+new MutationObserver(() => { if (!root()) { card.drop(); if (talk) talk.drop(); full.leave(); } }).observe(grid, { childList: true });
+
+/* Opens the talk panel on channel ch over the office (the module loads on first use). */
+function talkTo(ch) {
+  card.close();
+  import("../office/overlay/talk.js").then((t) => { talk = t; if (root()) t.open(ch); });
+}
 
 /* Builds the model and its plan from the last read: the CEO's lamp from the store, the seats that talk now. */
 function model() {
@@ -130,7 +137,7 @@ export function render() {
   queueMicrotask(mount);
   return `<div class="nxs org office"><section class="band" aria-label="Office summary"><div class="perch" id="perch" aria-hidden="true"></div><div class="bt">${line()}</div></section>` +
     `<section class="stage" aria-label="The office"><div class="hud"><button type="button" id="office-zin" aria-label="Zoom in">+</button><button type="button" id="office-zout" aria-label="Zoom out">−</button><button type="button" id="office-reset">Reset view</button></div>` +
-    `<p class="hint">Drag to turn · wheel or pinch to zoom · tap a creature or a room's sign</p><p class="still">${NOTE}</p></section>` +
+    `<div class="ofs">${full.button()}</div><p class="hint">Drag to turn · wheel or pinch to zoom · tap a creature or a room's sign</p><p class="still">${NOTE}</p></section>` +
     `<div class="olist">${list(M)}</div></div>`;
 }
 
@@ -140,8 +147,16 @@ export function tick() {
   pull(M && (M.line.working || M.panels.running.length) ? FAST_MS : STALE_MS);
 }
 
-/* A list button or a chip opens its card, the card's × closes it; the stage buttons move the camera. */
+/* A list button or a chip opens its card, the card's × closes it; the stage buttons move the camera; Full screen toggles it;
+   a Message link on a card or in the list opens the talk panel (a modified click still opens Chat). */
 export function click(e) {
+  const m = e.target.closest && e.target.closest('#office-card a.btn[href^="#chat?ch="], .office .olist a.msg[href^="#chat?ch="]');
+  if (m && !e.metaKey && !e.ctrlKey && !e.shiftKey && e.button === 0) {
+    e.preventDefault();
+    talkTo(new URLSearchParams(m.getAttribute("href").slice(6)).get("ch"));
+    return true;
+  }
+  if (e.target.closest && e.target.closest("#office-full")) { full.toggle(); return true; }
   const t = e.target.closest && e.target.closest("[data-who], [data-close], #office-zin, #office-zout, #office-reset");
   if (!t) return false;
   if ("close" in t.dataset) card.close();
@@ -150,10 +165,13 @@ export function click(e) {
   return true;
 }
 
-/* Escape closes an open card instead of leaving the screen. */
+/* Escape closes the talk panel, else an open card, else leaves fill-the-window mode, instead of leaving the screen. */
 export function key(e) {
-  if (e.key !== "Escape" || !card.isOpen()) return false;
-  card.close();
+  if (e.key !== "Escape") return false;
+  if (talk && talk.isOpen()) talk.close();
+  else if (card.isOpen()) card.close();
+  else if (full.isFull()) full.leave();
+  else return false;
   return true;
 }
 

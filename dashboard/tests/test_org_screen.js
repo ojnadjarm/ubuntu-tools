@@ -1,4 +1,4 @@
-// Org screen (T1515-P21): a message button per seat opens its direct message in Chat, workers hang under the seat that
+// Org screen (T1515-P21): a message button per seat opens its direct message (T1658: in the office talk panel, then Chat through Open in Chat), workers hang under the seat that
 // started them (3 shown, the rest folded behind a "hidden N" line), managers wear their own gear, no sideways scroll.
 // P35: a card shows avatar, name, state dot and a message icon; the state and description lines live in the office card the avatar opens (T1601-07).
 // V3: every creature is a moving Familiar; a new message makes its sender talk for about 2 s, the owner never.
@@ -135,6 +135,7 @@ const srv = serveStatic((u, res) => {
     await p.emulateMedia({ reducedMotion: "no-preference" });
 
     await p.click('.org .seat[data-seat="mooblox"] a.msg');
+    await p.click("dialog.otalk[open] [data-full]");
     await p.waitForSelector(".chat .stream header h2", { timeout: 15000 });
     assert.strictEqual(await p.evaluate(() => location.hash), "#chat?ch=dm-mooblox--owner", "the button lands on the direct message");
     assert.strictEqual(await p.textContent(".chat .stream header h2"), "Mooblox", "Chat opens that direct message");

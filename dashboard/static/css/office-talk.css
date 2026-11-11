@@ -1,0 +1,29 @@
+/* Agents › Office talk panel (T1658): a seat's direct message in a modal dialog over the live office; from 900 px a floating panel at the
+   bottom right, below a bottom sheet (60 % of the screen, up to 90 % while the keyboard is up) that keeps to the visual viewport (--vvh, --vvt from talk.js) so the keyboard never covers the composer.
+   Rows and composer keep chat.css and chat-compose.css; eye.css tokens only. */
+.otalk { --gap: clamp(.5rem, 1.5vw, 1.5rem); position: fixed; inset: auto var(--gap) var(--gap) auto; margin: 0; padding: 0;
+  width: clamp(22rem, 32vw, 38rem); max-width: calc(100vw - 2 * var(--gap)); height: min(48rem, calc(100svh - 2 * var(--gap))); max-height: none;
+  overflow: hidden; border: 1px solid var(--line3); background: var(--bg); color: var(--txt); box-shadow: 0 0 40px -10px var(--g), 0 12px 40px var(--bg); }
+.otalk[open] { display: flex; }
+.otalk::backdrop { background: color-mix(in srgb, var(--bg) 22%, transparent); }
+.otalk .chat { display: flex; flex: 1; min-width: 0; min-height: 0; height: auto; gap: 0; }
+.otalk .stream { flex: 1; min-width: 0; min-height: 0; height: auto; border: 0; }
+.otalk .msgs { flex: 1; min-height: 0; overflow-y: auto; align-content: start; scrollbar-width: thin; }
+.otalk .ohead { display: grid; grid-template-columns: 2.6rem minmax(0, 1fr) auto auto; grid-template-areas: "av h2 full x" "av st full x"; align-items: center;
+  gap: .1rem .7rem; padding: .45rem .45rem .45rem .9rem; border-bottom: 1px solid var(--line); background: var(--bg1); }
+.otalk .ofig { grid-area: av; }
+.otalk .ofig svg { width: 100%; height: auto; display: block; }
+.otalk h2 { grid-area: h2; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--hi); font-size: 1.05rem; font-weight: 600; letter-spacing: 0; text-transform: none; }
+.otalk h2 span { margin-left: .6rem; color: var(--mute); font-size: max(11px, .72rem); font-weight: 400; letter-spacing: .16em; text-transform: uppercase; }
+.otalk .st { grid-area: st; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--mid); font-size: max(11px, .8rem); }
+.otalk .ofull { grid-area: full; display: inline-flex; align-items: center; min-height: 44px; padding: 0 .8rem; font-size: max(11px, .74rem); white-space: nowrap; text-decoration: none; }
+.otalk .cx { grid-area: x; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid var(--line2); background: var(--bg1); color: var(--mid); font: inherit; font-size: 1.4rem; line-height: 1; cursor: pointer; }
+.otalk .cx:hover { color: var(--g2); background: var(--w08); }
+.otalk :focus-visible { outline: 1px solid var(--g); outline-offset: 2px; }
+@media (max-width: 899px) {
+  .otalk { --vh: var(--vvh, 100svh); --sh: min(var(--vh) * .9, max(var(--vh) * .6, 30rem)); inset: auto 0; top: calc(var(--vvt, 0px) + var(--vh) - var(--sh));
+    width: 100%; max-width: 100%; height: var(--sh); border-width: 1px 0 0; }
+  .otalk .ohead { padding-left: var(--gut); }
+  .otalk .msgs { padding-inline: var(--gut); }
+}
+@media (max-width: 600px) { .otalk h2 span { display: none; } }

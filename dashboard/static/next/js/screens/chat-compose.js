@@ -118,31 +118,33 @@ function send(f, done, name) {
     .finally(() => { sending = false; f.querySelector("button[type=submit]").disabled = false; done(); });
 }
 
-let bound = false;
+let bound = false, done = null, name = null, redraw = null;
 /* Once: the @ list, send on submit or Enter, chips from the picker, a paste into the box or a drop on the stream, × removes one;
-   chat:reply for the open channel shows the quote, its ×, Esc in an empty box or a channel change drops it. */
-export function bind(done, name, redraw) {
+   chat:reply for the open channel shows the quote, its ×, Esc in an empty box or a channel change drops it.
+   Every call hands over the callbacks of the view that now shows the composer (the Chat screen or the office's talk panel). */
+export function bind(done0, name0, redraw0) {
+  done = done0; name = name0; redraw = redraw0;
   if (bound) return;
   bound = true;
   bindMention();
-  load(redraw);
-  document.addEventListener("input", (e) => { if (e.target.matches(".chat .compose textarea")) { load(redraw); typing(e.target); } });
+  load(() => redraw());
+  document.addEventListener("input", (e) => { if (e.target.matches(".chat .compose textarea")) { load(() => redraw()); typing(e.target); } });
   document.addEventListener("submit", (e) => { const f = e.target.closest(".chat .compose"); if (f) { e.preventDefault(); send(f, done, name); } });
   document.addEventListener("keydown", (e) => {
     if (e.target.matches(".chat .compose textarea") && key(e)) return;
     if (e.key === "Escape" && reply && !e.target.value && e.target.matches(".chat .compose textarea")) { reply = null; redraw(); return; }
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.target.matches(".chat .compose textarea")) { e.preventDefault(); send(e.target.form, done, name); }
   });
-  document.addEventListener("change", (e) => { if (e.target.matches(".chat .compose input[type=file]")) { add([...e.target.files], redraw); e.target.value = ""; } });
+  document.addEventListener("change", (e) => { if (e.target.matches(".chat .compose input[type=file]")) { add([...e.target.files], () => redraw()); e.target.value = ""; } });
   document.addEventListener("paste", (e) => {
     const files = [...((e.clipboardData && e.clipboardData.files) || [])];
     if (!files.length || !e.target.closest(".chat .compose")) return;
     if (!e.clipboardData.getData("text/plain")) e.preventDefault();
-    add(files, redraw);
+    add(files, () => redraw());
   });
   const zone = (e) => document.querySelector(".chat .compose") && e.target.closest && e.target.closest(".chat .stream");
   document.addEventListener("dragover", (e) => { if (zone(e) && e.dataTransfer && [...e.dataTransfer.types].includes("Files")) e.preventDefault(); });
-  document.addEventListener("drop", (e) => { if (zone(e) && e.dataTransfer && e.dataTransfer.files.length) { e.preventDefault(); add([...e.dataTransfer.files], redraw); } });
+  document.addEventListener("drop", (e) => { if (zone(e) && e.dataTransfer && e.dataTransfer.files.length) { e.preventDefault(); add([...e.dataTransfer.files], () => redraw()); } });
   document.addEventListener("chat:reply", (e) => {
     const d = e.detail || {};
     if (!at || d.ch !== at || d.id == null) return;
