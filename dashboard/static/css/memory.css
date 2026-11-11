@@ -33,7 +33,11 @@
 .mem a.mt { display: inline-block; color: var(--g); text-decoration: none; border-bottom: 1px solid var(--line3); }
 .mem a.mt:hover, .mem a.mt:focus-visible { border-bottom-color: var(--g); }
 .mem .sm.bad { color: var(--gold); }
-@media (pointer: coarse) { .mem .mrow, .mem .mback, .mem .mfold td.n a { min-height: 44px; } .mem a.mt { min-height: 44px; line-height: 44px; } }
+.mem .mtabs { display: flex; flex-wrap: wrap; gap: .4rem; border-bottom: 1px solid var(--line2); }
+.mem .mtab { display: inline-flex; align-items: center; min-height: 2.5rem; padding: 0 1rem; color: var(--mid); text-decoration: none; font-size: max(11px, .78rem); letter-spacing: .16em; text-transform: uppercase; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.mem .mtab:hover, .mem .mtab:focus-visible { color: var(--g2); }
+.mem .mtab[aria-current="page"] { color: var(--g); border-bottom-color: var(--g); }
+@media (pointer: coarse) { .mem .mtab { min-height: 44px; } .mem .mrow, .mem .mback, .mem .mfold td.n a { min-height: 44px; } .mem a.mt { min-height: 44px; line-height: 44px; } }
 @media (max-width: 899px) { .mem .mgrid.open .mlist { display: none; } }
 @media (min-width: 900px) {
   .mem .mgrid { grid-template-columns: minmax(16rem, 1fr) minmax(0, 2.4fr); }

@@ -1,27 +1,33 @@
-/* Library › Memory: the memory store read-only. GET /api/memory is the page index, GET /api/memory/page?p= one page's lines; PRIVATE pages by name only. */
+/* Library › Memory: the memory store read-only. GET /api/memory is the page index, GET /api/memory/page?p= one page's lines; PRIVATE pages by name only. Tab Network (`#memory?v=net`): memory-net.js. */
 import { esc, size, when } from "/static/js/core/fmt.js";
 import { getJSON } from "/static/js/core/api.js";
 import { cur, go } from "/static/js/core/router.js";
 import * as shapes from "../shapes.js";
 import { fitEye } from "../gl/cam.js";
 import { plural } from "../summary.js";
+import * as net from "./memory-net.js";
 
 export const own = true;
 const STALE_MS = 20000;
-let IDX = null, at = 0, err = "", open = "";
+let IDX = null, at = 0, err = "", open = "", view = "";
 const PG = {};
 
 if (!document.querySelector('link[href="/static/css/memory.css"]')) { const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "/static/css/memory.css"; document.head.appendChild(l); }
 
 const href = (p) => "#memory" + (p ? "?p=" + encodeURIComponent(p) : "");
 const repaint = () => { if (cur === "memory") go("memory", true); };
+net.bind(repaint);
+/* Page and view from a hash query: `v=net` is the Network tab, else `p=` the open page. */
+const parse = (q) => { const u = new URLSearchParams(q); view = u.get("v") === "net" ? "net" : ""; open = view ? "" : u.get("p") || ""; };
 const known = (p) => ((IDX && IDX.pages) || []).find((r) => r.page === p);
 
-export function read(q) { open = new URLSearchParams(q).get("p") || ""; }
-export function hash() { return href(open); }
+export function read(q) { parse(q); }
+export function hash() { return view ? "#memory?v=net" : href(open); }
+export function input(e) { net.input(e); }
 
 /* Reads the index when missing or stale and the open page when not read yet; no timer. */
 export function enter() {
+  if (view) net.enter();
   if (!IDX || Date.now() - at > STALE_MS) {
     at = Date.now();
     getJSON("/api/memory").then((j) => { IDX = j; err = ""; }, (e) => { err = e.message; }).then(repaint);
@@ -34,19 +40,25 @@ export function enter() {
 }
 
 function show(p) {
-  if (p === open) return;
-  open = p;
+  if (p === open && !view) return;
+  open = p; view = "";
   history.pushState(null, "", href(p));
   go("memory", true);
   scrollTo(0, 0);
 }
 addEventListener("hashchange", () => {
   if (cur !== "memory" || !location.hash.startsWith("#memory")) return;
-  const i = location.hash.indexOf("?"), p = i < 0 ? "" : new URLSearchParams(location.hash.slice(i + 1)).get("p") || "";
-  open = p;
+  const i = location.hash.indexOf("?");
+  parse(i < 0 ? "" : location.hash.slice(i + 1));
   go("memory", true);
 });
 export function click(e) {
+  const t = e.target.closest("a[data-mv]");
+  if (t && !e.metaKey && !e.ctrlKey && !e.shiftKey && e.button === 0) {
+    e.preventDefault();
+    if (t.dataset.mv !== view) { view = t.dataset.mv; open = ""; history.pushState(null, "", hash()); go("memory", true); }
+    return true;
+  }
   const a = e.target.closest("a[data-mp]");
   if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return false;
   e.preventDefault();
@@ -121,11 +133,17 @@ function list() {
     [...groups].map(([k, rs]) => `<div class="mgrp"><h3>${esc(k)}</h3><ul>${rs.map(row).join("")}</ul></div>`).join("") + `</section>`;
 }
 
+/* Pages | Network. */
+function tabs() {
+  const t = (v, name) => `<a class="mtab" href="${v ? "#memory?v=net" : "#memory"}" data-mv="${v}" aria-current="${view === v ? "page" : "false"}">${name}</a>`;
+  return `<nav class="mtabs" aria-label="memory views">${t("", "pages")}${t("net", "network")}</nav>`;
+}
+
 export function render() {
   const sum = IDX ? `${plural(IDX.count, "page")} · ${IDX.private} private · read only · edit in Obsidian on the PC` : err ? "store unreadable" : "reading the store";
   return `<div class="nxs mem"><section class="band" aria-label="Memory summary"><div class="perch" id="perch" aria-hidden="true"></div>` +
     `<div class="bt"><p class="kin" data-dec>Memory</p><p class="bsum">${esc(sum)}</p></div></section>` +
-    `<div class="mgrid${open ? " open" : ""}">${list()}${reader()}</div></div>`;
+    tabs() + (view ? net.render() : `<div class="mgrid${open ? " open" : ""}">${list()}${reader()}</div>`) + `</div>`;
 }
 
 /* The eye perched on the band over one glyph sheet per page. */

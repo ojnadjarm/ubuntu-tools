@@ -1,0 +1,34 @@
+/* Library › Memory › Network: the sky beside the try box and the domain key from 1200 px, stacked below; eye.css tokens only. */
+.mem .mngrid { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr); align-items: start; }
+.mem .mnhow { color: var(--mid); font-size: max(11px, .84rem); line-height: 1.5; margin: 0 0 .6rem; max-width: 80ch; }
+.mem .mnsky { height: clamp(340px, 90vw, 72svh); border: 1px solid var(--line); background: var(--bg1); }
+.mem .mnsky canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+.mem .mngrid h2 { flex-wrap: wrap; }
+.mem .mngrid .pane h2 s { white-space: normal; }
+.mem .mnside { display: grid; gap: 1rem; min-width: 0; }
+.mem .mnkey { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr)); gap: .35rem 1rem; font-size: max(11px, .8rem); color: var(--txt); }
+.mem .mnkey li { display: flex; align-items: center; gap: .4rem; min-width: 0; overflow-wrap: anywhere; }
+.mem .mnkey i { flex: none; width: .6rem; height: .6rem; border-radius: 50%; background: var(--c); }
+.mem .mnkey s { margin-left: auto; white-space: nowrap; text-decoration: none; color: var(--mute); font-variant-numeric: tabular-nums; }
+.mem .mnform { display: flex; flex-wrap: wrap; gap: .5rem; }
+.mem .mnform input { flex: 1 1 12rem; min-width: 0; min-height: max(44px, 2.75rem); padding: 0 .8rem; border: 1px solid var(--line3); background: var(--bg); color: var(--hi); font: inherit; font-size: max(11px, .9rem); }
+.mem .mnform input:focus { outline: none; border-color: var(--g); }
+.mem .mnform input::placeholder { color: var(--mute); }
+.mem .mnform .btn { min-height: max(44px, 2.75rem); padding: 0 1.2rem; }
+.mem .mnout { margin-top: .8rem; color: var(--txt); font-size: max(11px, .88rem); line-height: 1.5; overflow-wrap: anywhere; }
+.mem .mnout .sm { color: var(--mid); }
+.mem .mncues code { color: var(--gold); background: var(--gold-w); padding: 0 .3rem; margin-right: .2rem; }
+.mem .mncues b, .mem .mnlbl { color: var(--mute); font-weight: 400; font-size: max(10px, .72rem); letter-spacing: .14em; text-transform: uppercase; margin-right: .4rem; }
+.mem .mnhints { list-style: none; margin: .6rem 0; padding: 0; }
+.mem .mnhints li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .1rem .6rem; padding: .45rem 0; border-top: 1px solid var(--line); }
+.mem .mnhints b { color: var(--g); }
+.mem .mnhints .pl { color: var(--hi); min-width: 0; }
+.mem .mnhints .why { grid-column: 1 / -1; color: var(--gold); }
+.mem .mnhints s { text-decoration: none; color: var(--mute); font-variant-numeric: tabular-nums; }
+.mem .mnlbl { display: block; margin-top: .6rem; }
+.mem .mnblock { white-space: pre-wrap; overflow-wrap: anywhere; margin: .3rem 0 0; padding: .6rem .7rem; border: 1px solid var(--line); background: var(--bg1); color: var(--g2); font-family: var(--mono); font-size: max(11px, .8rem); }
+@media (min-width: 1200px) {
+  .mem .mngrid { grid-template-columns: minmax(0, 2.6fr) minmax(20rem, 1fr); align-items: stretch; }
+  .mem .mnside { grid-template-rows: auto 1fr; }
+  .mem .mnsky { height: clamp(420px, 40vw, calc(100svh - 16rem)); }
+}

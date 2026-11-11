@@ -206,8 +206,13 @@ def apply(store, seat_, args):
 
 
 def net(store, seat_, args):
-    """`net build [folder]` compiles the graph into a store folder (`memory apply` runs it); `net stats` prints its size."""
+    """`net build [folder]` compiles the graph into a store folder (`memory apply` runs it); `net stats` prints its size;
+    `net export --json` prints the public graph for a picture (PRIVATE pages by name only)."""
     import memory_net
+    if args.net == "export":
+        import memory_view
+        print(json.dumps(memory_view.export(store), separators=(",", ":")))
+        return
     if args.net == "build":
         target = memory_store.Store(args.folder) if args.folder else store
         pub, priv = memory_net.build(target)
@@ -304,6 +309,8 @@ def main():
     nv = p.add_subparsers(dest="net", required=True)
     nv.add_parser("build", help="compile net/graph.json + graph.private.json (git-ignored)").add_argument("folder", nargs="?")
     nv.add_parser("stats", help="nodes and links of the public graph (built, else compiled in memory)")
+    nv.add_parser("export", help="the public graph as JSON for a picture; PRIVATE pages by name only").add_argument(
+        "--json", action="store_true", required=True, help="the only format")
     p = sub.add_parser("recall", help="the hints a prompt stirs in the network (at most 3 lines, or nothing)")
     src = p.add_mutually_exclusive_group()
     src.add_argument("--hook", action="store_true", help="read Claude Code's UserPromptSubmit JSON on stdin; never fails")
