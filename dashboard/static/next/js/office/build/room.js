@@ -72,16 +72,19 @@ function frame(ctx, R, k) {
   return { w: c.w, d: c.d, slots: c.slots, h, tint: mul(ctx.th.tints[Math.max(0, R.team) % ctx.th.tints.length], k(h)) };
 }
 
-/* A seat's room: the seat at the lead desk under the room's name board, its workers at the side desks with nothing tall before them. */
+/* The room as the floor trace sees it: a room with a status (paused, on vacation) traces as asleep. */
+const resting = (R) => (R.status ? { ...R, busy: 0, awake: false } : R);
+
+/* A seat's room: the seat at the lead desk under the room's name board, its workers at the side desks with nothing tall before them; a resting room keeps its floor lamp off. */
 export function seatRoom(ctx, R) {
   const { B } = ctx, { w, d, slots, h, tint } = frame(ctx, R, (h) => 0.86 + (h % 5) * 0.07), lead = R.people[0];
-  trace(ctx, R, w, d); rug(ctx, R, tint, h);
+  trace(ctx, resting(R), w, d); rug(ctx, R, tint, h);
   B.push({ z: -d / 2 + 0.5 });
   const p = station(ctx, lead, tint, true);
   B.pop();
   places(ctx, R, R.people.slice(1), tint, w, d, slots, false, false, true);
   B.push({ z: d / 2 - 0.75 }); LOUNGE[h % LOUNGE.length](B, mul(tint, 0.9)); B.pop();
-  const lit = R.awake || ctx.night;
+  const lit = !R.status && (R.awake || ctx.night);
   B.model("lampRoundFloor", { x: -0.8, z: -d / 2 + 0.6, glow: { lamp: lit ? glow(ctx, [1, 0.82, 0.5, 1]) : 0 } });
   if (lit) lamp(ctx, -0.8, 0.95, -d / 2 + 0.7, ctx.night ? 0.8 : 0.5, 1.3, { halo: 0.3 });
   B.push({ z: -d / 2 + 0.15 }); board(ctx, R, { id: R.sign, name: R.info.name, y: 0.8, h: 1.85 }); B.pop();
@@ -91,7 +94,7 @@ export function seatRoom(ctx, R) {
 /* A team room of staff: the team's name board at the back, one desk per member. */
 export function teamRoom(ctx, R) {
   const { B } = ctx, { w, d, slots, h, tint } = frame(ctx, R, () => 0.9);
-  trace(ctx, R, w, d); rug(ctx, R, tint, h);
+  trace(ctx, resting(R), w, d); rug(ctx, R, tint, h);
   B.push({ z: -d / 2 + 0.3 }); board(ctx, R, { id: R.sign, name: R.info.name }); B.pop();
   places(ctx, R, R.people, tint, w, d, slots, true);
   B.push({ z: d / 2 - 0.75 }); LOUNGE[(h + 1) % LOUNGE.length](B, mul(tint, 0.9)); B.pop();

@@ -3,6 +3,8 @@ import json
 import os
 import zlib
 
+import section_status
+
 ROLES = ("owner", "ceo", "po", "manager")
 WAKES = ("po-inbox", "channel", "pull")
 KEYS = ("id", "name", "role", "parent", "wake", "match")
@@ -33,6 +35,7 @@ def _validate(seats):
             raise ValueError(f"seat {s['id']}: wake {s['wake']} not in {WAKES}")
         if s["match"] is not None and not (s["match"] == "~" or s["match"].startswith("~/")):
             raise ValueError(f"seat {s['id']}: match must be ~ or ~/<path> (no machine paths)")
+        section_status.check(f"seat {s['id']}", s.get("status"))
         ids[s["id"]] = s
     for s in seats:
         if s["role"] == "manager" and ids.get(s["parent"], {}).get("role") != "po":

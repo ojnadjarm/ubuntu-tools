@@ -2,6 +2,8 @@
 import json
 import os
 
+import section_status
+
 
 def path():
     """The staff file: $STAFF_FILE, else $HARNESS_HOME/staff.json (default ~/agents)."""
@@ -18,6 +20,7 @@ def _validate(data):
         if t["id"] in teams:
             raise ValueError(f"duplicate team id {t['id']}")
         teams.add(t["id"])
+        section_status.check(f"team {t['id']}", t.get("status"))
         for m in t["members"]:
             mid = m.get("id")
             if not str(mid or "").strip():

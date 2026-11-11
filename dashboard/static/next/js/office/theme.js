@@ -11,6 +11,6 @@ export const THEME = {
   floor: { col: [0.5, 0.33, 0.21], cu: 0.22, cv: 1.6, stagger: true, sub: 6, k: 0.1 },
   wall: { col: [0.4, 0.22, 0.17], cell: 0.13, stagger: true, k: 0.12 },
   deck: [0.44, 0.3, 0.2], frame: [0.13, 0.1, 0.09], seat: [0.3, 0.22, 0.17],
-  state: STATE, accent: GREEN, second: AMBER, grow: VIOLET, city: [0.6, 0.36, 0.14], cityLit: AMBER,
+  state: STATE, accent: GREEN, second: AMBER, grow: VIOLET, rest: VIOLET, city: [0.6, 0.36, 0.14], cityLit: AMBER,
   warm: true, minLight: 0.56, trace: 0.6,
 };

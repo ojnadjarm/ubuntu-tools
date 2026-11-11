@@ -9,6 +9,8 @@ const SHOWN = 3;
 const BUBBLE = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H10l-5 4v-4H4z"/></svg>';
 
 const dot = (st) => `<span class="pill dot ${PILL[st] || "idle"}" title="${esc(st)}"><span class="sr-only">${esc(st)}</span></span>`;
+/* A section's status tag ("Paused"), its since date and note in its title; nothing while active. */
+const tag = (s) => (s ? `<span class="ost" title="${esc([s.label + (s.since ? " since " + s.since : ""), s.note].filter(Boolean).join(" · "))}">${esc(s.label)}</span>` : "");
 const who = (id, html) => `<button type="button" class="who" data-who="${esc(id)}">${html}</button>`;
 
 /* An avatar button that opens the card of `id`; out of the tab order, the name button next to it is the one stop. */
@@ -27,8 +29,8 @@ function crew(H) {
 /* A seat's card: avatar and name buttons that open its office card, rank, state dot, its workers, the message link. */
 function seatCard(p, H) {
   const msg = "Message " + p.name;
-  return `<div class="seat" data-seat="${esc(p.id)}">${av(p.id, p.name, familiar(p.id, p.state, p.role))}` +
-    `<h3>${who(p.id, esc(p.name))} ${p.rank ? `<span class="rk">${esc(p.rank)}</span>` : ""}${dot(p.state)}</h3>` +
+  return `<div class="seat${p.raw.status ? " rest" : ""}" data-seat="${esc(p.id)}">${av(p.id, p.name, familiar(p.id, p.state, p.role))}` +
+    `<h3>${who(p.id, esc(p.name))} ${p.rank ? `<span class="rk">${esc(p.rank)}</span>` : ""}${dot(p.state)}${tag(p.raw.status)}</h3>` +
     `${crew(H)}<a class="btn msg" href="#chat?ch=${esc(dmOf(p.id))}" aria-label="${esc(msg)}" title="${esc(msg)}">${BUBBLE}</a></div>`;
 }
 
@@ -41,7 +43,7 @@ function tree(M) {
 
 const staffState = (p) => (p.pose === "working" ? "running" : p.pose === "error" ? "error" : p.raw.on ? "asleep" : "off");
 const member = (p) => `<li>${who(p.id, `<span class="mini" aria-hidden="true">${familiar(p.id, p.pose === "working" ? "working" : "asleep", p.role)}</span><b>${esc(p.name)}</b><span class="rk">${esc(p.rank)}</span>${dot(staffState(p))}`)}</li>`;
-const team = (r) => `<li class="team"><h3>${who(r.id, esc(r.name))}<span class="rk">${r.people.length} staff, ${r.busy} running</span></h3><ul class="mem">${r.people.map(member).join("")}</ul></li>`;
+const team = (r) => `<li class="team${r.status ? " rest" : ""}"><h3>${who(r.id, esc(r.name))}${tag(r.status)}<span class="rk">${r.people.length} staff, ${r.busy} running</span></h3><ul class="mem">${r.people.map(member).join("")}</ul></li>`;
 
 /* list(M) → HTML of the two list panes: who reports to whom, and the staff teams. */
 export function list(M) {

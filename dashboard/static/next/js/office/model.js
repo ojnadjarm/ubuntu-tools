@@ -20,11 +20,11 @@ const pidOf = (a) => a.pid ?? (/^pid(\d+)$/.exec(a.id) || [])[1] * 1;
 const ms = (t) => (typeof t === "number" || /^\d+$/.test(t) ? t * 1000 : Date.parse(t));
 const workingFirst = (L) => [...L.filter((p) => p.pose === "working"), ...L.filter((p) => p.pose !== "working")];
 
-/* A room around its people: busy counts the working, awake is anyone not asleep; a lead's pose is the room's. */
-function room(kind, id, name, rank, area, team, people, lead) {
+/* A room around its people: busy counts the working, awake is anyone not asleep; a lead's pose is the room's; status is its section's {id, label, since?, note?}, null while active. */
+function room(kind, id, name, rank, area, team, people, lead, status = null) {
   const busy = people.filter((p) => p.pose === "working" || p.pose === "talking").length, awake = people.some((p) => p.pose !== "sleep");
   const pose = lead ? lead.pose : busy ? "working" : people.some((p) => p.pose === "error") ? "error" : awake ? "idle" : "sleep";
-  return { id, kind, name, rank, area, team, pose, state: lead ? lead.state : STATE[pose], busy, awake, people, more: Math.max(0, people.length - (lead ? 1 : 0) - SLOTS), key: "" };
+  return { id, kind, name, rank, area, team, pose, state: lead ? lead.state : STATE[pose], busy, awake, people, more: Math.max(0, people.length - (lead ? 1 : 0) - SLOTS), status, key: "" };
 }
 
 /* A seat's pose: working, error when its runner is bad, a protected seat's from its session's state only, idle, else asleep. */
@@ -63,7 +63,7 @@ export function build(P, { now = Date.now(), needs = verdict(store.D).bad, talk 
       state: free ? "available" : state, since: (prot || mine[0] || {}).since, room: seat.id,
       raw: { ...seat, session: prot ? { seat: prot.seat, state: prot.state, since: prot.since } : mine[0],
         crew: { n: crew.length, on: busy.length, list: crew.map((p) => ({ id: p.id, name: p.name, since: p.since })) } } });
-    return room(kind, seat.id, seat.name, seat.rank || "", seat.area || "", team, [lead, ...crew], lead);
+    return room(kind, seat.id, seat.name, seat.rank || "", seat.area || "", team, [lead, ...crew], lead, seat.status || null);
   };
 
   const heads = top ? under(top.id) : [], down = (id, t) => under(id).flatMap((s) => [seatRoom(s, t, "seat"), ...down(s.id, t)]);
@@ -84,12 +84,12 @@ export function build(P, { now = Date.now(), needs = verdict(store.D).bad, talk 
   const staff = (P.staff || []).map((t, k) => {
     const id = "team-" + t.id, members = (t.members || []).map((m) => put({ id: m.id, kind: "staff", name: m.name, rank: m.rank, role: "crew", pose: staffPose(m),
       on: !!m.on, state: m.state, since: (m.last || {}).end, room: id, raw: { ...m, team: t.name } }));
-    return room("team", id, t.name, "Team", t.name, heads.length + k, members);
+    return room("team", id, t.name, "Team", t.name, heads.length + k, members, null, t.status || null);
   });
   [pool, ...staff].forEach((r) => (who[r.id] = r));
 
   const all = [ceo, ...rooms, ...staff].filter(Boolean), night = !all.some((r) => r.awake);
-  all.forEach((r) => (r.key = JSON.stringify([r.kind, r.name, r.area, r.team, r.people.map((p) => [p.id, p.pose, !!p.on]), r.busy, r.awake, r.more, r.live || 0, night])));
+  all.forEach((r) => (r.key = JSON.stringify([r.kind, r.name, r.area, r.team, r.people.map((p) => [p.id, p.pose, !!p.on]), r.busy, r.awake, r.more, r.live || 0, ...(r.status ? [r.status] : []), night])));
 
   const members = staff.flatMap((r) => r.people.map((p) => p.raw)), on = members.filter((m) => m.on);
   const next = on.filter((m) => m.next).sort((a, b) => Date.parse(a.next) - Date.parse(b.next));

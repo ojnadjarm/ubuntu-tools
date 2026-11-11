@@ -1,6 +1,6 @@
 # Dashboard office: add a team, a member, a name; the 3D Org page (`staff.json`, `/api/office`)
 
-Ticket: T1601 (01-18), T1658, T1666 · Last verified: 2026-11-11 by T1666 (`bin/tests/dashboard-office-drag.test.sh`), T1658 (`bin/tests/dashboard-office-chat.test.sh`); 2026-11-10 by T1601-16 (`staff.load()` 3 teams 12 members, live `GET /api/office`
+Ticket: T1601 (01-18), T1658, T1666, T1687 · Last verified: 2026-11-11 by T1687 (`tests/test_office_status.js`, `tests/test_section_status.py`, live `/api/office` vass paused), T1666 (`bin/tests/dashboard-office-drag.test.sh`), T1658 (`bin/tests/dashboard-office-chat.test.sh`); 2026-11-10 by T1601-16 (`staff.load()` 3 teams 12 members, live `GET /api/office`
 4 teams incl. Unassigned 1 (`memory-keeper`), `test_office_*.js` green, `GPU=1 tools/shots.mjs` margins at 5 widths)
 
 ## When to use
@@ -40,6 +40,11 @@ Ticket: T1601 (01-18), T1658, T1666 · Last verified: 2026-11-11 by T1666 (`bin/
 - Full screen (T1658): `overlay/full.js` + `#office-full` (stage top right): `html.ofill` lays the stage over the chrome and,
   where element fullscreen exists, the page (`documentElement`) goes full screen too; iPhone Safari has none, so it only
   fills the window. Esc / the button leave; leaving the office leaves it.
+- Section status (T1687, owner 2026-11-11: "a status to the sections, like Vacation"): `lib/section_status.py` checks it on
+  load and `office.compose` sends `{id, label, since?, note?}`; a resting room's board turns violet (`th.rest`) with the
+  label under a rail, its racks keep their state, floor trace and lamp read as asleep; card state line "Paused since 11 Nov
+  · N working now", note first; the list tags the seat or team. Rooms without one build byte-identical chunks. No status
+  changes behaviour: a paused seat still works when woken. Shots `~/drop/T1687/`.
 - Unread mark in the 3D office: left out (T1658). The data is cheap (`/api/chat` `channels[].unread` per `dmOf(id)`), but a
   mark over a creature needs a per-creature lamp or halo in `model.js` + `gl/` (Room.key, diff, rebuild), not a few lines.
 
@@ -59,6 +64,10 @@ cd ~/agents
 #   {"id": "<team>", "name": "<Team>", "members": [{"id": "<agent folder or unit id>", "name": "<Name>", "rank": "<Rank>"}]}
 #   "unit": "<x>.timer|.service" only for a member with no ~/agents/<id> folder; "hidden": ["<id>"] keeps one out
 python3 -c 'import sys; sys.path.insert(0, "lib"); import staff; d = staff.load(); print(len(d["teams"]), "teams ok")'   # ValueError names the first problem
+# set or clear a section's status (T1687): on its org.json seat or staff.json team line add
+#   "status": {"id": "paused|vacation", "since": "YYYY-MM-DD", "note": "<optional>"}; delete the key (or "id": "active") to clear;
+#   the ids live only in lib/section_status.py STATUSES (a new one = one line); a finished project still just loses its line
+python3 -c 'import sys; sys.path.insert(0, "lib"); import org; print([(s["id"], s["status"]) for s in org.seats() if "status" in s])'   # unknown id: ValueError
 curl -s http://127.0.0.1:19998/api/office | python3 -c 'import sys,json; d=json.load(sys.stdin); print([(t["id"], len(t["members"])) for t in d["staff"]], d.get("error"))'
 cd dashboard
 python3 -m pytest tests/test_staff.py tests/test_office_api.py -q

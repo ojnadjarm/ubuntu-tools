@@ -7,10 +7,11 @@ from dash.services import org as org_svc
 from dash.services.sites import trusted
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "lib"))
+import section_status  # noqa: E402
 import staff  # noqa: E402
 
 OFFICE_TTL = 3
-SEAT_KEYS = ("id", "name", "rank", "role", "parent", "area", "about", "wake")
+SEAT_KEYS = ("id", "name", "rank", "role", "parent", "area", "about", "wake", "status")
 LIVE = ("active", "activating", "reloading", "deactivating")
 EMPTY = {"seats": [], "sessions": [], "staff": [], "agents": {"orchestrator": {}, "subagents": [], "claims": []}}
 
@@ -48,15 +49,21 @@ def crews(seats, sessions, subs):
     return out, [a for a in subs if a.get("id") not in moved]
 
 
+def shown(d):
+    """d with its raw status replaced by the page's view of it: absent when active."""
+    v = section_status.view(d.get("status"))
+    return {k: x for k, x in d.items() if k != "status"} | ({"status": v} if v else {})
+
+
 def compose(org, ags, cfg):
     """The office payload from the org payload, the agents payload (roster rows include the unit members) and the staff file."""
     rows = {r["name"]: r for r in ags.get("roster", [])}
-    seats = [{k: s[k] for k in SEAT_KEYS if k in s} | ({"runner": rows[folder(s)]} if folder(s) in rows else {})
+    seats = [shown({k: s[k] for k in SEAT_KEYS if k in s}) | ({"runner": rows[folder(s)]} if folder(s) in rows else {})
              for s in org.get("seats", []) if s["role"] != "owner"]
     folders = [f for s in org.get("seats", []) for f in [folder(s)] if f]
     sessions, subs = crews(org.get("seats", []), org.get("sessions", []), ags.get("subagents", []))
     out = {"seats": seats, "sessions": sessions,
-           "staff": staff.assign(cfg["teams"], cfg.get("hidden", []), ags.get("roster", []), folders),
+           "staff": [shown(t) for t in staff.assign(cfg["teams"], cfg.get("hidden", []), ags.get("roster", []), folders)],
            "agents": {"orchestrator": ags.get("orchestrator", {}), "subagents": subs, "claims": ags.get("claims", [])}}
     err = "; ".join(e for e in (org.get("error"), ags.get("error")) if e)
     return {**out, "error": err} if err else out

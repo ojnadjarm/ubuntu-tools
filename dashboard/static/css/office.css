@@ -87,3 +87,5 @@ html.ofill #board { z-index: 50; }
 html.ofill .office .stage { position: fixed; inset: 0; height: auto; border: 0; }
 html.ofill .office .ofs { top: max(.7rem, env(safe-area-inset-top)); }
 html.ofill .office .hud { bottom: max(.7rem, env(safe-area-inset-bottom)); }
+.office .ost { padding: 0 .45em; border: 1px solid var(--vio); background: var(--vio-w); color: var(--vio2); font-size: max(11px, .72rem); font-weight: 400; letter-spacing: .12em; text-transform: uppercase; white-space: nowrap; }
+.office .seat.rest .av, .office .team.rest .mem { opacity: .55; }

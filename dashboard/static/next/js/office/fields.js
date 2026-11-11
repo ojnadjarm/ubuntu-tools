@@ -1,7 +1,7 @@
 /* Card content for whoever is tapped in the office: one entry per kind in CARDS, plain data (the overlay escapes and draws it); `lines` are prose lines under the sub. */
 import { dmOf } from "../seats.js";
 import { rest } from "./model.js";
-import { ago, at, until, progress, took } from "./time.js";
+import { ago, at, day, until, progress, took } from "./time.js";
 
 const ROLE = { ceo: "Runs the fleet and answers questions about the harness.", po: "Product owner.", manager: "Project manager. Never posts." };
 const WAKE = { channel: "Always on; woken through its chat channel.", "po-inbox": "Asleep until someone writes to its inbox.", pull: "Reads its messages when it next runs." };
@@ -13,6 +13,9 @@ const cut = (s, n = 80) => (s && s.length > n ? s.slice(0, n - 1).trimEnd() + "�
 /* A card's list kept short: the first 5, and how many more there are. */
 export const MAX = 5;
 const cap = (list) => ({ shown: list.slice(0, MAX), more: Math.max(0, list.length - MAX) });
+
+/* A status as one line: "Paused since 11 Nov". */
+const rests = (s, t) => s.label + (s.since ? " since " + day(s.since, t) : "");
 
 /* "Now <state>", with how long when awake (a protected seat shows its state only). */
 const now = (p, t) => "Now " + (SAY[p.state] || p.state) + (p.pose === "sleep" || p.state === "yours" || !p.since ? "" : " · " + ago(p.since, t));
@@ -111,10 +114,11 @@ function held(claims) {
 }
 const runs = (I, t) => part("Next runs", "no scheduled runs", I.next.map((n) => [n.name, "in " + until(n.next, t) + " · " + at(n.next, t) + (n.bad ? " · last run failed" : ""), n.bad ? "bad" : ""].filter(Boolean)));
 
-/* A room's info, its sign's card: who is in it with their state (5, then +N more; a running sub-agent only once, in its own list), the files it holds in one row, its next runs, sessions and running sub-agents; empty parts say so in one line. */
+/* A room's info, its sign's card: its status, who is in it with their state (5, then +N more; a running sub-agent only once, in its own list), the files it holds in one row, its next runs, sessions and running sub-agents; empty parts say so in one line. */
 function room(r, t, sub, extra) {
   const I = r.info, run = new Set(I.subs.map((a) => a.id)), ids = r.people.map((p) => p.id).filter((id) => !run.has(id)), roll = cap(ids.length || !run.size ? ids : []);
-  return { title: I.name, rank: r.kind === "seat" ? "Project" : r.kind === "pool" ? r.rank : "Team", sub, ...extra, state: { pose: r.pose, text: r.busy + " working now" }, rows: held(I.claims), actions: [],
+  const s = r.status, note = s && s.note ? { lines: [s.note] } : {};
+  return { title: I.name, rank: r.kind === "seat" ? "Project" : r.kind === "pool" ? r.rank : "Team", sub, ...extra, ...note, state: { pose: r.pose, text: (s ? rests(s, t) + " · " : "") + r.busy + " working now" }, rows: held(I.claims), actions: [],
     roll: ids.length || !run.size ? roll.shown : null, rollMore: roll.more, parts: [runs(I, t), sessions(I, t), subs(I, t)] };
 }
 /* A staff team's room; the Unassigned room says why they are there. */

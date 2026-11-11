@@ -24,6 +24,12 @@ export const took = (s) => (s == null || s === "" ? "—" : s + " s");
 
 const DAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const p2 = (n) => String(n).padStart(2, "0");
+/* A calendar date "YYYY-MM-DD" as "D Mon", with its year when not this year's. */
+export function day(v, t) {
+  const [y, m, d] = String(v).split("-").map(Number), now = new Date(t);
+  return isNaN(new Date(y, m - 1, d)) ? String(v) : d + " " + MON[m - 1] + (y === now.getFullYear() ? "" : " " + y);
+}
+
 /* A moment as the Roster wrote it: "HH:MM" today, "yesterday HH:MM", "Wed HH:MM" within 6 days, else "D Mon". */
 export function at(v, t) {
   const d = new Date(typeof v === "number" ? v * 1000 : v), now = new Date(t), hm = p2(d.getHours()) + ":" + p2(d.getMinutes());
