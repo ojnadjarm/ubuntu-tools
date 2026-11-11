@@ -87,7 +87,12 @@ def note(store, seat, args):
 
 
 def check(store, seat, args):
-    """Run every checker; exit 0 clean, 1 with one line per finding (checker · file:line · what)."""
+    """Run every checker; exit 0 clean, 1 with one line per finding (checker · file:line · what). `--recall`: the recall table alone."""
+    if args.recall:
+        import memory_recall_check
+        out, ok = memory_recall_check.run(store)
+        print("\n".join(out))
+        sys.exit(0 if ok else 1)
     folders = []
     for f in args.folders:
         rel = os.path.relpath(store.path(f) if os.path.isdir(store.path(f)) else os.path.abspath(f), store.root)
@@ -283,6 +288,8 @@ def main():
     p.add_argument("--changed", action="store_true", help="--quiz: only the questions of pages changed since --before (default: git HEAD)")
     p.add_argument("--domains", type=lambda v: [d for d in re.split(r"[\s,]+", v) if d], default=[],
                    help="--live: the domains the agent gets besides core (comma-separated)")
+    p.add_argument("--recall", action="store_true", help="instead: the recall network against plain word match on the quiz and "
+                   "checks/cues.d cues; exit 1 when the ship gate is not met")
     p = sub.add_parser("install", help="write the carriers: the core line, project stubs, MEMORY.md, agent.env domains")
     p.add_argument("--plan", action="store_true", help="print what would be written, write nothing")
     p = sub.add_parser("sources", help="the project files the keeper may read (read-only): domain, path, protected")

@@ -6,12 +6,13 @@ import os
 import re
 from collections import namedtuple
 
+import memory_route
 import memory_store
 from memory_cue import tokens
 
 SPREAD, STEPS, PRIME, PLACE_W, CC_W = 0.6, 2, 0.5, 0.5, 0.5
-BASE_W, DEFAULT_AGE, THETA, MIN_PATHS, S_ASSOC, W_MIN = 0.3, 365, 1.0, 2, 6.5, 0.05
-FAN_SHARE, FAN_FLOOR = 0.15, 8
+BASE_W, DEFAULT_AGE, THETA, MIN_PATHS, S_ASSOC, W_MIN = 0.1, 365, 0.5, 2, 6.5, 0.05
+FAN_SHARE, FAN_FLOOR = 0.05, 8
 RESIDUAL_N, RESIDUAL_MIN = 10, 0.05
 NET, PUBLIC, PRIVATE = "net", "net/graph.json", "net/graph.private.json"
 IGNORED = ("graph.json", "graph.private.json", "links.private.tsv")
@@ -61,18 +62,11 @@ def base_level(dates, today):
     return BASE_W * math.log(sum(a ** -0.5 for a in ages or [DEFAULT_AGE]))
 
 
-def _private(store, page):
-    """A PRIVATE page, or a ledger beside a PRIVATE card."""
-    card = os.path.dirname(page) + "/DOMAIN.md"
-    probe = card if page.endswith("/ledger.md") and os.path.isfile(store.path(card)) else page
-    return store.private_seats(probe) is not None
-
-
 def _memories(store, concepts, private):
     """([(id, place, words, dates, keeper words, is private)], rival id pairs) from cards, topic files and ledgers."""
     out, rivals = [], []
     for page in store.pages():
-        priv = _private(store, page)
+        priv = memory_route.seats_of(store, page) is not None
         if priv and not private:
             continue
         if page.endswith("/ledger.md"):
