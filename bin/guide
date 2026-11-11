@@ -117,7 +117,7 @@ candidates | awk -F'\t' -v q="$*" '
     d = $5; hint = ""
     if ($3 == "skill") { hint = substr(d, 1, index(d, " — ") - 1) }
     else { t = d; while (match(t, /skill \/[a-z0-9-]+/)) { hint = hint (hint == "" ? "" : " ") substr(t, RSTART + 6, RLENGTH - 6); t = substr(t, RSTART + RLENGTH) } }
-    if (length(d) > 160) d = substr(d, 1, 157) "..."
+    if (length(d) > 160) { d = substr(d, 1, 157); sub(/[\300-\367][\200-\277]*$/, "", d); d = d "..." }
     printf "%-5s %d/%d %s%s\n      %s\n", $3, $7, $6, $4, (hint == "" ? "" : "  → invoke " hint), d; found = 1
   }
   END { exit !found }' || { echo "guide: nothing for \"$*\"; also try: pc explain $*" >&2; exit 1; }
