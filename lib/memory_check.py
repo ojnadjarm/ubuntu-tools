@@ -51,7 +51,7 @@ def lint_files(store):
         ds[:] = sorted(d for d in ds if d != ".git")
         for name in sorted(fs):
             rel = os.path.relpath(os.path.join(r, name), store.root)
-            text = None if rel.startswith(RAW) else _read(os.path.join(r, name))
+            text = None if rel.startswith((RAW, "net/graph")) else _read(os.path.join(r, name))
             if text is not None:
                 out.append((rel, text))
     return out

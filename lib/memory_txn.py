@@ -181,6 +181,8 @@ def apply(store, staging, car=None):
         import memory_quiz
         memory_quiz.merge(stg)
     memory_store._atomic(stg.path("INDEX.md"), index(stg))
+    import memory_net
+    memory_net.build(stg)
     armed = os.path.isfile(store.path("checks/quiz-baseline.tsv"))
     found = memory_check.run(stg, memory_check.before_dir(store.root), also=["quiz-changed"] if armed else [])
     if found:

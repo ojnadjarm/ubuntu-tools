@@ -200,6 +200,20 @@ def apply(store, seat_, args):
     sys.exit(memory_txn.apply(store, args.staging, carrier()))
 
 
+def net(store, seat_, args):
+    """`net build [folder]` compiles the graph into a store folder (`memory apply` runs it); `net stats` prints its size."""
+    import memory_net
+    if args.net == "build":
+        target = memory_store.Store(args.folder) if args.folder else store
+        pub, priv = memory_net.build(target)
+        print(f"net · built · {len(pub.mem)} public and {len(priv.mem)} private memories under {target.path(memory_net.NET)}")
+        return
+    g = memory_net.load(store)
+    src = memory_net.PUBLIC if g else "the store, in memory (not built yet)"
+    g = g or memory_net.born(store, private=False)[0]
+    print(f"net · {src} · " + " · ".join(f"{k} {v}" for k, v in memory_net.stats(g).items()))
+
+
 def main():
     ap = argparse.ArgumentParser(prog="memory", description=__doc__.split("— ", 1)[1])
     sub = ap.add_subparsers(dest="verb", required=True)
@@ -225,12 +239,16 @@ def main():
     sub.add_parser("stage", help="copy the store to a new staging folder and print its path")
     p = sub.add_parser("apply", help="the keeper's commit: owner edits first, gate, move in, notes filed, views, commit, guarded push")
     p.add_argument("staging")
+    p = sub.add_parser("net", help="the recall network: build the graph, print its size")
+    nv = p.add_subparsers(dest="net", required=True)
+    nv.add_parser("build", help="compile net/graph.json + graph.private.json (git-ignored)").add_argument("folder", nargs="?")
+    nv.add_parser("stats", help="nodes and links of the public graph (built, else compiled in memory)")
     args = ap.parse_args()
     store = memory_store.Store(memory_store.home())
     if args.verb == "check" and args.domains:
         unknown(store, args.domains)
     {"load": load, "note": note, "check": check, "install": install, "sources": sources, "stage": stage,
-     "apply": apply}[args.verb](store, seat(store), args)
+     "apply": apply, "net": net}[args.verb](store, seat(store), args)
 
 
 if __name__ == "__main__":
