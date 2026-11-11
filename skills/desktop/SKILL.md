@@ -38,7 +38,9 @@ when rendering or layout itself is the question, or when the tree gives no coord
 **Never screenshot Spotify** — it is Electron with no AT-SPI tree; every control goes through `pc spotify`
 (MPRIS + PipeWire): `status [--json]`, `play|pause|toggle|next|prev`, `vol 0-100`, `seek <s|+s|-s>`,
 `open <uri|url>`, `output earbuds|speakers|tv|<sink>`, `search <q>`, `library`. `search`, `library` and
-starting a specific URI need the Web API — without `~/agents/secrets/spotify.env` they exit 2 with the setup steps.
+starting a specific URI need the Web API, through the fleet vault (T1634-V7): the broker holds the Spotify app and the
+sign-in; `pc spotify` uses `FLEET_LEASE_SPOTIFY_TOKEN` (a brief's `Secrets: spotify-token`) or asks `secret grant` itself
+(refused inside a headless agent without that line). Without the app in the vault they exit 2 with the setup steps.
 
 ## Rules
 - **Screenshots.** Always `--scale 0.5` (halves the tokens; multiply what you read by 2); `--region X,Y,W,H` is

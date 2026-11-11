@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# T472: `pc spotify` and spotify_api.py on stubs — fake playerctl/pactl/sleep on PATH, a fake $HOME, a patched urlopen
-# inside bwrap --unshare-net; no live player, sink or Web API is touched (selftest proves the stubs resolve first).
+# T472: `pc spotify` and spotify_api.py on stubs — fake playerctl/pactl/sleep/secret on PATH, a fake $HOME, a patched
+# urlopen inside bwrap --unshare-net, a fixture vault socket and URL; no live player, sink, vault or Web API is touched
+# (selftest proves the stubs resolve first). T1634-V7: the helper holds a lease only; the broker side is vault-spotify.test.sh.
 set -uo pipefail
 SELF=$(readlink -f "$0"); BIN=$(cd "$(dirname "$SELF")/.." && pwd)
 if [ -z "${SP_SANDBOXED:-}" ] && bwrap --dev-bind / / --unshare-net true 2>/dev/null; then
@@ -10,6 +11,8 @@ PC="$BIN/pc-spotify" API="$BIN/spotify_api.py"
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 STUB="$WORK/stub" FH="$WORK/home" LOG="$WORK/calls.log"
 mkdir -p "$STUB" "$FH/agents/secrets"; : >"$LOG"
+export FLEET_VAULT_SOCKET="$WORK/vault.sock" FLEET_VAULT_URL="http://127.0.0.1:9"
+unset FLEET_LEASE_SPOTIFY_TOKEN
 . "$HOME/agents/bin/tests/lib/assert.sh"
 has() { grep -qF -- "$2" <<<"$3" && ok "$1" || nok "$1" "no '$2' in: $3"; }
 sp()  { PATH="$STUB:$PATH" HOME="$FH" HARNESS_CONFIG=/dev/null SP_LOG="$LOG" SP_SINK="$WORK/sink" \
@@ -53,13 +56,21 @@ n() { printf '{"id":%s,"type":"PipeWire:Interface:Node","info":{"props":{"object
 echo "[$(n 5 alsa_output.pci-0000_00_1f.3.analog-stereo),$(n 7 bluez_output.00_00_5E_00_53_01.1)]"
 EOF
 printf '#!/bin/sh\nexit 0\n' >"$STUB/sleep"
+cat >"$STUB/secret" <<'EOF'
+#!/bin/bash
+echo "secret $*" >>"$SP_LOG"
+[ -n "${SP_LEASE:-}" ] || { echo 'secret: spotify-token is not in the vault' >&2; exit 1; }
+echo "$SP_LEASE"
+EOF
 chmod +x "$STUB"/*
 
 # 0. selftest: the stubs win on PATH, the fake HOME has no Web API secrets, the sandbox has no route out.
-for c in playerctl pactl pw-dump sleep; do
+for c in playerctl pactl pw-dump sleep secret; do
   is "selftest: $c resolves to the stub" "$(PATH="$STUB:$PATH" command -v $c)" "$STUB/$c"
 done
 [ -e "$FH/agents/secrets/spotify.env" ] && nok 'selftest: fake HOME has no spotify.env' present || ok 'selftest: fake HOME has no spotify.env'
+case "$FLEET_VAULT_SOCKET $FLEET_VAULT_URL" in "$WORK/vault.sock http://127.0.0.1:9") ok 'selftest: vault socket and URL are fixtures';;
+  *) nok 'selftest: vault socket and URL are fixtures' "$FLEET_VAULT_SOCKET $FLEET_VAULT_URL";; esac
 if [ -n "${SP_SANDBOXED:-}" ]; then
   python3 -c 'import socket; socket.create_connection(("1.1.1.1", 443), 2)' 2>/dev/null \
     && nok 'selftest: sandbox has no network' reachable || ok 'selftest: sandbox has no network'
@@ -112,7 +123,7 @@ has 'search with no credentials explains the setup' 'developer.spotify.com/dashb
 # 5. spotify_api.py with a patched urlopen (no socket is ever opened).
 api() {  # api <http-status> <args...> — runs spotify_api.py under the fake HOME; requests go to $WORK/req.jsonl
   local code=$1; shift
-  HOME="$FH" WORK="$WORK" CODE="$code" python3 - "$API" "$@" <<'PY'
+  PATH="$STUB:$PATH" SP_LOG="$LOG" HOME="$FH" WORK="$WORK" CODE="$code" python3 - "$API" "$@" <<'PY'
 import io, json, os, runpy, sys, urllib.error, urllib.request
 work, code = os.environ["WORK"], int(os.environ["CODE"])
 R = {"me/player/devices": {"devices": [{"id": "ph", "type": "Smartphone", "name": "Phone"},
@@ -127,9 +138,12 @@ class Resp(io.BytesIO):
 def fake(req, timeout=None):
     url = req.full_url
     with open(os.path.join(work, "req.jsonl"), "a") as f:
-        f.write(json.dumps({"method": req.get_method(), "url": url,
+        f.write(json.dumps({"method": req.get_method(), "url": url, "auth": req.get_header("Authorization"),
                             "body": (req.data or b"").decode()}) + "\n")
-    if code != 200 and "api.spotify.com" in url:
+    if code == 503:
+        raise urllib.error.HTTPError(url, code, "x", {}, io.BytesIO(
+            b'{"error": "not signed in: run the sign-in once (pc spotify auth)"}'))
+    if code != 200 and "/spotify-token/v1/" in url:
         raise urllib.error.HTTPError(url, code, "x", {}, None)
     path = url.split("/v1/")[-1].split("?")[0] if "/v1/" in url else "api/token"
     return Resp(json.dumps(R.get(path, {})).encode() if path in R else b"")
@@ -138,10 +152,10 @@ sys.argv = sys.argv[1:]
 runpy.run_path(sys.argv[0], run_name="__main__")
 PY
 }
-S="$FH/agents/secrets"
-printf 'SPOTIFY_CLIENT_ID=cid\nSPOTIFY_CLIENT_SECRET="sec"\n' >"$S/spotify.env"
-out=$(api 200 search q 2>&1); is 'api: no token exits 2' "$?" 2; has 'api: no token says run auth' 'pc spotify auth' "$out"
-echo '{"access_token":"OLD","refresh_token":"R","expires_at":9999999999}' >"$S/spotify-token.json"
+out=$(api 200 search q 2>&1); is 'api: no lease from the vault exits 2' "$?" 2
+has 'api: no lease from the vault explains the setup' 'developer.spotify.com/dashboard' "$out"
+export SP_LEASE=FIXTURELEASE
+out=$(api 503 search q 2>&1); is 'api: no token exits 2' "$?" 2; has 'api: no token says run auth' 'pc spotify auth' "$out"
 api 200 bogus >/dev/null 2>&1; is 'api: unknown command exits 2' "$?" 2
 out=$(api 200 search q); is 'api search exits 0' "$?" 0
 has 'api search prints the track' 'track: A — T  spotify:track:1' "$out"
@@ -153,10 +167,13 @@ is 'api play PUTs an album as context_uri' \
   "$(jq -sr '.[-1]|.method + " " + (.url|test("device_id=pc")|tostring) + " " + .body' "$WORK/req.jsonl")" \
   'PUT true {"context_uri": "spotify:album:7"}'
 out=$(api 401 library 2>&1); is 'api: an HTTP error exits 1' "$?" 1; has 'api: an HTTP error names the code' 'Web API 401' "$out"
-echo '{"access_token":"OLD","refresh_token":"R","expires_at":1}' >"$S/spotify-token.json"; chmod 600 "$S/spotify-token.json"
-api 200 library >/dev/null
-is 'api: an expired token is refreshed and kept 0600' \
-  "$(jq -r '.access_token + " " + .refresh_token' "$S/spotify-token.json") $(stat -c %a "$S/spotify-token.json")" 'NEW R 600'
+is 'api: every call goes to the vault with the lease, never with an Authorization header' \
+  "$(jq -sr '[.[] | select((.url | startswith("http://127.0.0.1:9/FIXTURELEASE/spotify-token/v1/") | not) or .auth != null)] | length' "$WORK/req.jsonl")" 0
+: >"$LOG"; api 200 play spotify:album:7 >/dev/null
+is 'api: one lease asked per run (spotify-token, ticket pc-spotify)' "$(grep -c '^secret grant spotify-token --ticket pc-spotify' "$LOG") $(grep -c '^secret' "$LOG")" '1 1'
+: >"$LOG"; FLEET_LEASE_SPOTIFY_TOKEN=ENVLEASE api 200 library >/dev/null
+is 'api: a lease in FLEET_LEASE_SPOTIFY_TOKEN is used as is' "$(grep -c '^secret' "$LOG") $(jq -sr '.[-1].url | contains("/ENVLEASE/spotify-token/v1/me/playlists")' "$WORK/req.jsonl")" '0 true'
+is 'no secret file: the helper and pc spotify name none' "$(grep -c 'agents/secrets\|spotify.env\|spotify-token.json' "$API" "$PC" | cut -d: -f2 | tr '\n' ' ')" '0 0 '
 
 : >"$LOG"
 for c in play pause toggle next prev vol seek; do sp $c -h >/dev/null 2>&1; sp $c --help >/dev/null 2>&1; done

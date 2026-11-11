@@ -16,7 +16,7 @@ from vault.grants import Grants  # noqa: E402
 from vault.leases import Leases  # noqa: E402
 from vault import page  # noqa: E402
 from vault.listener import serve  # noqa: E402
-from vault.proxy import Proxy  # noqa: E402
+from vault.oauth import OAuthProxy  # noqa: E402
 from vault.seal import SealError, SystemdCreds  # noqa: E402
 
 
@@ -48,7 +48,7 @@ def main():
     leases = Leases(path=os.path.join(a.state, "leases.json"))
     admin = Admin(a.registry, os.path.join(a.state, "added.json"), sealer, audit,
                   Grants(leases, audit, Callers(a.cgroup_root)))
-    gate = Gate(lambda: admin.entries, sealer, leases, audit, {"proxy": Proxy(a.upstream)})
+    gate = Gate(lambda: admin.entries, sealer, leases, audit, {"proxy": OAuthProxy(sealer, audit, a.upstream)})
     web = serve(gate, "127.0.0.1", a.port)
     page.serve(admin, a.page_socket, a.owner_login)
     with open(os.path.join(a.state, "port"), "w") as f:

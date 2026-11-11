@@ -13,7 +13,7 @@ usage: pc spotify <command> [args]
   seek <s|+s|-s>         absolute or relative position
   open <uri|url>         spotify:… or open.spotify.com/… ; launches the app if needed
   output [earbuds|speakers|tv|<sink>]   move the Spotify stream via pc audio move (ledgered; no arg: print current)
-  search <query>         Web API (needs ~/agents/secrets/spotify.env)
+  search <query>         Web API, through the fleet vault (lease: FLEET_LEASE_SPOTIFY_TOKEN, else secret grant)
   library                your playlists (Web API)
   auth                   one-time browser login for the Web API (run as the owner)
 EOF
@@ -98,18 +98,17 @@ cmd_open() {
   running || { echo "spotify: app did not appear on MPRIS" >&2; exit 1; }
   echo "opened: $uri"
   # MPRIS OpenUri is a no-op in this client, so playback has to be started through the Web API.
-  if [ -r "$HOME/agents/secrets/spotify.env" ]; then
-    python3 "$API" play "$uri" || exit 1
-    for i in $(seq 20); do
-      [ "$($P status 2>/dev/null)" = Playing ] && break
-      sleep 0.5; $P play 2>/dev/null
-    done
-    [ "$($P status)" = Playing ] || { echo "spotify: playback did not start" >&2; cmd_status; exit 1; }
-    cmd_status
-  else
-    echo "note: the URI was handed to the app, but starting playback needs the Web API" >&2
-    api play "$uri"
+  python3 "$API" play "$uri"; rc=$?
+  if [ $rc -ne 0 ]; then
+    [ $rc -eq 2 ] && echo "note: the URI was handed to the app, but starting playback needs the Web API" >&2
+    exit $rc
   fi
+  for i in $(seq 20); do
+    [ "$($P status 2>/dev/null)" = Playing ] && break
+    sleep 0.5; $P play 2>/dev/null
+  done
+  [ "$($P status)" = Playing ] || { echo "spotify: playback did not start" >&2; cmd_status; exit 1; }
+  cmd_status
 }
 
 cmd_output() {
@@ -122,20 +121,8 @@ cmd_output() {
   echo "output: $(alias_of_sink "${stream#* }") (${stream#* })"
 }
 
-# api SUB ARGS — run the Web API helper, or print the setup instructions and exit 2.
-api() {
-  [ -r "$HOME/agents/secrets/spotify.env" ] || {
-    cat >&2 <<'EOF'
-spotify: the Web API needs credentials the owner must create. Open https://developer.spotify.com/dashboard,
-click Create app, give it any name, set the Redirect URI to exactly http://127.0.0.1:8899/callback, tick Web API
-and save; then copy the app's Client ID and Client secret into ~/agents/secrets/spotify.env as
-SPOTIFY_CLIENT_ID=... and SPOTIFY_CLIENT_SECRET=... (chmod 600) and run `pc spotify auth` once from the desktop —
-it opens a browser to approve, stores the tokens 0600 and refreshes them from then on.
-EOF
-    exit 2
-  }
-  exec python3 "$API" "$@"
-}
+# api SUB ARGS — run the Web API helper (it prints the setup steps and exits 2 when the vault lacks the app).
+api() { exec python3 "$API" "$@"; }
 
 for a in "${@:2}"; do case $a in -h|--help) usage; exit 0;; esac; done
 case "${1:--h}" in

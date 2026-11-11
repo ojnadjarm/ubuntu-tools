@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
-"""Spotify Web API helper for `pc spotify search|library|auth` (authorization code flow)."""
-import base64
+"""Spotify Web API helper for `pc spotify search|library|play|auth`, through the fleet vault (T1634-V7): the broker holds
+the client secret and the refresh token; this helper holds only a lease."""
+import functools
 import http.server
 import json
 import os
+import shutil
 import subprocess
 import sys
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
-SECRETS = os.path.expanduser("~/agents/secrets")
-ENV = os.path.join(SECRETS, "spotify.env")
-TOKENS = os.path.join(SECRETS, "spotify-token.json")
 REDIRECT = "http://127.0.0.1:8899/callback"
 SCOPES = "playlist-read-private user-library-read user-read-playback-state user-modify-playback-state"
+SETUP = """spotify: the Web API needs the Spotify app in the vault. The owner opens https://developer.spotify.com/dashboard,
+clicks Create app (any name), sets the Redirect URI to exactly http://127.0.0.1:8899/callback, ticks Web API and saves;
+then adds <client id>:<client secret> as spotify-client on the dashboard's Vault page (or `secret add spotify-client`
+in a terminal) and runs `pc spotify auth` once from the desktop: it opens a browser to approve, and the broker keeps
+the sign-in and refreshes it from then on."""
+urllib.request.install_opener(urllib.request.build_opener(urllib.request.ProxyHandler({})))
 
 
 def die(msg, code=2):
@@ -23,66 +27,52 @@ def die(msg, code=2):
     sys.exit(code)
 
 
-def creds():
-    out = {}
-    with open(ENV) as fh:
-        for line in fh:
-            line = line.strip()
-            if "=" in line and not line.startswith("#"):
-                k, v = line.split("=", 1)
-                out[k.strip()] = v.strip().strip("'\"")
-    cid, sec = out.get("SPOTIFY_CLIENT_ID"), out.get("SPOTIFY_CLIENT_SECRET")
-    if not cid or not sec:
-        die(f"spotify: {ENV} needs SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET")
-    return cid, sec
+@functools.cache
+def base():
+    """http://127.0.0.1:<port>/<lease>/spotify-token: a lease from the env, else one asked with `secret grant`."""
+    lease = os.environ.get("FLEET_LEASE_SPOTIFY_TOKEN", "")
+    if not lease:
+        try:
+            cli = shutil.which("secret") or os.path.join(os.path.dirname(os.path.realpath(__file__)), "secret")
+            r = subprocess.run([cli, "grant", "spotify-token", "--ticket", "pc-spotify", "--ttl", "600"],
+                               capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.SubprocessError) as e:
+            die(f"spotify: no vault client ({type(e).__name__})\n{SETUP}")
+        lease, why = r.stdout.strip(), r.stderr.strip()
+        if r.returncode or not lease:
+            die(f"spotify: the vault gave no lease on spotify-token ({why or r.returncode})"
+                + (f"\n{SETUP}" if "not in the vault" in why else ""))
+    vault = os.environ.get("FLEET_VAULT_URL") or f"http://127.0.0.1:{os.environ.get('FLEET_VAULT_PORT') or 18480}"
+    return f"{vault}/{lease}/spotify-token"
 
 
-def token_request(data):
-    cid, sec = creds()
-    auth = base64.b64encode(f"{cid}:{sec}".encode()).decode()
-    req = urllib.request.Request(
-        "https://accounts.spotify.com/api/token",
-        data=urllib.parse.urlencode(data).encode(),
-        headers={"Authorization": f"Basic {auth}", "Content-Type": "application/x-www-form-urlencoded"},
-    )
-    with urllib.request.urlopen(req, timeout=20) as r:
-        return json.load(r)
-
-
-def save(tok):
-    tok["expires_at"] = time.time() + tok.get("expires_in", 3600) - 60
-    old = json.load(open(TOKENS)) if os.path.exists(TOKENS) else {}
-    tok.setdefault("refresh_token", old.get("refresh_token", ""))
-    fd = os.open(TOKENS, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    os.fchmod(fd, 0o600)
-    with os.fdopen(fd, "w") as fh:
-        json.dump(tok, fh)
-    return tok
-
-
-def access_token():
-    if not os.path.exists(TOKENS):
-        die("spotify: not authorised yet — run `pc spotify auth` from the desktop")
-    tok = json.load(open(TOKENS))
-    if tok.get("expires_at", 0) < time.time():
-        tok = save(token_request({"grant_type": "refresh_token", "refresh_token": tok["refresh_token"]}))
-    return tok["access_token"]
+def refusal(e):
+    """Exit with the vault's own words for an HTTPError when it sent them (exit 2 when the vault lacks a value)."""
+    try:
+        why = json.loads(e.read()).get("error")
+    except (ValueError, AttributeError, OSError, TypeError):
+        why = None
+    if isinstance(why, str):
+        die(f"spotify: vault: {why}" + (f"\n{SETUP}" if e.code == 503 and "not in the vault" in why else ""),
+            2 if e.code == 503 else 1)
 
 
 def call(path, method="GET", body=None, **params):
-    url = "https://api.spotify.com/v1/" + path
+    url = f"{base()}/v1/{path}"
     if params:
         url += "?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(
-        url, method=method,
-        data=json.dumps(body).encode() if body is not None else None,
-        headers={"Authorization": "Bearer " + access_token(), "Content-Type": "application/json"})
+        url, method=method, data=json.dumps(body).encode() if body is not None else None,
+        headers={"Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:
+        with urllib.request.urlopen(req, timeout=30) as r:
             raw = r.read()
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as e:
+        refusal(e)
         die(f"spotify: Web API {e.code} on {path}", 1)
+    except urllib.error.URLError as e:
+        die(f"spotify: the vault broker is unreachable ({e.reason}); is fleet-vault.service running?", 1)
 
 
 def get(path, **params):
@@ -101,8 +91,8 @@ def play(uri):
 
 
 def auth():
-    cid, _ = creds()
-    code = {}
+    """Sign in once: the browser goes through the broker to Spotify; the broker exchanges the code and keeps the token."""
+    b, code = base(), {}
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
@@ -115,17 +105,24 @@ def auth():
         def log_message(self, *a):
             pass
 
-    url = "https://accounts.spotify.com/authorize?" + urllib.parse.urlencode(
-        {"client_id": cid, "response_type": "code", "redirect_uri": REDIRECT, "scope": SCOPES})
-    print("open: " + url)
+    print("open: the Spotify sign-in page in the desktop browser (through the vault)")
+    url = f"{b}/authorize?" + urllib.parse.urlencode({"redirect_uri": REDIRECT, "scope": SCOPES})
     subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     srv = http.server.HTTPServer(("127.0.0.1", 8899), Handler)
     srv.timeout = 180
     srv.handle_request()
     if "code" not in code:
         die("spotify: no authorisation code received (" + code.get("error", "timed out") + ")", 1)
-    save(token_request({"grant_type": "authorization_code", "code": code["code"], "redirect_uri": REDIRECT}))
-    print("auth: tokens stored in " + TOKENS)
+    form = {"grant_type": "authorization_code", "code": code["code"], "redirect_uri": REDIRECT}
+    req = urllib.request.Request(f"{b}/api/token", data=urllib.parse.urlencode(form).encode(),
+                                 headers={"Content-Type": "application/x-www-form-urlencoded"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            json.load(r)
+    except urllib.error.HTTPError as e:
+        refusal(e)
+        die(f"spotify: sign-in refused ({e.code})", 1)
+    print("auth: the sign-in is sealed in the vault (spotify-token)")
 
 
 def search(query):

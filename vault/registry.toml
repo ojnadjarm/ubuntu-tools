@@ -4,6 +4,8 @@
 # modes: proxy | op | exchange | unit. legacy: today's file under ~/agents/secrets, removed by its migration row.
 # check: the rule a lease request must pass (lib/vault/grants.py); cap_usd: most a lease may spend;
 # month_cap_usd: most all leases may spend in a calendar month; cost: the JSON path of a call's cost in the answer.
+# routes: path prefix -> pinned host (default: the first host); methods: allowed (default GET, POST);
+# oauth: the broker keeps the refresh token, refreshes and signs in itself with the client secret it names.
 
 [secret.openrouter]
 class = "ruled"
@@ -36,19 +38,19 @@ legacy = "ntfy.env"
 
 [secret.spotify-client]
 class = "free"
-used_in = "pc spotify (Spotify Web API app)"
-modes = ["proxy"]
-hosts = ["api.spotify.com", "accounts.spotify.com"]
-paths = ["/v1/", "/api/token"]
+used_in = "pc spotify: the Spotify Web API app, value <client id>:<client secret>; used by the broker only (spotify-token)"
 legacy = "spotify.env"
 reissue = "https://developer.spotify.com/dashboard"
 
 [secret.spotify-token]
 class = "free"
-used_in = "pc spotify: the signed-in user's access and refresh token"
+used_in = "pc spotify: the signed-in user's refresh token; the broker refreshes the access token itself"
 modes = ["proxy"]
 hosts = ["api.spotify.com", "accounts.spotify.com"]
-paths = ["/v1/", "/api/token"]
+paths = ["/v1/", "/api/token", "/authorize"]
+routes = { "/v1/" = "api.spotify.com", "/api/token" = "accounts.spotify.com", "/authorize" = "accounts.spotify.com" }
+methods = ["GET", "POST", "PUT"]
+oauth = { client = "spotify-client", token = "/api/token", authorize = "/authorize" }
 legacy = "spotify-token.json"
 reissue = "https://developer.spotify.com/dashboard"
 

@@ -3,7 +3,7 @@ import json
 
 from .leases import LeaseError
 from .mode import Response
-from .proxy import PathError
+from .proxy import MethodError, PathError
 
 
 def _refuse(status, why):
@@ -40,7 +40,7 @@ class Gate:
             self._log(name, lease, "refused", "month cap")
             return _refuse(403, f"refused: month cap of {entry.month_cap_usd:.2f} USD reached")
         value = self.sealer.get(name)
-        if value is None:
+        if value is None and not entry.oauth:
             self._log(name, lease, "error", "not sealed")
             return _refuse(503, "the vault holds no value for this secret")
         try:
@@ -48,6 +48,9 @@ class Gate:
         except PathError:
             self._log(name, lease, "refused", "path not allowed")
             return _refuse(403, "refused: path not allowed for this secret")
+        except MethodError:
+            self._log(name, lease, "refused", "method not allowed")
+            return _refuse(405, "refused: method not allowed for this secret")
         except OSError as e:
             self._log(name, lease, "error", f"upstream {type(e).__name__}")
             return _refuse(502, f"upstream unreachable ({type(e).__name__})")

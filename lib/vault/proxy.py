@@ -16,12 +16,22 @@ class PathError(ValueError):
     """A path outside the entry's allowed list."""
 
 
+class MethodError(ValueError):
+    """A method outside the entry's allowed list."""
+
+
 def allowed_path(path, prefixes):
     """True when path is clean (no dot segments, backslash or empty segment) and under one of prefixes."""
     plain = urllib.parse.unquote(path)
     if "\\" in plain or "//" in plain or any(s in (".", "..") for s in plain.split("/")):
         return False
     return any(plain.startswith(p) for p in prefixes)
+
+
+def host_for(entry, path):
+    """The pinned host for path: the longest matching route, else the entry's first host."""
+    best = max((p for p, _ in entry.routes if path.startswith(p)), key=len, default=None)
+    return dict(entry.routes)[best] if best else entry.hosts[0]
 
 
 def cost_of(body, dotted):
@@ -38,7 +48,7 @@ def cost_of(body, dotted):
 
 
 class Proxy(Mode):
-    """HTTPS to the entry's first pinned host; `upstream` (tests only) sends every call to one plain-HTTP base."""
+    """HTTPS to the path's pinned host; `upstream` (tests only) sends every call to one plain-HTTP base."""
 
     def __init__(self, upstream="", timeout=300):
         self.upstream, self.timeout = upstream, timeout
@@ -49,22 +59,38 @@ class Proxy(Mode):
             return http.client.HTTPConnection(u.hostname, u.port, timeout=self.timeout)
         return http.client.HTTPSConnection(host, 443, context=ssl.create_default_context(), timeout=self.timeout)
 
-    def handle(self, request, entry, value, lease):
-        if request.method not in METHODS:
-            return Response(405, body=b'{"error":"method not allowed"}')
+    def check(self, request, entry):
+        """Raise MethodError or PathError when request is outside the entry's lists."""
+        if request.method not in (entry.methods or METHODS):
+            raise MethodError(request.method)
         if not allowed_path(request.path, entry.paths):
             raise PathError(request.path)
-        host = entry.hosts[0]
-        url = request.path + (f"?{request.query}" if request.query else "")
-        headers = {k: v for k, v in request.headers.items() if k.lower() in PASS_IN}
-        headers["Authorization"] = "Bearer " + value.decode()
+
+    def send(self, method, host, url, body, headers):
+        """One upstream call: (status, headers, body)."""
         conn = self._conn(host)
         try:
-            conn.request(request.method, url, body=request.body or None, headers=headers)
+            conn.request(method, url, body=body or None, headers=headers)
             r = conn.getresponse()
-            body = r.read().replace(value, REDACTED)
-            out = {k: v for k, v in r.getheaders() if k.lower() in PASS_OUT}
-            return Response(r.status, out, body, f"{request.method} {host}{request.path}", cost_of(body, entry.cost))
+            return r.status, r.getheaders(), r.read()
         finally:
             conn.close()
+
+    def forward(self, request, entry, auth, hide):
+        """Send request to its host with the Authorization header auth; every value in hide is redacted from the answer."""
+        host = host_for(entry, request.path)
+        url = request.path + (f"?{request.query}" if request.query else "")
+        headers = {k: v for k, v in request.headers.items() if k.lower() in PASS_IN}
+        headers["Authorization"] = auth
+        try:
+            status, got, body = self.send(request.method, host, url, request.body, headers)
+        finally:
             del headers
+        for v in hide:
+            body = body.replace(v, REDACTED)
+        out = {k: v for k, v in got if k.lower() in PASS_OUT}
+        return Response(status, out, body, f"{request.method} {host}{request.path}", cost_of(body, entry.cost))
+
+    def handle(self, request, entry, value, lease):
+        self.check(request, entry)
+        return self.forward(request, entry, "Bearer " + value.decode(), [value])

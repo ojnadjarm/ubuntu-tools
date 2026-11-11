@@ -44,12 +44,10 @@ def make_handler(gate):
             req = Request(self.command, "/" + parts[3], u.query, dict(self.headers.items()), body)
             self._send(gate.forward(parts[1], parts[2], req))
 
-        do_GET = do_POST = _serve
+        do_GET = do_POST = do_PUT = do_DELETE = _serve
 
-        def do_PUT(self):
+        def do_PATCH(self):
             self._plain(405, "method not allowed")
-
-        do_DELETE = do_PATCH = do_PUT
 
     return Handler
 
