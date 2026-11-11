@@ -30,7 +30,7 @@ e = registry.load(sys.argv[2]); print(len(e), " ".join(sorted({x.cls for x in e.
 EOF
 )
 is "registry: shipped file loads 7 names in classes critical, free, ruled" "$reg" "7 critical free ruled"
-bad=$(python3 -I - "$A/lib" <<'EOF'
+nbad=$(python3 -I - "$A/lib" <<'EOF'
 import sys; sys.path.insert(0, sys.argv[1]); from vault import registry
 rows = {"bad class": {"class": "paid", "used_in": "x"}, "ruled without rules": {"class": "ruled", "used_in": "x"},
         "proxy without host": {"class": "free", "used_in": "x", "modes": ["proxy"]},
@@ -49,7 +49,7 @@ except registry.RegistryError: n += 1
 print(n)
 EOF
 )
-is "registry: 12 bad rows and names refused" "$bad" 12
+is "registry: 12 bad rows and names refused" "$nbad" 12
 
 # 2. Admin with MemorySealer: add, re-add, replace, unknown, class rules, list and log hold no value.
 adm=$(python3 -I - "$A/lib" "$W/registry.toml" "$W/mem" "$VALUE" <<'EOF'
