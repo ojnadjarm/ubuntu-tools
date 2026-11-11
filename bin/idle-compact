@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# idle-compact (T1657): compacts a Claude session hosted in tmux once it sat idle, before its 1 h prompt cache expires.
+# Every 5 min (idle-compact.timer) it checks each live session in the Claude registry ($CLAUDE_DIR/sessions/<pid>.json)
+# that names a tmux pane. Idle = registry status idle and no write to the session's transcript, subagents or workflows
+# for IDLE_COMPACT_AFTER min (default 45: under the 1 h cache TTL, so the compaction reads a warm cache).
+# Fires only when the context is >= IDLE_COMPACT_MIN_TOKENS (default 100000), the pane runs that claude at an empty
+# prompt (no turn, background agents, copy mode or typed text) and no compaction followed its last request.
+# Trigger: `/compact` typed into the pane; the session's own Compact instructions decide what is kept.
+# Off switch: IDLE_COMPACT=off in config.env. Log: $IDLE_COMPACT_LOG (one line per firing).
+# Usage: idle-compact [--apply]   without --apply prints "would: …" or "skip: …" per session, changes nothing
+#        idle-compact status      enabled, timer, last firing, tokens saved
+case "${1:-}" in -h|--help) awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; exit 0 ;; esac
+set -uo pipefail
+BIN=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+. "$BIN/orchlib.sh"
+CLAUDE_DIR=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
+HARNESS_CONFIG=${HARNESS_CONFIG:-$HOME/.config/pc-harness/config.env}
+# cfg <key> <default>: the environment, else the last `key=` line of config.env, else the default.
+cfg() { local v=${!1:-}; [ -n "$v" ] || v=$(sed -n "s/^$1=\"\{0,1\}\([^\"#]*\)\"\{0,1\}.*/\1/p" "$HARNESS_CONFIG" 2>/dev/null | tail -n1 | tr -d ' '); echo "${v:-$2}"; }
+ENABLED=$(cfg IDLE_COMPACT on)
+AFTER=$(cfg IDLE_COMPACT_AFTER 45)
+MIN_TOKENS=$(cfg IDLE_COMPACT_MIN_TOKENS 100000)
+LOG=${IDLE_COMPACT_LOG:-${AGENT_WORK:-$HOME/agent-work}/idle-compact/idle-compact.log}
+WAIT=${IDLE_COMPACT_WAIT:-240}
+UNIT=idle-compact.timer
+PANE=
+tm() { tmux ${IDLE_COMPACT_TMUX_SOCKET:+-L "$IDLE_COMPACT_TMUX_SOCKET"} "$@"; }
+
+# Prints "compact" or "skip <reason>" from facts: enabled status idle_min tokens compacted pane_reason.
+decide() {
+  local on=$1 st=$2 idle=$3 tokens=$4 compacted=$5 pane_why=$6
+  [ "$on" != off ] || { echo "skip off (IDLE_COMPACT=off)"; return; }
+  [ "$st" = idle ] || { echo "skip session ${st:-unknown}, not idle"; return; }
+  [ "$idle" -ge "$AFTER" ] || { echo "skip idle $idle min < $AFTER"; return; }
+  [ "$compacted" = 0 ] || { echo "skip already compacted since its last request"; return; }
+  [ "$tokens" -ge "$MIN_TOKENS" ] || { echo "skip $tokens tokens < $MIN_TOKENS"; return; }
+  [ -z "$pane_why" ] || { echo "skip $pane_why"; return; }
+  echo compact
+}
+
+# Live registry entries with a tmux pane: "pid sid pane status status_epoch tmux_session".
+sessions() {
+  python3 - "$CLAUDE_DIR/sessions" <<'PY'
+import glob, json, os, sys
+for f in glob.glob(os.path.join(sys.argv[1], "*.json")):
+    try: r = json.load(open(f))
+    except Exception: continue
+    t, pid = r.get("tmux") or "", r.get("pid")
+    if "." not in t or not pid or not os.path.exists(f"/proc/{pid}"): continue
+    print(pid, r.get("sessionId") or "-", t.rsplit(".", 1)[1], r.get("status") or "unknown",
+          int((r.get("statusUpdatedAt") or 0) / 1000), t.split(":", 1)[0] or "-")
+PY
+}
+
+# Transcript facts of session $1: "tokens compacted last_write_epoch" (context of the newest main-thread request, or
+# the post size of a newer compaction; compacted=1 when a compaction came after the newest request).
+facts() {
+  python3 - "$CLAUDE_DIR/projects" "$1" <<'PY'
+import glob, json, os, sys
+root, sid = sys.argv[1], sys.argv[2]
+paths = glob.glob(os.path.join(root, "*", sid + ".jsonl"))
+if not paths: print(0, 0, 0); sys.exit()
+p = paths[0]; last = os.path.getmtime(p)
+for d, _, fs in os.walk(os.path.join(os.path.dirname(p), sid)):
+    for f in fs:
+        try: last = max(last, os.path.getmtime(os.path.join(d, f)))
+        except OSError: pass
+def scan(data):
+    for line in reversed(data.splitlines()):
+        if b'"usage"' not in line and b'compact_boundary' not in line: continue
+        try: o = json.loads(line)
+        except Exception: continue
+        if o.get("isSidechain"): continue
+        if o.get("type") == "system" and o.get("subtype") == "compact_boundary":
+            return (o.get("compactMetadata") or {}).get("postTokens") or 0, 1
+        u = (o.get("message") or {}).get("usage") if o.get("type") == "assistant" else None
+        if u: return sum(u.get(k) or 0 for k in ("input_tokens", "cache_read_input_tokens",
+                                                 "cache_creation_input_tokens", "output_tokens")), 0
+with open(p, "rb") as fh:
+    size = fh.seek(0, 2); fh.seek(max(0, size - (4 << 20))); r = scan(fh.read())
+    if r is None and size > (4 << 20): fh.seek(0); r = scan(fh.read())
+tokens, compacted = r or (0, 0)
+print(tokens, compacted, int(last))
+PY
+}
+
+# Why pane $PANE must not be typed into for claude pid $1; empty when it is at an empty prompt.
+pane_reason() {
+  local pid=$1 ppid a line rest
+  ppid=$(tm display -pt "$PANE" '#{pane_pid}' 2>/dev/null) || { echo "pane $PANE gone"; return; }
+  [ -n "$ppid" ] || { echo "pane $PANE gone"; return; }
+  ps -o args= -p "$pid" 2>/dev/null | grep -qE '^([^ ]*/)?claude( |$)' || { echo "pid $pid is not claude"; return; }
+  local q=$pid; while [ "$q" -gt 1 ] && [ "$q" != "$ppid" ]; do q=$(ps -o ppid= -p "$q" 2>/dev/null | tr -d ' '); [ -n "$q" ] || q=1; done
+  [ "$q" = "$ppid" ] || { echo "pane $PANE does not run pid $pid"; return; }
+  [ "$(tm display -pt "$PANE" '#{pane_in_mode}' 2>/dev/null)" = 0 ] || { echo "pane in copy mode"; return; }
+  a=$(pane)
+  local why; why=$(pane_busy "$a"); [ -z "$why" ] || { echo "$why"; return; }
+  printf '%s\n' "$a" | awk '/^─/{f=1; next} f' | grep -qE '^ *◯ ' && { echo "background agents listed"; return; }
+  line=$(prompt_line)
+  [ -n "$line" ] || { echo "no prompt box"; return; }
+  rest=$(printf '%s' "$line" | sed -e 's/^❯//' -e 's/^>//' | tr -d ' \302\240')
+  [ -z "$rest" ] || echo "prompt box not empty (len=${#rest})"
+}
+
+log() { mkdir -p "$(dirname "$LOG")"; printf '%s %s\n' "$(date -Is)" "$*" >>"$LOG"; }
+
+status() {
+  local fired saved last
+  echo "enabled: $ENABLED (after ${AFTER} min, min ${MIN_TOKENS} tokens)"
+  echo "timer: $(systemctl --user is-enabled "$UNIT" 2>/dev/null) $(systemctl --user is-active "$UNIT" 2>/dev/null)"
+  fired=$(grep -c ' compacted ' "$LOG" 2>/dev/null); fired=${fired:-0}
+  last=$(grep ' compacted ' "$LOG" 2>/dev/null | tail -n1)
+  saved=$(awk '/ compacted /{b=a=""; for(i=1;i<=NF;i++){if($i~/^before=/)b=substr($i,8); if($i~/^after=[0-9]/)a=substr($i,7)} if(a!="")s+=b-a} END{print s+0}' "$LOG" 2>/dev/null)
+  echo "firings: $fired, tokens saved: ${saved:-0}"
+  echo "last firing: ${last:-none}"
+}
+
+[ "${BASH_SOURCE[0]}" = "$0" ] || return 0
+
+case "${1:-}" in
+  status) status; exit 0 ;;
+  --compacted) [ "$(facts "$2" | awk '{print $2}')" = 1 ]; exit ;;
+  ''|--apply) ;;
+  *) echo "usage: idle-compact [--apply] | status" >&2; exit 2 ;;
+esac
+APPLY=0; [ "${1:-}" = --apply ] && APPLY=1
+now=$(date +%s)
+mapfile -t rows < <(sessions)
+[ "${#rows[@]}" -gt 0 ] || echo "no Claude session in tmux"
+for row in "${rows[@]}"; do
+  read -r pid sid PANE st st_at name <<<"$row"
+  read -r tokens compacted wrote < <(facts "$sid")
+  last=$(( st_at > wrote ? st_at : wrote )); idle=$(( (now - last) / 60 ))
+  why=; [ "$st" != idle ] || [ "$idle" -lt "$AFTER" ] || why=$(pane_reason "$pid")
+  verdict=$(decide "$ENABLED" "$st" "$idle" "$tokens" "$compacted" "$why")
+  if [ "$verdict" != compact ]; then echo "$verdict: $name (${sid:0:8})"; continue; fi
+  echo "would: $name idle $idle min, $tokens tokens → compact"
+  [ "$APPLY" = 1 ] || continue
+  a=$(pane); sleep 2
+  [ "$(pane)" = "$a" ] && [ -z "$(pane_reason "$pid")" ] || { echo "skip pane changed: $name (${sid:0:8})"; continue; }
+  tm send-keys -t "$PANE" -l "/compact" && sleep 1 && tm send-keys -t "$PANE" Enter
+  after=unknown
+  if timeout "$WAIT" wait-for --label idle-compact --every 5 --until "$(printf '%q ' "$BIN/idle-compact") --compacted $sid" >/dev/null 2>&1; then
+    after=$(facts "$sid" | awk '{print $1}')
+  fi
+  log "compacted session=$name sid=${sid:0:8} idle=${idle}m before=$tokens after=$after"
+  echo "compacted: $name before=$tokens after=$after"
+done

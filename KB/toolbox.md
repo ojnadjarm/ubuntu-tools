@@ -251,6 +251,7 @@ Runner, orchestrator, CI:
 - `orchestrator-pulse` (hourly idle-prompt nudge), `pulse-5h-reset` (a pulse after each 5-hour window reset).
 - `orchestrator-handover` (hand-run `claude --continue` → the unit), `orchestrator-login-watch` (push on login loss),
   `orchestrator-update-restart` (nightly move onto the installed Claude Code).
+- `idle-compact` (5-min timer: `/compact` into an idle tmux Claude session before its cache expires; `idle-compact status`).
 - `fleet-ci-daily` (nightly `bin/tests/run.sh -j 8`), `tier-nightly` (what tiered tickets skipped), `ci-autofix <cmd>`
   (one fixer per cause on red), `ailearning-ci-daily` (ailearning suite on a throwaway copy).
 - `code-review` (weekly swarm, skill /weekly-code-review), `code-review-sandbox` (its allowlist sandbox),
