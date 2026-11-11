@@ -54,13 +54,15 @@ export function build(P, { now = Date.now(), needs = verdict(store.D).bad, talk 
     return put({ id: "pid" + s.pid, kind: "worker", name: s.name || "pid " + s.pid, rank: s.rank || "Worker", role: "worker", pose: SESSION[s.state] || "sleep",
       state: s.state, since: s.since, room: roomId, raw: { ...s, boss: byId[s.parent] ? byId[s.parent].name : s.parent } });
   };
-  /* The lead of a seat's room (talking while it says something) and the workers at its desks. */
+  /* The lead of a seat's room (talking while it says something, available while only its workers work) and the workers at its desks. */
   const seatRoom = (seat, team, kind) => {
     const mine = S.filter((s) => s.seat === seat.id), state = seatState(seat, S), prot = mine.find((s) => !("pid" in s));
     const crew = kind === "seat" ? workingFirst(S.filter((s) => !s.seat && s.parent === seat.id).map((s) => worker(s, seat.id))) : [];
-    const lead = put({ id: seat.id, kind, name: seat.name, rank: seat.rank || "", role: seat.role, pose: talk(seat.id) ? "talking" : seatPose(seat, state, mine), state,
-      since: (prot || mine[0] || {}).since, room: seat.id,
-      raw: { ...seat, session: prot ? { seat: prot.seat, state: prot.state, since: prot.since } : mine[0], crew: { n: crew.length, on: crew.filter((p) => p.pose === "working").length } } });
+    const busy = crew.filter((p) => p.pose === "working"), free = busy.length > 0 && !mine.length, pose = seatPose(seat, state, mine);
+    const lead = put({ id: seat.id, kind, name: seat.name, rank: seat.rank || "", role: seat.role, pose: talk(seat.id) ? "talking" : free && pose === "sleep" ? "idle" : pose,
+      state: free ? "available" : state, since: (prot || mine[0] || {}).since, room: seat.id,
+      raw: { ...seat, session: prot ? { seat: prot.seat, state: prot.state, since: prot.since } : mine[0],
+        crew: { n: crew.length, on: busy.length, list: busy.map((p) => ({ id: p.id, name: p.name, since: p.since })) } } });
     return room(kind, seat.id, seat.name, seat.rank || "", seat.area || "", team, [lead, ...crew], lead);
   };
 

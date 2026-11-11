@@ -35,10 +35,10 @@
 .office .mem .rk { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .office .mem .pill.dot { padding: 0; border: 0; background: none; }
 .office .mem .pill.off::before { background: none; box-shadow: inset 0 0 0 1px currentColor; }
-.ocard { position: fixed; inset: auto; margin: 0; width: min(38rem, calc(100vw - 16px)); max-height: calc(100svh - 16px); overflow: auto; overscroll-behavior: contain; padding: 1rem; gap: 1rem; border: 1px solid var(--line3); background: color-mix(in srgb, var(--bg1) 94%, transparent); color: var(--txt); box-shadow: 0 0 40px -10px var(--g), 0 12px 40px var(--bg); }
+.ocard { position: fixed; inset: auto; margin: 0; width: min(40.15rem, calc(100vw - 16px)); max-height: calc(100svh - 16px); overflow: auto; overscroll-behavior: contain; padding: 1rem; gap: 1rem; border: 1px solid var(--line3); background: color-mix(in srgb, var(--bg1) 94%, transparent); color: var(--txt); box-shadow: 0 0 40px -10px var(--g), 0 12px 40px var(--bg); }
 .ocard:popover-open { display: flex; }
 .ocard:focus { outline: none; }
-.ocard .cx { position: sticky; top: 0; order: 2; align-self: flex-start; flex: none; margin: -.6rem -.6rem 0 calc(.6rem - 44px); width: 44px; height: 44px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line2); background: var(--bg1); color: var(--mid); font: inherit; font-size: 1.4rem; line-height: 1; cursor: pointer; z-index: 1; }
+.ocard .cx { position: sticky; top: 0; order: 2; align-self: flex-start; flex: none; margin: -.6rem -.6rem 0 -.6rem; width: 44px; height: 44px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line2); background: var(--bg1); color: var(--mid); font: inherit; font-size: 1.4rem; line-height: 1; cursor: pointer; z-index: 1; }
 .ocard .cx:hover { color: var(--g2); background: var(--w08); }
 .ocard h3 { margin: .9rem 0 0; color: var(--mute); font-size: max(var(--fs-min), .75rem); font-weight: 400; text-transform: uppercase; letter-spacing: .16em; }
 .ocard .cpart dl { margin-top: .3rem; grid-template-columns: minmax(0, 1fr); row-gap: 0; }
@@ -50,7 +50,7 @@
 .ocard .cfig { flex: 0 0 5rem; }
 .ocard .cfig svg { width: 100%; height: auto; display: block; }
 .ocard .cbody { min-width: 0; flex: 1; }
-.ocard h2 { margin: 0; padding-right: 2.6rem; font-size: 1.1rem; color: var(--hi); letter-spacing: .04em; overflow-wrap: anywhere; }
+.ocard h2 { margin: 0; font-size: 1.1rem; color: var(--hi); letter-spacing: .04em; overflow-wrap: anywhere; }
 .ocard h2 span { display: block; font-weight: 400; color: var(--mute); font-size: max(var(--fs-min), .75rem); text-transform: uppercase; letter-spacing: .16em; }
 .ocard p { margin: .45rem 0 0; font-size: max(var(--fs-min), .9rem); overflow-wrap: anywhere; }
 .ocard .area { color: var(--g); }
@@ -78,5 +78,5 @@
   .office .hud button, .office .who, .ocard .chip, .ocard .btn { min-width: 44px; min-height: 44px; }
 }
 @media (max-width: 700px) { .office .stage { height: min(70svh, 125vw); } .office .hint { display: none; } }
-@media (max-width: 600px) { .ocard { left: 8px; right: 8px; bottom: 8px; top: auto; width: auto; max-height: 70svh; } .ocard p, .ocard dl { font-size: max(var(--fs-min), 1.08rem); } }
+@media (max-width: 600px) { .ocard { left: 8px; right: 8px; bottom: 8px; top: auto; width: auto; max-height: 70svh; } .ocard .cfig { flex-basis: 4rem; } .ocard p, .ocard dl { font-size: max(var(--fs-min), 1.08rem); } }
 .office .crew b, .office .folded b { font-size: max(11px, .82rem); }

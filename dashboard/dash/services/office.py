@@ -1,5 +1,5 @@
 """GET /api/office (tailnet only): seats without the owner, live sessions, staff teams from staff.json with their runner rows, the orchestrator's agents and claims, and error when a source failed."""
-import os, sys
+import os, re, sys
 from dash.cache import cache_meta, cached
 from dash.routes import route
 from dash.services import agents, runners, system
@@ -35,15 +35,29 @@ def folder(seat):
     return name if name and "/" not in name else None
 
 
+def crews(seats, sessions, subs):
+    """(sessions, subagents) with each po-work worker (a session started by `<seat folder>-T<n>`) under its seat as a Worker named by its ticket, its sub-agent row dropped."""
+    own = {folder(s): s["id"] for s in seats if folder(s)}
+    out, moved = [], set()
+    for s in sessions:
+        m = re.fullmatch(r"(.+)-(T\d+)", s.get("started_by") or "")
+        if "pid" in s and m and m[1] in own:
+            s = {**s, "seat": None, "parent": own[m[1]], "name": m[2], "rank": org_svc.org.rank("worker")}
+            moved.add("pid%d" % s["pid"])
+        out.append(s)
+    return out, [a for a in subs if a.get("id") not in moved]
+
+
 def compose(org, ags, cfg):
     """The office payload from the org payload, the agents payload (roster rows include the unit members) and the staff file."""
     rows = {r["name"]: r for r in ags.get("roster", [])}
     seats = [{k: s[k] for k in SEAT_KEYS if k in s} | ({"runner": rows[folder(s)]} if folder(s) in rows else {})
              for s in org.get("seats", []) if s["role"] != "owner"]
     folders = [f for s in org.get("seats", []) for f in [folder(s)] if f]
-    out = {"seats": seats, "sessions": org.get("sessions", []),
+    sessions, subs = crews(org.get("seats", []), org.get("sessions", []), ags.get("subagents", []))
+    out = {"seats": seats, "sessions": sessions,
            "staff": staff.assign(cfg["teams"], cfg.get("hidden", []), ags.get("roster", []), folders),
-           "agents": {"orchestrator": ags.get("orchestrator", {}), "subagents": ags.get("subagents", []), "claims": ags.get("claims", [])}}
+           "agents": {"orchestrator": ags.get("orchestrator", {}), "subagents": subs, "claims": ags.get("claims", [])}}
     err = "; ".join(e for e in (org.get("error"), ags.get("error")) if e)
     return {**out, "error": err} if err else out
 

@@ -162,7 +162,7 @@ const ok = (name, fn) => { fn(); n++; console.log("ok " + n + " " + name); };
     Q.sessions.push({ seat: null, state: "working", since: 1794322700, pid: 3002, parent: "mosaico", name: "agent-T9005", cwd: "~", started_by: "T9005", rank: "Worker" });
     const d = Mo.diff(M, Mo.build(Q));
     assert.deepStrictEqual(d.rooms, ["mosaico"]);
-    assert.deepStrictEqual(d.people, ["pid3002"]);
+    assert.deepStrictEqual(d.people, ["mosaico", "pid3002"]);
     assert.strictEqual(d.layout, false);
   });
 

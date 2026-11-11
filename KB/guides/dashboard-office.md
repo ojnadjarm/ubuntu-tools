@@ -51,6 +51,11 @@ node tools/office-measure.mjs --gate                     # CPU rest < 2 %, 3 wor
 ```
 
 ## Pitfalls (measured)
+- A po-work worker (`po-work-<p>-T<n>`, session `agent-po-<p>-T<n>`, cwd = the PO folder) was placed on the seat by
+  `lib/sessions.py` (exact folder) and listed by `agents.job_rows` as a pool sub-agent: the manager read "Now working" and
+  the worker sat in the Desk pool (T1627). `office.crews()` moves any session started by `<seat folder>-T<n>` under its
+  seat (Worker, named by ticket) and drops its sub-agent row; the model makes a seat with only working workers
+  `available` ("Free to talk · N workers running", part "Workers running"). Only the Office: /api/agents and chat untouched.
 - Owner rejections (2026-11-10): name tags flying over the scene, room names on the floor, and boards beside the scene
   were all removed (17, 17c); the name sits on a rack-and-screen board inside each room. Do not bring any of them back.
 - Rest CPU 4.8 % (gate < 2) came from the list's Familiar CSS loops (`familiars.css`, 6.3 of 7.8 % at rest), not

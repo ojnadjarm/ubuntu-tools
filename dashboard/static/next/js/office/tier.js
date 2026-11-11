@@ -1,7 +1,7 @@
 /* Which parts of a card show at a glance; everything else sits in the card's one closed Details fold. Pure data, runs under node. */
 
 /* Glance rows and parts by label: true always, a RegExp when the value matches; every other label is a detail. */
-export const GLANCE = { Now: true, "Next run": /^in /, "Needs you": true, "Sub-agents running": true };
+export const GLANCE = { Now: true, "Next run": /^in /, "Needs you": true, "Sub-agents running": true, "Workers running": true };
 /* The Members list of a room is a detail. */
 export const ROLL = "detail";
 

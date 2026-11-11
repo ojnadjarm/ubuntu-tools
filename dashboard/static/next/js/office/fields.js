@@ -1,11 +1,11 @@
 /* Card content for whoever is tapped in the office: one entry per kind in CARDS, plain data (the overlay escapes and draws it); `lines` are prose lines under the sub. */
 import { dmOf } from "../seats.js";
 import { rest } from "./model.js";
-import { ago, until, progress, took } from "./time.js";
+import { ago, at, until, progress, took } from "./time.js";
 
 const ROLE = { ceo: "Runs the fleet and answers questions about the harness.", po: "Product owner.", manager: "Project manager. Never posts." };
 const WAKE = { channel: "Always on; woken through its chat channel.", "po-inbox": "Asleep until someone writes to its inbox.", pull: "Reads its messages when it next runs." };
-const SAY = { working: "working", talking: "talking", error: "stuck on an error", idle: "idle", asleep: "asleep", off: "off", yours: "yours", done: "done", stale: "stopped" };
+const SAY = { available: "free to talk", working: "working", talking: "talking", error: "stuck on an error", idle: "idle", asleep: "asleep", off: "off", yours: "yours", done: "done", stale: "stopped" };
 const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
 const keep = (rows) => rows.filter((r) => r[1] != null && r[1] !== "");
 /* A card's text kept to one line: longer text is cut with an ellipsis. */
@@ -32,11 +32,15 @@ function ceo(p, t) {
     ...(f ? [["Failed", f.ticket + " · " + ago(f.last, t) + " ago", "bad"]] : []), ...(s && "pid" in s ? [["Session", s.name || "pid " + s.pid]] : []), ...where(s, t)], actions: message(p) };
 }
 
-/* A product owner or manager seat: area, about, role and wake lines, workers, its session, its runner's 4 rows, a message button. */
+/* A free seat's working workers, one row each: ticket, since when, how long; none while the seat itself works. */
+const crew = (p, t) => p.state !== "available" ? [] : [part("Workers running", "no workers running", p.raw.crew.list.map((w) => [w.name, "since " + at(w.since, t) + " · " + ago(w.since, t)]))];
+
+/* A product owner or manager seat: area, about, role and wake lines, workers, its session, its runner's 4 rows, a message button; free to talk while only its workers run. */
 function seat(p, t) {
   const r = p.raw, c = r.crew || { n: 0, on: 0 };
   const run = r.runner ? last4(r.runner, t, r.runner.health === "bad") : [];
-  return { ...base(p, t, r.area), lines: lines(r), rows: [["Workers", c.n ? plural(c.n, "worker") + ", " + c.on + " working" : "no workers"], ...where(r.session, t), ...run], actions: message(p) };
+  const b = base(p, t, r.area), state = p.state === "available" ? { ...b.state, text: "Free to talk · " + plural(c.on, "worker") + " running" } : b.state;
+  return { ...b, state, lines: lines(r), rows: [["Workers", c.n ? plural(c.n, "worker") + ", " + c.on + " working" : "no workers"], ...where(r.session, t), ...run], parts: crew(p, t), actions: message(p) };
 }
 
 /* A session a seat started: who it works for, its folder, who started it, when it was last active. */
@@ -52,16 +56,6 @@ function agent(p, t) {
   return { ...base(p, t, rest(a.label)), rows: keep([["Type", a.type], ...rows, ...(s ? [["Session", "pid " + s.pid], ...where(s, t)] : [])]) };
 }
 
-const DAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const p2 = (n) => String(n).padStart(2, "0");
-/* A moment as the Roster wrote it: "HH:MM" today, "yesterday HH:MM", "Wed HH:MM" within 6 days, else "D Mon". */
-function at(v, t) {
-  const d = new Date(typeof v === "number" ? v * 1000 : v), now = new Date(t), hm = p2(d.getHours()) + ":" + p2(d.getMinutes());
-  if (isNaN(d)) return String(v);
-  if (d.toDateString() === now.toDateString()) return hm;
-  if (d.toDateString() === new Date(t - 86400e3).toDateString()) return "yesterday " + hm;
-  return Math.abs(t - d) < 6 * 86400e3 ? DAY[d.getDay()] + " " + hm : d.getDate() + " " + MON[d.getMonth()] + (d.getFullYear() === now.getFullYear() ? "" : " " + d.getFullYear());
-}
 const when = (v, t) => at(v, t) + " · " + ago(v, t) + " ago";
 const ran = (l, t) => (l && l.end ? when(l.end, t) : "never");
 const gold = (row, bad) => (bad ? [...row, "bad"] : row);
@@ -127,14 +121,14 @@ function room(r, t, sub, extra) {
 const team = (r, t) => room(r, t, r.people.length + " staff", NOTE[r.id] ? { lines: [NOTE[r.id]] } : {});
 /* The desk pool: the agents the CEO runs himself. */
 const pool = (r, t) => room(r, t, "Agents the CEO runs himself");
-/* A seat's room: its project, the seat and the workers at its desks. */
-const project = (r, t) => room(r, t, r.area || r.people[0].name + "'s room");
+/* A seat's room: its project, the seat and the workers at its desks, the working ones listed. */
+const project = (r, t) => { const c = room(r, t, r.area || r.people[0].name + "'s room"); return { ...c, parts: [...crew(r.people[0], t), ...c.parts] }; };
 
 /* A person's card gains the line naming its room (opens the room's card) and the room's running sub-agents; a seat also its room's sessions and the files it holds. */
 function homed(p, t, c) {
   const r = p.sign && p.info, lead = p.kind === "seat";
   return r ? { ...c, rows: lead ? [...c.rows, ...held(r.claims)] : c.rows, home: { id: p.sign, text: "Team · " + r.name },
-    parts: [...(lead ? [sessions(r, t)] : []), subs(r, t)] } : c;
+    parts: [...(c.parts || []), ...(lead ? [sessions(r, t)] : []), subs(r, t)] } : c;
 }
 
 /* What only the CEO sees: needs-you, the sessions and the files (one row) no avatar holds. */
