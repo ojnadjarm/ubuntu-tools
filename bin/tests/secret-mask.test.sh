@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# T1633 secret-mask and the po-work image-key mask: a listed file reads empty (cat, python open, a copy) in the whole
-# process tree, other files read as is; po-work runs a worker without `AI image grant:` under it, a granted one not.
+# T1633 secret-mask: a listed file reads empty (cat, python open, a copy) in the whole process tree, other files read
+# as is. po-work no longer masks a worker (T1634-V10: the image key lives only in the vault; a lease is the only route).
 # Fixture-only (FLEET §5.6): fake key and secrets in a temp HARNESS_HOME, fake systemd-run/agent-exec/agent-run, no
 # network call. Not inside a bwrap sandbox: bwrap cannot nest here (AppArmor), and secret-mask is bwrap.
 set -uo pipefail
@@ -40,13 +40,13 @@ secret-mask "$WORK/missing" -- true; is 'mask: a missing path runs the command' 
 secret-mask "$K" >/dev/null 2>&1; is 'mask: no command exits 2' "$?" 2
 is 'mask: the key file itself is unchanged' "$(cat "$K")" 'FXKEY-T1633'
 
-# po-work: no grant -> masked; a grant -> the key reads
+# po-work: grant or not, the worker runs unmasked (a fixture file reads as is; no key file exists on the machine)
 echo 'draw him' >"$AGENT_WORK/briefs/T501-mg-masked.md"
 printf 'AI image grant: "hazme una imagen con IA"\n' >"$AGENT_WORK/briefs/T502-mg-granted.md"
 for t in T501 T502; do
   po-work mg start $t --brief "$(ls "$AGENT_WORK"/briefs/$t-*.md)" >/dev/null 2>&1
   timeout 15 wait-for --every 0.1 --until "[ \"\$(jq -r .status '$HARNESS_HOME/po-mg/state/work/$t.json')\" = done ]" >/dev/null 2>&1
 done
-is 'po-work: no grant: the key reads 0 three ways; another secret reads' "$(cat "$HARNESS_HOME/po-mg/logs/work/T501.out")" '0 0 0 fxtoken'
+is 'po-work: no grant: the worker runs unmasked (T1634-V10)' "$(cat "$HARNESS_HOME/po-mg/logs/work/T501.out")" '11 11 11 fxtoken'
 is 'po-work: a grant: the worker reads the key' "$(cat "$HARNESS_HOME/po-mg/logs/work/T502.out")" '11 11 11 fxtoken'
 exit $bad

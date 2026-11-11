@@ -180,7 +180,7 @@ echo 'draw him' >"$AGENT_WORK/briefs/T401-mg-nogrant.md"
 printf 'AI image grant: "hazme una imagen con IA"\n' >"$AGENT_WORK/briefs/T402-mg-grant.md"
 PATH="$WORK/argstub:$PATH" po-work mg start T401 --brief "$AGENT_WORK/briefs/T401-mg-nogrant.md" >/dev/null 2>&1
 PATH="$WORK/argstub:$PATH" po-work mg start T402 --brief "$AGENT_WORK/briefs/T402-mg-grant.md" >/dev/null 2>&1
-ev '(T1632) a brief without a grant: the worker unit gets no key' 'grep "po-work-mg-T401" "$WORK/args.log" | grep -q -- "--setenv=OPENROUTER_KEY_FILE=/dev/null"'
+ev '(T1632, T1634-V10) a brief without a grant: the worker unit gets no key path and no mask' 'grep -q "po-work-mg-T401" "$WORK/args.log" && ! grep "po-work-mg-T401" "$WORK/args.log" | grep -q -e OPENROUTER_KEY_FILE -e secret-mask'
 ev '(T1632) a brief with a grant: the key file is left as is' 'grep -q "po-work-mg-T402" "$WORK/args.log" && ! grep "po-work-mg-T402" "$WORK/args.log" | grep -q OPENROUTER_KEY_FILE'
 
 # (T1634-V5) leases come from agent-exec in the worker's own run (--secrets-from the brief): `start` runs inside the

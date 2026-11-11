@@ -153,11 +153,11 @@
   the track), and so is `spotify --uri=…` / `xdg-open spotify:…` beyond navigating the UI. Starting a *specific*
   track/playlist therefore needs the Web API (`PUT /me/player/play` on the desktop Connect device), which
   `pc spotify open` uses when credentials exist.
-- Web API (`search`, `library`, and playback start in `open`): needs `~/agents/secrets/spotify.env` with
-  `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` from https://developer.spotify.com/dashboard (redirect URI
-  `http://127.0.0.1:8899/callback`), then a one-time `pc spotify auth` **run by the owner** (it opens a browser).
-  Tokens land 0600 in `~/agents/secrets/spotify-token.json` and refresh themselves. Without the file those
-  subcommands print the setup steps and exit 2. Helper: `~/agents/bin/spotify_api.py`.
+- Web API (`search`, `library`, and playback start in `open`): goes through the vault (T1634-V7). The broker
+  holds `spotify-client` (`<client id>:<client secret>` from https://developer.spotify.com/dashboard) and
+  `spotify-token` (the refresh token) and refreshes the access token itself; `pc spotify` holds only a lease
+  (`secret grant spotify-token`, or `Secrets: spotify-token` in a headless agent's brief). No secret file exists.
+  Re-issue: `secret reissue spotify-client`. Helper: `~/agents/bin/spotify_api.py`.
 - Web API quirks: `me/playlists` items carry the track count in `items.total`, **not** `tracks.total`, and some
   entries come back null; `me/player/recently-played` needs a scope the token does not have (403). A
   `PUT /me/player/play` with a `context_uri` can load the context and leave the app paused, so `pc spotify open`

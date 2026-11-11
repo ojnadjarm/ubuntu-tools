@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fleet-vaultd: the secrets broker (T1634); wires registry, sealer, audit, leases, the admin socket, the loopback listener and the owner page."""
+"""fleet-vaultd: the secrets broker (T1634); wires registry, sealer, audit, leases, the leak scan, the admin socket, the loopback listener and the owner page."""
 import argparse
 import os
 import pwd
@@ -21,6 +21,7 @@ from vault.listener import serve  # noqa: E402
 from vault.op import Ntfy  # noqa: E402
 from vault.push import Push  # noqa: E402
 from vault.oauth import OAuthProxy  # noqa: E402
+from vault.scan import Scanner  # noqa: E402
 from vault.seal import SealError, SystemdCreds  # noqa: E402
 from vault.standing import Standing  # noqa: E402
 
@@ -53,11 +54,13 @@ def main():
     leases = Leases(path=os.path.join(a.state, "leases.json"))
     ntfy = Ntfy(a.upstream)
     push = Push(lambda: admin.entries, sealer, ntfy)
-    grants = Approving(leases, audit, Callers(a.cgroup_root), Approvals(push, audit), push)
+    callers = Callers(a.cgroup_root)
+    grants = Approving(leases, audit, callers, Approvals(push, audit), push)
     admin = Admin(a.registry, os.path.join(a.state, "added.json"), sealer, audit, grants,
                   Standing(lambda: admin.entries, sealer, audit, {"ntfy": ntfy}))
     gate = Gate(lambda: admin.entries, sealer, leases, audit, {"proxy": OAuthProxy(sealer, audit, a.upstream),
                                                            "exchange": Exchange(a.upstream)})
+    scanner = Scanner(lambda: admin.entries, sealer, audit, callers)
     web = serve(gate, "127.0.0.1", a.port)
     page.serve(admin, a.page_socket, a.owner_login)
     with open(os.path.join(a.state, "port"), "w") as f:
@@ -74,6 +77,8 @@ def main():
                 audit.log({"event": str(req.get("op", "?"))[:20], "secret": req.get("name"), "result": "refused",
                            "uid": uid, "target": "admin socket: uid not allowed"})
                 return wire.write_msg(self.wfile, {"ok": False, "error": "refused: this user may not use the vault"})
+            if req.get("op") == "scan":
+                return scanner.serve(self.request, self.wfile, req, uid, pid)
             try:
                 reply = admin.handle(req, uid, pid)
             except SealError as e:

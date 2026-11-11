@@ -9,8 +9,8 @@
 # Secrets: `run` hands the brief to agent-exec --secrets-from, which asks the vault for one lease per name on its line
 # `Secrets: <name>[, <name>]` (FLEET_LEASE_<NAME> in the worker, T1634-V5). The image key needs a line
 # `AI image grant: "<quote>"`: the requester's verbatim words asking for an AI image (T1632; it counts as
-# `Secrets: openrouter` with that quote). Without it the unit sets OPENROUTER_KEY_FILE to /dev/null and runs under
-# secret-mask (T1633).
+# `Secrets: openrouter` with that quote). Without a lease no worker reaches the image model: the key lives only in the
+# vault (T1634-V10: no key path, no mask).
 # `list`: open work, one line per ticket. No cap on workers at once (owner 2026-11-11); start exits 3 when the same key
 # or ticket is open (nothing starts), 1 when the launch fails, 2 on bad usage.
 help() { awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; }
@@ -77,12 +77,9 @@ case "$verb" in
       '{ticket:$t, key:$k, brief:$b, channel:$c, thread:$th, asked_by:$a, model:$m, effort:$e, started:$s, unit:$u,
         status:"starting", filed:false}' >"$W/.$t.tmp" && mv "$W/.$t.tmp" "$W/$t.json"
     tmo=$(envkey WORK_TIMEOUT); tmo=${tmo:-14400}
-    nokey=(--setenv=OPENROUTER_KEY_FILE=/dev/null); mask=("$(dirname "$SELF")/secret-mask" "$HARNESS_HOME/secrets/openrouter.key" --)
-    quote=$(sed -n 's/^AI image grant: "\(..*\)"$/\1/p' "$brief" | head -1)
-    [ -z "$quote" ] || nokey=() mask=()
-    if ! systemd-run --user --quiet --collect --unit="po-work-$p-$t" --setenv=PATH="$PATH" "${nokey[@]}" \
+    if ! systemd-run --user --quiet --collect --unit="po-work-$p-$t" --setenv=PATH="$PATH" \
          --property=RuntimeMaxSec=$((tmo + 300)) --property=ExecStopPost="$SELF $p reap" \
-         "${mask[@]}" "$SELF" "$p" run "$t" </dev/null >>"$L/$t.log" 2>&1 7>&-; then
+         "$SELF" "$p" run "$t" </dev/null >>"$L/$t.log" 2>&1 7>&-; then
       jset "$t" '.status = "failed" | .rc = "launch" | .filed = true'
       echo "po-work: launch of $t failed; see $L/$t.log" >&2; exit 1
     fi

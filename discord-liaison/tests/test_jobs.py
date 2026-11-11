@@ -176,17 +176,19 @@ class TestJobCli(JobBase):
 
 
 class TestImageGrant(JobBase):
-    """T1632: a job holds no image key; `art --asked` gets it only with a quote from the job's own messages."""
+    """T1632, T1634-V10: a job holds no image key path; `art --asked` passes the quote only when the job's messages hold it."""
 
     async def test_job_worker_env_holds_no_key(self):
         (a,) = await self.inbox('dibuja una representación de ti')
         await self.run_cli('job', a, 'draw yourself')
         seen = os.path.join(self.tmp.name, 'key.seen')
-        await self.run_cli('job-run', self.launches()[0], env={'LIAISON_WORKER_CMD': f'echo "$OPENROUTER_KEY_FILE" > {seen}'})
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop('OPENROUTER_KEY_FILE', None)
+            await self.run_cli('job-run', self.launches()[0], env={'LIAISON_WORKER_CMD': f'echo "[$OPENROUTER_KEY_FILE]" > {seen}'})
         with open(seen) as f:
-            self.assertEqual(f.read().strip(), '/dev/null')
+            self.assertEqual(f.read().strip(), '[]')
 
-    async def test_art_passes_key_and_quote_only_when_the_quote_is_in_the_job(self):
+    async def test_art_passes_the_quote_only_when_it_is_in_the_job_and_never_a_key_path(self):
         (a,) = await self.inbox('Hazme   una imagen con IA del héroe, porfa')
         await self.run_cli('job', a, 'AI image of the hero')
         jid = self.launches()[0]
@@ -203,7 +205,7 @@ class TestImageGrant(JobBase):
             await self.run_cli('art', 'hero', env=env)
         with open(seen) as f:
             rows = f.read().splitlines()
-        self.assertEqual(rows, [repr(('hazme una imagen con IA del héroe', '/fx/key')), repr((None, '/dev/null')),
+        self.assertEqual(rows, [repr(('hazme una imagen con IA del héroe', '/dev/null')), repr((None, '/dev/null')),
                                 repr((None, '/dev/null'))])
 
 
@@ -238,7 +240,7 @@ class TestVaultLease(JobBase):
 
 
 class TestImageKeyMask(JobBase):
-    """T1633: a job whose messages ask for no AI image cannot read the image key file at all."""
+    """T1633 retired by T1634-V10: no job runs under secret-mask any more (the image key lives only in the vault)."""
 
     async def asyncSetUp(self):
         await super().asyncSetUp()
@@ -267,8 +269,9 @@ class TestImageKeyMask(JobBase):
                 got.append(f.read().strip())
         return got
 
-    async def test_no_grant_job_reads_the_key_empty_three_ways_and_other_files_as_is(self):
-        self.assertEqual(await self.reads('dibuja una representación de ti'), ['0', '0', '0', 'other'])
+    async def test_no_grant_job_runs_unmasked_and_reads_files_as_is(self):
+        n = str(len('FXKEY-T1633'))
+        self.assertEqual(await self.reads('dibuja una representación de ti'), [n, n, n, 'other'])
         with open(self.key) as f:
             self.assertEqual(f.read(), 'FXKEY-T1633')
 

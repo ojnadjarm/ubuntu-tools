@@ -16,6 +16,7 @@ hosts = ["openrouter.ai"]
 paths = ["/api/v1/"]
 legacy = "openrouter.key"
 reissue = "https://openrouter.ai/settings/keys"
+reissue_then = "create a key, delete the old one; secret replace openrouter (or the Vault page), then one concept-img run with a lease"
 check = "image-ask"
 cap_usd = 2.0
 month_cap_usd = 10.0
@@ -31,6 +32,7 @@ methods = ["GET", "POST", "PUT", "DELETE"]
 scheme = "Bot"
 legacy = "discord-bot-token"
 reissue = "https://discord.com/developers/applications"
+reissue_then = "the app, Bot, Reset Token; secret replace discord-bot-token; then pc units restart discord-bot-gateway --system --apply"
 
 [secret.ntfy]
 class = "free"
@@ -38,6 +40,7 @@ used_in = "notify-owner and po-picks: pushes to his phone"
 modes = ["op"]
 hosts = ["ntfy.sh"]
 reissue = "https://docs.ntfy.sh/subscribe/phone/"
+reissue_then = "choose a new topic name, subscribe to it in the phone app; secret replace ntfy; a test push (secret notify) arrives"
 legacy = "ntfy.env"
 
 [secret.spotify-client]
@@ -45,6 +48,7 @@ class = "free"
 used_in = "pc spotify: the Spotify Web API app, value <client id>:<client secret>; used by the broker only (spotify-token)"
 legacy = "spotify.env"
 reissue = "https://developer.spotify.com/dashboard"
+reissue_then = "the app, rotate the client secret; secret replace spotify-client with <client id>:<client secret>"
 
 [secret.spotify-token]
 class = "free"
@@ -57,6 +61,7 @@ methods = ["GET", "POST", "PUT"]
 oauth = { client = "spotify-client", token = "/api/token", authorize = "/authorize" }
 legacy = "spotify-token.json"
 reissue = "https://developer.spotify.com/dashboard"
+reissue_then = "after a new client: open the broker's /authorize link once and approve the Spotify sign-in; pc spotify library works"
 
 [secret.salesforce]
 class = "free"
@@ -65,9 +70,36 @@ modes = ["exchange"]
 hosts = ["login.salesforce.com"]
 paths = ["/services/Soap/u/59.0"]
 legacy = "salesforce.env"
+reissue = "https://login.salesforce.com/"
+reissue_then = "Settings, Change My Password; secret replace salesforce with the SF_* lines (multi-line stdin)"
 
 [secret.fleet-backup-pass]
 class = "critical"
 used_in = "fleet-backup: the restic repository password"
 modes = ["unit"]
 legacy = "fleet-backup.pass"
+reissue_then = "none: a new repo on a new stick makes its own key (fleet-backup run); the stick keeps its copy (T1623)"
+
+# Credentials a tool owns (not sealed here): `secret reissue` lists them so one command prints the whole checklist.
+[tool.github-token]
+place = "gh login keyring"
+reissue = "https://github.com/settings/applications"
+reissue_then = "gh auth login (a narrow token: personal repos only), revoke the old one at the link"
+
+[tool.ssh-key]
+place = "~/.ssh/id_ed25519"
+reissue = "https://github.com/settings/keys"
+reissue_then = "ssh-keygen -t ed25519; add the new public key at the link, remove the old one"
+
+[tool.claude-login]
+place = "~/.claude/.credentials.json"
+reissue_then = "claude, then /login; one browser approval"
+
+[tool.tailscale-node]
+place = "tailscaled state (root)"
+reissue = "https://login.tailscale.com/admin/machines"
+reissue_then = "remove the dead node, sign the new one in; one browser approval"
+
+[tool.finance-link]
+place = "~/finance/.token"
+reissue_then = "none: finance-web makes a new token; he gets the new link"

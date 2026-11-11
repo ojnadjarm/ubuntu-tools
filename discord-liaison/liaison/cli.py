@@ -112,7 +112,6 @@ class App:
                          {'run': int(env.get('LIAISON_RUNS_PER_DAY', '30')), 'pr': int(env.get('LIAISON_PRS_PER_DAY', '3')),
                           'img': int(env.get('LIAISON_IMAGES_PER_DAY', '5'))})
         self.art_dir = os.path.join(self.papers, 'art')
-        self.art_key = env.get('LIAISON_ART_KEY_FILE', os.path.join(os.path.dirname(ME), 'secrets', 'openrouter.key'))
         # The vault lease command (T1634); a fixture (LIAISON_HOME) asks no real broker unless it names one.
         self.lease_cmd = env.get('LIAISON_LEASE_CMD', '' if 'LIAISON_HOME' in env else
                                  os.path.join(os.path.dirname(ME), 'bin', 'secret') + ' grant')
@@ -474,7 +473,7 @@ class App:
             '--prompt-file', out + '.prompt', '--resolution', '1K', '--out', out,
             '--log', os.path.join(self.art_dir, 'spend.tsv')] + (['--asked', asked] if granted else [])
         lease = (self.env.get('FLEET_LEASE_OPENROUTER') or self.lease(asked)) if granted else ''
-        env = dict(os.environ, OPENROUTER_KEY_FILE=self.art_key, **({'FLEET_LEASE_OPENROUTER': lease} if lease else {}))
+        env = dict(os.environ, **({'FLEET_LEASE_OPENROUTER': lease} if lease else {}))
         rc = subprocess.call(cmd, stdin=subprocess.DEVNULL, env=env if granted else None)
         if rc in (3, 4):
             self.caps.give('img')
@@ -664,8 +663,8 @@ class App:
 
     async def job_run(self, args):
         """The worker's runner: hold the job lock, run the agent (a failed run is retried once), then start the next job.
-        No message of the job asks for an AI image: the agent runs under secret-mask, the image key reads empty (T1633).
-        One does: its words go in the job's grant file, from which agent-exec asks the image lease (T1634-V5).
+        A message of the job that asks for an AI image goes in the job's grant file, from which agent-exec asks the image
+        lease (T1634-V5); without it the worker has no route to the image model (no key file exists, T1634-V10).
         Through the vault, the worker gets its own Discord lease for the job's time limit, revoked at the end (T1634-V8)."""
         job = self.jobs.get(args[0]) if args else None
         if job is None or job['status'] not in ('queued', 'running'):
@@ -680,7 +679,6 @@ class App:
             logs = os.path.join(self.home, 'logs', 'jobs')
             os.makedirs(logs, exist_ok=True)
             asks = [m.get('content', '') for m in job.get('messages', [job['message']]) if GRANT.search(m.get('content', ''))]
-            mask = [] if asks else [os.path.join(os.path.dirname(ME), 'bin', 'secret-mask'), self.art_key, '--']
             src = getattr(self.rest, 'lease', None)
             worker = src.mint(job['id'], min(int(self.env.get('LIAISON_JOB_TIMEOUT', '1800')) + 600, 86400)) if src else None
             while True:
@@ -693,7 +691,7 @@ class App:
                     'agent-exec --prompt-file {prompt} --system-file {preamble} --model {model} --cwd {home} '
                     '--name discord-liaison-job --timeout {timeout} --raw-out {logs}/{id}.json --meta-out {logs}/{id}.meta.json '
                     '--secrets-from {secrets} --ticket {id} >>{logs}/{id}.log 2>&1')).format(**q)
-                rc = subprocess.call(mask + ['/bin/sh', '-c', cmd], stdin=subprocess.DEVNULL, env=dict(os.environ, **({LEASE_ENV: worker} if worker else {}), LIAISON_JOB=job['id'], EFFORT=self.env.get('LIAISON_JOB_EFFORT', 'xhigh'), OPENROUTER_KEY_FILE='/dev/null'))
+                rc = subprocess.call(['/bin/sh', '-c', cmd], stdin=subprocess.DEVNULL, env=dict(os.environ, **({LEASE_ENV: worker} if worker else {}), LIAISON_JOB=job['id'], EFFORT=self.env.get('LIAISON_JOB_EFFORT', 'xhigh')))
                 job = self.jobs.get(job['id'])
                 if job['status'] == 'superseded':
                     if worker:

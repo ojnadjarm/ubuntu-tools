@@ -19,7 +19,8 @@
 ## 2. Paths
 `~/agents/`: `bin/` (CLIs, on PATH), `KB/` (`toolbox.md`, `machine.md`, `quirks.md`, `runbooks/`, `guides/`: `guide
 <words>`), `README-pc-control.md`, `<name>/` (an agent: `BRIEF.md`, `agent.env`, `state/`, `logs/`, `REPORT.md`),
-`adapters/<agent>/`, `secrets/` (600: read, never print or push), `log/actions.jsonl` (tool-call audit,
+`adapters/<agent>/`, secrets: the vault only (`secret list`; a brief's `Secrets:` line gives a lease, never a value;
+`guide secrets-vault`), `log/actions.jsonl` (tool-call audit,
 `agents-log`), `config.example.env` (machine keys; real: `~/.config/pc-harness/config.env`): tools only.
 `~/agent-work` (`$AGENT_WORK`): papers outside every repo (`history.md`, `briefs/`, `research/<date>/<ticket>/`,
 `evidence/`, `archive/`, `owner/` = owner material, move only; `backups/` `$FLEET_BACKUPS_DIR`, `claims-snap/`,

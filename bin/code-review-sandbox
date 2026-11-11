@@ -64,8 +64,10 @@ if [ -z "$fixture" ]; then
   mkdir -p "$FLEET_BACKUPS_DIR/code-review" "$FLEET_BACKUPS_DIR/retired" "$TOOLSMITH_PAPERS" "$IMPROVE_PAPERS/queue"
   rw_after+=("$FLEET_BACKUPS_DIR/code-review" "$FLEET_BACKUPS_DIR/retired" "$TOOLSMITH_PAPERS" "$IMPROVE_PAPERS/queue")
 fi
-hide_dirs=("$A/secrets" "$ASR_CORPUS" "$H/.ssh" "$H/.gnupg" "$H/.config/gh" "$H/.local/share/keyrings" "/run/user/$U")
-hide_files=(/run/dbus/system_bus_socket /run/docker.sock /run/containerd/containerd.sock "$H/.git-credentials" "$H/.netrc")
+hide_dirs=("$A/secrets" "$ASR_CORPUS" "$H/.ssh" "$H/.gnupg" "$H/.config/gh" "$H/.local/share/keyrings" "/run/user/$U"
+           /run/fleet-vault /run/credentials)
+hide_files=(/run/dbus/system_bus_socket /run/docker.sock /run/containerd/containerd.sock "$H/.git-credentials" "$H/.netrc"
+            /run/fleet-vault-seal.sock)
 
 # Shims over the binaries themselves, so they hold whatever PATH a lane's shell has.
 refuse() { printf '#!/bin/sh\necho "refused %s $*" >>"%s"\necho "%s: refused inside the code-review sandbox" >&2\nexit 97\n' "$1" "$attempts" "$1" >"$work/shims/$1"; chmod +x "$work/shims/$1"; }
@@ -116,6 +118,7 @@ if [ "$selftest" = 1 ]; then
   for p in "$A/secrets" "$ASR_CORPUS" "$H/.ssh"; do [ -d "$p" ] && [ -n "$(ls -A "$p" 2>/dev/null)" ] && say "VISIBLE $p"; done
   [ -e "/tmp/tmux-$U" ] && say "VISIBLE tmux socket"
   [ -S "/run/user/$U/bus" ] && say "VISIBLE user bus"
+  [ -S /run/fleet-vault/admin.sock ] && say "REACHABLE vault admin socket"
   curl -s --unix-socket /run/docker.sock -m 3 http://d/_ping >/dev/null 2>&1 && say "REACHABLE docker"
   timeout 5 /usr/bin/systemd-run --user --wait true >/dev/null 2>&1 && say "ESCAPE systemd-run"
   timeout 5 busctl --user list >/dev/null 2>&1 && say "REACHABLE user bus (busctl)"

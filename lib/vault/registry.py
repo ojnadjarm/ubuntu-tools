@@ -9,7 +9,7 @@ NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 HOST = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
 LEGACY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 ROW_FIELDS = {"class", "used_in", "modes", "rules", "hosts", "paths", "legacy", "reissue", "max_age_days", "check",
-              "cap_usd", "month_cap_usd", "cost", "routes", "methods", "oauth", "scheme"}
+              "cap_usd", "month_cap_usd", "cost", "routes", "methods", "oauth", "scheme", "reissue_then"}
 METHODS = ("GET", "POST", "PUT", "DELETE")
 OAUTH_KEYS = {"client", "token", "authorize"}
 CHECK = re.compile(r"^[a-z][a-z0-9-]{0,40}$")
@@ -83,6 +83,8 @@ def entry(name, row, added=False):
     reissue = row.get("reissue", "")
     if reissue and not reissue.startswith("https://"):
         raise RegistryError(f"{name}: reissue must be an https link")
+    if not isinstance(row.get("reissue_then", ""), str):
+        raise RegistryError(f"{name}: reissue_then is one line of text")
     age = row.get("max_age_days", 0)
     if not isinstance(age, int) or age < 0:
         raise RegistryError(f"{name}: max_age_days must be a whole number of days")
@@ -128,10 +130,10 @@ def _oauth(name, row, paths):
 
 
 def load(path, added=None):
-    """Read the registry file and merge the owner-added rows: {name: Entry}."""
+    """Read the registry file and merge the owner-added rows: {name: Entry}; `tool` rows are for `secret reissue` only."""
     with open(path, "rb") as f:
         data = tomllib.load(f)
-    extra = set(data) - {"secret"}
+    extra = set(data) - {"secret", "tool"}
     if extra:
         raise RegistryError(f"unknown table(s) {', '.join(sorted(extra))}")
     out = {n: entry(n, row) for n, row in data.get("secret", {}).items()}
