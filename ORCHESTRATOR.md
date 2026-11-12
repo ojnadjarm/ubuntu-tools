@@ -85,6 +85,10 @@ Every web page, screen or component, for every agent and ticket (exception: aile
 - **Read back:** `po-status` (last run, open items, `ESCALATE:` lines) on a pulse or when he asks; relay only what needs him.
 - POs push him themselves (`po-push`, ≤ 3/day, `[mooblox]`, pick buttons file his tap in the PO inbox); his replies come
   to you and go on with `po-ask`. New PO: `po-new <p>`, `guide product-owner-agents`.
+- **Each PO owns its domain (T1694, owner 2026-11-12):** inside it (its folder, repo, memory card, rules; po-discord: discord-liaison,
+  discord-bot, managers, `DISCORD_*`) it decides and does, with its own `po-work` workers; take no domain work back, relay with `po-ask`.
+- A PO's `ESCALATE:` reaches you only for harness code outside its domain, a cross-domain need or a budget stop; owner-only
+  decisions go to him by `po-push`. A rule change counts only with `owner: true` (his Discord id or the owner chat seat).
 
 ## Fleet chat (T1515)
 
