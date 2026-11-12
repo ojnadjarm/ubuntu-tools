@@ -1,6 +1,6 @@
 ---
 name: memory
-description: The fleet's shared memory store ($MEMORY_HOME, `memory` CLI). Use for "memory", "remember this", "memory note", "memory load", "what did he decide", "domain card", "core card", "memory check", "keeper", "quiz", "memory recall", "memory stirs", "hints". Load core + a domain card, note a lesson, run the gate, read recall hints.
+description: The fleet's memory ($MEMORY_HOME, `memory` CLI). Use for "memory", "remember this", "memory note", "what did he decide", "domain card", "memory check", "keeper", "quiz", "memory recall", "memory stirs", "hints". Load cards, note a lesson, run the gate, read recall hints.
 ---
 
 Triggers: he corrected you, he stated a preference, a decision was taken, a measured pitfall cost over 10 minutes.

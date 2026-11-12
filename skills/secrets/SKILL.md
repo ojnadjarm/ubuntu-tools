@@ -1,6 +1,6 @@
 ---
 name: secrets
-description: The fleet's secrets vault (fleet-vault broker, `secret` CLI). Use for "secret", "API key", "token", "password", "credential", "vault", "lease", "Secrets: line", "add a secret", "replace a key", "rotate", "re-issue", "leaked", "scan for secrets", "laptop died". Agents never hold a value: a lease, the broker adds it.
+description: The fleet's secrets vault (fleet-vault broker, `secret` CLI). Use for "secret", "API key", "token", "password", "credential", "vault", "lease", "Secrets: line", "add a secret", "rotate", "re-issue", "leaked", "scan for secrets", "laptop died". Agents hold a lease, never a value.
 ---
 
 Triggers: secrets vault, fleet-vault, secret list, secret grant, secret scan, secret reissue, owner-secret, credstore.

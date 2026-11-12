@@ -100,7 +100,7 @@ printf '\n[secret.selftest-card]\nclass = "critical"\nused_in = "fixture card"\n
 wait-for --label vault-proxy-up --every 0.1 --until "test -s '$W/up.port' && test -S '$W/seal.sock'" >/dev/null
 python3 -I "$A/vault/fleet-vaultd" --registry "$W/registry.toml" --state "$W/state" --socket "$FLEET_VAULT_SOCKET" \
   --seal-socket "$W/seal.sock" --cred-dir "$W/creds" --clients "$me" --upstream "http://127.0.0.1:$(cat "$W/up.port")" \
-  >"$W/d.out" 2>&1 &
+  --cgroup-root "$W/cg" >"$W/d.out" 2>&1 &
 PIDS+=($!)
 wait-for --label vault-proxy-broker --every 0.1 --until "test -S '$FLEET_VAULT_SOCKET' && test -s '$W/state/port'" >/dev/null
 export FLEET_VAULT_URL="http://127.0.0.1:$(cat "$W/state/port")"

@@ -11,6 +11,7 @@ if [ -z "${PO_SANDBOXED:-}" ]; then
     --setenv REAL_HOME "$REAL_HOME" -- bash "$SELF"
 fi
 . "$BIN/tests/lib/assert.sh"
+. "$BIN/tests/lib/budget.sh"
 
 WORK=$(mktemp -d)
 trap 'touch "$WORK/release"; pkill -f "$WORK/stubs" 2>/dev/null; sleep 0.2; rm -rf "$WORK"' EXIT
@@ -82,7 +83,8 @@ ask 11 $'please build the map\nwork: map'
 t0=$(date +%s.%N); po-run mg >/dev/null 2>&1; rc=$?; t1=$(date +%s.%N)
 secs=$(echo "$t1 - $t0" | bc)
 is '(a) po-run exit 0' "$rc" 0
-ev "(a) manager run ended in < 5 s while the worker runs ($secs s)" '[ "$(echo "$secs < 5" | bc)" = 1 ]'
+lim=$(budget 5)
+ev "(a) manager run ended within the ${lim} s budget while the worker runs ($secs s)" 'awk -v s="$secs" -v l="$lim" "BEGIN{exit !(s < l)}"'
 is '(a) plan reply written' "$(replies 'plan: T101 map')" 1
 ev '(a) lock free after the run' 'flock -n "$M/.po-run.lock" true'
 timeout 10 wait-for --every 0.05 --until "[ \"\$(jq -r .status '$M/state/work/T101.json')\" = running ]" >/dev/null 2>&1
@@ -114,7 +116,8 @@ is '(f) 3 detached workers running at once (T101 map, art, T104 sound)' "$(po-wo
 ask 17 "anything new?"
 t0=$(date +%s.%N); po-run mg >/dev/null 2>&1; secs=$(echo "$(date +%s.%N) - $t0" | bc)
 is '(f) the 4th request is answered' "$(replies 'answer: anything new?')" 1
-ev "(f) answered in < 5 s with 3 workers running ($secs s)" '[ "$(echo "$secs < 5" | bc)" = 1 ]'
+lim=$(budget 5)
+ev "(f) answered within the ${lim} s budget with 3 workers running ($secs s)" 'awk -v s="$secs" -v l="$lim" "BEGIN{exit !(s < l)}"'
 
 # (c) the worker's result reaches the inbox once and is relayed once
 : >"$WORK/stop-unused"; touch "$WORK/release"
@@ -160,7 +163,8 @@ ask 18 $'build X please\nwork: build-x'
 t0=$(date +%s.%N); po-run mg >/dev/null 2>&1; secs=$(echo "$(date +%s.%N) - $t0" | bc)
 ev '(g) "build X": a brief was written' 'ls "$AGENT_WORK"/briefs/T*-mg-build-x.md >/dev/null 2>&1'
 is '(g) "build X": one detached worker unit launched' "$(( $(wc -l <"$WORK/units.log") - n ))" 1
-ev "(g) \"build X\": the manager run ended in < 5 s, the worker still running ($secs s)" '[ "$(echo "$secs < 5" | bc)" = 1 ] && po-work mg list | grep -q " running  build-x "'
+lim=$(budget 5)
+ev "(g) \"build X\": the manager run ended within the ${lim} s budget, the worker still running ($secs s)" 'awk -v s="$secs" -v l="$lim" "BEGIN{exit !(s < l)}" && po-work mg list | grep -q " running  build-x "'
 touch "$WORK/release"; timeout 15 wait-for --every 0.1 --until "! po-work mg list | grep -q build-x" >/dev/null 2>&1; rm -f "$WORK/release"
 
 # po-new --refresh: a manager brief made from an older template gets the current head, keeps name and project block
