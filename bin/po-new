@@ -5,6 +5,7 @@
 # Refuses (exit 3) when po-<p> exists. Prints the unit command that wakes it on a request.
 # po-new <p> --refresh (T1626): re-render BRIEF.md above "## Project" from the current template (MANAGER.tmpl.md when
 # agent.env has PARENT=), keeping its name and project block; exit 2 for a brief not made from a template (po-discord).
+# Both templates get po-template/OWN-DOMAIN.md (the own-domain rule, T1694) at their `{{OWN_DOMAIN}}` line.
 help() { awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; }
 case "${1:-}" in -h|--help) help; exit 0 ;; '') help >&2; exit 2 ;; esac
 set -euo pipefail
@@ -15,7 +16,8 @@ case "$parent" in *[!a-z0-9-]*) echo "po-new: --parent takes a seat id [a-z0-9-]
 case "$p" in -*|*[!a-z0-9-]*|template) echo "po-new: name must be [a-z0-9-] and not 'template'" >&2; exit 2 ;; esac
 case "$name" in *[\|\&\\]*) echo "po-new: project name may not contain | & or \\" >&2; exit 2 ;; esac
 tpl="$HARNESS_HOME/po-template"; dir="$HARNESS_HOME/po-$p"
-fill() { sed -e "s|{{P}}|$p|g" -e "s|{{NAME}}|$name|g" -e "s|{{PARENT}}|po-$parent|g" "$1"; }
+fill() { sed -e "/^{{OWN_DOMAIN}}$/{r $tpl/OWN-DOMAIN.md" -e 'd}' "$1" |
+  sed -e "s|{{P}}|$p|g" -e "s|{{NAME}}|$name|g" -e "s|{{PARENT}}|po-$parent|g"; }
 if [ "${2:-}" = --refresh ]; then
   dir=$(po_dir po-new "$p") || exit 2
   parent=$(sed -n 's/^PARENT=\([a-z0-9-]*\).*/\1/p' "$dir/agent.env" 2>/dev/null | tail -1)

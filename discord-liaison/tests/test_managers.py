@@ -268,3 +268,39 @@ class TestLanguage(unittest.TestCase):
             self.assertNotIn('Spanish only', text, rel)
         for p in Registry(os.path.join(AGENTS, 'discord-liaison', 'projects.json')).projects.values():
             self.assertIn(LANGUAGE_RULE, p['rules']['language'], p['id'])
+
+
+class TestOwnDomain(unittest.TestCase):
+    """T1694: one own-domain rule in every PO brief; po-discord does Discord-domain work; RULES.md is read and agrees."""
+
+    def flat(self, rel):
+        with open(os.path.join(AGENTS, rel)) as f:
+            return ' '.join(f.read().split())
+
+    def test_every_po_brief_carries_the_rule_and_its_gates(self):
+        with open(os.path.join(AGENTS, 'po-template', 'OWN-DOMAIN.md')) as f:
+            rule = f.read()
+        briefs = sorted(d for d in os.listdir(AGENTS) if d.startswith('po-') and d != 'po-template'
+                        and os.path.exists(os.path.join(AGENTS, d, 'BRIEF.md')))
+        self.assertGreaterEqual(len(briefs), 7, briefs)
+        for d in briefs:
+            text = self.flat(f'{d}/BRIEF.md')
+            self.assertIn(' '.join(rule.replace('{{P}}', d.removeprefix('po-')).split()), text, d)
+            self.assertNotIn('{{', text, d)
+        for tpl in ('BRIEF.tmpl.md', 'MANAGER.tmpl.md'):
+            self.assertIn('\n{{OWN_DOMAIN}}\n', open(os.path.join(AGENTS, 'po-template', tpl)).read(), tpl)
+        for gate in ('owner: true', 'Vass, Moodle Workplace', 'AGENTS.md, ORCHESTRATOR.md', 'no secret values',
+                     'never via the orchestrator', 'ESCALATE: budget', '`lib/`'):
+            self.assertIn(gate, rule)
+
+    def test_po_discord_owns_the_discord_domain(self):
+        text = self.flat('po-discord/BRIEF.md')
+        self.assertNotIn('spawn no worker', text.lower())
+        for want in ('po-work discord start', 'discord-liaison/RULES.md', 'MANAGER.tmpl.md', 'DISCORD_FRIEND_BOTS',
+                     'never `DISCORD_OWNER_ID`', '`owner: true` -> `discord-hire'):
+            self.assertIn(want, text)
+
+    def test_discord_agents_read_rules_md_and_it_quotes_the_language_rule(self):
+        self.assertIn(LANGUAGE_RULE, self.flat('discord-liaison/RULES.md'))
+        for rel in ('discord-liaison/BRIEF.md', 'po-discord/BRIEF.md', 'po-template/MANAGER.tmpl.md'):
+            self.assertIn('~/agents/discord-liaison/RULES.md', self.flat(rel), rel)

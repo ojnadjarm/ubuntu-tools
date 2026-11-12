@@ -1,6 +1,7 @@
 """One manager per Discord project (T1515 P31): `python -m liaison.managers new <project-id>` makes po-<id> under the
 router with `po-new --parent`, a project block rendered from that one projects.json entry, and its own ledger;
-`hire` (T1547, `discord-hire`) also writes the entry, the org seat, the thread route and both units, each step once."""
+`hire` (T1547, `discord-hire`) also writes the entry, the org seat, the thread route and both units, each step once;
+on a hired project `--repo` fills a null repo and `--rule` changes rules, both re-render the block (T1694)."""
 import argparse
 import json
 import os
@@ -142,9 +143,14 @@ def hire(pid, name, thread, repo=None, rules=None, words=(), env=None, about=Non
                 print(f'warning: {o["id"]} matches "{hit[0]}" in this name: its messages would go to the router; narrow it')
         data['projects'].append(p)
         done.append('entry')
-    elif repo and not p.get('repo'):
-        p.update(repo=repo, clone=f'~/projects/collab/{repo.split("/")[1]}')
-        done.append('repo')
+    else:
+        if repo and not p.get('repo'):
+            p.update(repo=repo, clone=f'~/projects/collab/{repo.split("/")[1]}')
+            done.append('repo')
+        changed = {k: v for k, v in (rules or {}).items() if p.get('rules', {}).get(k) != v}
+        if changed:
+            p['rules'] = {**p.get('rules', {}), **changed}
+            done.append('rules')
     if done:
         _replace(reg, dump(data))
     brief = os.path.join(po_home(env), f'po-{pid}', 'BRIEF.md')
@@ -153,7 +159,7 @@ def hire(pid, name, thread, repo=None, rules=None, words=(), env=None, about=Non
         if rc:
             return rc
         done.append('manager')
-    elif 'repo' in done:
+    elif 'repo' in done or 'rules' in done:
         with open(brief) as f:
             head = f.read().split('\n## Project\n')[0]
         _replace(brief, f'{head}\n## Project\n{block(p)}\n')
@@ -174,9 +180,10 @@ def hire(pid, name, thread, repo=None, rules=None, words=(), env=None, about=Non
     if not done:
         print(f'already hired: po-{pid} (entry, manager, seat, route, units in place)')
         return 0
-    note = f'Hired po-{pid}, the manager of «{name}» (Discord thread {thread}): {", ".join(done)}.'
+    verb = 'Updated' if 'rules' in done else 'Hired'
+    note = f'{verb} po-{pid}, the manager of «{name}» (Discord thread {thread}): {", ".join(done)}.'
     rc = subprocess.call(_cmd(env, 'CHAT', 'chat') + ['post', '@owner', note], env=dict(env, CHAT_SEAT=env.get('CHAT_SEAT') or parent))
-    print(f'hired po-{pid}: {", ".join(done)}')
+    print(f'{verb.lower()} po-{pid}: {", ".join(done)}')
     if rc:
         print(f'failed: owner note (chat exit {rc}); post it by hand: {note}')
         return 1

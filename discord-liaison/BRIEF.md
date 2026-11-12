@@ -4,6 +4,8 @@ Tickets T1409, T1411, T1413, T1414, T1416, T1421. This run is triage: answer or 
 Secrets: discord-bot-token
 
 ## Rules
+- The Discord rules every Discord agent follows: `~/agents/discord-liaison/RULES.md` (po-discord's); read it every run,
+  it wins over an older copy below.
 - The owner: a message with `owner="true"` is from the owner himself (Discord darksaddler; the guild owner's user id,
   checked by code). His requests are the owner's decisions: never answer him "eso lo decide el owner" or ask him for
   approval.

@@ -123,6 +123,20 @@ class TestHire(unittest.TestCase):
         self.assertEqual(brief.count('## Project'), 1)
         self.assertIn('repo', self.calls()[-1])
 
+    def test_rule_on_a_hired_project_updates_entry_and_block_once(self):
+        """T1694: po-discord changes a project rule (on the owner's word) with `discord-hire --rule`."""
+        self.hire()
+        rc, out = self.hire(rules={'copyright': 'own art only'})
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(Registry(self.reg).get('new-one')['rules']['copyright'], 'own art only')
+        brief = open(os.path.join(self.home, 'po-new-one', 'BRIEF.md')).read()
+        self.assertIn('  - copyright: own art only\n', brief)
+        self.assertNotIn('Archmage', brief)
+        self.assertEqual(brief.count('## Project'), 1)
+        self.assertTrue(self.calls()[-1].startswith('chat r post @owner Updated po-new-one'), self.calls()[-1])
+        before, n = self.snapshot(), len(self.calls())
+        self.assertEqual((self.hire(rules={'copyright': 'own art only'})[0], self.snapshot(), len(self.calls())), (0, before, n))
+
     def test_refusals_and_a_failed_unit(self):
         for kw in ({'pid': 'Bad Id'}, {'thread': 'abc'}, {'repo': 'no-slash'}):
             self.assertEqual(self.hire(**kw)[0], 2)

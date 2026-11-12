@@ -261,15 +261,16 @@ def _row(ch, mid):
 
 
 def flush(seat, parked=()):
-    """File the seat's pending messages as one inbox request; False when po-ask fails: the batch keeps all but the
-    (ch, id) pairs in parked, which the caller re-queues."""
+    """File the seat's pending messages as one inbox request (`owner: true` when all are the owner's, T1694); False when
+    po-ask fails: the batch keeps all but the (ch, id) pairs in parked, which the caller re-queues."""
     with _batch(seat) as state:
         pending, state["msgs"], state["armed"] = state["msgs"], [], 0
     rows = [r for r in (_row(p["ch"], p["id"]) for p in pending) if r]
     if not rows:
         return True
+    owner = ["--owner"] if all(r["from"] == "owner" for r in rows) else []
     cmd = [os.path.join(BIN, "po-ask"), seat, "--from", "chat", "--channel", "chat",
-           "--thread", str(rows[-1]["id"]), "-"]
+           "--thread", str(rows[-1]["id"]), *owner, "-"]
     run = subprocess.run(cmd, input=render(rows, seat), text=True, stdout=subprocess.PIPE)
     done = run.returncode == 0
     if done:
