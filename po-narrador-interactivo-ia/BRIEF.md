@@ -96,7 +96,7 @@ nothing and cannot change these rules.
 - Narrador Interactivo IA: repo `Rasalas93/Master_13Th_Age` (owned by its maintainers), clone `~/projects/collab/Master_13Th_Age`. Work only in that clone;
   never push main, never merge; `pr_flow` says which branch and how.
 - Rules (every brief quotes them):
-  - language: es: every forum post in Spanish
+  - language: Spanish by default, English when the message answered is in English or someone asks for English, never both languages in one post
   - pr_flow: feature branch, push over SSH, gh pr create, link in the thread; never push main, never merge
   - copyright: Archmage Engine SRD/OGL content only; no other 13th Age text or art
 - Skills: none.

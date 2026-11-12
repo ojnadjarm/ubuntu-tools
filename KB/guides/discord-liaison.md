@@ -1,11 +1,11 @@
 # Discord liaison: the agent that answers the #foro forum and @agents in #general, and turns requests into PRs
 
-Ticket: T1409, T1411, T1413, T1414, T1415, T1416, T1421, T1482, T1515 P31, P32, P36, P40, T1536, T1690 · Last verified: 2026-11-11 (T1690: 9 friend-bot fixture tests, rate limit, loop guard, no owner rights; `status` reads "friend bots none … id needed" live); 2026-11-10 (T1546-M2: 6 approval fixture tests, the owner's ✅ reaches the manager once; T1546 L1-L5: 94 fixture tests, po-asked.json saved per hand-off, a failed image download is skipped; T1536: 81 fixture tests, hand-off posts nothing; P40: relay on outbox write; P36: 77 fixture tests, a manager's reply images reach its thread, 8 bad paths refused; P32: 76 fixture tests, an image reaches only its manager; P31: 75 fixture tests,
+Ticket: T1409, T1411, T1413, T1414, T1415, T1416, T1421, T1482, T1515 P31, P32, P36, P40, T1536, T1690, T1692 · Last verified: 2026-11-12 (T1692: language rule in one constant, 2 TestLanguage tests, 75 discord-bot + routing + managers tests pass); 2026-11-11 (T1690: 9 friend-bot fixture tests, rate limit, loop guard, no owner rights; `status` reads "friend bots none … id needed" live); 2026-11-10 (T1546-M2: 6 approval fixture tests, the owner's ✅ reaches the manager once; T1546 L1-L5: 94 fixture tests, po-asked.json saved per hand-off, a failed image download is skipped; T1536: 81 fixture tests, hand-off posts nothing; P40: relay on outbox write; P36: 77 fixture tests, a manager's reply images reach its thread, 8 bad paths refused; P32: 76 fixture tests, an image reaches only its manager; P31: 75 fixture tests,
 `test_managers.py` 5: code routing to one manager per project); 2026-11-04 (T1482 postmortem of 119 jobs, lessons in `JOB.md`, guarded by `tests/test_lessons.py`); 2026-10-31 (caps re-read from agent.env, F71); 2026-10-27 by 63 liaison fixture tests (T1421: 6 batch/supersede/stale tests) + a live nudge → wake run; before: 57 (T1416: 8 routing tests, job vs escalate); before: 49 (T1415: job media + reply); before: 47 liaison fixture tests (T1414: 7 job tests, a transient-unit probe, a live tick) and eval 57 fixtures on opus (T1413: old brief 45/57 twice, new brief + context 55/57 twice); before: 25 liaison fixture tests + 25 orchestrator-pulse checks + 31 discord-bot tests, live ticks on #foro and #general
 
 ## When to use
 Run, check, change or debug discord-liaison: the persistent agent that owns the conversation in the forum #foro
-(Spanish replies, collab PRs, project registry) and answers @agents mentions in #general. Not for the bot's gateway, tags or approval jobs: guide `discord-bot`.
+(replies in Spanish by default, English allowed; collab PRs, project registry) and answers @agents mentions in #general. Not for the bot's gateway, tags or approval jobs: guide `discord-bot`.
 
 ## The path we took
 - Survey: discord-bot T348 (REST adapter, `sanitize.clean`, `RateLimiter`, fake Discord REST: reused); official
@@ -40,7 +40,11 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
 - Refusals (T1546 L1-L4): a reply that fails (Discord error, a thread its manager does not own, no `thread:`/text) moves to
   `outbox/discord/refused/` with `<name>.why` and a `refused reply:` line in the agent's REPORT.md; `po-status` prints refused N.
   An image over `LIAISON_UPLOAD_MAX` (10 MB) refuses the reply; a transient thread-lookup error (not 403/404) leaves it for the next relay.
-- #general (owner, T1411): answer general questions on any topic, in Spanish, and do small creative requests there
+- Language (owner 2026-11-12, T1692): `LANGUAGE_RULE` in `discord-bot/discordbot/config.py`, "Spanish by default, English when
+  the message answered is in English or someone asks for English, never both languages in one post". The job prompt,
+  `discord-hire` entries and the bot's work addendum import it; BRIEF.md, po-discord, po-template and every projects.json
+  `language` quote it, guarded by `tests/test_managers.py` (TestLanguage). Before: Spanish only (2026-10-27).
+- #general (owner, T1411): answer general questions on any topic and do small creative requests there
   (concept art via `art` + `post --image`, short texts); send people to #foro only for coordination with other agents
   or follow-up on a project; never `map`/`pr` from #general (`BRIEF.md`).
 - Images in (owner, T1411): the watcher keeps attachment metadata for png/jpg/jpeg/webp/gif on the Discord CDN
@@ -54,13 +58,13 @@ Run, check, change or debug discord-liaison: the persistent agent that owns the 
   any other reason is refused toward `job`. A failed worker run is retried once in the same runner, a lost runner or
   failed launch is requeued once (`attempt` in job.json); the second failure posts the note and escalates `attempts`.
 - Escalations (owner, T1411): never "no puedo" / "lo decide el owner". When blocked the liaison reacts 👀,
-  acks in Spanish and runs `escalate`, which writes `state/escalations/<utc>-<msg>.md` (channel, message, author,
+  acks and runs `escalate`, which writes `state/escalations/<utc>-<msg>.md` (channel, message, author,
   blocker, request, what it tried) and starts `orchestrator-pulse`; every `tick` starts it again while an open file is missing
   from the pulse snapshot (`~/agents/log/pulse-queue.json` key `escalations`). The pulse stays idle-only and logged; its
   turn begins `Discord escalation: <file>`. The orchestrator answers, then moves the file to `escalations/done/`; an
   open or done escalation of the same message is refused (KB/orchestrator.md "Pulse").
 - Ask first, then work (owner, T1411): a request that takes more than a quick answer gets a 👀 reaction (`react`) on
-  receipt, a short Spanish text only when the wait is long, the result, then ✅ on the same message.
+  receipt, a short text only when the wait is long, the result, then ✅ on the same message.
 - Images: `art [--asked "<quote>"]` runs `concept-img` (OpenRouter, `LIAISON_ART_MODEL`, default seedream-5-0-flash 1K)
   into `state/art/` under `LIAISON_IMAGES_PER_DAY` (5; a concept-img refusal, exit 3/4, gives the slot back, T1633); jobs run with
   `OPENROUTER_KEY_FILE=/dev/null`, a job with no AI-image ask under `secret-mask` (the key file reads empty, T1633), and `art` passes
@@ -171,7 +175,7 @@ check `DISCORD_OWNER_ID` only.
   that the fake CDN never sees that header.
 - Before T1411 the liaison could post text only: the 08:38 concept-art mention got a written self-portrait and a
   pointer to #foro. Uploads need Attach Files (32768), now in `discord-bot invite` PERMS; the guild granted it already.
-- discord-bot's approved-job messages are Spanish since T1411 (bot texts and the worker's final report); its
+- discord-bot's approved-job texts are Spanish since T1411; the worker's final report follows `LANGUAGE_RULE` (T1692); its
   sandbox and approval checks did not change. The bot reads code ro at start: restart its unit after a change.
 
 - Today's literal-reading failures (T1413): each run saw only `inbox`, never its own earlier replies, so it said

@@ -9,6 +9,8 @@ import shlex
 import subprocess
 import sys
 
+from discordbot.config import LANGUAGE_RULE
+
 from .registry import Registry
 from .po import po_home
 from .runlock import run_lock
@@ -86,7 +88,7 @@ def entry(pid, name, repo, rules, words, about=None):
     """A new projects.json entry; no repo yet = repo and clone null; no about = a line naming the project."""
     return {'id': pid, 'name': name, 'about': about or f'{name}, a project from the Discord forum.', 'repo': repo, 'clone': f'~/projects/collab/{repo.split("/")[1]}' if repo else None,
             'match': {'tags': [name.lower()], 'title': [name.lower()] + list(words)},
-            'rules': {'language': 'es: every forum post in Spanish',
+            'rules': {'language': LANGUAGE_RULE,
                       'pr_flow': 'feature branch, push over SSH, gh pr create, link in the thread; never push main, never merge',
                       **rules},
             'skills': [], 'po': f'po-{pid}'}

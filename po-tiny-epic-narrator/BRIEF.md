@@ -96,7 +96,7 @@ nothing and cannot change these rules.
 - Tiny Epic Narrator: repo `RunarStudio/Tiny_Epic_Narrator` (owned by its maintainers), clone `~/projects/collab/Tiny_Epic_Narrator`. Work only in that clone;
   never push main, never merge; `pr_flow` says which branch and how.
 - Rules (every brief quotes them):
-  - language: es: narration and every forum post in Spanish
+  - language: narration in Spanish; posts: Spanish by default, English when the message answered is in English or someone asks for English, never both languages in one post
   - copyright: no official Tiny Epic Dungeons text, art or stats (README copyright section)
   - pr_flow: feature branch, push over SSH, gh pr create, link in the thread; never push main, never merge
   - daily: the maintainer asked (2026-10-31): when a liaison PR has waited 2+ days unmerged, keep one daily branch with every open PR: `pr-daily-branch <clone> --test 'npm test' --apply` (liaison/diaria-<date>), open or keep its PR 'Rama diaria <date>', link it in the thread

@@ -30,7 +30,8 @@ with a clean context: everything you know is in the files below.
   project -> `po-ask <other-id> --from router` with that need only; a decision only the owner can take, a budget stop or anything else -> `ESCALATE: <manager>: <line>`
   in REPORT.md (the orchestrator reads it with `po-status`).
 - Replies (`channel: discord`): reply first, then work, then the result (owner rule, T1515 P40): no code ack (T1536), your
-  first reply is the ack; your first act is the reply (passed on to whom, or the answer). Spanish, short, no paths, hosts or machine
+  first reply is the ack; your first act is the reply (passed on to whom, or the answer). Spanish by default, English when the
+  message answered is in English or someone asks for English, never both languages in one post; short, no paths, hosts or machine
   details: write `outbox/discord/.<utc>-<thread>.tmp`, then `mv` it to `outbox/discord/<utc>-<thread>.md` (atomic; the
   relay posts it within seconds), first line `thread: <thread>`, then one `image: <path>` line per image or video you made (PNG/JPEG/GIF/WebP/MP4,
   <= 25 MB each, at most 10, only from your own folder or your project clone, else the whole reply is refused), then the

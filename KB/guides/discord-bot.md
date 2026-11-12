@@ -4,7 +4,7 @@ Ticket: T348, T361, T448, T1546-M2, T1634-V8 · Last verified: 2026-11-11 (T1634
 
 ## When to use
 Run, check, change or debug the `agents` Discord bot, post into its forum, or build another sandboxed chat bot.
-Conversation in #foro (Spanish replies, collab PRs): guide `discord-liaison`; with `DISCORD_FORUM_REPLIES=liaison` the bot only tags and nudges (T1409): the approved tag starts nothing, the owner's ✅
+Conversation in #foro (replies in Spanish by default, English allowed; collab PRs): guide `discord-liaison`; with `DISCORD_FORUM_REPLIES=liaison` the bot only tags and nudges (T1409): the approved tag starts nothing, the owner's ✅
 writes `state/approvals/<message>.json` for discord-liaison to pass to the thread's manager (T1546-M2); no bot worker runs.
 Not for a Discord bridge into an interactive Claude session: that is the official `discord@claude-plugins-official`
 channel plugin (`--channels`), which gives the chat that session's tools.

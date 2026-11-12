@@ -4,10 +4,13 @@ import json
 import os
 import shutil
 import subprocess
+import unittest
 from unittest import mock
 
 import aiohttp
 
+from discordbot.config import LANGUAGE_RULE
+from discordbot.runner import WORK_ADDENDUM
 from liaison import managers, po
 from liaison.registry import Registry
 
@@ -247,3 +250,21 @@ class TestManagers(Base):
         self.assertIn('ESCALATE:` goes to po-r', brief)
         self.assertTrue(os.path.exists(os.path.join(self.tmp.name, 'work', 'decisions', 'ten.md')))
         self.assertEqual(managers.make('nope', dict(self.env)), 2)
+
+
+class TestLanguage(unittest.TestCase):
+    """T1692: one Discord language rule; prompts import it, briefs and the registry quote it verbatim."""
+
+    def test_prompts_and_new_entries_use_the_rule(self):
+        self.assertIn(LANGUAGE_RULE, WORK_ADDENDUM)
+        self.assertEqual(managers.entry('x', 'X', None, {}, ())['rules']['language'], LANGUAGE_RULE)
+        self.assertIn(f'  - language: {LANGUAGE_RULE}\n', managers.block(managers.entry('x', 'X', None, {}, ())))
+
+    def test_briefs_and_registry_quote_the_rule(self):
+        for rel in ('discord-liaison/BRIEF.md', 'po-discord/BRIEF.md', 'po-template/BRIEF.tmpl.md'):
+            with open(os.path.join(AGENTS, rel)) as f:
+                text = ' '.join(f.read().split())
+            self.assertIn(LANGUAGE_RULE, text, rel)
+            self.assertNotIn('Spanish only', text, rel)
+        for p in Registry(os.path.join(AGENTS, 'discord-liaison', 'projects.json')).projects.values():
+            self.assertIn(LANGUAGE_RULE, p['rules']['language'], p['id'])

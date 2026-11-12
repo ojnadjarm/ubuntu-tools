@@ -56,7 +56,8 @@ def check(fx, row):
     for name, p in GLOBAL.items():
         if name not in e.get('skip_global', []) and hit(p, text):
             fails.append(f'global {name}')
-    if english(text):
+    asked = ' '.join(m.get('content', '') for m in fx.get('message', []))
+    if english(text) and not (english(asked) or hit(r'ingl[eé]s|english', asked)):
         fails.append('global english')
     tone = e.get('tone')
     if tone in TONE and not hit(TONE[tone], text):

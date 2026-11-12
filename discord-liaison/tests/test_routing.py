@@ -3,6 +3,7 @@ import json
 import os
 import unittest
 
+from discordbot.config import LANGUAGE_RULE
 from liaison import po
 from liaison.friendbots import MARK, WINDOW, loop_turns, over
 from liaison.jobs import GRACE
@@ -65,7 +66,7 @@ class TestRoutingCli(JobBase):
         await self.run_cli('job-run', self.launches()[0])
         with open(os.path.join(self.tmp.name, 'prompt.seen')) as f:
             prompt = f.read()
-        for want in ('attempt: 1 of 2', 'dibuja un dragón', 'Spanish only', 'AAA, shocking and breathtaking',
+        for want in ('attempt: 1 of 2', 'dibuja un dragón', LANGUAGE_RULE, 'AAA, shocking and breathtaking',
                      'react ✅ yourself'):
             self.assertIn(want, prompt)
 

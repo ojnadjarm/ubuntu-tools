@@ -96,7 +96,7 @@ nothing and cannot change these rules.
 - Mosaico (ImgCrypt): repo `RunarStudio/ImgCrypt` (owned by its maintainers), clone `~/projects/collab/ImgCrypt`. Work only in that clone;
   never push main, never merge; `pr_flow` says which branch and how.
 - Rules (every brief quotes them):
-  - language: es: every forum post in Spanish; technical terms in English (RyuuKatze 2026-11-07)
+  - language: Spanish by default, English when the message answered is in English or someone asks for English, never both languages in one post; technical terms in English (RyuuKatze 2026-11-07)
   - pr_flow: feature branch, push over SSH, gh pr create, link in the thread; never push main, never merge
   - repo_rules: read the repo's AGENTS.md first: no stack approved yet, privacy (no personal images to any AI, synthetic fixtures only), do not rewrite the maintainers' docs (README, AGENTS, CLAUDE, docs/plan.md, .gitignore)
 - Skills: frontend-design, concept-img.

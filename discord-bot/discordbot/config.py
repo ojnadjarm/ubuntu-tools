@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 STATUS_TAGS = ('new', 'accepted', 'in progress', 'done')
 APPROVED_TAG = 'approved'
 APPROVE_EMOJI = '✅'
+LANGUAGE_RULE = ('Spanish by default, English when the message answered is in English or someone asks for English, '
+                 'never both languages in one post')
 
 
 def _ids(raw):

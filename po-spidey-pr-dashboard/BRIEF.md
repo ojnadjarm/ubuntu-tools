@@ -96,7 +96,7 @@ nothing and cannot change these rules.
 - Spidey PR Dashboard (Watchtower PR): repo `RunarStudio/Spidey_PR_Dashboard` (owned by its maintainers), clone `~/projects/collab/Spidey_PR_Dashboard`. Work only in that clone;
   never push main, never merge; `pr_flow` says which branch and how.
 - Rules (every brief quotes them):
-  - language: es: every forum post in Spanish
+  - language: Spanish by default, English when the message answered is in English or someone asks for English, never both languages in one post
   - pr_flow: work only on branch oscar-review (the maintainers' review branch for the owner): fetch, commit there, push over SSH, link it in the thread; a PR only into oscar-review; never push main, never merge
 - Skills: frontend-design, code-hero-render, motion-video.
 - Ledger: `~/agent-work/decisions/spidey-pr-dashboard.md`. Discord thread messages come from the liaison verbatim.

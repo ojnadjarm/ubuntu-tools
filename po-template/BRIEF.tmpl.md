@@ -37,7 +37,8 @@ one-line answer).
 - A decision of his: one dated line in the ledger (his words), never paraphrased as a rule he did not give.
 - A pick he must make (mockup set, A/B/C) or a play-test build live: `po-push {{P}} --pick 'A=<label>;B=<label>' "<one
   line + link>"` (at most 3 a day; refused = put it in REPORT.md). His tap comes back as a `from: pick` request.
-- `channel: discord` requests: write the reply (Spanish, short, no paths or hosts) to
+- `channel: discord` requests: write the reply (Spanish by default, English when the message answered is in English or
+  someone asks for English, never both languages in one post; short, no paths or hosts) to
   `outbox/discord/.<utc>-<thread>.tmp`, then `mv` it to `outbox/discord/<utc>-<thread>.md` (atomic), first line
   `thread: <thread>`, then the text; the liaison posts it.
 - When done with a request: append `outcome: <one line>` to its file and move it to `~/agent-work/po/{{P}}/done/`.

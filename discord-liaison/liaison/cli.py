@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 import aiohttp
 from discordbot.cli import write_config
-from discordbot.config import Config, friend_bots
+from discordbot.config import LANGUAGE_RULE, Config, friend_bots
 from discordbot.rest import RestError
 from discordbot.runner import SECRET_KEYS
 from discordbot.sanitize import chunks, clean
@@ -671,7 +671,7 @@ class App:
         text = (f'{head}\n{rules}\n## Your job\n\njob: {job["id"]}\nattempt: {job.get("attempt", 1)} of {MAX_ATTEMPTS}\n{target}'
                 f'folder: {d}\ntask (from the triage run): {job["task"]}\nrequest: the <message newest="true"> below, verbatim; the '
                 f'messages before it are the same conversation, oldest first: the newest wins, a correction replaces '
-                f'what it corrects\nmust: reply in Spanish only; anything audiovisual is AAA, shocking and breathtaking; '
+                f'what it corrects\nmust: write posts in {LANGUAGE_RULE}; anything audiovisual is AAA, shocking and breathtaking; '
                 f'post the result and react ✅ yourself\n\n{context}' + ''.join(msgs))
         path = os.path.join(d, 'prompt.md')
         with open(path, 'w') as f:
