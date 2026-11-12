@@ -9,6 +9,7 @@ A=$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)
 W=$(mktemp -d); PIDS=()
 trap 'for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null; done; rm -rf "$W"' EXIT
 . "$A/bin/tests/lib/assert.sh"
+. "$A/bin/tests/lib/vault-seam.sh"
 me=$(id -un); uid=$(id -u)
 export FLEET_VAULT_SOCKET="$W/run/admin.sock" FLEET_VAULT_REGISTRY="$W/registry.toml" SECRET_RAISE_CMD="$W/raise"
 export HARNESS_CONFIG=/dev/null

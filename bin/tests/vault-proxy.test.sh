@@ -8,6 +8,7 @@ A=$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)
 W=$(mktemp -d); PIDS=()
 trap 'for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null; done; rm -rf "$W"' EXIT
 . "$A/bin/tests/lib/assert.sh"
+. "$A/bin/tests/lib/vault-seam.sh"
 me=$(id -un)
 VALUE="fixture-$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"   # fake, random, never a real secret
 export FLEET_VAULT_SOCKET="$W/run/admin.sock" FLEET_VAULT_REGISTRY="$W/registry.toml" NO_PROXY=127.0.0.1 no_proxy=127.0.0.1

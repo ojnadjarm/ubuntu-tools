@@ -8,6 +8,7 @@ A=$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)
 D="$A/discord-bot"; W=$(mktemp -d); U="fleet-selftest-v8-$$"
 trap 'sudo -n systemctl stop "$U.service" >/dev/null 2>&1; sudo -n rm -rf "$W" 2>/dev/null || rm -rf "$W"' EXIT
 . "$A/bin/tests/lib/assert.sh"
+. "$A/bin/tests/lib/vault-seam.sh"
 G="$D/units/discord-bot-gateway.service"; N="$D/units/discord-bot-netproxy.service"
 key() { sed -n "s/^$2=//p" "$1"; }
 

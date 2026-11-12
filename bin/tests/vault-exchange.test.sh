@@ -17,6 +17,7 @@ cleanup() {
 }
 trap cleanup EXIT
 . "$A/bin/tests/lib/assert.sh"
+. "$A/bin/tests/lib/vault-seam.sh"
 me=$(id -un)
 rnd() { head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
 PASS="pw-$(rnd)<&>"; SID="sid-$(rnd)"; BPASS="bk-$(rnd)"   # fake, random, never a real secret

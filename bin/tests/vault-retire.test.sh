@@ -9,6 +9,7 @@ A=$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)
 W=$(mktemp -d); PIDS=()
 trap 'for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null; done; chmod -R u+rwx "$W" 2>/dev/null; rm -rf "$W"' EXIT
 . "$A/bin/tests/lib/assert.sh"
+. "$A/bin/tests/lib/vault-seam.sh"
 me=$(id -un); uid=$(id -u)
 rnd() { head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
 KEY="fxkey-$(rnd)"; PASS="fxpass-$(rnd)"; CSEC="fxclientsecret-$(rnd)"   # fake, random, never a real secret

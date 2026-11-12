@@ -7,6 +7,7 @@ A=$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)
 W=$(mktemp -d); PIDS=()
 trap 'for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null; done; rm -rf "$W"' EXIT
 . "$A/bin/tests/lib/assert.sh"
+. "$A/bin/tests/lib/vault-seam.sh"
 me=$(id -un)
 VALUE="fixture-$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"   # fake, random, never a real secret
 VALUE2="fixture-$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
@@ -114,10 +115,10 @@ import base64, sys; sys.path.insert(0, sys.argv[1]); from vault import wire
 wire.call(sys.argv[2], {"op": "put", "name": "selftest-pre", "value_b64": base64.b64encode(sys.argv[3].encode()).decode()})
 EOF
 python3 -I "$A/vault/fleet-vaultd" --registry "$W/registry.toml" --state "$W/state" --socket "$FLEET_VAULT_SOCKET" \
-  --seal-socket "$W/seal.sock" --cred-dir "$W/creds" --clients "$me" >"$W/d.out" 2>&1 &
+  --seal-socket "$W/seal.sock" --cred-dir "$W/creds" --clients "$me" --cgroup-root "$W/cg" >"$W/d.out" 2>&1 &
 PIDS+=($!)
 python3 -I "$A/vault/fleet-vaultd" --registry "$W/registry.toml" --state "$W/state" --socket "$W/run/other.sock" \
-  --seal-socket "$W/seal.sock" --cred-dir "$W/creds" --clients nobody >/dev/null 2>&1 &
+  --seal-socket "$W/seal.sock" --cred-dir "$W/creds" --clients nobody --cgroup-root "$W/cg" >/dev/null 2>&1 &
 PIDS+=($!)
 for _ in $(seq 50); do [ -S "$FLEET_VAULT_SOCKET" ] && [ -S "$W/run/other.sock" ] && break; sleep 0.1; done
 S="$A/bin/secret"

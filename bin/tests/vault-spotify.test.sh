@@ -8,6 +8,7 @@ A=$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)
 W=$(mktemp -d); PIDS=()
 trap 'for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null; done; rm -rf "$W"' EXIT
 . "$A/bin/tests/lib/assert.sh"
+. "$A/bin/tests/lib/vault-seam.sh"
 me=$(id -un)
 rnd() { head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
 CID="fixturecid$(rnd)" CSEC="fixture-csec-$(rnd)" REFRESH="fixture-refresh-$(rnd)"   # fake, random, never real
