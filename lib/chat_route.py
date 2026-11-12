@@ -12,6 +12,11 @@ def next_hop(sender, parent):
     return parent["hop"] + 1
 
 
+def needs(msg):
+    """True when a message wakes the CEO seat: the owner's, a question or answer, or a post marked needs (T1695)."""
+    return msg["from"] == "owner" or msg.get("kind") in ("ask", "answer") or bool(msg.get("needs"))
+
+
 def may_post(seat, ch, org):
     """'' when seat may post in ch, else the refusal; a manager posts only in its direct message with the owner."""
     role = next((s["role"] for s in org if s["id"] == seat), None)

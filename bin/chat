@@ -150,7 +150,7 @@ def post(a, seat, seats):
     files = [chat_files.save(data, name) for data, name in blobs]
     parent = next((r for r in reversed(chat_store.read(ch, limit=20)) if r["from"] != seat), None)
     msg = {"ch": ch, "from": seat, "to": to, "text": text, "hop": chat_route.next_hop(seat, parent),
-           **({"files": files} if files else {})}
+           **({"files": files} if files else {}), **({"needs": True} if a.needs else {})}
     try:
         mid = chat_store.post(msg)
     except ValueError:
@@ -362,6 +362,9 @@ def main():
     s.add_argument("text", help="the message (max 2000 characters), or - to read it from stdin; may be empty with --file")
     s.add_argument("--file", action="append", default=[], metavar="PATH",
                    help="attach a file (repeatable, at most 5, 10 MiB each); readers get their own copy's path")
+    s.add_argument("--needs", action="store_true",
+                   help="wake the orchestrator: it must act (a request, a decision, a blocker); without it a message "
+                        "to the orchestrator waits unread; never for an ack or an FYI")
     s = sub.add_parser("read", help="no channel: your channels with unread counts; else the messages, marked read")
     s.add_argument("ch", nargs="?", help="a channel or @<seat>")
     s.add_argument("--unread", action="store_true", help="only messages since you last read, not your own")

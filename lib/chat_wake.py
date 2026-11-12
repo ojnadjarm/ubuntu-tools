@@ -66,14 +66,25 @@ def render(msgs, seat=None, seats=None):
     if seat and chat_route.may_post(seat, ch, org.seats() if seats is None else seats):
         lines.append(f"You may not post in #{ch}: put what matters in REPORT.md; read more with `chat read {ch}`.")
         return "\n".join(lines)
-    if last.get("kind") == "ask":
-        reply = f"chat answer {last['id']} <text>"
-    elif ch.startswith("dm-"):
-        reply = f"chat post @{last['from']} <text>"
-    else:
-        reply = f"chat post {ch} <text>"
-    lines.append(f"Answer with `{reply}`; read more with `chat read {ch}`.")
+    lines.append(f"Answer with `{_reply(last)}`; read more with `chat read {ch}`.")
     return "\n".join(lines)
+
+
+def _reply(m):
+    """The command that answers message m: `chat answer` for a question, else a post to the sender or the channel."""
+    if m.get("kind") == "ask":
+        return f"chat answer {m['id']} <text>"
+    if m["ch"].startswith("dm-"):
+        return f"chat post @{m['from']} <text>"
+    return f"chat post {m['ch']} <text>"
+
+
+def line(m):
+    """The CEO seat's one wake line (T1695): id, channel, sender, kind, the text on one line, attachments, how to answer."""
+    where = "dm" if m["ch"].startswith("dm-") else f"#{m['ch']}"
+    kind = f" ({m['kind']})" if m.get("kind", "msg") != "msg" else ""
+    files = f" [{len(m['files'])} file(s): chat read {m['ch']}]" if m.get("files") else ""
+    return f"chat {m['id']} {where} {m['from']}{kind}: {' / '.join(m['text'].split(chr(10)))}{files} · reply: `{_reply(m)}`"
 
 
 class Adapter:
@@ -84,7 +95,8 @@ class Adapter:
 
 
 class Channel(Adapter):
-    """The CEO seat: one user line on its live session's messaging socket, auth line first; no timer, no daemon."""
+    """The CEO seat: one line per message that needs it (chat_route.needs) on its live session's messaging socket, auth
+    line first; any other message waits unread in the store (queued); no timer, no daemon."""
 
     def __init__(self, seats=None, directory=None, tmux=None):
         self.seats = {s["id"]: s for s in (org.seats() if seats is None else seats)}
@@ -136,11 +148,16 @@ class Channel(Adapter):
         return (path, token) if token and is_sock else None
 
     def deliver(self, seat, msgs):
+        if not msgs:
+            return REFUSED
+        msgs = [m for m in msgs if chat_route.needs(m)]
+        if not msgs:
+            return QUEUED
         found = self.target(seat)
-        if not found or not msgs:
+        if not found:
             return REFUSED
         path, token = found
-        content = render(msgs, seat, list(self.seats.values()))
+        content = "\n".join(line(m) for m in msgs)
         data = (json.dumps({"type": "auth", "token": token}) + "\n"
                 + json.dumps({"type": "user", "message": {"role": "user", "content": content}}) + "\n")
         try:

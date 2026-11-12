@@ -80,7 +80,7 @@ def _read_json(path, default):
 
 
 def _validate(msg):
-    extra = set(msg) - set(KEYS) - {"files"}
+    extra = set(msg) - set(KEYS) - {"files", "needs"}
     if extra:
         raise ValueError(f"unknown keys: {', '.join(sorted(extra))}")
     m = {"to": [], "kind": "msg", "re": None, "hop": 0, **msg}
@@ -104,18 +104,21 @@ def _validate(msg):
         raise ValueError(f"bad hop: {m['hop']!r}")
     if m["re"] is not None and type(m["re"]) is not int:
         raise ValueError(f"bad re: {m['re']!r}")
+    if type(m.get("needs", False)) is not bool:
+        raise ValueError(f"bad needs: {m['needs']!r}")
     return m
 
 
 def post(msg):
-    """Store one message (ch, from, text; to, kind, re, hop, files optional); returns its id (UTC ms, rising)."""
+    """Store one message (ch, from, text; to, kind, re, hop, files, needs optional); returns its id (UTC ms, rising)."""
     m = _validate(msg)
     with _locked():
         last_path = os.path.join(root(), "last-id")
         mid = max(_now_ms(), _read_json(last_path, 0) + 1)
         when = _utc(mid)
         row = {"id": mid, "ts": when.strftime("%Y-%m-%dT%H:%M:%S.") + f"{mid % 1000:03d}Z",
-               **{k: m[k] for k in KEYS}, **({"files": m["files"]} if m.get("files") else {})}
+               **{k: m[k] for k in KEYS}, **({"files": m["files"]} if m.get("files") else {}),
+               **({"needs": True} if m.get("needs") else {})}
         _append(os.path.join(root(), f"{m['ch']}.{when:%Y-%m}.jsonl"), row)
         _write_json(last_path, mid)
         _append(os.path.join(root(), "audit.jsonl"), {k: row[k] for k in ("ts", "id", "ch", "from", "kind")})
