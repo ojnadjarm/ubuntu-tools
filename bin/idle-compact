@@ -86,15 +86,21 @@ PY
 
 # Why pane $PANE must not be typed into for claude pid $1; empty when it is at an empty prompt.
 pane_reason() {
-  local pid=$1 ppid a line rest
+  local pid=$1 ppid
   ppid=$(tm display -pt "$PANE" '#{pane_pid}' 2>/dev/null) || { echo "pane $PANE gone"; return; }
   [ -n "$ppid" ] || { echo "pane $PANE gone"; return; }
   ps -o args= -p "$pid" 2>/dev/null | grep -qE '^([^ ]*/)?claude( |$)' || { echo "pid $pid is not claude"; return; }
   local q=$pid; while [ "$q" -gt 1 ] && [ "$q" != "$ppid" ]; do q=$(ps -o ppid= -p "$q" 2>/dev/null | tr -d ' '); [ -n "$q" ] || q=1; done
   [ "$q" = "$ppid" ] || { echo "pane $PANE does not run pid $pid"; return; }
   [ "$(tm display -pt "$PANE" '#{pane_in_mode}' 2>/dev/null)" = 0 ] || { echo "pane in copy mode"; return; }
+  screen_reason
+}
+
+# Why the screen of pane $PANE is not an idle empty prompt (turn, agents, typed text; dim ghost text is empty).
+screen_reason() {
+  local a line rest why
   a=$(pane)
-  local why; why=$(pane_busy "$a"); [ -z "$why" ] || { echo "$why"; return; }
+  why=$(pane_busy "$a"); [ -z "$why" ] || { echo "$why"; return; }
   printf '%s\n' "$a" | awk '/^─/{f=1; next} f' | grep -qE '^ *◯ ' && { echo "background agents listed"; return; }
   line=$(prompt_line)
   [ -n "$line" ] || { echo "no prompt box"; return; }

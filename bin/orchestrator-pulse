@@ -22,9 +22,12 @@ tm() { if [ -n "${PULSE_TMUX_SOCKET:-}" ]; then tmux -L "$PULSE_TMUX_SOCKET" "$@
 log() { mkdir -p "$(dirname "$LOG")"; printf '%s %s session=%s %s\n' "$(date -Is)" "$1" "$SESSION" "$2" >>"$LOG"; echo "orchestrator-pulse: $1 $2"; }
 PANE=
 . "$(dirname "$(readlink -f "$0")")/orchlib.sh"
-squash() { tr -s ' \n' '  '; }
+# Whitespace dropped: Claude Code wraps the box at any character (mid-path too) and indents continuation rows.
+squash() { tr -d ' \n'; }
 # The input box text from the last prompt glyph to the box border, joined, so a wrapped prompt still matches.
 box_text() { pane | awk '/^(❯|>)/{buf=""; on=1} on&&/^─/{on=0} on{buf=buf" "$0} END{print buf}' | squash; }
+# Characters left in the input box, dim ghost text excluded.
+box_left() { prompt_line | sed -e 's/^❯//' -e 's/^>//' | tr -d ' \302\240'; }
 
 tm has-session -t "=$SESSION" 2>/dev/null || { log skip "no tmux session"; exit 0; }
 read -r PANE ppid < <(tm display -pt "=$SESSION:" '#{pane_id} #{pane_pid}' 2>/dev/null)
@@ -40,7 +43,7 @@ why=$(pane_busy "$a")
 [ -z "$why" ] || { log skip "$why"; exit 0; }
 line=$(prompt_line)
 [ -n "$line" ] || { log skip "no prompt box (dialog or startup)"; exit 0; }
-rest=$(printf '%s' "$line" | sed -e 's/^❯//' -e 's/^>//' | tr -d ' \302\240')
+rest=$(box_left)
 [ -z "$rest" ] || { log skip "input line not empty"; exit 0; }
 
 esc_files=$(find "$ESC_DIR" -maxdepth 1 -name '*.md' 2>/dev/null | sort)
@@ -84,5 +87,8 @@ for _ in 1 2 3 4 5; do
       failed: ($f | split("\n") | map(select(. != ""))), escalations: ($e | split("\n") | map(select(. != "")))}' >"$SNAP"
     log fired "prompt submitted (queue: $queue; new: $new)"; exit 0; fi
 done
-tm send-keys -t "$PANE" C-u
-log skip "prompt never echoed whole; line cleared"
+# Ctrl+U deletes one wrapped row of the box per press (Claude Code 2.1.322): repeat until the box is empty.
+for _ in $(seq 40); do [ -n "$(box_left)" ] || break; tm send-keys -t "$PANE" C-u; sleep 0.2; done
+left=$(box_left)
+if [ -z "$left" ]; then log skip "prompt never echoed whole; box cleared"
+else log skip "prompt never echoed whole; box NOT cleared (${#left} chars left)"; fi

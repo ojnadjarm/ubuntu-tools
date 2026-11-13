@@ -1,6 +1,7 @@
 # Compact an idle Claude session automatically (before the 1 h prompt cache expires)
 
-Ticket: T1657 · Last verified: 2026-11-11 by `bin/tests/idle-compact.test.sh` (28 checks) and a dry run on the live registry
+Ticket: T1657, T1696 · Last verified: 2026-11-13 by `bin/tests/idle-compact.test.sh` (28 checks), `idle-compact-panes.test.sh`
+(5 captured panes), `orchestrator-pulse-wrap.test.sh` (6) and a dry run on the live registry
 
 ## When to use
 A long-lived interactive Claude session in tmux (the orchestrator) finished its work and sits idle: compact it so the
@@ -37,6 +38,13 @@ tail "$AGENT_WORK/idle-compact/idle-compact.log"
 - 81 of 217 idle gaps (37 %) ended between 45 and 60 min, inside the TTL: a firing there costs about 24 k
   input-equivalents for nothing; the 63 % past 60 min pay for it (break-even above).
 - Keep `IDLE_COMPACT_AFTER` under 60: after the TTL the compaction itself reads the context uncached.
+- Text left in the box blocks it for good, and that is right: real typed text is never overwritten. Measured
+  2026-11-12/13: 64 skips `prompt box not empty (len=74)` over 19 h. The 74 characters were not ghost text (dim text is
+  already ignored; checked on real 2.1.322 captures) but the first row of a pulse turn: orchestrator-pulse typed a turn
+  with a long escalation path at 2026-11-11 22:43, Claude Code wrapped it mid-path, the echo check joined rows with a space
+  and missed, and its one Ctrl+U cleared only the last wrapped row (Ctrl+U deletes one row per press). Fixed in the pulse
+  (T1696): match with whitespace dropped, Ctrl+U until the box is empty. Leftover text in the real box needs a human or
+  the session itself to clear it. Pane fixtures: `bin/tests/fixtures/idle-compact/*.pane`.
 - Typed text from the phone (Remote Control) is not in the pane; the registry `busy` status and the 2 s re-check cover a
   prompt that is being sent.
 - Test fixture: `tmux -L <socket>` via `IDLE_COMPACT_TMUX_SOCKET`; a fake `claude` (`exec -a claude bash`) registers itself
@@ -44,5 +52,6 @@ tail "$AGENT_WORK/idle-compact/idle-compact.log"
 
 ## Links
 - Code: `~/agents/bin/idle-compact`, `~/agents/bin/orchlib.sh`, `~/agents/units/idle-compact.{service,timer}`
-- Tests: `bin/tests/idle-compact.test.sh` (private tmux server, fake CLAUDE_DIR, stub systemctl)
+- Tests: `bin/tests/idle-compact.test.sh` (private tmux server, fake CLAUDE_DIR, stub systemctl),
+  `idle-compact-panes.test.sh` (screen verdicts on captured panes), `orchestrator-pulse-wrap.test.sh` (wrapped box)
 - Brief: `~/agent-work/briefs/T1657-idle-compact.md`
