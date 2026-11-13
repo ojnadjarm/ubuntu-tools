@@ -260,6 +260,8 @@ def make_handler(admin, owner_login, peers, local=is_local, clock=time.time):
 
         def do_POST(self):
             p, _q = self._path()
+            n = int(self.headers.get("Content-Length") or 0)
+            raw = self.rfile.read(n) if 0 < n <= MAX_FORM else b""
             why = refusal(self.peer_uid, self.headers, owner_login, peers, local)
             if why:
                 return self._page(403, "refused", head("vault", "Refused", "") + notice(why[1]))
@@ -269,11 +271,10 @@ def make_handler(admin, owner_login, peers, local=is_local, clock=time.time):
                 return self._page(404, "not found", head("vault", "Not found", ""))
             if (self.headers.get("Content-Type") or "").split(";")[0].strip() != "application/x-www-form-urlencoded":
                 return self._page(415, "refused", head("vault", "Refused", "send the form"))
-            n = int(self.headers.get("Content-Length") or 0)
             if not 0 < n <= MAX_FORM:
                 return self._page(413, "refused", head("vault", "Refused", "the form is empty or too large"))
             try:
-                form = urllib.parse.parse_qs(self.rfile.read(n).decode("utf-8"), max_num_fields=8, strict_parsing=False)
+                form = urllib.parse.parse_qs(raw.decode("utf-8"), max_num_fields=8, strict_parsing=False)
             except (UnicodeDecodeError, ValueError):
                 return self._page(400, "refused", head("vault", "Refused", "the form could not be read"))
             f = {k: (v[0] if v else "").strip() for k, v in form.items()}
