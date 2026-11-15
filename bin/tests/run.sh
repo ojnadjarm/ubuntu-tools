@@ -17,7 +17,7 @@
 #      RUN_TESTS_LOCK (full-run lock, default $XDG_RUNTIME_DIR/fleet-suite.lock; --no-wait exits 75 while it is held),
 #      RUN_TESTS_SKILLS (skill dirs, colon-separated, default ~/.claude/skills:<root>/skills; symlinks followed, counted once)
 #      RUN_TESTS_SKIP_DEPS (--skip-unchanged inputs besides the skill, colon-separated, default ~/opt/gamedev:the vcpkg baseline)
-#      Every file starts from a clean env: HOME LANG TERM TMPDIR USER LOGNAME SHELL XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS DISPLAY
+#      Every file starts from a clean env: HOME LANG TERM TMPDIR USER LOGNAME SHELL XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS DISPLAY XAUTHORITY
 #      WAYLAND_DISPLAY FLEET_FRESH from the caller, plus what this runner sets; no other caller variable reaches it.
 #      Every file gets a private TMPDIR, removed when it exits (timed out or killed too), unless it mounts its own `--tmpfs /tmp`;
 #      `tmp residue: N dirs` counts new tmp.* left in the base TMPDIR.
@@ -216,7 +216,7 @@ run_one() {
   # Empty CI_UNITS: ci-window inside a test never sees the live CI units (its own scope sits outside the CI's cgroup).
   # Clean env (T1514): the caller's exported fleet config (env.sh keys) never reaches a file; only the session and runner vars do.
   local v keep=()
-  for v in HOME LANG TERM TMPDIR USER LOGNAME SHELL XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS DISPLAY WAYLAND_DISPLAY \
+  for v in HOME LANG TERM TMPDIR USER LOGNAME SHELL XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS DISPLAY XAUTHORITY WAYLAND_DISPLAY \
            SUDO_SHIM_LOG CREATIVE_CI_LOG RUN_TESTS_ID FLEET_SUITE_HOLDER FLEET_FRESH; do
     [[ -n ${!v+x} ]] && keep+=("$v=${!v}")
   done
