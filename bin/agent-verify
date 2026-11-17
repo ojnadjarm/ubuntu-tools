@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a brief's `CHECK: <command>` and record the verdict in $AGENT_WORK/evidence/<ticket>/check.json (T381); list changed existing tests for review (T1591)."""
+"""Run a brief's `CHECK: <command>` and record the verdict in $AGENT_WORK/evidence/<ticket>/check.json (T381); list changed existing tests for the lead that handed out the work (T1591, T1754 ruling 1)."""
 import argparse, datetime, glob, json, os, re, shutil, signal, subprocess, sys, tempfile, time
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
@@ -329,7 +329,7 @@ def main():
     write(os.path.join(evidence_dir(), ticket, 'check.json'), rec)
     noted = rec.get('test_changes', {}).get('noted', True)
     if not noted:
-        print('red: existing tests changed without a "Test changes" note; add one, then the orchestrator reviews it (guide test-changes)')
+        print('red: existing tests changed without a "Test changes" note; add one; the lead that handed out the work reads the list (guide test-changes)')
     sys.exit(0 if rec['ok'] and noted else 1)
 
 if __name__ == '__main__':

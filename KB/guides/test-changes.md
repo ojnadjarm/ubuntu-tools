@@ -1,17 +1,19 @@
-# Changing an existing test: a declared, reviewed step (test-changes)
+# Changing an existing test: a declared step the lead reads (test-changes)
 
-Ticket: T1591 · Last verified: 2026-11-10 by `bin/tests/test-changes.test.sh` (39/39), `agent-verify.test.sh`, `brief-check.test.sh`, moodle-ci `mci.test.sh` + `moodle-stop-reminder.test.sh`, and an mfixture plugin in 5.2 (`mci quick` without a note: testchanges red; `mci full` with `MCI_TEST_NOTE`: 16 ok, 0 red)
+Ticket: T1591, T1754 · Last verified: 2026-11-17 (T1754: `bin/tests/test-changes.test.sh`, `agent-verify.test.sh`, `brief-check.test.sh` green); before: 2026-11-10 by `bin/tests/test-changes.test.sh` (39/39), `agent-verify.test.sh`, `brief-check.test.sh`, moodle-ci `mci.test.sh` + `moodle-stop-reminder.test.sh`, and an mfixture plugin in 5.2 (`mci quick` without a note: testchanges red; `mci full` with `MCI_TEST_NOTE`: 16 ok, 0 red)
 
 ## When to use
 Any work that touches an existing test file (PHPUnit, Behat, node/vitest, pytest, `*.test.sh`). Owner *intent* (2026-11-10):
-agents tend to "fake" tests, so a changed test needs a stated reason and a second reviewer. New test files are free.
+agents tend to "fake" tests, so a changed test needs a stated reason. New test files are free.
+Owner 2026-11-17 (ruling 1, *copy*): "I just don't one a development that took 5 minutes becames 1 hour due to testing."
+Test in proportion to the change: run the tests of what changed (`guide change-tiers`).
 
 ## The rule
 1. Existing tests are frozen by default. Never weaken, skip or delete an assertion or a test to get green.
 2. A task that changes a feature's behaviour may change its tests. List each changed test under a `## Test changes` heading
    (in the report, the brief's `<T>-report.md`, or `$AGENT_WORK/evidence/<T>/test-changes.md`), one line each:
    `- <file> · <test> · <requirement that changed> · <assertion before> → <assertion after>`
-3. A second reviewer (the orchestrator, or an agent that did not write the change) approves that list before "done" is relayed.
+3. The lead that handed out the work reads that list before "done" is relayed; no second reviewer agent (ruling 1).
 
 ## The path we took
 Before: the freeze lived only in briefs (hand `sha256sum` of `tests/` before/after: T1445, T1451, T1483, T1488); nothing checked it.
@@ -28,16 +30,15 @@ Mutation testing (infection, stryker) would catch more but needs the suite and m
   `test_changes {noted, report}` in check.json, exits 1 while a file has no note (the CHECK's own `ok` is unchanged).
 - `mci` step `testchanges` (quick, schema, full): `test-changes --repo <plugin>` vs HEAD; notes from `MCI_TEST_NOTE`.
   The Moodle stop hook adds "Existing tests changed (…)" to its reason when a `*_test.php`/`.feature` in the base changed.
-- `brief-lint`: rule `test-changes` (the brief, or its `_common` file, must say "test change(s)").
+- `brief-lint` has no test-changes rule since T1754: the rule lives once in `~/agents/AGENTS.md` §3, a brief need not repeat it.
 
 ## Exact commands
 ```bash
-test-changes --repo ~/agents --ticket T1591                       # what the reviewer reads
+test-changes --repo ~/agents --ticket T1591                       # what the lead reads
 test-changes --repo <plugin-dir> --note ~/agent-work/evidence/T<n>/test-changes.md
 MCI_TEST_NOTE=~/agent-work/evidence/T<n>/test-changes.md ~/.claude/skills/moodle-ci/scripts/mci quick <plugin-dir>
 agent-verify ~/agent-work/briefs/T<n>-<slug>.md                    # NEEDS REVIEW block + verdict
 ```
-Brief line: `Test changes: existing tests are frozen; a changed test needs a "Test changes" note (guide test-changes), reviewed before done.`
 
 ## Pitfalls (measured)
 - Pure additions to an existing file first counted as changed: on ~/agents (2026-11-10) agent-verify.test.sh (8 new cases, 0 removed

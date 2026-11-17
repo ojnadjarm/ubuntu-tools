@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
-"""Lint agent briefs: every brief needs a CHECK command, file claims, a report cap (T381) and the test-changes line (T1591); warn when it names a project but not its decisions ledger (T396), feeds /dev/zero into script/tmux (T401), sets a time limit (T1631) or has a `Secrets:` line the vault will not lease (T1634-V5); `--backlog` checks a planner BACKLOG.md (T913)."""
+"""Lint agent briefs: every brief needs a CHECK command (T381); warn when it feeds /dev/zero into script/tmux (T401), sets a time limit (T1631), names a project without a `Memory:` line (T1599), has a `Secrets:` line the vault will not lease (T1634-V5) or a full-tier CHECK without `Class:` (T1399); `--backlog` checks a planner BACKLOG.md (T913)."""
 import argparse, os, re, sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
-import decisions  # noqa: E402
 import memory_store  # noqa: E402
 from vault import briefline, registry, wire  # noqa: E402
 
 RULES = [
     ('check', re.compile(r'^\s*(?:[-*]\s*)?CHECK:\s*\S', re.M)),
-    ('claims', re.compile(r'FILE-CLAIMS', re.I)),
-    ('report-cap', re.compile(r'report:?\s*(?:at most|max\.?|≤)\s*\d+\s*lines?', re.I)),
-    ('test-changes', re.compile(r'\btest[- ]changes?\b', re.I)),
 ]
 INCLUDE = re.compile(r'(_common[\w-]*\.md)')
 FULLRUN = re.compile(r'\b(test:perf|test:all)\b|\btests/run\.sh\b(?![^;&|]*--only)')
@@ -262,8 +258,6 @@ def main():
         passed += not miss
         if not a.summary:
             print(f"{'ok  ' if not miss else 'FAIL'} {p}" + (f": missing {', '.join(miss)}" if miss else ''))
-            for name in decisions.unreferenced(text_of(p)):
-                print(f"WARN {p}: names {name} but not its decisions ledger {decisions.path(name)}")
             for n in devzero_hits(p):
                 print(f"WARN {p}:{n}: /dev/zero feeds script/tmux; use </dev/null or `sleep inf |`")
             for hit in time_limits(text_of(p)):

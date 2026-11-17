@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""List existing test files changed against a base (a removed line or an added skip), what each change weakens, and whether a "Test changes" note covers it (T1591)."""
+"""List existing test files changed against a base (a removed line or an added skip), what each change weakens, and whether a "Test changes" note covers it; the lead that handed out the work reads the list (T1591, T1754 ruling 1)."""
 import argparse, os, re, subprocess, sys
 
 TEST_FILE = re.compile(r'(^|/)tests?/.*(_test|Test)\.php$|\.feature$|\.(test|spec)\.[cm]?[jt]sx?$|(^|/)__tests__/.*\.[cm]?[jt]sx?$'

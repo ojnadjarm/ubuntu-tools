@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# T381: brief-lint flags the required rules (T396: and warns on a missing decisions ledger; T401: and on /dev/zero fed to script/tmux); agent-verify writes green/red check.json into a temp AGENT_WORK only.
+# T381: brief-lint flags a missing CHECK (T1754: the only required rule; T401: warns on /dev/zero fed to script/tmux); agent-verify writes green/red check.json into a temp AGENT_WORK only.
 set -uo pipefail
 BIN="$HOME/agents/bin"
 FIX="$BIN/tests/fixtures/brief-check"
@@ -7,11 +7,14 @@ WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 export AGENT_WORK="$WORK" MEMORY_HOME="$WORK/memory"
 . "$HOME/agents/bin/tests/lib/assert.sh"
 
-# 1. lint: green (rules via _common include) and red pass; bare misses all four.
+# 1. lint: green (rules via _common include) and red pass; bare misses the CHECK; a CHECK alone passes (T1754).
 "$BIN/brief-lint" "$FIX/T901-green.md" "$FIX/T902-red.md" >/dev/null && ok 'lint passes complete briefs' || nok 'lint complete' 'rc != 0'
 out=$("$BIN/brief-lint" "$FIX/T903-bare.md"); rc=$?
-[ "$rc" = 1 ] && grep -q 'missing check, claims, report-cap, test-changes$' <<<"$out" && ok 'lint flags 4/4 on bare brief' || nok 'lint bare' "rc=$rc $out"
-[ "$("$BIN/brief-lint" --summary "$FIX"/T90*.md)" = 'pass 2/3 · check 2/3 · claims 2/3 · report-cap 2/3 · test-changes 2/3' ] \
+[ "$rc" = 1 ] && grep -q 'missing check$' <<<"$out" && ok 'lint flags the missing CHECK on bare brief' || nok 'lint bare' "rc=$rc $out"
+printf 'CHECK: true\n' >"$WORK/T906-check-only.md"
+out=$("$BIN/brief-lint" "$WORK/T906-check-only.md"); rc=$?
+[ "$rc" = 0 ] && [ "$out" = "ok   $WORK/T906-check-only.md" ] && ok 'lint passes a brief with a CHECK and no fixed sentences' || nok 'lint check only' "rc=$rc $out"
+[ "$("$BIN/brief-lint" --summary "$FIX"/T90*.md)" = 'pass 2/3 · check 2/3' ] \
   && ok 'summary counts' || nok 'summary' "$("$BIN/brief-lint" --summary "$FIX"/T90*.md)"
 
 # 2. verify green: rc 0, backticks stripped, json ok=true under the temp AGENT_WORK.
@@ -40,10 +43,10 @@ alive=0; [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && { alive=1; kill "$pid"; 
 [ "$rc" = 1 ] && [ "$alive" = 0 ] && grep -q '"rc": 124' "$WORK/evidence/T905/check.json" \
   && ok 'timeout kills the process group (0 survivors)' || nok 'timeout group' "rc=$rc survivors=$alive"
 
-# 5. decisions ledger (T396): a brief naming a project without its ledger warns, rc stays 0; naming the ledger is quiet.
+# 5. decisions ledger (T396, dropped T1754: the memory cards carry the decisions): a brief naming a project without its ledger is quiet, rc 0.
 out=$("$BIN/brief-lint" "$FIX/T910-noref.md"); rc=$?
-[ "$rc" = 0 ] && grep -q "^WARN .*names ailearning but not its decisions ledger $WORK/decisions/ailearning.md" <<<"$out" \
-  && ok 'lint warns on a missing decisions ledger' || nok 'decisions warn' "rc=$rc $out"
+[ "$rc" = 0 ] && ! grep -q 'decisions ledger' <<<"$out" \
+  && ok 'lint gives no decisions-ledger warning' || nok 'decisions quiet' "rc=$rc $out"
 out=$("$BIN/brief-lint" "$FIX/T911-ref.md"); rc=$?
 [ "$rc" = 0 ] && ! grep -q WARN <<<"$out" && ok 'lint quiet when the ledger is named' || nok 'decisions quiet' "rc=$rc $out"
 
