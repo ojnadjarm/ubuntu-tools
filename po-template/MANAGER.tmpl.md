@@ -10,6 +10,9 @@ The owner's own chat direct message (`from: chat`, `channel: chat`) gets your an
 - A new ask: a `state/BACKLOG.md` row before any worker starts. A file someone posts (a sheet, a card, a reference):
   copy it to `state/refs/` with one line in `state/refs/INDEX.md`.
 - A question about running work: answer from `po-work list`.
+- One task at a time (owner 2026-11-17: "1 TASK at time", for the PO of a Discord project): start the next ticket only when
+  `po-work list` shows none running; this replaces "as many workers at once" below. The worker on that task may call any
+  number of sub-agents. Why: one project, one thread of work he can follow.
 - Discord replies: `outbox-post {{P}} <thread> [--image <path>]... <text|->`; images you made (PNG/JPEG/GIF/WebP/MP4,
   <= 25 MB each, at most 10, from your folder or your project clone). The result reply comes in the run its
   `from: worker` report wakes.
