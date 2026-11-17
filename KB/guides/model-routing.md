@@ -13,14 +13,14 @@ liaison call it; briefs and agent definitions point at `model-route --table`. Th
 Model routing (owner 2026-11-17, T1728): Opus by default. Fable is the scarce budget: only where its judgement pays, and then as the lead.
 class    model             effort  who works  when
 fix      opus              high    itself     a bug, a red test, a small change or tweak; any topic, visual included
-touchup  opus              high    itself     a change to an existing visual or audio piece: colour, spacing, crop, timing, copy, re-encode
+touchup  opus              high    itself     a change that keeps the look of an existing visual or audio piece: colour, spacing, crop, timing, copy, re-encode, one glitch
 build    opus              high    itself     build from a brief or a plan, any size: feature, refactor, wiring, tests, shipping a picked look
 review   opus              high    itself     review, audit, research, a question
 plan     claude-fable-5-2  high    lead       a plan, an architecture, a ticket table, a hard design with no precedent
-art      claude-fable-5-2  medium  itself     a new audiovisual piece whose look is the deliverable: art direction, mockups, character, scene, film, sound identity
+art      claude-fable-5-2  medium  itself     an audiovisual piece whose look is the deliverable, new or restyled (a new face, proportions or style for an existing character or scene): art direction, mockups, character, scene, film, sound identity
 1. No class is build. Unsure between two rows: take the Opus row.
 2. Lead: Fable writes the plan and one brief per piece, hands the pieces to Opus workers (its own `worker` sub-agents for up to 3 file-disjoint pieces, else the caller starts each as build), reviews their diffs and reports. It edits no product file.
-3. Fable does the work itself only for art: a look cannot be split. In a mixed job the art pieces are art; the code, encodes, tests and skill round them are build.
+3. Fable does the work itself only for art: a look cannot be split. A restyle changes the look, so it is art; a touch-up keeps it (owner 2026-11-17). In a mixed job the art pieces are art; the code, encodes, tests and skill round them are build.
 4. A request for Fable on an Opus row is downgraded to Opus with one log line. The owner's own words naming a model win: --owner-said "<his words>".
 5. High is the top effort. No dollar caps.
 ```

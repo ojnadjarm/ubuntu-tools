@@ -34,7 +34,7 @@ Every web page, screen or component, for every agent and ticket (exception: aile
   shipping a picked look, a plain screen video).
   `planner` (Fable high): plan (a plan, an architecture, a hard design). It leads: the plan plus one brief per piece,
   the pieces run on `worker`s (its own, up to 3 file-disjoint, or yours), it reviews their diffs.
-  `worker-max` (Fable medium): art, a new audiovisual piece whose look is the deliverable (art direction, mockups,
+  `worker-max` (Fable medium): art, an audiovisual piece whose look is the deliverable, new or a restyle (art direction, mockups,
   character, scene, film, sound identity); it makes the art itself, the code round it is a `worker` ticket.
   Headless: `po-work … --class <class>`, `discord-liaison job … --class <class>`; a Fable request on an Opus class is
   downgraded with one log line; his own words naming a model win (`--owner-said "<his words>"`). Unsure: Opus.
