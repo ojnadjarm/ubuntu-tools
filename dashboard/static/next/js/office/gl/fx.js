@@ -1,16 +1,22 @@
-/* Light surfaces of every chunk in one draw: city windows, dot-matrix signs and holo screens; the clock moves only on drawn frames. */
+/* Light surfaces of every chunk in one draw: city windows (a top-floor pane, k[2] = 1, opens on the sky over a low skyline), dot-matrix signs and holo screens; the clock moves only on drawn frames. */
 import * as T from "../../../vendor/three.sub.js";
 
 export const WINDOW = 0, DOT = 2, HOLO = 3;
 const VS = `attribute vec4 aK; attribute vec3 aCol; varying vec2 vUv; varying vec4 vK; varying vec3 vCol;
 void main(){ vUv = uv; vK = aK; vCol = aCol; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
 const FS = `precision highp float;
-uniform float uT, uDim; uniform vec3 uCity, uLit;
+uniform float uT, uDim, uNight; uniform vec3 uCity, uLit;
 varying vec2 vUv; varying vec4 vK; varying vec3 vCol;
 float h1(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 vec4 city(){
   float hh = vK.z, y = vUv.y / hh; vec2 p = vec2(vUv.x + vK.y * 7.3, vUv.y);
   vec3 c = mix(uCity * 0.55, vec3(0.012, 0.02, 0.03), smoothstep(0.0, 0.95, y));
+  if (vK.w > 0.5) {
+    vec3 hi = mix(vec3(0.045, 0.1, 0.16), vec3(0.01, 0.018, 0.04), uNight);
+    c = mix(mix(uCity * 0.5, hi * 1.5, smoothstep(0.0, 1.1, y)), hi * 0.45, smoothstep(1.0, 2.6, y));
+    vec2 g = vec2(p.x, vUv.y) / 0.05;
+    c += vec3(0.8, 0.9, 1.0) * step(0.975, h1(floor(g) + 31.0)) * step(1.15, y) * smoothstep(0.3, 0.0, length(fract(g) - 0.5)) * (0.2 + 0.8 * uNight);
+  }
   for (float L = 0.0; L < 2.0; L++) {
     float bw = 0.34 - L * 0.12, bx = floor(p.x / bw + L * 0.37), top = (0.3 + 0.55 * h1(vec2(bx, L + 3.0))) * hh * (1.0 - L * 0.3);
     if (vUv.y < top) {
@@ -36,7 +42,7 @@ void main(){
 
 /* effects(scene) → {set(id, quads), drop(id), look(theme, night), step(t)}. */
 export function effects(scene) {
-  const geo = new T.BufferGeometry(), U = { uT: { value: 0 }, uDim: { value: 1 }, uCity: { value: new T.Vector3() }, uLit: { value: new T.Vector3() } }, all = new Map();
+  const geo = new T.BufferGeometry(), U = { uT: { value: 0 }, uDim: { value: 1 }, uNight: { value: 0 }, uCity: { value: new T.Vector3() }, uLit: { value: new T.Vector3() } }, all = new Map();
   const mesh = new T.Mesh(geo, new T.ShaderMaterial({ uniforms: U, vertexShader: VS, fragmentShader: FS, transparent: true, premultipliedAlpha: true, depthWrite: false }));
   let dirty = false;
   mesh.frustumCulled = false; mesh.renderOrder = 2; scene.add(mesh);
@@ -56,7 +62,7 @@ export function effects(scene) {
     /* quads: [{kind, p: four world corners (counter-clockwise from the lit side), uv: [w, h], k: [a, b, c], col, two}]. */
     set(id, quads) { all.set(id, quads); dirty = true; },
     drop(id) { dirty = all.delete(id) || dirty; },
-    look(th, night) { U.uCity.value.set(...th.city); U.uLit.value.set(...th.cityLit); U.uDim.value = night ? 0.8 : 1; },
+    look(th, night) { U.uCity.value.set(...th.city); U.uLit.value.set(...th.cityLit); U.uDim.value = night ? 0.8 : 1; U.uNight.value = night ? 1 : 0; },
     step(t) { if (dirty) merge(); U.uT.value = t % 600; },
   };
 }

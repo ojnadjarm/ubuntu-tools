@@ -63,7 +63,7 @@ test("a floor with no deck: no mezzanine column, bays from the left wall, a pool
   P.staff.push({ id: "labs", name: "Labs", members: [{ id: "lab-bot", name: "Lab", rank: "Staff", state: "running" }] });
   P.floors[2].teams.push("labs");
   P.sessions.push(session(2001, { parent: null, started_by: "lab-bot" }));
-  const M = build(P, { needs: false }), V = F.view(M, "personal", P), D = F.view(M, "ceo", P);
+  const M = build(P, { needs: false }), V = F.view(M, "personal", P), D = F.view(M, "discord", P);
   const p = L.plan(V), d = L.plan(D);
   assert.ok(V.rooms.some((r) => r.id === "pool-personal"), "the worker's desk pool is on Personal");
   assert.strictEqual(p.hall.x0, L.GAP / 2);
@@ -75,13 +75,14 @@ test("a floor with no deck: no mezzanine column, bays from the left wall, a pool
   assert.strictEqual(L.baysOf(V), 2, "mooblox and the pool");
 });
 
-test("the hall of a deck-less floor draws no stairs and no kitchen; the CEO's and Discord's still do", async () => {
+test("the hall of a deck-less floor draws no stairs and no kitchen; Discord's still does; the CEO's own room (T1758) has no stairs", async () => {
   const { build } = await load("office/model.js"), F = await load("office/floors.js"), P = five(), M = build(P, { needs: false });
   for (const f of ["personal", "work"]) {
     const m = await hallModels(F.view(M, f, P));
     assert.ok(!m.includes("stairs") && !m.includes("kitchenFridgeSmall"), f);
   }
-  for (const f of ["ceo", "discord"]) assert.ok((await hallModels(F.view(M, f, P))).includes("stairs"), f);
+  assert.ok((await hallModels(F.view(M, "discord", P))).includes("stairs"), "discord");
+  assert.ok(!(await hallModels(F.view(M, "ceo", P))).includes("stairs"), "ceo");
 });
 
 test("the hall chunk's stamp changes when a pool takes a bay on a deck-less floor", async () => {

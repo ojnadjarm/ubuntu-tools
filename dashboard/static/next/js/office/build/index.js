@@ -3,9 +3,13 @@ import { batch } from "./batch.js";
 import { hall, DECK } from "./hall.js";
 import { baysOf } from "../layout.js";
 import { seatRoom, teamRoom, ceoSpot, headSpot, pool } from "./room.js";
+import { SWITCHBOARD } from "./ceo/index.js";
 
 export const HALL = "hall";
 const ROOMS = { seat: seatRoom, team: teamRoom, ceo: ceoSpot, head: headSpot, pool };
+/* A shell draws one kind of floor: its hall, a builder per room kind, and where a room's frame stands; the loft raises whoever holds the office onto the deck. */
+const LOFT = { hall, rooms: ROOMS, at: (R, M, c) => (R === M.ceo ? { x: c.x, y: DECK, z: c.z + 0.25 } : { x: c.x, z: c.z }) };
+const shellOf = (plan) => (plan.shell === "ceo" ? SWITCHBOARD : LOFT);
 const room = (M, id) => [M.ceo, ...M.rooms, ...M.staff].find((r) => r && r.id === id);
 const envOf = (theme, M) => theme.env[M.night ? "night" : "day"];
 
@@ -19,13 +23,13 @@ export function stamp(id, M, plan) {
 function run(id, M, plan, theme, kit, ink, dry) {
   const B = batch(kit, theme.pal), model = B.model;
   if (dry) B.cells = B.box = B.cyl = B.ring = B.foot = () => {};
-  const ctx = { B, M, plan, th: theme, night: M.night, ink, actors: [], lamps: [], glows: [null], glowIx: new Proxy({}, { get: () => undefined }), labels: [], quads: [] };
+  const ctx = { B, M, plan, th: theme, night: M.night, ink, actors: [], lamps: [], glows: [null], glowIx: new Proxy({}, { get: () => undefined }), labels: [], quads: [], rails: [] }, sh = shellOf(plan);
   B.model = (name, o = {}) => { for (const k in o.glow) o.glow[k] ||= ctx.glows.push(null) - 1; return dry ? kit.models[name].s : model(name, o); };
-  if (id === HALL) hall(ctx, plan);
+  if (id === HALL) sh.hall(ctx, plan);
   else {
-    const R = room(M, id), c = plan.cells[id], up = R === M.ceo;
-    B.push({ x: c.x, y: up ? DECK : 0, z: c.z + (up ? 0.25 : 0) });
-    ROOMS[R.kind](ctx, R);
+    const R = room(M, id);
+    B.push(sh.at(R, M, plan.cells[id]));
+    sh.rooms[R.kind](ctx, R);
     B.pop();
   }
   return ctx;
@@ -33,7 +37,7 @@ function run(id, M, plan, theme, kit, ink, dry) {
 
 /* The build of chunk `id` as two short tasks: the builders, then the frozen buffers; the second returns the Chunk, unlit until bake(env, lamps). */
 export function steps(id, M, plan, theme, kit, ink) {
-  const lit = (v) => theme.minLight + (1 - theme.minLight) * v, take = (c, ctx) => Object.assign(c, { lamps: ctx.lamps, quads: ctx.quads, actors: ctx.actors, labels: ctx.labels, glows: ctx.glows });
+  const lit = (v) => theme.minLight + (1 - theme.minLight) * v, take = (c, ctx) => Object.assign(c, { lamps: ctx.lamps, quads: ctx.quads, actors: ctx.actors, labels: ctx.labels, glows: ctx.glows, rails: ctx.rails });
   let ctx;
   return [
     () => { ctx = run(id, M, plan, theme, kit, ink); },

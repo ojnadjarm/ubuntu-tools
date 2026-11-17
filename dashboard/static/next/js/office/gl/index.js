@@ -4,6 +4,7 @@ import { chunks } from "./chunks.js";
 import { creatures } from "./creatures.js";
 import { effects } from "./fx.js";
 import { halos } from "./halos.js";
+import { capsules } from "./capsule.js";
 
 const HALL = "hall", SLICE_MS = 8, REACH = 2.6, TAP_PX = 22, made = new WeakMap(), inks = new Map();
 
@@ -42,9 +43,9 @@ const near = (c, lamps) => lamps.filter((l) => l.i > 0 && Math.hypot(Math.max(c.
 /* createRenderer(canvas, {theme, kit, still?, build?, chunk?, ink?}) → Renderer; one per canvas, a second call returns the first. build = {steps, stamp?} defaults to build/index.js; chunk is a one-step build. */
 export function createRenderer(canvas, opts) {
   if (made.has(canvas)) return made.get(canvas);
-  const S = stage(canvas, { still: opts.still }), mesh = chunks(S), fam = creatures(S.scene), fx = effects(S.scene), halo = halos(S), lit = halos(S), built = new Map(), anchors = new Map();
+  const S = stage(canvas, { still: opts.still }), mesh = chunks(S), fam = creatures(S.scene), fx = effects(S.scene), halo = halos(S), lit = halos(S), cap = capsules(S.scene, { out: opts.theme.accent, back: (opts.theme.state || {}).talking || opts.theme.accent }), built = new Map(), anchors = new Map();
   let B = opts.build || (opts.chunk && { steps: (...a) => [() => opts.chunk(...a)] }), actors = [], boards = [], jobs = [], raf = 0, cur = null, fit = false, queued = null, hot = null, tally = { rebuilt: 0, relit: 0, ms: 0 };
-  S.ticker((t, dt) => { fx.step(t); return fam.step(t, dt); });
+  S.ticker((t, dt) => { fx.step(t); const moving = cap.step(dt); return fam.step(t, dt) || moving; });
 
   /* Runs queued jobs for SLICE_MS, then leaves the rest to the next frame. */
   function pump() {
@@ -83,15 +84,16 @@ export function createRenderer(canvas, opts) {
     }
     for (const a of actors) anchors.set(a.id, [a.x, a.y + (0.8 * a.scale) / 0.36, a.z]);
     for (const { c } of built.values()) for (const l of c.labels || []) { anchors.set(l.id ?? l.who, l.pos); if (l.quad) boards.push(l); (l.cap || []).forEach((q, i) => anchors.set(l.id + "/cap" + i, q)); }
-    fam.set(actors); halo(lamps); fx.look(opts.theme, M.night);
+    fam.set(actors); halo(lamps); fx.look(opts.theme, M.night); cap.rails([...built.values()].flatMap((b) => b.c.rails || []));
     if (fit) S.view({ lo, hi, ...plan.home }); else { S.invalidate(); canvas.dispatchEvent(new Event("view")); }
     fit = false;
   }
-  /* Queues what the patch asks: a chunk with a new stamp is rebuilt, one that only changed day or night is re-lit, the rest keep their buffers; an empty patch does nothing. */
+  /* Queues what the patch asks: a chunk with a new stamp is rebuilt, one that only changed day or night is re-lit, the rest keep their buffers; an empty patch does nothing; patch.events send capsules down or up the well. */
   function apply(M, plan, patch = {}) {
     if (!B) { queued = [M, plan, patch]; return; }
     const ids = [HALL, ...Object.keys(plan.cells)], all = !cur || jobs.length > 0 || patch.layout || patch.night || cur.M.night !== M.night;
     tally = { rebuilt: 0, relit: 0, ms: 0 };
+    if (patch.events) { cap.fire(patch.events); S.invalidate(); }
     if (!all && !(patch.rooms || []).length) return;
     fit = fit || !cur || !!patch.layout; cur = { M, plan }; jobs = [];
     for (const id of [...built.keys()]) if (!ids.includes(id)) { built.delete(id); mesh.drop(id); fx.drop(id); }
@@ -147,8 +149,8 @@ export function createRenderer(canvas, opts) {
     },
     reset: S.reset,
     zoom: S.zoom,
-    /* rebuilt, relit and ms count the last apply; pending is its jobs still queued. */
-    stats: () => ({ chunks: mesh.size, rebuilt: tally.rebuilt, relit: tally.relit, pending: jobs.length, verts: mesh.verts(), ms: tally.ms, frames: S.stats.frames }),
+    /* rebuilt, relit and ms count the last apply; pending is its jobs still queued; frame is the last frame's ms, calls its draw calls. */
+    stats: () => ({ chunks: mesh.size, rebuilt: tally.rebuilt, relit: tally.relit, pending: jobs.length, verts: mesh.verts(), ms: tally.ms, frames: S.stats.frames, frame: S.stats.last, calls: S.stats.calls || 0 }),
   };
   made.set(canvas, R);
   return R;

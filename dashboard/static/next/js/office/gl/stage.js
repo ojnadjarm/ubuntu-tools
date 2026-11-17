@@ -27,7 +27,7 @@ export function stage(canvas, { still = false } = {}) {
     const hold = frozen || calm.matches, t = hold ? 1.3 : now / 1000, t0 = performance.now(), active = (ticker ? ticker(t, hold ? 1 : Math.min(0.1, t - prev)) : false) && !hold;
     prev = t;
     if (r) r.render(scene, cam);
-    S.stats.frames++; S.stats.last = performance.now() - t0;
+    S.stats.frames++; S.stats.last = performance.now() - t0; if (r) S.stats.calls = r.info.render.calls;
     if (moved) { moved = false; canvas.dispatchEvent(new Event("view")); }
     if (active && !document.hidden) { if (dragging) S.invalidate(); else timer = setTimeout(() => { timer = 0; S.invalidate(); }, STEP_MS); }
   }

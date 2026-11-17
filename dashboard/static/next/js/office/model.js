@@ -4,6 +4,9 @@ import { claimRow } from "../claims.js";
 import { store } from "../store.js";
 import { verdict } from "../verdict.js";
 import { placer } from "./floors.js";
+import { desk } from "./ceo/desk.js";
+
+export { diff } from "./diff.js";
 
 export const SLOTS = 6;
 const SESSION = { working: "working", idle: "idle" };
@@ -84,6 +87,7 @@ export function build(P, { now = Date.now(), needs = verdict(store.D).bad, talk 
     c.raw.crew = { n: poolPeople.length, on: live.length };
     if (bad) { Object.assign(c, { pose: "error", state: "error" }); Object.assign(ceo, { pose: "error", state: "error", awake: true }); c.raw.failing = { ticket: ticket(bad.label), last: bad.last }; }
     ceo.live = { motes: live.map((a) => a.id), lamp: needs ? "needs" : "ok", failing: bad ? bad.id : null };
+    ceo.desk = desk(P, rooms, bad);
   }
 
   const staff = (P.staff || []).map((t, k) => {
@@ -94,7 +98,7 @@ export function build(P, { now = Date.now(), needs = verdict(store.D).bad, talk 
   [...pools, ...staff].forEach((r) => (who[r.id] = r));
 
   const all = [ceo, ...rooms, ...staff].filter(Boolean), night = !all.some((r) => r.awake);
-  all.forEach((r) => (r.key = JSON.stringify([r.kind, r.name, r.area, r.team, r.people.map((p) => [p.id, p.pose, !!p.on]), r.busy, r.awake, r.more, r.live || 0, ...(r.status ? [r.status] : []), night])));
+  all.forEach((r) => (r.key = JSON.stringify([r.kind, r.name, r.area, r.team, r.people.map((p) => [p.id, p.pose, !!p.on]), r.busy, r.awake, r.more, r.live || 0, ...(r.desk ? [r.desk] : []), ...(r.status ? [r.status] : []), night])));
 
   const members = staff.flatMap((r) => r.people.map((p) => p.raw)), on = members.filter((m) => m.on);
   const next = on.filter((m) => m.next).sort((a, b) => Date.parse(a.next) - Date.parse(b.next));
@@ -139,22 +143,4 @@ function signs(all, who, S, byPid, panels, ceo) {
     for (const p of r.people) p.info = r.info;
   }
   if (ceo) ceo.people[0].raw.loose = { needs: ceo.live.lamp === "needs", sessions: panels.sessions.filter((x) => !(x.id in ses)), claims: panels.claims.filter((c) => !held(c)) };
-}
-
-const rooms = (M) => [M.ceo, ...M.rooms, ...M.staff].filter(Boolean);
-const look = (p) => JSON.stringify([p.pose, p.state, p.since, p.name, p.rank, p.room]);
-
-/* What changed from model a to model b: the layout, day or night, rooms by key, people by look, boards, the band line. */
-export function diff(a, b) {
-  const R = rooms(b), people = R.flatMap((r) => r.people);
-  if (!a) return { layout: true, night: false, rooms: R.map((r) => r.id), people: people.map((p) => p.id), panels: Object.keys(b.panels), line: true };
-  const was = new Map(rooms(a).map((r) => [r.id, r.key])), saw = new Map(rooms(a).flatMap((r) => r.people).map((p) => [p.id, look(p)]));
-  return {
-    layout: rooms(a).map((r) => r.id).join("\n") !== R.map((r) => r.id).join("\n"),
-    night: a.night !== b.night,
-    rooms: R.filter((r) => was.get(r.id) !== r.key).map((r) => r.id),
-    people: people.filter((p) => saw.get(p.id) !== look(p)).map((p) => p.id),
-    panels: Object.keys(b.panels).filter((k) => JSON.stringify(a.panels[k]) !== JSON.stringify(b.panels[k])),
-    line: JSON.stringify(a.line) !== JSON.stringify(b.line),
-  };
 }

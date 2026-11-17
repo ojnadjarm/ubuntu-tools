@@ -1,5 +1,6 @@
 /* Where things stand in the loft: seat rooms as bays in rows of COLS, the staff teams' rows in front, the CEO on the mezzanine, the desk pool by the stairs under it; a floor with no deck (M.deck false) has no mezzanine column: the bays start at the left wall and the pool takes a bay. */
 import { SLOTS } from "./model.js";
+import { plan as ceoPlan } from "./ceo/plan.js";
 
 export const IW = 3.25, ID = 3.3, COLS = 4, MW = 4.0, MD = 3.2, GAP = 1.4, H = 2.5;
 export const X0 = MW + GAP, PX = IW + GAP, PZ = ID + GAP;
@@ -19,8 +20,9 @@ export function rowsOf(M) {
   return { rows, all: Math.max(2, rows + Math.ceil(M.staff.length / COLS)) };
 }
 
-/* Plan for model M: the hall's size, one cell per room (centre, usable size, worker desks), the camera's home view. */
+/* Plan for model M: the hall's size, one cell per room (centre, usable size, worker desks), the camera's home view; the CEO floor's own room (M.shell "ceo") has its own plan. */
 export function plan(M) {
+  if (M.shell === "ceo") return ceoPlan(M);
   const deck = M.deck !== false, seatRooms = M.rooms.filter((r) => !deck || r.kind !== "pool"), pool = deck && M.rooms.find((r) => r.kind === "pool");
   const { rows, all } = rowsOf(M), x0 = x0Of(M);
   const depth = 0.2 + all * PZ - GAP + 0.7;

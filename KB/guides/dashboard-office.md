@@ -1,6 +1,6 @@
 # Dashboard office: add a team, a member, a name; the 3D Org page (`staff.json`, `/api/office`)
 
-Ticket: T1601 (01-18), T1658, T1666, T1687, T1755, T1756, T1757, T1759 · Last verified: 2026-11-17 by T1759 (deck key, `tests/test_office_floor_work.js`, `test_office_floors.py` deck, live `/api/office` 5 floors, shots `~/drop/T1759/`), T1757 (four floors, `tests/test_office_floor_four.js`, `test_office_floors.py` rest, live `/api/office`, shots `~/drop/T1757/` 4 floors × 5 widths), T1756 (floor head, `tests/test_office_floor_model.js`, shots `~/drop/T1756/`), T1755 (`tests/test_office_floor_model.js`, `tests/test_office_floors.py`, live `/api/office` floors, shots 2 floors × 5 widths); 2026-11-11 by T1687 (`tests/test_office_status.js`, `tests/test_section_status.py`, live `/api/office` vass paused), T1666 (`bin/tests/dashboard-office-drag.test.sh`), T1658 (`bin/tests/dashboard-office-chat.test.sh`); 2026-11-10 by T1601-16 (`staff.load()` 3 teams 12 members, live `GET /api/office`
+Ticket: T1601 (01-18), T1658, T1666, T1687, T1755, T1756, T1757, T1759, T1758 · Last verified: 2026-11-17 by T1758 (CEO floor, `tests/test_office_ceo.js` 7, shots `~/drop/T1758/`), T1759 (deck key, `tests/test_office_floor_work.js`, `test_office_floors.py` deck, live `/api/office` 5 floors, shots `~/drop/T1759/`), T1757 (four floors, `tests/test_office_floor_four.js`, `test_office_floors.py` rest, live `/api/office`, shots `~/drop/T1757/` 4 floors × 5 widths), T1756 (floor head, `tests/test_office_floor_model.js`, shots `~/drop/T1756/`), T1755 (`tests/test_office_floor_model.js`, `tests/test_office_floors.py`, live `/api/office` floors, shots 2 floors × 5 widths); 2026-11-11 by T1687 (`tests/test_office_status.js`, `tests/test_section_status.py`, live `/api/office` vass paused), T1666 (`bin/tests/dashboard-office-drag.test.sh`), T1658 (`bin/tests/dashboard-office-chat.test.sh`); 2026-11-10 by T1601-16 (`staff.load()` 3 teams 12 members, live `GET /api/office`
 4 teams incl. Unassigned 1 (`memory-keeper`), `test_office_*.js` green, `GPU=1 tools/shots.mjs` margins at 5 widths)
 
 ## When to use
@@ -90,6 +90,26 @@ Ticket: T1601 (01-18), T1658, T1666, T1687, T1755, T1756, T1757, T1759 · Last v
   agents:   {orchestrator: {name, role, rank, session, state}, subagents: [{id, label, type, started, last, state, doing, report}], claims: [str]},
   error?:   "…" }                                                                    last good body kept on a source error
 ```
+
+## CEO floor: the Switchboard (T1758, last verified 2026-11-17)
+
+The CEO's floor line, when it holds only the CEO and the desk pool, is its own room (`view()` sets `shell: "ceo"`); any other case keeps the loft. No mezzanine: the office is a stone platform, the pit one step (0.16 m) lower.
+
+| Object | Live from | Files |
+|---|---|---|
+| Patch wall: a column per floor (top first), a cable + pilot per ticket (green working, dim waiting, red failing), floor plate lit while a ticket runs there | workers and sub-agents in `/api/office`, by `room.floor`; the orchestrator's own sub-agents plug into the CEO column | `office/ceo/desk.js` `tickets`, `columns`; `build/ceo/wall.js` |
+| Round table: a sheet per ticket, newest on top; the Conductor stands at it | the same tickets (`sheets`, 12 at most) | `build/ceo/table.js` |
+| His chair and reading lamp (amber, the only warm light) | the needs-you verdict (`ceo.live.lamp`, `lampOn`) | `build/ceo/nook.js` |
+| Well: a capsule drops for a ticket that starts, rises for one that ends or fails; one run per event | the difference between two reads (`events`, sent as `patch.events`) | `build/ceo/well.js` (rails), `gl/capsule.js` |
+| Pit: desks on arcs facing the table (7, 16 once more than 7 sit), step light while it works | desk pool people | `ceo/plan.js` `desk(k)`, `build/ceo/pit.js` |
+| Windows: sky over a low skyline, stars at night | `M.night` (quad `k[2] = 1`, `uNight` in `gl/fx.js`) | `build/ceo/shell.js` |
+| Chair, tubes, shell | static | |
+
+- A new floor shell = one entry `{hall, rooms, at}` in `build/index.js` `shellOf` plus a plan in `layout.js`; the renderer is untouched.
+- `ceo.desk` is in the CEO's `Room.key`, so a ticket anywhere rebuilds the CEO chunk (9,700 vertices, about 16 ms under node); the one-hall office (no floor lines) gets no desk.
+- Measured (fixture, 1366, GPU): 76,406 → 17,861 vertices, 11 → 11 draw calls, frame median 0.2 → 0.2 ms; a capsule is 1 extra draw only while it moves.
+- Pitfall: with nobody working the page reads `/api/office` on the 30 s tick, so the first brief out of a calm office shows up to 30 s late (5 s once anything runs).
+- No closed ceiling (the camera lives above): a bronze head beam on the glass walls only.
 
 ## Exact commands
 ```bash

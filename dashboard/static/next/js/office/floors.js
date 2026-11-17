@@ -37,10 +37,11 @@ export function placer(P) {
   return { seat, team, starter, head: (id) => heads.has(id), home: base };
 }
 
-/* The model as floor f of payload P shows it: that floor's rooms and teams, `deck` false when its line says so; the raised office holds the CEO on its floor, the floor's head (as kind "head", out of the bays) elsewhere, else nobody; a floor with no deck has none. */
+/* The model as floor f of payload P shows it: that floor's rooms and teams, `deck` false when its line says so; the raised office holds the CEO on its floor, the floor's head (as kind "head", out of the bays) elsewhere, else nobody; a floor with no deck has none. The CEO's own line, holding him and the desk pool only, is the Switchboard (`shell` "ceo"), not the loft. */
 export function view(M, f, P) {
   const deck = !flat(P).includes(f), here = M.rooms.filter((r) => r.floor === f), head = deck && here.find((r) => r.head), top = deck && M.ceo && M.ceo.floor === f;
-  return { ...M, floor: f, deck, ceo: top ? M.ceo : head ? { ...head, kind: "head" } : null, rooms: here.filter((r) => top || r !== head), staff: M.staff.filter((r) => r.floor === f) };
+  const staff = M.staff.filter((r) => r.floor === f), own = top && !!M.ceo.desk && !staff.length && here.every((r) => r.kind === "pool");
+  return { ...M, floor: f, deck, ceo: top ? M.ceo : head ? { ...head, kind: "head" } : null, rooms: here.filter((r) => top || r !== head), staff, ...(own ? { shell: "ceo" } : {}) };
 }
 
 /* People working on each floor: {floor id: n}. */
