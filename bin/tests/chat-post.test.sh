@@ -55,6 +55,13 @@ print(len(r), sorted({k for x in r for k in x}), [x['rule'] for x in r])")" \
   refused 'over 2000 characters' fx 2 post harness "$(printf 'x%.0s' $(seq 2001))"
   refused 'two texts' fx 2 post harness a b
   is 'refused: nothing stored' "$(cat "$ST"/*.20*.jsonl | wc -l)" "$n0"
+
+  # T1754-B D439: a worker (MEMORY_WORKER=1, not under `po-run`) does not post; ask and read stay open
+  o=$(MEMORY_WORKER=1 CHAT_SEAT=fx chat post harness 'from a worker' 2>&1); rc=$?
+  is 'worker: post refused, rc 2, one line' "$rc $o" \
+     '2 chat: a worker does not post in chat (D439): hand the text to your lead or PO in your report; chat ask and chat read stay open'
+  is 'worker: nothing stored' "$(cat "$ST"/*.20*.jsonl | wc -l)" "$n0"
+  MEMORY_WORKER=1 CHAT_SEAT=fx chat read harness >/dev/null 2>&1; is 'worker: chat read stays open' "$?" 0
 }
 
 t_post

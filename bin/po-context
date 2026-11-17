@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # usage: po-context check <p> | repo <p> — a PO's context against the manager layout (T1557, po-template/PROJECT.md).
 #   check: state/PROJECT|BACKLOG|RUNS.md exist; caps: PROJECT <= 80 lines and 6 KB, BACKLOG <= 30 rows, REPO <= 40 lines,
-#          HISTORY <= 150 lines, refs/INDEX.md names every file in refs/. A manager (PARENT= in agent.env) also: the 6
+#          HISTORY <= 150 lines, no PR number in PROJECT, refs/INDEX.md names every file in refs/. A manager (PARENT= in agent.env) also: the 6
 #          template headings in order, HISTORY.md, its ledger, a REPO.md under 24 h old when its clone exists, the 8
 #          standing rules in BRIEF.md. Prints `ok <p>`, else one `miss: ...` line each and exits 1.
 #          PROJECT.md and the ledger are read from $MEMORY_HOME/domains/<p>/{DOMAIN,ledger}.md once the old path is
@@ -37,6 +37,7 @@ check() {
   if [ -f "$card" ]; then
     n=$(wc -l <"$card"); [ "$n" -le 80 ] || miss+=("PROJECT.md $n lines > 80 (oldest lines to HISTORY.md)")
     n=$(wc -c <"$card"); [ "$n" -le 6144 ] || miss+=("PROJECT.md $n bytes > 6 KB (oldest lines to HISTORY.md)")
+    ! grep -qiE '\bPR ?#?[0-9]+|pull request #?[0-9]+|/pull/[0-9]+' "$card" || miss+=("PROJECT.md holds a PR number (state/REPO.md has them)")
   fi
   if [ -f "$s/BACKLOG.md" ]; then
     n=$(grep -E '^\|' "$s/BACKLOG.md" | grep -vcE '^\|[-:| ]+$|^\| *id *\|')

@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""outbox-post <p> <thread> [--image PATH]... <text|-> — one Discord reply of po-<p> into its outbox/discord/ (P044).
+Writes `.<utc>-<thread>.tmp`, then renames it to `<utc>-<thread>.md` (the relay posts it within seconds): the line
+`thread: <thread>`, one `image: <path>` line per --image, then the text. Exit 3 (nothing written) when the text holds a
+secret, a home path, the host or tailnet name, or the owner's name or e-mail (lib/chat_guard.py outward); image size and
+count caps stay in the liaison, which refuses the whole reply. Exit 2 on bad usage."""
+import argparse
+import os
+import sys
+import time
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
+import chat_guard  # noqa: E402
+
+
+def po_dir(p):
+    """~/agents/po-<p> (HARNESS_HOME) when it is a PO folder, else exit 2."""
+    d = os.path.join(os.environ.get("HARNESS_HOME") or os.path.expanduser("~/agents"), f"po-{p}")
+    if not p.replace("-", "").isalnum() or not os.path.isfile(os.path.join(d, "BRIEF.md")) or not os.path.isdir(
+            os.path.join(d, "inbox")):
+        print(f"outbox-post: no PO '{p}' ({d})", file=sys.stderr)
+        sys.exit(2)
+    return d
+
+
+def main():
+    a = argparse.ArgumentParser(prog="outbox-post", description=__doc__.split("—", 1)[1].strip())
+    a.add_argument("p", help="the PO name, e.g. mosaico")
+    a.add_argument("thread", help="the Discord thread id")
+    a.add_argument("--image", action="append", default=[], metavar="PATH", help="attach an image or video (repeatable)")
+    a.add_argument("text", help="the reply, or - to read it from stdin")
+    args = a.parse_args()
+    text = (sys.stdin.read() if args.text == "-" else args.text).strip()
+    if not args.thread.isdigit() or not text:
+        print("outbox-post: the thread is a number and the text is not empty", file=sys.stderr)
+        return 2
+    out = os.path.join(po_dir(args.p), "outbox", "discord")
+    ok, rule = chat_guard.outward(text)
+    if not ok:
+        print(f"outbox-post: refused ({rule}): {chat_guard.FIX.get(rule, 'reword it')}; nothing was written",
+              file=sys.stderr)
+        return 3
+    os.makedirs(out, exist_ok=True)
+    images = "".join(f"image: {os.path.abspath(p)}\n" for p in args.image)
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    tmp = os.path.join(out, f".{stamp}-{args.thread}.{os.getpid()}.tmp")
+    with open(tmp, "w") as f:
+        f.write(f"thread: {args.thread}\n{images}{text}\n")
+    n, dest = 1, os.path.join(out, f"{stamp}-{args.thread}.md")
+    while os.path.exists(dest):
+        n += 1
+        dest = os.path.join(out, f"{stamp}-{args.thread}-{n}.md")
+    os.rename(tmp, dest)
+    print(dest)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

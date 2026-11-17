@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# usage: spawn-gate [--limit N] — CPU busy % from two /proc/stat samples 0.5 s apart (not the load average, D183).
+# Prints `cpu busy NN % (limit N)`; exit 0 below the limit (default 90), 3 at or above it, 2 on bad usage.
+# SPAWN_GATE=off: exit 0 at once (one light ticket). SPAWN_GATE_STAT1/SPAWN_GATE_STAT2: two stat files (tests).
+case "${1:-}" in -h|--help) awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; exit 0 ;; esac
+limit=90
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --limit) [[ ${2:-} =~ ^[0-9]+$ ]] || { echo "spawn-gate: --limit takes a whole number" >&2; exit 2; }; limit=$2; shift 2 ;;
+    *) echo "spawn-gate: unknown option $1" >&2; exit 2 ;;
+  esac
+done
+[ "${SPAWN_GATE:-}" = off ] && { echo "spawn gate off (SPAWN_GATE=off)"; exit 0; }
+# cpu <file>: "<total> <idle+iowait>" of the aggregate cpu line.
+cpu() { awk '$1=="cpu"{t=0; for(i=2;i<=NF;i++) t+=$i; print t, $5+$6; exit}' "$1"; }
+if [ -n "${SPAWN_GATE_STAT1:-}" ]; then a=$(cpu "$SPAWN_GATE_STAT1"); b=$(cpu "$SPAWN_GATE_STAT2")
+else a=$(cpu /proc/stat); sleep 0.5; b=$(cpu /proc/stat); fi
+busy=$(awk -v a="$a" -v b="$b" 'BEGIN{split(a,x," "); split(b,y," "); t=y[1]-x[1]; i=y[2]-x[2]
+  printf "%d", (t > 0 ? 100 * (t - i) / t : 0)}')
+echo "cpu busy $busy % (limit $limit)"
+[ "$busy" -lt "$limit" ] || exit 3

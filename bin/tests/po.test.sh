@@ -22,7 +22,7 @@ cat >"$WORK/stubs/agent-run" <<'STUB'
 #!/usr/bin/env bash
 d="$HARNESS_HOME/$1"
 mkdir "$WORK/running" 2>/dev/null || echo overlap >>"$WORK/runs.log"
-echo "start $(ls "$d/current" | wc -l)" >>"$WORK/runs.log"; echo "$PO_BUDGET" >>"$WORK/budget.log"; echo "$CHAT_SEAT" >"$WORK/seat.log"
+echo "start $(ls "$d/current" | wc -l)" >>"$WORK/runs.log"; echo "$PO_BUDGET" >>"$WORK/budget.log"; echo "$CHAT_SEAT" >"$WORK/seat.log"; echo "$PO_RUN" >"$WORK/porun.log"
 [ -e "$WORK/drop" ] && { rm -f "$WORK/drop"; po-ask fx "arrived mid-run" >/dev/null; }
 [ -e "$WORK/hold" ] && while [ -e "$WORK/hold" ]; do sleep 0.05; done
 if [ ! -e "$WORK/leave" ]; then
@@ -122,10 +122,12 @@ is 'po-run: 5 requests in done/' "$(ls "$PO_PAPERS/fx/done" | wc -l)" 5
 touch "$WORK/leave"; po-ask fx "unfiled" >/dev/null; po-run fx >/dev/null 2>&1; rm -f "$WORK/leave"
 ev 'po-run: a request the run left gets an outcome line' 'grep -l unfiled "$PO_PAPERS"/fx/done/*.md | xargs grep -q "^outcome: left in current/"'
 is 'po-run: current/ empty after' "$(ls "$P/current" | wc -l)" 0
-# review focus 4: week >= 95 % -> the run gets PO_BUDGET=stop (the brief then spawns no worker)
-is 'po-run: PO_BUDGET=ok under 95 %' "$(sort -u "$WORK/budget.log")" ok
-echo 1 >"$WORK/plan.rc"; po-ask fx "work at 96 %" >/dev/null; po-run fx >/dev/null 2>&1; rm -f "$WORK/plan.rc"
-is 'po-run: PO_BUDGET=stop at >= 95 %' "$(tail -1 "$WORK/budget.log")" stop
+# owner ruling 2 (T1754): no automatic plan-usage stop; the run gets no PO_BUDGET at any week %
+is 'po-run: no PO_BUDGET under 95 %' "$(sort -u "$WORK/budget.log")" ''
+echo 1 >"$WORK/plan.rc"; po-ask fx "work at 96 %" >/dev/null; n0=$(grep -c '^start' "$WORK/runs.log")
+po-run fx >/dev/null 2>&1; rm -f "$WORK/plan.rc"
+is 'po-run: at >= 95 % the run still runs, no PO_BUDGET' "$(grep -c '^start' "$WORK/runs.log") $(tail -1 "$WORK/budget.log")" "$((n0 + 1)) "
+is 'po-run: the run gets PO_RUN=<p> (T1754-B P016)' "$(cat "$WORK/porun.log")" fx
 
 # po-status
 printf '| F1 | fx | t | open |\n| F2 | fx | t | done |\n| F3 | fx | t | doing |\n' >>"$P/state/BACKLOG.md"

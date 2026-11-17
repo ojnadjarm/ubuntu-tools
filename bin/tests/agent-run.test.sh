@@ -235,5 +235,31 @@ printf 'PRECHECK=true\n' >"$SB/agents/demo/agent.env"; run_agent claude; rm -f "
 { [ -s "$SB/claude-args.log" ] && [ "$(wc -l <"$idx")" = $((rows + 1)) ] && [ "$(tail -1 "$idx" | cut -f3)" = 0 ]; } \
   && ok || no "$(tail -1 "$idx")"
 
+# T1754-B: PO run tool deny (P016), the CPU gate only logs (D183), a held lock says so (P179).
+run_with() {  # run_with VAR=value... : one agent-run demo with extra environment; stdout+stderr in $SB/with.log
+  env -i HOME="$SB" PATH=/usr/bin:/bin TERM=dumb SHIM_LOG="$SHIM_LOG" HARNESS_CONFIG=/nonexistent \
+      HARNESS_HOME="$SB/agents" HARNESS_AGENT=claude "$@" bash "$SB/agents/bin/agent-run" demo >"$SB/with.log" 2>&1
+}
+
+t "P016: under PO_RUN the Agent tool leaves --tools, the run still starts"
+printf 'AGENT_TOOLS=Bash,Agent,Read\n' >"$SB/agents/demo/agent.env"; : >"$SB/claude-args.log"; rows="$(wc -l <"$idx")"
+run_with PO_RUN=fx; rc=$?; rm -f "$SB/agents/demo/agent.env"
+{ [ "$rc" = 0 ] && grep -q -- '--tools Bash,Read ' "$SB/claude-args.log" && [ "$(wc -l <"$idx")" = $((rows + 1)) ]; } \
+  && ok || no "rc $rc: $(cat "$SB/with.log" "$SB/claude-args.log")"
+
+t "D183: a busy CPU is logged in one line and the run goes on"
+cp "$BIN/spawn-gate" "$SB/agents/bin/"
+printf 'cpu  1000 0 0 1000 0 0 0 0 0 0\n' >"$SB/stat.a"; printf 'cpu  1950 0 0 1050 0 0 0 0 0 0\n' >"$SB/stat.b"
+: >"$SB/claude-args.log"; rows="$(wc -l <"$idx")"
+run_with SPAWN_GATE_STAT1="$SB/stat.a" SPAWN_GATE_STAT2="$SB/stat.b"; rc=$?; rm -f "$SB/agents/bin/spawn-gate"
+{ [ "$rc" = 0 ] && [ "$(cat "$SB/with.log")" = "agent-run: cpu busy 95 % (limit 90); demo runs anyway (scheduled runs are not gated)" ] \
+  && [ -s "$SB/claude-args.log" ] && [ "$(wc -l <"$idx")" = $((rows + 1)) ]; } && ok || no "rc $rc: $(cat "$SB/with.log")"
+
+t "P179: a held lock prints one line naming it, exit 0, no run"
+: >"$SB/claude-args.log"; rows="$(wc -l <"$idx")"
+flock "$SB/agents/demo/.lock" bash -c "$(declare -f run_with); SB='$SB' SHIM_LOG='$SHIM_LOG' run_with"; rc=$?
+{ [ "$rc" = 0 ] && [ "$(cat "$SB/with.log")" = "agent-run: demo did not run: another run of it holds $SB/agents/demo/.lock (its unit or a hand run); nothing started, wait for that run to end" ] \
+  && [ ! -s "$SB/claude-args.log" ] && [ "$(wc -l <"$idx")" = "$rows" ]; } && ok || no "rc $rc: $(cat "$SB/with.log")"
+
 [ $fail = 0 ] && echo "agent-run.test.sh: all green" || echo "agent-run.test.sh: FAILURES"
 exit $fail

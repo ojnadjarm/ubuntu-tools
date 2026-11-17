@@ -64,6 +64,7 @@ STUB
 printf '#!/bin/sh\nexit 0\n' >"$WORK/stubs/plan-usage"
 chmod +x "$WORK"/stubs/*
 export PATH="$WORK/stubs:$BIN:$PATH" WORK
+export SPAWN_GATE=off   # the real CPU never decides a fixture start; the D183 cases set their own stat files
 
 # selftest
 if curl -sS -m 3 -o /dev/null https://ntfy.sh 2>/dev/null; then echo 'FAIL selftest: sandbox reaches the network'; exit 1; fi
@@ -218,4 +219,17 @@ ev '(T1728) the route note carries his words' 'jm T503 .route | grep -q "\"use f
 PATH="$WORK/argstub:$PATH" po-work mg start T504 --brief "$AGENT_WORK/briefs/T504-mg-route4.md" --class nonsense >/dev/null 2>&1
 is '(T1728) unknown class exits 2' "$?" 2
 ev '(T1728) unknown class records and launches nothing' '[ ! -e "$M/state/work/T504.json" ] && ! grep -q T504 "$WORK/args.log"'
+
+# (T1754-B D183) start asks spawn-gate: CPU busy refuses with one line (exit 4, nothing recorded); calm starts
+printf 'cpu  1000 0 0 1000 0 0 0 0 0 0\n' >"$WORK/stat.a"; printf 'cpu  1950 0 0 1050 0 0 0 0 0 0\n' >"$WORK/stat.busy"
+printf 'cpu  1200 0 0 1800 0 0 0 0 0 0\n' >"$WORK/stat.calm"; echo "goal gate" >"$AGENT_WORK/briefs/T601-mg-gate.md"
+out=$(SPAWN_GATE= SPAWN_GATE_STAT1="$WORK/stat.a" SPAWN_GATE_STAT2="$WORK/stat.busy" PATH="$WORK/argstub:$PATH" \
+      po-work mg start T601 --brief "$AGENT_WORK/briefs/T601-mg-gate.md" 2>&1); rc=$?
+is '(D183) busy CPU: exit 4' "$rc" 4
+is '(D183) busy CPU: one line that says how to pass' "$out" \
+   'po-work: T601 not started: cpu busy 95 % (limit 90); start it later, or SPAWN_GATE=off po-work ... for one light ticket'
+ev '(D183) busy CPU: nothing recorded or launched' '[ ! -e "$M/state/work/T601.json" ] && ! grep -q T601 "$WORK/args.log"'
+SPAWN_GATE= SPAWN_GATE_STAT1="$WORK/stat.a" SPAWN_GATE_STAT2="$WORK/stat.calm" PATH="$WORK/argstub:$PATH" \
+  po-work mg start T601 --brief "$AGENT_WORK/briefs/T601-mg-gate.md" >/dev/null 2>&1
+is '(D183) calm CPU: started' "$?" 0
 exit $bad

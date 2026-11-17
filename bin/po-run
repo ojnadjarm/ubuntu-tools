@@ -2,8 +2,8 @@
 # usage: po-run <p> — the po@<p>.service body (no LLM): move the inbox to current/, run `agent-run po-<p>` once, file any
 # request the run left in current/ to $PO_PAPERS/<p>/done/ with an outcome line; repeat while the inbox refills (at most PO_MAX_LOOPS,
 # default 5; the path unit starts it again after that). One po-run per PO at a time: a second call exits 0 at once.
-# Each run gets PO_BUDGET=stop when `plan-usage --check 95` exits 1 (the PO then spawns no worker), else ok;
-# CHAT_SEAT=<p> lets the run post with `chat` (a manager only in its direct message with the owner, T1515 P34). For a
+# No plan-usage stop (owner ruling 2, T1754): a stop or a burn is his call. PO_RUN=<p> makes agent-run drop the Agent
+# tool and bin/guards/agent-exec refuse inside the run: workers start with `po-work <p> start` (P016). CHAT_SEAT=<p> lets the run post with `chat` (a manager only in its direct message with the owner, T1515 P34). For a
 # manager (PARENT=<seat> in agent.env, T1515 P31) each new REPORT.md `ESCALATE:` line goes to its parent with
 # `po-ask <seat> --from manager` once: state/escalated keeps a sha1 per sent line (newest 50). A manager's run is
 # wrapped by `po-context repo <p>` before (state/REPO.md) and `po-context check <p>` after: each miss becomes one
@@ -44,9 +44,8 @@ for _ in $(seq "${PO_MAX_LOOPS:-5}"); do
   reqs=("$dir"/inbox/*.md)
   [ ${#reqs[@]} -gt 0 ] || break
   mv -n "${reqs[@]}" "$dir/current/"
-  PO_BUDGET=ok; plan-usage --check 95 >/dev/null 2>&1; [ $? -ne 1 ] || PO_BUDGET=stop
   [ -z "$parent" ] || po-context repo "$1" >/dev/null 2>&1 9>&-
-  PO_BUDGET=$PO_BUDGET CHAT_SEAT="$1" agent-run "$name" 9>&-; rc=$?
+  PO_RUN="$1" CHAT_SEAT="$1" agent-run "$name" 9>&-; rc=$?
   [ -z "$parent" ] || { escalate; context "$1"; }
   for f in "$dir"/current/*.md; do
     printf '\noutcome: left in current/ by the run (agent-run exit %s); see REPORT.md\n' "$rc" >>"$f"

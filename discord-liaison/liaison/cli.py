@@ -38,6 +38,7 @@ GENERAL = '#general'
 ME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(ME), 'lib'))
 from agent_work import liaison_papers  # noqa: E402
+from chat_guard import has_owner_name  # noqa: E402
 from image_grant import GRANT  # noqa: E402
 USAGE = ('usage: discord-liaison tick [--dry-run]|wake|check|inbox|done|post <thread> [--image <file>] [--reply <message>] <text…>|'
          'react <thread> <message> <emoji>|art [--asked <quote>] <prompt…>|escalate <message> <blocker> <what…>|map <thread> <project>|pr <project>|'
@@ -408,6 +409,9 @@ class App:
         if len(images) > MAX_FILES or not all(map(self.image_ok, images)):
             print(f'refused: --image (at most {MAX_FILES}) takes a PNG/JPEG made by `discord-liaison art` (max 10 MB) '
                   'or a PNG/JPEG/GIF/WebP/MP4 in your job folder (max 25 MB)')
+            return 3
+        if has_owner_name(text):
+            print("refused: the text holds the owner's name or e-mail (D481); write it without them")
             return 3
         parts = chunks(clean(text, [self.env.get(k, '') for k in SECRET_KEYS]))
         if self.env.get('LIAISON_DRY_RUN'):

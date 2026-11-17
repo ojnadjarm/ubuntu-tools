@@ -13,7 +13,8 @@
 # `Secrets: openrouter` with that quote). Without a lease no worker reaches the image model: the key lives only in the
 # vault (T1634-V10: no key path, no mask).
 # `list`: open work, one line per ticket. No cap on workers at once (owner 2026-11-11); start exits 3 when the same key
-# or ticket is open (nothing starts), 1 when the launch fails, 2 on bad usage.
+# or ticket is open (nothing starts), 4 when `spawn-gate` finds the CPU busy (nothing starts; SPAWN_GATE=off passes one
+# light ticket), 1 when the launch fails, 2 on bad usage.
 help() { awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; }
 case "${1:-}" in -h|--help) help; exit 0 ;; '') help >&2; exit 2 ;; esac
 set -uo pipefail
@@ -71,6 +72,8 @@ case "$verb" in
     ask=(--json); [ -z "$cls" ] || ask+=(--class "$cls"); [ -z "$model" ] || ask+=(--model "$model")
     [ -z "$effort" ] || ask+=(--effort "$effort"); [ -z "$said" ] || ask+=(--owner-said "$said")
     route=$("$(dirname "$SELF")/model-route" "${ask[@]}") || exit 2
+    gate=$("$(dirname "$SELF")/spawn-gate"); [ $? -ne 3 ] ||
+      { echo "po-work: $t not started: $gate; start it later, or SPAWN_GATE=off po-work ... for one light ticket"; exit 4; }
     { read -r cls; read -r model; read -r effort; read -r note; } < <(jq -r '.class, .model, .effort, .note' <<<"$route")
     exec 7>"$W/.lock"; flock 7
     for o in $(open); do

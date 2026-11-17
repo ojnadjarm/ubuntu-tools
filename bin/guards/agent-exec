@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# PO run guard (P016): inside a run po-run started (PO_RUN=<p>) agent-exec is refused, since a worker inside the run
+# holds the PO's lock and its next request; anywhere else the real agent-exec runs unchanged.
+GUARD_DIR=$(cd "$(dirname "$0")" && pwd)
+if [ -n "${PO_RUN:-}" ]; then
+  echo "agent-exec: refused inside the po-$PO_RUN run: start the worker with \`po-work $PO_RUN start T<n> --brief <path>\` and end the run" >&2
+  exit 3
+fi
+IFS=: read -ra dirs <<<"$PATH"
+for d in "${dirs[@]}"; do
+  [ "$d" = "$GUARD_DIR" ] || [ ! -x "$d/agent-exec" ] || exec "$d/agent-exec" "$@"
+done
+echo "agent-exec: not found on PATH" >&2; exit 127

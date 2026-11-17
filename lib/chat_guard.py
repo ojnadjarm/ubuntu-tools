@@ -87,7 +87,83 @@ def has_protected_word(text, seat):
     return protectedlib.project(protected_words(config_mtime()), text.lower()) is not None
 
 
-RULES = (('secret', has_secret), ('protected path', has_protected_path), ('deny word', has_deny_word))
+def conf(key):
+    """A config value: the environment first, else the config file; '' when unset."""
+    if key in os.environ:
+        return os.environ[key]
+    try:
+        with open(config_path()) as f:
+            for l in f:
+                if re.match(r'\s*(export\s+)?' + key + '=', l):
+                    return re.split(r'\s+#', l.split('=', 1)[1])[0].strip().strip('"\'')
+    except OSError:
+        pass
+    return ''
+
+
+def git_identity(key):
+    """`git config --global <key>`, '' when unset."""
+    try:
+        return subprocess.run(['git', 'config', '--global', key], capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return ''
+
+
+@functools.lru_cache(maxsize=2)
+def owner_names(_mtime):
+    """The owner's full name, its family names (words after the first, 4+ letters) and e-mail, lower-cased."""
+    name = conf('HARNESS_OWNER_NAME') or git_identity('user.name')
+    mail = conf('HARNESS_OWNER_EMAIL') or git_identity('user.email')
+    words = name.split()
+    return tuple(w.lower() for w in {name, mail, *[w for w in words[1:] if len(w) >= 4]} if w)
+
+
+@functools.lru_cache(maxsize=2)
+def machine_names(_mtime):
+    """This machine's host name and the tailnet name's first two labels, lower-cased."""
+    fqdn = conf('HARNESS_TAILNET_FQDN')
+    return tuple(w.lower() for w in {conf('HARNESS_HOST'), fqdn, *fqdn.split('.')[:2]} if len(w) >= 3)
+
+
+def has_word(words, text):
+    low = text.lower()
+    return any(re.search(r'(?<![a-z0-9])' + re.escape(w) + r'(?![a-z0-9])', low) for w in words)
+
+
+def has_owner_name(text, seat=None):
+    """The owner's name, family name or e-mail, any case (D481)."""
+    return has_word(owner_names(config_mtime()), text)
+
+
+def has_home_path(text, seat=None):
+    """A home path: ~/..., $HOME/..., /home/<user> or this $HOME."""
+    home = os.path.expanduser('~')
+    return bool(re.search(r'(?<![\w/.-])(?:~|\$HOME|\$\{HOME\})/|/home/\w', text)) or home in text
+
+
+def has_machine_name(text, seat=None):
+    """This machine's host or tailnet name."""
+    return has_word(machine_names(config_mtime()), text)
+
+
+OUTWARD = (('secret', has_secret), ('home path', has_home_path), ('host or tailnet name', has_machine_name),
+           ('owner name', has_owner_name))
+FIX = {'secret': 'drop the token or key', 'home path': 'name the file without its folder',
+       'host or tailnet name': 'say "the server" instead', 'owner name': 'write it without his name or e-mail'}
+
+
+def outward(text):
+    """(True, '') when text may leave the fleet (a Discord reply), else (False, the rule that holds it)."""
+    try:
+        for name, rule in OUTWARD:
+            if rule(text, None):
+                return False, name
+        return True, ''
+    except Exception as e:
+        return False, 'guard error: ' + type(e).__name__
+
+
+RULES = (('secret', has_secret),('protected path', has_protected_path), ('deny word', has_deny_word))
 STRICT = (('ticket key', has_ticket_key), ('protected word', has_protected_word))
 
 

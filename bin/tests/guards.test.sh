@@ -180,4 +180,12 @@ grep -q 'bin/guards' "$HOME/.bashrc" 2>/dev/null \
   && nok 'the interactive shell is untouched' '.bashrc adds the guards dir' \
   || ok 'the interactive shell is untouched'
 
+# 8. T1754-B P016: inside a PO run (PO_RUN) agent-exec is refused with the po-work way; elsewhere the real one runs.
+printf '#!/bin/sh\necho "REAL agent-exec $*"\n' >"$WORK/real/agent-exec"; chmod +x "$WORK/real/agent-exec"
+out=$(PO_RUN=fx agent-exec --prompt-file x 2>&1); rc=$?
+is 'PO run: agent-exec exits 3' "$rc" 3
+is 'PO run: one line naming po-work' "$out" \
+  'agent-exec: refused inside the po-fx run: start the worker with `po-work fx start T<n> --brief <path>` and end the run'
+out=$(agent-exec --prompt-file x 2>&1); is 'no PO run: the real agent-exec runs with its args' "$?:$out" '0:REAL agent-exec --prompt-file x'
+
 exit $bad

@@ -401,6 +401,10 @@ def main():
         if a.cmd == "prune":
             return prune(a)
         seats = org.seats()
+        if a.cmd == "post" and os.environ.get("MEMORY_WORKER") and not po_run():
+            chat_store.audit({"refused": True, "rule": "worker"})
+            raise ValueError("a worker does not post in chat (D439): hand the text to your lead or PO in your report; "
+                             "chat ask and chat read stay open")
         return {"post": post, "read": read, "search": search, "ask": ask, "answer": answer}[a.cmd](a, seat_of(seats, cwd), seats)
     except ValueError as e:
         print(f"chat: {e}", file=sys.stderr)

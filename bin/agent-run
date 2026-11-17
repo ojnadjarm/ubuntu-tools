@@ -13,6 +13,8 @@ fleet_path
 MODEL=opus; TIMEOUT=3600; PRECHECK=""
 # shellcheck source=/dev/null
 [ -r "$dir/agent.env" ] && . "$dir/agent.env"
+# PO_RUN (po-run): no Agent tool, and bin/guards/agent-exec refuses inside the run (P016); agent-run's own call is direct.
+[ -z "${PO_RUN:-}" ] || AGENT_TOOLS=$(tr , '\n' <<<"${AGENT_TOOLS-Bash,Read,Edit,Write}" | grep -vxE 'Agent|Task' | paste -sd, -)
 [ -n "${AGENT_TOOLS:-}" ] && export AGENT_TOOLS
 [ -n "${AGENT_WRAP:-}" ] && export AGENT_WRAP
 [ -n "${AGENT_ENV_KEEP:-}" ] && export AGENT_ENV_KEEP
@@ -23,7 +25,10 @@ if [ -n "$PRECHECK" ] && ! (cd "$dir" && bash -c "$PRECHECK") >/dev/null 2>&1 </
 fi
 
 mkdir -p "$dir/logs" "$dir/state"
-fleet_lock "$dir/.lock" 8 || { echo "agent-run: $name is already running" >&2; exit 0; }
+fleet_lock "$dir/.lock" 8 ||
+  { echo "agent-run: $name did not run: another run of it holds $dir/.lock (its unit or a hand run); nothing started, wait for that run to end" >&2; exit 0; }
+# D183: a scheduled run is never refused (a skipped run loses work); a busy CPU is only logged.
+gate=$(spawn-gate 2>/dev/null); [ $? -ne 3 ] || echo "agent-run: $gate; $name runs anyway (scheduled runs are not gated)" >&2
 
 ts="$(date +%Y-%m-%d-%H%M%S)-$(printf '%04x' "$RANDOM")"
 log="$dir/logs/$ts.log"; out="$dir/logs/$ts.json"; idx="$dir/logs/index.tsv"
@@ -75,7 +80,7 @@ finish() {
 
 # HARNESS_AGENT set (config.env) -> the adapter layer; unset -> the pre-GH07 direct call.
 if [ -n "${HARNESS_AGENT:-}" ]; then
-  cmd=(agent-exec --prompt-file "$dir/BRIEF.md" --system-file "$HOME/agents/AGENT-PREAMBLE.md"
+  cmd=("$HARNESS_HOME/bin/agent-exec" --prompt-file "$dir/BRIEF.md" --system-file "$HOME/agents/AGENT-PREAMBLE.md"
        --model "$MODEL" --cwd "$dir" --name "$name" --timeout "$TIMEOUT"
        --raw-out "$out" --meta-out "$meta" --pid-file "$dir/state/pid" --secrets-from "$dir/BRIEF.md")
 else

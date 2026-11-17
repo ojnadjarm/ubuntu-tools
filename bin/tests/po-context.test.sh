@@ -88,6 +88,12 @@ cp "$WORK/P.bak" "$P"; seq 90 >>"$P"
 ev 'check: 90+ lines PROJECT.md is a miss' 'grep -q "^miss: fx: PROJECT.md 10[0-9] lines > 80" <<<"$(po-context check fx)"'
 cp "$WORK/P.bak" "$P"; sed -i '/^## People/d' "$P"
 ev 'check: a missing heading is a miss' 'grep -q "^miss: fx: PROJECT.md headings" <<<"$(po-context check fx)"'
+cp "$WORK/P.bak" "$P"; echo '- open: PR #42 waits for review' >>"$P"
+is 'check: a PR number in PROJECT.md is a miss (T1754-B P045)' "$(po-context check fx)" 'miss: fx: PROJECT.md holds a PR number (state/REPO.md has them)'
+cp "$WORK/P.bak" "$P"; echo '- see https://github.com/o/r/pull/7' >>"$P"
+ev 'check: a pull URL in PROJECT.md is a miss (P045)' 'grep -q "holds a PR number" <<<"$(po-context check fx)"'
+cp "$WORK/P.bak" "$P"; echo '- colour #333, 12 PRs a week, PRINT 5' >>"$P"
+is 'check: a colour or a count is no PR number (P045)' "$(po-context check fx)" 'ok fx'
 cp "$WORK/P.bak" "$P"
 for i in $(seq 31); do echo "| T$i | x | y | open |" >>"$S/BACKLOG.md"; done
 ev 'check: 31 BACKLOG rows is a miss' 'grep -qx "miss: fx: BACKLOG.md 31 rows > 30 (done rows to RUNS.md)" <<<"$(po-context check fx)"'
