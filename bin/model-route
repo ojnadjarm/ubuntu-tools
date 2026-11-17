@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+"""model-route — pick the model and effort for a task by its class, not its topic (T1728).
+
+usage: model-route --class <c> [--model M] [--effort E] [--owner-said "<q>"] [--json]
+       model-route --table | --classes
+  Prints `<class>: <model> <effort> (<who works>)`, plus a note line when the request was changed or the owner's
+  words decided. --json prints {class, model, effort, who, requested, downgraded, note}.
+  No class is build. A Fable request (any model id containing "fable") on an Opus class becomes opus high
+  (downgraded); --owner-said "<his words>" with --model keeps the asked model and effort. Effort above high is high.
+  A model other than the row's runs at high unless --effort is asked.
+  --table prints the rule; --classes the class names. No file, network or environment read.
+Exit: 0; 2 unknown class or bad usage.
+"""
+import json, sys
+
+HEAD = ('Model routing (owner 2026-11-17, T1728): Opus by default. Fable is the scarce budget: only where its '
+        'judgement pays, and then as the lead.')
+TABLE = {
+    'fix': ('opus', 'high', 'itself', 'a bug, a red test, a small change or tweak; any topic, visual included'),
+    'touchup': ('opus', 'high', 'itself',
+                'a change to an existing visual or audio piece: colour, spacing, crop, timing, copy, re-encode'),
+    'build': ('opus', 'high', 'itself',
+              'build from a brief or a plan, any size: feature, refactor, wiring, tests, shipping a picked look'),
+    'review': ('opus', 'high', 'itself', 'review, audit, research, a question'),
+    'plan': ('claude-fable-5-2', 'high', 'lead',
+             'a plan, an architecture, a ticket table, a hard design with no precedent'),
+    'art': ('claude-fable-5-2', 'medium', 'itself', 'a new audiovisual piece whose look is the deliverable: art '
+            'direction, mockups, character, scene, film, sound identity'),
+}
+RULES = '''1. No class is build. Unsure between two rows: take the Opus row.
+2. Lead: Fable writes the plan and one brief per piece, hands the pieces to Opus workers (its own `worker` sub-agents for up to 3 file-disjoint pieces, else the caller starts each as build), reviews their diffs and reports. It edits no product file.
+3. Fable does the work itself only for art: a look cannot be split. In a mixed job the art pieces are art; the code, encodes, tests and skill round them are build.
+4. A request for Fable on an Opus row is downgraded to Opus with one log line. The owner's own words naming a model win: --owner-said "<his words>".
+5. High is the top effort. No dollar caps.'''
+EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+
+
+def table():
+    """The rule block: head line, table and rules."""
+    rows = [('class', 'model', 'effort', 'who works', 'when')] + [(c,) + r for c, r in TABLE.items()]
+    return '\n'.join([HEAD] + [f'{c:<9}{m:<18}{e:<8}{w:<11}{n}' for c, m, e, w, n in rows] + [RULES])
+
+
+def choose(cls, model=None, effort=None, owner_said=None):
+    """Route one request to {class, model, effort, who, requested, downgraded, note}."""
+    cls = cls or 'build'
+    if cls not in TABLE:
+        raise ValueError(f'unknown class {cls!r}; one of: {" ".join(TABLE)}')
+    if effort is not None and effort not in EFFORTS:
+        raise ValueError(f'unknown effort {effort!r}; one of: {" ".join(EFFORTS)}')
+    row_model, row_effort, who, _ = TABLE[cls]
+    out_model, notes, down = model or row_model, [], False
+    out_effort = effort or (row_effort if out_model == row_model else 'high')
+    if model and owner_said:
+        notes.append(f'model-route: {cls} on {model} by the owner\'s words: "{owner_said}"')
+    elif model and 'fable' in model and 'fable' not in row_model:
+        out_model, out_effort, down = row_model, row_effort, True
+        notes.append(f'model-route: {model} asked for {cls}, an Opus class: downgraded to {row_model} {row_effort} '
+                     f'(T1728 rule 4; his words naming a model win: --owner-said "<his words>")')
+    if EFFORTS.index(out_effort) > EFFORTS.index('high'):
+        notes.append(f'model-route: effort {out_effort} capped at high (high is the top effort)')
+        out_effort = 'high'
+    return {'class': cls, 'model': out_model, 'effort': out_effort, 'who': who,
+            'requested': {'model': model, 'effort': effort}, 'downgraded': down, 'note': '; '.join(notes)}
+
+
+def main(argv):
+    """Parse the CLI and print the route, the table or the classes."""
+    opts, as_json = {}, False
+    while argv:
+        a = argv.pop(0)
+        if a in ('-h', '--help'):
+            print(__doc__.strip())
+            return 0
+        if a == '--table':
+            print(table())
+            return 0
+        if a == '--classes':
+            print('\n'.join(TABLE))
+            return 0
+        if a == '--json':
+            as_json = True
+        elif a in ('--class', '--model', '--effort', '--owner-said') and argv:
+            opts[a[2:].replace('-', '_')] = argv.pop(0) or None
+        else:
+            print(f'model-route: bad argument {a!r} (see --help)', file=sys.stderr)
+            return 2
+    if 'class' in opts and opts['class'] is None:
+        print('model-route: --class needs a value (see --classes)', file=sys.stderr)
+        return 2
+    try:
+        r = choose(opts.get('class'), opts.get('model'), opts.get('effort'), opts.get('owner_said'))
+    except ValueError as e:
+        print(f'model-route: {e}', file=sys.stderr)
+        return 2
+    if as_json:
+        print(json.dumps(r))
+    else:
+        print(f'{r["class"]}: {r["model"]} {r["effort"]} ({r["who"]})' + (f'\n{r["note"]}' if r['note'] else ''))
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

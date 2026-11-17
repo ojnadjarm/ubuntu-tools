@@ -24,6 +24,7 @@ from .context import ContextRenderer, self_line
 from .friendbots import MARK, Gate
 from .history import History
 from .jobs import JobQueue
+from .models import pick
 from .placement import NOTE_MAX, homes, misplaced
 from .routing import BLOCKERS, MAX_ATTEMPTS, after_failure, route
 from .registry import Registry
@@ -40,7 +41,7 @@ from agent_work import liaison_papers  # noqa: E402
 from image_grant import GRANT  # noqa: E402
 USAGE = ('usage: discord-liaison tick [--dry-run]|wake|check|inbox|done|post <thread> [--image <file>] [--reply <message>] <text…>|'
          'react <thread> <message> <emoji>|art [--asked <quote>] <prompt…>|escalate <message> <blocker> <what…>|map <thread> <project>|pr <project>|'
-         'job <message> [--project <id>] <task…>|job-run <id>|status')
+         'job <message> [--project <id>] [--class <class>] <task…>|job-run <id>|status')
 STALE = ('refused: stale: a newer message from the requester or the owner is waiting in this conversation; do not post '
          'or react. The triage run handles it (it may replace this job). End with `stale: <what you made>`.')
 FAILED = '{author}, no he podido terminarlo. Lo paso al orquestador y te respondo aquí.'
@@ -566,13 +567,25 @@ class App:
     def job(self, args):
         """Hand a conversation to one background worker: anchored on its newest message, all its messages and images
         carried, a live job of the same conversation stopped and replaced (T1421)."""
-        projects = []
-        while args[1:2] == ['--project'] and len(args) > 3:
-            projects, args = projects + [args[2]], args[:1] + args[3:]
+        projects, cls = [], None
+        while args[1:2] in (['--project'], ['--class']) and len(args) > 3:
+            if args[1] == '--class':
+                cls = args[2]
+            else:
+                projects = projects + [args[2]]
+            args = args[:1] + args[3:]
         m = next((m for m in self.state.inbox if args and m['id'] == args[0]), None)
+        usage = ('usage: discord-liaison job <message-id from the inbox> [--project <id>] [--class <class>] '
+                 '"<task: deliverable, project, skills>"')
         if len(args) < 2 or m is None:
-            print('usage: discord-liaison job <message-id from the inbox> [--project <id>] "<task: deliverable, project, skills>"')
+            print(usage)
             return 2
+        if cls is not None:
+            try:
+                pick(cls, self.env)
+            except ValueError as e:
+                print(f'{usage}\n{e}')
+                return 2
         if any(self.registry.get(p) is None for p in projects):
             print(f'refused: unknown project; known: {", ".join(self.registry.projects)}')
             return 3
@@ -594,6 +607,9 @@ class App:
         job = self.jobs.create(msgs[-1], ' '.join(args[1:]), files + ([ctx] if os.path.exists(ctx) else []), msgs)
         if projects:
             job['projects'] = projects
+        if cls is not None:
+            job['class'] = cls
+        if projects or cls is not None:
             self.jobs.save(job)
         for j in old:
             self.jobs.finish(j, 'superseded', f'replaced by {job["id"]}')
@@ -691,16 +707,20 @@ class App:
             if not held:
                 print('job already running')
                 return 0
-            job.update(status='running', started=time.time())
+            model, effort, route = pick(job.get('class'), self.env)
+            job.update(status='running', started=time.time(), route=route)
             self.jobs.save(job)
             logs = os.path.join(self.home, 'logs', 'jobs')
             os.makedirs(logs, exist_ok=True)
+            if route:
+                with open(os.path.join(logs, f'{job["id"]}.log'), 'a') as f:
+                    f.write(route + '\n')
             asks = [m.get('content', '') for m in job.get('messages', [job['message']]) if GRANT.search(m.get('content', ''))]
             src = getattr(self.rest, 'lease', None)
             worker = src.mint(job['id'], min(int(self.env.get('LIAISON_JOB_TIMEOUT', '1800')) + 600, 86400)) if src else None
             while True:
                 q = {k: shlex.quote(v) for k, v in {
-                    'prompt': self.job_prompt(job), 'id': job['id'], 'home': self.home, 'model': self.env.get('LIAISON_JOB_MODEL', self.env.get('MODEL', 'opus')),
+                    'prompt': self.job_prompt(job), 'id': job['id'], 'home': self.home, 'model': model,
                     'timeout': self.env.get('LIAISON_JOB_TIMEOUT', '1800'), 'logs': logs,
                     'preamble': os.path.join(os.path.dirname(ME), 'AGENT-PREAMBLE.md'),
                     'secrets': self.grant_file(job, asks)}.items()}
@@ -708,7 +728,7 @@ class App:
                     'agent-exec --prompt-file {prompt} --system-file {preamble} --model {model} --cwd {home} '
                     '--name discord-liaison-job --timeout {timeout} --raw-out {logs}/{id}.json --meta-out {logs}/{id}.meta.json '
                     '--secrets-from {secrets} --ticket {id} >>{logs}/{id}.log 2>&1')).format(**q)
-                rc = subprocess.call(['/bin/sh', '-c', cmd], stdin=subprocess.DEVNULL, env=dict(os.environ, **({LEASE_ENV: worker} if worker else {}), LIAISON_JOB=job['id'], EFFORT=self.env.get('LIAISON_JOB_EFFORT', 'xhigh')))
+                rc = subprocess.call(['/bin/sh', '-c', cmd], stdin=subprocess.DEVNULL, env=dict(os.environ, **({LEASE_ENV: worker} if worker else {}), LIAISON_JOB=job['id'], EFFORT=effort))
                 job = self.jobs.get(job['id'])
                 if job['status'] == 'superseded':
                     if worker:

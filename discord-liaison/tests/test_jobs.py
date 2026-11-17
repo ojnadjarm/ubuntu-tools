@@ -174,6 +174,45 @@ class TestJobCli(JobBase):
         self.assertEqual((q.get(jid)['status'], q.get(jid)['why']), ('failed', 'lost'))
         self.assertIn('no he podido terminarlo', self.fake.sent('400')[0])
 
+    async def routed(self, *opts, env=None):
+        """Run one job made with `opts`; the model and EFFORT its worker got, and its job.json."""
+        (a,) = await self.inbox('haz algo')
+        seen = os.path.join(self.tmp.name, 'route.seen')
+        env = dict(env or {}, LIAISON_WORKER_CMD=f'echo {{model}} $EFFORT > {seen}')
+        rc, out = await self.run_cli('job', a, *opts, 'task', env=env)
+        self.assertEqual(rc, 0, out)
+        jid = self.launches()[0]
+        await self.run_cli('job-run', jid, env=env)
+        with open(seen) as f:
+            return f.read().split(), self.jobs().get(jid)
+
+    async def test_job_without_class_downgrades_a_fable_request_to_opus_high(self):
+        got, job = await self.routed(env={'LIAISON_JOB_MODEL': 'claude-fable-5-2'})
+        self.assertEqual(got, ['opus', 'high'])
+        self.assertIn('downgraded to opus high', job['route'])
+        with open(os.path.join(self.tmp.name, 'logs', 'jobs', f'{job["id"]}.log')) as f:
+            self.assertIn(job['route'], f.read())
+
+    async def test_art_job_runs_on_the_requested_fable_high(self):
+        got, job = await self.routed('--class', 'art', env={'LIAISON_JOB_MODEL': 'claude-fable-5-2', 'LIAISON_JOB_EFFORT': 'high'})
+        self.assertEqual((got, job['class']), (['claude-fable-5-2', 'high'], 'art'))
+
+    async def test_plan_job_without_a_request_runs_on_fable_high(self):
+        got, _ = await self.routed('--class', 'plan')
+        self.assertEqual(got, ['claude-fable-5-2', 'high'])
+
+    async def test_unknown_class_is_refused_with_the_usage_and_makes_no_job(self):
+        (a,) = await self.inbox('haz algo')
+        rc, out = await self.run_cli('job', a, '--class', 'nonsense', 'task')
+        self.assertEqual(rc, 2)
+        self.assertIn('[--class <class>]', out)
+        self.assertEqual((self.jobs().list(), self.launches()), ([], []))
+
+    async def test_broken_chooser_runs_the_job_on_opus_high(self):
+        got, job = await self.routed(env={'LIAISON_ROUTE_CMD': 'false', 'LIAISON_JOB_MODEL': 'claude-fable-5-2'})
+        self.assertEqual(got, ['opus', 'high'])
+        self.assertIn('model-route failed', job['route'])
+
 
 class TestImageGrant(JobBase):
     """T1632, T1634-V10: a job holds no image key path; `art --asked` passes the quote only when the job's messages hold it."""

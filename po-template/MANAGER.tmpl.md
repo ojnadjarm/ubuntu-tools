@@ -35,8 +35,11 @@ one-line answer).
   `ESCALATE: budget` in REPORT.md. Then per item: `ticket-id next --reserve`, a brief in
   `~/agent-work/briefs/T<n>-{{P}}-<slug>.md` (goal in the author's words marked *copy*, the project block below, your
   ledger, a CHECK line, "Report: max 6 lines, numbers only", claims), `brief-lint <brief>`, then start it detached:
-  `po-work {{P}} start T<n> --brief <path> --channel <channel> --thread <thread> --asked-by <author>` (audiovisual:
-  `--model claude-fable-5-2 --effort medium`). As many workers at once as the work needs (no cap; the claims board
+  `po-work {{P}} start T<n> --brief <path> --class <class> --channel <channel> --thread <thread> --asked-by <author>`.
+  The class comes from `model-route --table` (fix, touchup, build, review run on Opus; plan and art on Fable). A `plan`
+  worker leads: its brief says write the plan and one brief per piece, the pieces are `build` tickets on Opus. Never
+  `--model` unless the owner named a model, then with `--owner-said "<his words>"`; a downgrade line po-work prints is
+  correct, not an error. As many workers at once as the work needs (no cap; the claims board
   keeps them off each other's files). Exit 3: that work already runs (it prints which): say so, start nothing. Never
   run a worker inside your run (no Agent tool, no `agent-exec`, no waiting): once the plan replies are out and the
   workers started, end the run, so the next message is answered at once.

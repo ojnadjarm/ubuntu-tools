@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# usage: po-work <p> start T<n> --brief <path> [--key <slug>] [--channel <ch>] [--thread <id>] [--asked-by <who>] [--model M] [--effort E]
+# usage: po-work <p> start T<n> --brief <path> [--key <slug>] [--channel <ch>] [--thread <id>] [--asked-by <who>]
+#          [--class C] [--model M] [--effort E] [--owner-said "<q>"]: model and effort from `model-route` (no class: build)
 #        po-work <p> list | run T<n> | reap
 # Detached workers for PO/manager po-<p> (T1626): `start` records state/work/T<n>.json and launches a transient unit
 # po-work-<p>-T<n> (systemd-run, not a child of the PO run), so the PO run ends and its lock frees while the worker runs.
-# The unit's `run` holds state/work/T<n>.lock, runs agent-exec on the brief (MODEL opus, EFFORT high, WORK_TIMEOUT 14400
+# The unit's `run` holds state/work/T<n>.lock, runs agent-exec on the brief (MODEL, EFFORT as routed, WORK_TIMEOUT 14400
 # from agent.env) and files its report once as `po-ask <p> --from worker`, which wakes the PO to relay it.
 # `reap` (unit ExecStopPost and every po-run) marks a worker whose runner died `lost` and files that once.
 # Secrets: `run` hands the brief to agent-exec --secrets-from, which asks the vault for one lease per name on its line
@@ -51,12 +52,13 @@ case "$verb" in
 
   start)
     t="${3:-}"; shift 3 2>/dev/null || { help >&2; exit 2; }
-    brief='' key='' channel=none thread='' asked=unknown model=opus effort=high
+    brief='' key='' channel=none thread='' asked=unknown model='' effort='' cls='' said=''
     while [ $# -gt 0 ]; do
       [ $# -ge 2 ] || { echo "po-work: $1 needs a value" >&2; exit 2; }
       case "$1" in
         --brief) brief="$2" ;; --key) key="$2" ;; --channel) channel="$2" ;; --thread) thread="$2" ;;
         --asked-by) asked="$2" ;; --model) model="$2" ;; --effort) effort="$2" ;;
+        --class) cls="$2" ;; --owner-said) said="$2" ;;
         *) echo "po-work: unknown option $1" >&2; exit 2 ;;
       esac; shift 2
     done
@@ -66,6 +68,10 @@ case "$verb" in
     [ -n "$key" ] || key=$(basename "$brief" .md | sed -E "s/^T[0-9]+-($p-)?//")
     [[ $key =~ ^[a-z0-9-]+$ && $channel$thread =~ ^[A-Za-z0-9_.-]*$ ]] ||
       { echo "po-work: --key takes [a-z0-9-], --channel/--thread [A-Za-z0-9_.-]" >&2; exit 2; }
+    ask=(--json); [ -z "$cls" ] || ask+=(--class "$cls"); [ -z "$model" ] || ask+=(--model "$model")
+    [ -z "$effort" ] || ask+=(--effort "$effort"); [ -z "$said" ] || ask+=(--owner-said "$said")
+    route=$("$(dirname "$SELF")/model-route" "${ask[@]}") || exit 2
+    { read -r cls; read -r model; read -r effort; read -r note; } < <(jq -r '.class, .model, .effort, .note' <<<"$route")
     exec 7>"$W/.lock"; flock 7
     for o in $(open); do
       [ "$o" = "$t" ] || [ "$(jget "$o" key)" = "$key" ] || [ "$(jget "$o" brief)" = "$brief" ] || continue
@@ -73,9 +79,10 @@ case "$verb" in
       exit 3
     done
     jq -n --arg t "$t" --arg k "$key" --arg b "$brief" --arg c "$channel" --arg th "$thread" --arg a "$asked" \
-      --arg m "$model" --arg e "$effort" --arg s "$(date -Is)" --arg u "po-work-$p-$t" \
-      '{ticket:$t, key:$k, brief:$b, channel:$c, thread:$th, asked_by:$a, model:$m, effort:$e, started:$s, unit:$u,
-        status:"starting", filed:false}' >"$W/.$t.tmp" && mv "$W/.$t.tmp" "$W/$t.json"
+      --arg m "$model" --arg e "$effort" --arg cl "$cls" --arg r "$note" --arg s "$(date -Is)" --arg u "po-work-$p-$t" \
+      '{ticket:$t, key:$k, brief:$b, channel:$c, thread:$th, asked_by:$a, class:$cl, model:$m, effort:$e, started:$s,
+        unit:$u, status:"starting", filed:false} + if $r == "" then {} else {route:$r} end' >"$W/.$t.tmp" && mv "$W/.$t.tmp" "$W/$t.json"
+    [ -z "$note" ] || { echo "$note"; echo "$note" >>"$L/$t.log"; }
     tmo=$(envkey WORK_TIMEOUT); tmo=${tmo:-14400}
     if ! systemd-run --user --quiet --collect --unit="po-work-$p-$t" --setenv=PATH="$PATH" \
          --property=RuntimeMaxSec=$((tmo + 300)) --property=ExecStopPost="$SELF $p reap" \

@@ -41,8 +41,11 @@ Outside it: one `ESCALATE:` line. Gates, always:
   spawn nothing, write `ESCALATE: budget` in REPORT.md. Then per item:
   `ticket-id next --reserve`, a brief in `~/agent-work/briefs/T<n>-mooblox-<slug>.md` (goal in his words marked *copy* or
   *intent*, the project's common-rules file, the ledger, a CHECK line, "Report: max 6 lines, numbers only", claims),
-  `brief-lint <brief>`, then start it detached: `po-work mooblox start T<n> --brief <path> --channel <channel> --thread
-  <thread> --asked-by <who>` (audiovisual: `--model claude-fable-5-2 --effort medium`). As many workers at once as
+  `brief-lint <brief>`, then start it detached: `po-work mooblox start T<n> --brief <path> --class <class> --channel
+  <channel> --thread <thread> --asked-by <who>`. The class comes from `model-route --table` (fix, touchup, build, review
+  run on Opus; plan and art on Fable). A `plan` worker leads: its brief says write the plan and one brief per piece, the
+  pieces are `build` tickets on Opus. Never `--model` unless he named a model, then with `--owner-said "<his words>"`; a
+  downgrade line po-work prints is correct, not an error. As many workers at once as
   the work needs (no cap; the claims board keeps them apart). Exit 3: that work already runs: say so, start nothing.
   Never run a worker inside your run (no Agent tool, no `agent-exec`, no waiting): end the run once the workers are
   started, so the next request is answered at once.

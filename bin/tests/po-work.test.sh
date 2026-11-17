@@ -202,4 +202,20 @@ ev '(T1634-V5) run hands its brief and ticket to agent-exec, which asks the leas
    'grep -q -- " --secrets-from [^ ]*/T403-mg-lease.md --ticket T403" "$WORK/exec.log"'
 
 touch "$REAL_HOME/.po-test-probe" 2>/dev/null; is 'selftest: the real agents tree is read-only in the sandbox' "$?" 1
+
+# (T1728) start routes the model through model-route: class, downgrade note, owner's words, unknown class
+jm() { jq -r "$2" "$M/state/work/$1.json"; }
+for k in 1 2 3 4; do echo "goal $k" >"$AGENT_WORK/briefs/T50$k-mg-route$k.md"; done
+out=$(PATH="$WORK/argstub:$PATH" po-work mg start T501 --brief "$AGENT_WORK/briefs/T501-mg-route1.md" --class fix --model claude-fable-5-2)
+is '(T1728) fix asked with Fable records opus high' "$(jm T501 '.class + " " + .model + " " + .effort')" 'fix opus high'
+ev '(T1728) the downgrade line is printed, ledgered and logged' 'printf "%s\n" "$out" | grep -q "^model-route: claude-fable-5-2 asked for fix, an Opus class: downgraded" && jm T501 .route | grep -q downgraded && grep -q "downgraded to opus" "$M/logs/work/T501.log"'
+ev '(T1728) the started line still follows' 'printf "%s\n" "$out" | tail -1 | grep -q "^started T501 (route1) as po-work-mg-T501"'
+PATH="$WORK/argstub:$PATH" po-work mg start T502 --brief "$AGENT_WORK/briefs/T502-mg-route2.md" --class art >/dev/null
+is '(T1728) art records Fable medium, no route note' "$(jm T502 '.model + " " + .effort + " " + (.route // "none")')" 'claude-fable-5-2 medium none'
+PATH="$WORK/argstub:$PATH" po-work mg start T503 --brief "$AGENT_WORK/briefs/T503-mg-route3.md" --model claude-fable-5-2 --owner-said "use fable" >/dev/null
+is '(T1728) the owner'"'"'s words keep Fable on build' "$(jm T503 '.class + " " + .model')" 'build claude-fable-5-2'
+ev '(T1728) the route note carries his words' 'jm T503 .route | grep -q "\"use fable\""'
+PATH="$WORK/argstub:$PATH" po-work mg start T504 --brief "$AGENT_WORK/briefs/T504-mg-route4.md" --class nonsense >/dev/null 2>&1
+is '(T1728) unknown class exits 2' "$?" 2
+ev '(T1728) unknown class records and launches nothing' '[ ! -e "$M/state/work/T504.json" ] && ! grep -q T504 "$WORK/args.log"'
 exit $bad

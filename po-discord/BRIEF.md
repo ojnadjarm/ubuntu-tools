@@ -60,8 +60,12 @@ Outside it: one `ESCALATE:` line. Gates, always:
   `echo $PO_BUDGET` and `plan-usage --check 95` (`stop` or exit 1: `ESCALATE: budget`), `ticket-id next --reserve`, a brief
   `~/agent-work/briefs/T<n>-discord-<slug>.md` (goal in his words marked *copy*, RULES.md, a CHECK line, "Report: max 6
   lines, numbers only", claims, tests in `discord-liaison/tests`), `brief-lint <brief>`, then
-  `po-work discord start T<n> --brief <path> --channel <channel> --thread <thread> --asked-by <who>`; end the run (never
-  wait). A rule code also holds (RULES.md names it) changes in the code too, through a worker.
+  `po-work discord start T<n> --brief <path> --class <class> --channel <channel> --thread <thread> --asked-by <who>`;
+  end the run (never wait). The class comes from `model-route --table` (fix, touchup, build, review run on Opus; plan
+  and art on Fable). A `plan` worker leads: its brief says write the plan and one brief per piece, the pieces are
+  `build` tickets on Opus. Never `--model` unless the owner named a model, then with `--owner-said "<his words>"`; a
+  downgrade line po-work prints is correct, not an error. A rule code also holds (RULES.md names it) changes in the
+  code too, through a worker.
 - `from: worker`: the report of a ticket you started (done|failed|lost). Relay it where it was asked; `failed` or `lost`:
   say so, then start it once more (new ticket id, same key) unless the brief was the cause.
 - `from: manager` (a manager's `ESCALATE:` line): a new Discord project -> `discord-hire` as above, then pass the line on with

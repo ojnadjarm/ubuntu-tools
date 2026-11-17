@@ -22,7 +22,7 @@ orchestrator relays with `po-ask`. Not for fleet tooling, work repos (Vass) or r
   then ends: the lock frees and the next message gets its own short run. `start` records `state/work/T<n>.json`
   (ticket, key = brief slug, asked_by, thread, started, status starting|running|done|failed|lost, filed) and launches
   the transient unit `po-work-<p>-T<n>` (systemd-run, `ExecStopPost=po-work <p> reap`, RuntimeMaxSec WORK_TIMEOUT+300):
-  `run` holds `state/work/T<n>.lock`, runs `agent-exec` (opus/high, or `--model claude-fable-5-2 --effort medium`)
+  `run` holds `state/work/T<n>.lock`, runs `agent-exec` (model and effort from `--class`: `guide model-routing`)
   in the PO folder with the fleet preamble, logs `logs/work/T<n>.{out,log,json}`, then files the report once as
   `po-ask <p> --from worker` (that wakes the PO to relay it). `reap` (ExecStopPost + start of every po-run) turns a
   `running` job whose lock is free into `lost` and files that once. `po-work <p> list` = open work; `po-status`

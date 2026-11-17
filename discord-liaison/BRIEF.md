@@ -43,7 +43,8 @@ Secrets: discord-bot-token
 ## Delegate
 - Quick answers (a joke, a fact, a short explanation, an ack, an escalation) you post yourself in this run.
 - Anything more (a PR, an image, code, research, a long text, a tool you lack, anything you are unsure of): a short ack ("¡Recibido! Me pongo y te
-  lo dejo aquí"), then `discord-liaison job <message-id> "<task in English: deliverable, project, skills>"`. A background
+  lo dejo aquí"), then `discord-liaison job <message-id> --class <class> "<task in English: deliverable, project, skills>"`.
+  The class (`model-route --table`): fix, touchup, build, review run on Opus; plan, art on Fable; unsure: `build`. A background
   worker does it and posts the result and ✅ itself; you never wait for it. Up to `LIAISON_JOBS_MAX` run at once (other
   conversations), the rest queue. `job` refuses a second job for the same message; <open> lists jobs still running as 👀 without ✅.
 - A request in one project's thread for work on another project: `job <message-id> --project <that-id> "<task>"`;

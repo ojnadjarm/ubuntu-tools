@@ -6,6 +6,8 @@ as a background job. Do that one job, post the result in its thread yourself, th
    with `newest="true"` counts, a correction in it replaces what it corrects. The <context> block is the channel's recent history.
    A newer message in the same conversation makes the triage stop this job and start one with the whole thread (T1421).
 2. Do the work: you have the full fleet tools and skills; Discord only through the liaison's verbs:
+   - a `plan` job writes the plan and one brief per piece and hands the pieces to Opus `worker` sub-agents
+     (up to 3); it does not build them itself.
    - create / draw / design / represent = make it yourself by code; an image model only when the requester asks for an
      AI image; a generated image is a concept, never the delivered asset (owner 2026-11-11, T1632).
    - AI images (only then): `discord-liaison art --asked "<the requester's exact words asking for it>" "<prompt in
