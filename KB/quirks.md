@@ -88,6 +88,11 @@
   the power rule already allows. One hole remains, by design: a pcbench trial does not get the
   guards — `pcbench` builds its own PATH and relies on `bench/arms/safety/stubs` instead.
   Test: `bash ~/agents/bin/tests/guards.test.sh`. (verified 2026-10-20: ls bin/guards, fleet_path, sudo fleet_unit)
+- **The git guard refuses `git commit`/`push` in a `/tmp` repo (exit 3)**: only the personal repos pass
+  `git_check`. A test fixture commits by plumbing (`git commit-tree` + `git update-ref`) and "pushes" by
+  fetching into a bare origin. (verified 2026-11-17: bin/guards/git git_check refuses any toplevel outside the personal list; memory ^m92, 2026-11-13)
+- **Worker sandbox: git over SSH fails with "Bad owner" on `/etc/ssh/ssh_config.d`.** Run it with the
+  sandbox off and `GIT_SSH_COMMAND='ssh -F /dev/null'`. (unverified 2026-11-17: a worker's note, memory ^m89, 2026-11-11; not re-run)
 
 ## Power / session
 - The laptop never suspends: logind lid switch ignored, sleep targets masked, gsettings sleep `nothing`.
