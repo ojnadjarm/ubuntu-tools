@@ -1,4 +1,4 @@
-# {{P}}: project memory (at most 80 lines, 6 KB; the past goes to HISTORY.md)
+# {{P}}: project memory (the past goes to HISTORY.md)
 
 ## What it is
 

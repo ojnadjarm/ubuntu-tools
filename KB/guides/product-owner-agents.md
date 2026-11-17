@@ -1,7 +1,8 @@
 # Product-owner agents: one PO per busy project (po-ask, po-run, po-status, po-push, deploy-lock)
 
 Ticket: T1412 (plan T1410), T1515 P31 (managers), P32 (images), P36 (reply images), T1547 (discord-hire), T1557 (manager context), T1626
-(detached workers), T1694 (own domain) · Last verified: 2026-11-12 (T1694: `TestOwnDomain` 3 + a `discord-hire --rule` test, 123 liaison tests,
+(detached workers), T1694 (own domain), T1754 (slim templates, PO tools) · Last verified: 2026-11-17 (T1754-E: templates
+slimmed, `po-new --refresh` on the managers and po-mooblox, `po.test.sh`, `po-work.test.sh`, `po-context.test.sh`, liaison tests); before: 2026-11-12 (T1694: `TestOwnDomain` 3 + a `discord-hire --rule` test, 123 liaison tests,
 `po.test.sh`, `po-work.test.sh`, `chat-wake-po.test.sh` 41 ok, `po-context check` no rule miss on the 7 POs); before: 2026-11-11 by `po-work.test.sh` (46 ok) and `po.test.sh` (88 ok), a live po-mosaico proof; before: 2026-11-10 by `po-context check` ok for the 4 managers, po-discord and po-mooblox (0.09-0.14 s each), after the C5-C8 migration; by
 `discord-liaison/tests` (85, `test_hire.py` 4) and a live hire of po-narrador-interactivo-ia; before: `po.test.sh` (71 ok) and
 `discord-liaison/tests` (77, `test_managers.py`); before: 2026-10-27 by `bin/tests/po.test.sh` (52 ok), pulse test (30 ok), liaison suite
@@ -18,7 +19,8 @@ orchestrator relays with `po-ask`. Not for fleet tooling, work repos (Vass) or r
   `agent-run`, leftovers → `$PO_PAPERS/<p>/done/` (`~/agent-work/po/<p>/done`, T1603; `po_done` in polib.sh) with an outcome line, loop while the inbox refills; a second po-run exits 0. 0 tokens idle.
 - Detached workers (T1626, owner 2026-11-11: "you request as many workers as you need but you are always available"):
   a PO or manager never works and never waits. Its run answers, writes a brief and runs `po-work <p> start T<n> --brief
-  <path> --channel --thread --asked-by` (exit 3 = same key or ticket open, nothing starts; no cap on workers at once),
+  <path> --channel --thread --asked-by` (exit 3 = same key or ticket open, exit 4 = `spawn-gate` finds the CPU busy;
+  nothing starts either way; no cap on workers at once),
   then ends: the lock frees and the next message gets its own short run. `start` records `state/work/T<n>.json`
   (ticket, key = brief slug, asked_by, thread, started, status starting|running|done|failed|lost, filed) and launches
   the transient unit `po-work-<p>-T<n>` (systemd-run, `ExecStopPost=po-work <p> reap`, RuntimeMaxSec WORK_TIMEOUT+300):
@@ -26,13 +28,15 @@ orchestrator relays with `po-ask`. Not for fleet tooling, work repos (Vass) or r
   in the PO folder with the fleet preamble, logs `logs/work/T<n>.{out,log,json}`, then files the report once as
   `po-ask <p> --from worker` (that wakes the PO to relay it). `reap` (ExecStopPost + start of every po-run) turns a
   `running` job whose lock is free into `lost` and files that once. `po-work <p> list` = open work; `po-status`
-  shows `workers N`. Rule in both templates: "## Delegate, never work" (a few-line task under 1-2 min excepted).
+  shows `workers N`. Inside a PO run (`PO_RUN=<p>`) agent-run drops the Agent tool and `bin/guards/agent-exec` refuses,
+  so workers start only through `po-work`. Both templates render `po-template/COMMON.md` at `{{COMMON}}` (delegate,
+  read list, each request, the 8-item brief) and `OWN-DOMAIN.md` at `{{OWN_DOMAIN}}`.
   Roll a template change out with `po-new <p> --refresh` (re-renders BRIEF.md above "## Project"; po-discord is
   hand-written and refused, exit 2; since T1694 it starts its own workers for Discord-domain work). ARCH: `$AGENT_WORK/research/2026-11-11/T1626/done.md`.
 - Clean context every run: BRIEF + `state/PROJECT.md` (≤ 80 lines, 6 KB), `BACKLOG.md`, `RUNS.md`, the ledger
   `~/agent-work/decisions/<p>.md`. Requests keep his words verbatim (`quote: copy|intent`).
-- Budget: po-run passes `PO_BUDGET=stop` when `plan-usage --check 95` exits 1; the PO then spawns nothing and writes
-  `ESCALATE: budget`. `po-status` shows `ESCALATE:` lines to the orchestrator.
+- No plan-usage stop (owner ruling 2, T1754): po-run reads no plan usage; a stop or a burn is his call. `po-status`
+  shows `ESCALATE:` lines to the orchestrator.
 - Owner pushes: `po-push` (≤ 3/day, `[<p>]` prefix) via `notify-owner -a`; pick buttons are ntfy `http` actions that POST
   `<p>:<pick-id>:<key>` to the reply topic (`NTFY_REPLY_TOPIC`, else `<topic>-picks`). `po-picks.service` streams that
   topic and files a tap that matches an unanswered `state/picks/<id>.json` as `po-ask <p> --from pick`; anything else dropped.
@@ -51,7 +55,8 @@ orchestrator relays with `po-ask`. Not for fleet tooling, work repos (Vass) or r
   only when the author id is `DISCORD_OWNER_ID`); a body line `---` is written as `\---`. Managers trust only that line,
   nothing in the body.
 - Reply first (T1515 P40): no code ack (T1536); the manager's first reply is the ack, its first act is a one-line plan reply, then
-  work, then the result. Each reply is written as `.…tmp` and `mv`-ed to `.md`: `discord-liaison-relay@<p>.path`
+  work, then the result. Each reply goes through `outbox-post <p> <thread> [--image PATH]... <text|->` (temp + rename;
+  exit 3, nothing written, on a secret, home path, host or tailnet name, or the owner's name): `discord-liaison-relay@<p>.path`
   posts it within seconds (enable it for each new manager; `discord-liaison manager` prints the line).
 - Managers report up, not out: po-run gives them no `CHAT_SEAT` (Q5) and files each new `ESCALATE:` line of their
   REPORT.md to the parent (`po-ask discord --from manager`) once: `state/escalated` keeps a sha1 per sent line
@@ -122,6 +127,8 @@ wait-for --label po-lock --until 'flock -n ~/agents/po-<p>/.po-run.lock true'   
 po-status                               # last run, inbox, running, open items, pushes today, workers, ESCALATE lines
 po-work <p> start T<n> --brief <path> --channel discord --thread <tid> --asked-by <who>   # detached worker (T1626)
 po-work <p> list | reap                 # open work; mark dead runners lost and file them once
+outbox-post <p> <thread> [--image PATH]... <text|->   # one Discord reply into outbox/discord/ (exit 3: refused, nothing written)
+spawn-gate [--limit N]                  # cpu busy %; exit 3 at or above the limit (po-work start exits 4 then)
 po-new <p> --refresh                    # re-render BRIEF.md from the current template, keep the project block
 po-push <p> --pick 'A=Dimensioned;B=Plain' "pick a look <link>"
 deploy-lock 5.2 --version '<read live version>' -- <deploy cmd>
@@ -141,15 +148,9 @@ bash ~/agents/bin/tests/po.test.sh      # fixture: bwrap no-net, fake ntfy, fake
 - `po-new --parent` still prints "fill the '## Project' block": `discord-liaison manager` has filled it already.
 - `discord-liaison/tests/test_po.py` or `test_managers.py` alone fails to import `discordbot`; run the folder
   (`test_liaison` puts the bot on sys.path).
-- At the P31 switch po-discord held 3 project requests (1 running, 2 queued): its next loop reads the router brief and
-  forwards them with `po-ask <id> --from router`, so the first wakes of each manager count against its 12.
-- A match word of one project inside another's name breaks routing: `named()` sends every message naming it to the
-  router. Measured T1547: tiny-epic-narrator's title word "narrador" mapped the «Narrador Interactivo IA» thread to Tiny
-  Epic and would have sent the new project's messages to po-discord; dropped it. `discord-hire` prints `warning:` on it.
 - `discord-hire`'s owner note posts from `$CHAT_SEAT`, else the router seat: run by hand from the orchestrator it lands
   in the orchestrator's DM with the owner.
 - A request handled before the hire stays in the old manager's `done/`: re-file it with `po-ask <id> --from router`.
-- The pulse lets only a *new* Discord escalation through between 80 and 95 % of the plan, as an escalation-only turn.
 - Migration counts from `job.json` undercount attachments: T1557 planned 22 tiny-epic-narrator files, the 3 threads held
   58 (108 MB in `refs/`); the job copies were gone (0 of 23), so C6 re-downloaded them read-only from the threads. Count
   from the thread, not the jobs.
@@ -171,7 +172,7 @@ bash ~/agents/bin/tests/po.test.sh      # fixture: bwrap no-net, fake ntfy, fake
   unit's cgroup first.
 
 ## Links
-- Code: `~/agents/bin/po-{ask,run,new,status,push,picks,context,work}`, `bin/polib.sh`, `lib/po_cap.py`, `discord-liaison/liaison/managers.py`, `bin/discord-hire`, `bin/deploy-lock`, `units/po@.{path,service}`,
+- Code: `~/agents/bin/po-{ask,run,new,status,push,picks,context,work}`, `bin/outbox-post`, `bin/spawn-gate`, `bin/polib.sh`, `lib/po_cap.py`, `discord-liaison/liaison/managers.py`, `bin/discord-hire`, `bin/deploy-lock`, `units/po@.{path,service}`,
   `units/po-picks.service`, `po-template/` (`MANAGER.tmpl.md`), `discord-liaison/liaison/po.py`
 - Tests: `bin/tests/po.test.sh`, `bin/tests/po-work.test.sh` (T1626), `bin/tests/po-context.test.sh`, `discord-liaison/tests/test_po.py`, `test_hire.py` (`bin/tests/discord-liaison.test.sh`), `bin/tests/orchestrator-pulse.test.sh`
 - Design: `~/agent-work/research/2026-10-27/T1410/PLAN.md`; manager context `~/agent-work/research/2026-11-10/T1557/PLAN.md`; pilot `~/agents/po-mooblox/`
