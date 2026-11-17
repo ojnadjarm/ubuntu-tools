@@ -161,7 +161,7 @@ t "note 5 (manager domain): passed to domains/kiln/inbox, card untouched"
   && ok || no "$(ls "$St/domains/kiln/inbox/")"
 
 t "note 6 (a token): rejected by lint, kept outside the store and its history"
-{ ! grep -rqF "$TOK" "$St" --exclude-dir=.git && ! git -C "$St" log -p --all | grep -qF "$TOK" \
+{ ! grep -rqF "$TOK" "$St" --exclude-dir=.git && ! git -C "$St" log -p --all | grep -F "$TOK" >/dev/null \
   && [ -f "$AGENT_WORK/memory-keeper/rejected/n6-token.md" ]; } && ok || no "$(ls "$AGENT_WORK/memory-keeper/rejected/" 2>&1)"
 
 t "notes: 5 filed in archive/notes, the inbox is empty"
@@ -236,7 +236,7 @@ t "private notes: apply green; purse and listed notes in archive/notes-private"
 t "private notes: git-ignored, git status shows nothing new tracked, origin has none"
 { grep -qx 'archive/notes-private/' "$St/.gitignore" && [ -z "$(git -C "$St" status --porcelain)" ] \
   && [ -z "$(git -C "$St" ls-files archive/notes-private)" ] && git -C "$St" ls-files --error-unmatch archive/notes/n11-public.md >/dev/null 2>&1 \
-  && ! git -C "$T/origin.git" log -p main | grep -qE 'Purse coins|tea brand'; } \
+  && ! git -C "$T/origin.git" log -p main | grep -E 'Purse coins|tea brand' >/dev/null; } \
   && ok || no "$(git -C "$St" status --porcelain; git -C "$St" ls-files archive)"
 t "rejected note: a REVIEW.md line names it, the note is kept outside the store"
 { grep -q 'inbox/n12-token.md · rejected by secrets' "$St/REVIEW.md" && [ -f "$AGENT_WORK/memory-keeper/rejected/n12-token.md" ] \
@@ -245,7 +245,7 @@ t "checks/ edit: committed as owner:, no owner-edit ledger line"
 lines0="$(wc -l <"$St/core/ledger.md")"
 printf 'gd01\tHow wide are seed photos, in px?\t800\tseed.md\n' >>"$St/checks/questions.d/garden.tsv"
 S="$(mem stage)"; mem apply "$S" >"$T/ck.out" 2>&1; rc=$?
-{ [ "$rc" = 0 ] && [ "$(wc -l <"$St/core/ledger.md")" = "$lines0" ] && git -C "$St" log --format=%s | grep -q '^owner: ' \
+{ [ "$rc" = 0 ] && [ "$(wc -l <"$St/core/ledger.md")" = "$lines0" ] && git -C "$St" log --format=%s | grep '^owner: ' >/dev/null \
   && [ -z "$(git -C "$St" status --porcelain)" ]; } && ok || no "rc $rc: $(cat "$T/ck.out"; tail -2 "$St/core/ledger.md")"
 
 # --- PRECHECK: the keeper's agent.env through the real agent-run, model stubbed --------------------------------
