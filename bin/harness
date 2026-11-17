@@ -14,7 +14,7 @@ usage() {
   cat <<'U'
 usage: harness context [--brief] [--worker] [--full] [--json] [--moodle]
        --brief   the one-line machine brief only
-       --worker  the machine brief, 5 worker report rules and the claims/wait-for verbs (<= 720 B), for subagents
+       --worker  the machine brief and a pointer to the contract (<= 720 B), for subagents
        --full    the full text even inside an agent (CLAUDECODE or HARNESS_AGENT set), where the default is --worker
        --json    SessionStart hook JSON (systemMessage + hookSpecificOutput.additionalContext)
        --moodle  include the project guidelines even when detection finds no Moodle root
@@ -51,13 +51,7 @@ if [ "$BRIEF" = 1 ]; then
 fi
 
 if [ "$WORKER" != 0 ]; then
-  rules='Worker rules (the full output rules are in `harness context --full`):
-1. Report to your caller in at most 6 lines, numbers over prose.
-2. Lead with the result; no preamble, recap or closer.
-3. Report only what you verified; red is red.
-4. Absolute paths; code only when load-bearing; no emojis.
-5. Lists of at most 5; run `guide <words>` and `pc status` before acting.
-6. Claims: claims add T<n> <paths> before editing; claims done T<n> after. Waits: wait-for --label X --until '"'"'<cmd>'"'"'.'
+  rules='Rules: ~/agents/AGENTS.md and your agent prompt.'
   # 720 B cap (T908), 700 B for the in-agent plain form with its tail line (T602, T957).
   cap=720 tail=''; [ "$WORKER" = 2 ] && cap=700 tail=$'\nfull rules: harness context --full'
   # T993: over its share the brief drops middle fields for `…`, keeping orch= and FAIL=; cuts stay UTF-8 whole.
@@ -105,12 +99,8 @@ else:
 if root:
     p = lambda f: os.path.join(base, f)
     parts += [
-        "=== MOODLE PROJECT DETECTED — these rules are mandatory for this session ===\n"
-        f"BEFORE any work here, read with the Read tool:\n"
-        f"- {p('moodle-guidelines.md')} (mandatory rules: docs, style, Docker envs, code checker, tests)\n"
-        f"- {p('moodle-tips.md')} (known gotchas)\n"
-        f"BEFORE writing or reviewing any PHP, read {p('moodle-coding-style.md')}.\n"
-        "WHEN code is complete, run the /moodle-ci skill (phpcs + PHPUnit).",
+        "=== MOODLE PROJECT DETECTED ===\n"
+        f"Read {p('moodle-guidelines.md')} before working here: docs, style, Docker envs, code checker, tests.",
     ]
     banner += f" · Moodle guidelines loaded ({root})"
 session_ctx = "\n\n".join(p for p in parts if p)
@@ -118,13 +108,7 @@ session_ctx = "\n\n".join(p for p in parts if p)
 machine_msg = machine_ctx = ""
 if brief:
     machine_msg = f"Machine: {brief}"
-    machine_ctx = (
-        f"Machine now: {brief}. Run `pc status` (or `pc status --json`) for detail; "
-        "never ask the owner about machine state you can read. "
-        "Facts and runbooks: ~/agents/KB/. "
-        "Before a task, run `guide <words>`: it ranks how the fleet did it before (KB/guides) and the "
-        "installed skills; load any `→ invoke /<name>` skill it prints with the Skill tool."
-    )
+    machine_ctx = f"Machine now: {brief}."
 
 if as_json:
     print(json.dumps({

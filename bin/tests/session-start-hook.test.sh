@@ -39,7 +39,7 @@ for name, cond in [
     ("systemMessage: ADHD banner + machine brief", j["systemMessage"] == "Harness: ADHD mode on · Machine: AC 50% fixture-brief"),
     ("context: ADHD rules from the temp HOME, front matter stripped",
      "FIXTURE ADHD RULES" in ctx and "name: i-have-adhd" not in ctx),
-    ("context: machine brief and the guide pointer", "Machine now: AC 50% fixture-brief." in ctx and "`guide <words>`" in ctx),
+    ("context: machine brief, the guide pointer left to AGENTS.md", "Machine now: AC 50% fixture-brief." in ctx and "`guide <words>`" not in ctx),
     ("context: no Moodle block without a detector", "MOODLE PROJECT DETECTED" not in ctx),
 ]:
     print(("PASS " if cond else "FAIL ") + name)

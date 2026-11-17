@@ -48,8 +48,8 @@ w=$("$HARNESS" context --worker)
 [ "$(printf '%s\n' "$w" | wc -c)" -le 720 ] && ok 1 "--worker fits 720 bytes" || ok 0 "--worker fits 720 bytes"
 doc=$(grep -o 'context --worker` (≤ [0-9]* B)' "$HOME/agents/AGENTS.md" | grep -o '[0-9]\+')
 [ "${doc:-0}" -ge 720 ] && ok 1 "AGENTS.md's --worker cap ($doc B) covers the 720-byte hard cap" || ok 0 "AGENTS.md's --worker cap (${doc:-none}) covers the 720-byte hard cap"
-case "$w" in *"6. Claims: claims add T<n>"*"wait-for --label X --until"*) ok 1 "--worker names the claims and wait-for verbs";; *) ok 0 "--worker names the claims and wait-for verbs";; esac
-case "$w" in "Machine now: "*"at most 6 lines"*) ok 1 "--worker keeps the brief and report rules";; *) ok 0 "--worker keeps the brief and report rules";; esac
+case "$w" in *"Rules: ~/agents/AGENTS.md"*) ok 1 "--worker points to the contract";; *) ok 0 "--worker points to the contract";; esac
+case "$w" in "Machine now: "*"AGENTS.md"*) ok 1 "--worker keeps the brief and the contract pointer";; *) ok 0 "--worker keeps the brief and the contract pointer";; esac
 case "$w" in *"ADHD OUTPUT MODE"*) ok 0 "--worker drops the ADHD skill";; *) ok 1 "--worker drops the ADHD skill";; esac
 "$HARNESS" bogus >/dev/null 2>&1; [ $? = 2 ] && ok 1 "unknown subcommand exits 2" || ok 0 "unknown subcommand exits 2"
 
@@ -68,11 +68,11 @@ mctx() { (cd "$fx/plugin" && env -u CLAUDE_PROJECT_DIR HOME="$fx/home" HARNESS_C
 for mode in human headless; do
   if [ "$mode" = human ]; then c=$(mctx env -u AGENT_NAME); else c=$(mctx env AGENT_NAME=x); fi
   [ "${#c}" -lt 9500 ] && ok 1 "$mode Moodle context under 9500 chars (${#c})" || ok 0 "$mode Moodle context under 9500 chars (${#c})"
-  for f in moodle-guidelines moodle-tips moodle-coding-style; do
+  for f in moodle-guidelines; do
     case "$c" in *"$fx/ctx/$f.md"*) ok 1 "$mode context points to $f.md";; *) ok 0 "$mode context points to $f.md";; esac
   done
   case "$c" in *FIXTURE-BODY-*) ok 0 "$mode context inlines no rule file";; *) ok 1 "$mode context inlines no rule file";; esac
-  case "$c" in *"/moodle-ci"*) ok 1 "$mode context names /moodle-ci";; *) ok 0 "$mode context names /moodle-ci";; esac
+  case "$c" in *"/moodle-ci"*) ok 0 "$mode context leaves /moodle-ci to the guidelines";; *) ok 1 "$mode context leaves /moodle-ci to the guidelines";; esac
 done
 case "$(mctx env -u AGENT_NAME)" in *"ADHD OUTPUT MODE"*) ok 1 "human Moodle context keeps the output rules";; *) ok 0 "human Moodle context keeps the output rules";; esac
 else echo "SKIP owner data absent: $HOOKS/moodle-detect.sh"; fi
@@ -87,7 +87,7 @@ lp=$(cd "$fx" && CLAUDECODE=1 "$fx/bin/harness" context | wc -c)
 lpt=$(cd "$fx" && CLAUDECODE=1 "$fx/bin/harness" context)
 case "$lpt" in *$'\nfull rules: harness context --full') ok 1 "in-agent plain with a 900-byte brief keeps the --full line";; *) ok 0 "in-agent plain with a 900-byte brief keeps the --full line";; esac
 lwt=$(cd "$fx" && "$fx/bin/harness" context --worker)
-case "$lwt" in *"6. Claims: claims add T<n>"*"wait-for --label X --until"*) ok 1 "--worker with a 900-byte brief keeps rule 6";; *) ok 0 "--worker with a 900-byte brief keeps rule 6";; esac
+case "$lwt" in *"Rules: ~/agents/AGENTS.md"*) ok 1 "--worker with a 900-byte brief keeps the contract pointer";; *) ok 0 "--worker with a 900-byte brief keeps the contract pointer";; esac
 
 # T602: inside an agent plain `context` is the worker form; --full and --json keep the full text.
 mkdir -p "$fx/b2"; cp "$HARNESS" "$HOME/agents/bin/env.sh" "$fx/b2/"
@@ -97,7 +97,7 @@ human=$(out); hjson=$(ARGS=--json out)
 case "$human" in *"ADHD OUTPUT MODE"*) ok 1 "outside an agent plain is the full text";; *) ok 0 "outside an agent plain is the full text";; esac
 for v in CLAUDECODE=1 HARNESS_AGENT=claude; do
   a=$(out "$v")
-  case "$a" in "Machine now: FIXED-BRIEF"*"at most 6 lines"*$'\nfull rules: harness context --full') ok 1 "$v plain is the worker form plus the --full line";; *) ok 0 "$v plain is the worker form plus the --full line";; esac
+  case "$a" in "Machine now: FIXED-BRIEF"*"AGENTS.md"*$'\nfull rules: harness context --full') ok 1 "$v plain is the worker form plus the --full line";; *) ok 0 "$v plain is the worker form plus the --full line";; esac
   [ "$(printf '%s\n' "$a" | wc -c)" -le 700 ] && ok 1 "$v plain fits 700 bytes" || ok 0 "$v plain fits 700 bytes"
   [ "$(ARGS=--full out "$v")" = "$human" ] && ok 1 "$v --full equals the outside text" || ok 0 "$v --full equals the outside text"
   [ "$(ARGS=--json out "$v")" = "$hjson" ] && ok 1 "$v --json equals the outside JSON" || ok 0 "$v --json equals the outside JSON"
