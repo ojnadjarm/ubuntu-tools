@@ -1,5 +1,5 @@
 /* The hall round the rooms: floor, brick walls with city windows, the mezzanine over the kitchen, commons and machines in the free bays, aisle shelves and floor lines. */
-import { COLS, MW, MD, GAP, X0, PX, PZ, bay } from "../layout.js";
+import { COLS, MW, MD, GAP, X0, PX, PZ, bay, rowsOf } from "../layout.js";
 import { mul, tone, glow, lamp, neon, rack, grow, cable, pane, holo } from "./props.js";
 
 export const DECK = 1.34;
@@ -76,7 +76,7 @@ function aisles(ctx, all, X0, WD, DP) {
 /* The whole hall for a plan; the rooms themselves are other chunks. */
 export function hall(ctx, plan) {
   const { B, M, th } = ctx, { w: WD, d: DP, h: H } = plan.hall, F = th.floor, wc = (i, j) => tone(th.wall.col, i, j, th.wall.k);
-  const n = M.rooms.filter((r) => r.kind !== "pool").length, rows = Math.max(2, Math.ceil(n / COLS)), all = rows + Math.ceil(M.staff.length / COLS);
+  const n = M.rooms.filter((r) => r.kind !== "pool").length, { rows, all } = rowsOf(M);
   B.cells([0, 0, 0], [0, 0, DP], [WD, 0, 0], Math.round(DP / F.cu), Math.round(WD / F.cv), (i, j) => tone(F.col, i, j, F.k), { stagger: F.stagger, sub: F.sub });
   const bays = (len, x0, x1) => { for (let x = x0 + PX / 2; x < Math.min(x1, len) - 1; x += PX) pane(ctx, x, 0.6, 2.5, 1.55); };
   wall(B, 0, 0, WD, 0, H, wc, th.wall, (len) => bays(len, X0, len));

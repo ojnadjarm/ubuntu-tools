@@ -7,10 +7,16 @@ export const X0 = MW + GAP, PX = IW + GAP, PZ = ID + GAP;
 /* The centre of bay i: bays stand GAP apart in rows of COLS, the first one GAP from the mezzanine. */
 export const bay = (i) => ({ x: X0 + (i % COLS) * PX + IW / 2, z: 0.2 + Math.floor(i / COLS) * PZ + ID / 2 });
 
+/* Rows of seat bays and all bay rows of model M (one floor's view): seat rooms first, staff teams on rows of their own, two rows at least for the desk pool by the stairs. */
+export function rowsOf(M) {
+  const rows = Math.max(1, Math.ceil(M.rooms.filter((r) => r.kind !== "pool").length / COLS));
+  return { rows, all: Math.max(2, rows + Math.ceil(M.staff.length / COLS)) };
+}
+
 /* Plan for model M: the hall's size, one cell per room (centre, usable size, worker desks), the camera's home view. */
 export function plan(M) {
   const seatRooms = M.rooms.filter((r) => r.kind !== "pool"), pool = M.rooms.find((r) => r.kind === "pool");
-  const rows = Math.max(2, Math.ceil(seatRooms.length / COLS)), all = rows + Math.ceil(M.staff.length / COLS);
+  const { rows, all } = rowsOf(M);
   const depth = 0.2 + all * PZ - GAP + 0.7;
   const at = (i) => ({ ...bay(i), w: IW, d: ID, slots: SLOTS });
   const cells = {};

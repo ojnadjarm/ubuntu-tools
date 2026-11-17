@@ -89,3 +89,16 @@ html.ofill .office .ofs { top: max(.7rem, env(safe-area-inset-top)); }
 html.ofill .office .hud { bottom: max(.7rem, env(safe-area-inset-bottom)); }
 .office .ost { padding: 0 .45em; border: 1px solid var(--vio); background: var(--vio-w); color: var(--vio2); font-size: max(11px, .72rem); font-weight: 400; letter-spacing: .12em; text-transform: uppercase; white-space: nowrap; }
 .office .seat.rest .av, .office .team.rest .mem { opacity: .55; }
+/* Floors (T1755): an elevator panel top left, top floor first; the pressed floor is the one shown, each button counts who works there. */
+.office .oflr { position: absolute; left: .7rem; top: .7rem; z-index: 3; display: flex; flex-direction: column; gap: .3rem; }
+.office .oflr:empty, .office .stage[data-still="1"] .oflr { display: none; }
+.office .oflr button { display: grid; grid-template-columns: 2.2em minmax(0, 1fr) auto; align-items: center; gap: .5rem; min-height: 2.5rem; min-width: 9.5rem; padding: .3rem .7rem; border: 1px solid var(--line2); background: color-mix(in srgb, var(--bg1) 82%, transparent); color: var(--mid); font: inherit; font-size: max(11px, .8rem); letter-spacing: .14em; text-transform: uppercase; text-align: left; white-space: nowrap; cursor: pointer; }
+.office .oflr button:hover { color: var(--g2); background: var(--w08); }
+.office .oflr button:focus-visible { outline: 1px solid var(--g); outline-offset: 2px; }
+.office .oflr button[aria-pressed="true"] { border-color: var(--g); color: var(--hi); box-shadow: inset 3px 0 0 var(--g); }
+.office .oflr .fn { color: var(--mute); }
+.office .oflr [aria-pressed="true"] .fn { color: var(--g); }
+.office .oflr .fc { min-width: 1.6em; padding: 0 .35em; border: 1px solid var(--line2); color: var(--mute); font-weight: 400; text-align: center; letter-spacing: 0; }
+.office .oflr .fc.on { border-color: var(--g); color: var(--g); box-shadow: 0 0 .6em -.1em var(--g); }
+html.ofill .office .oflr { top: max(.7rem, env(safe-area-inset-top)); }
+@media (max-width: 899px), (pointer: coarse) { .office .oflr button { min-height: 44px; } }

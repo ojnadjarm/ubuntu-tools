@@ -3,6 +3,7 @@ import { seatState, titled } from "../seats.js";
 import { claimRow } from "../claims.js";
 import { store } from "../store.js";
 import { verdict } from "../verdict.js";
+import { MAIN, placer } from "./floors.js";
 
 export const SLOTS = 6;
 const SESSION = { working: "working", idle: "idle" };
@@ -71,8 +72,12 @@ export function build(P, { now = Date.now(), needs = verdict(store.D).bad, talk 
   const rooms = heads.flatMap((h, t) => [seatRoom(h, t, "seat"), ...down(h.id, t)]);
   const loose = S.filter((s) => !s.seat && !(s.parent in byId && s.parent !== (top && top.id)));
   const poolPeople = workingFirst([...loose.map((s) => worker(s, "pool")), ...subs.filter((a) => a.state === "working" && !placed.has(a.id) && !who[a.id]).map((a) => agent(a, "pool"))]);
-  const pool = room("pool", "pool", "Desk pool", "Agents", "", -1, poolPeople);
-  rooms.push(pool);
+  /* One desk pool a floor that has loose people (the main one always): a worker sits on the floor of whoever started it. */
+  const at = placer(P), fl = (p) => at.starter(p.raw.started_by), poolId = (f) => (f === MAIN ? "pool" : "pool-" + f);
+  poolPeople.forEach((p) => (p.room = poolId(fl(p))));
+  const pools = [...new Set([MAIN, ...poolPeople.map(fl)])].map((f) => Object.assign(room("pool", poolId(f), "Desk pool", "Agents", "", -1, poolPeople.filter((p) => fl(p) === f)), { floor: f })), pool = pools[0];
+  [ceo, ...rooms].filter(Boolean).forEach((r) => (r.floor = at.seat(r.id)));
+  rooms.push(...pools);
   const live = subs.filter((a) => a.state === "working"), bad = subs.find((a) => a.state === "error" && now - ms(a.last) < FAIL_MS);
   if (ceo) {
     const c = ceo.people[0];
@@ -84,9 +89,9 @@ export function build(P, { now = Date.now(), needs = verdict(store.D).bad, talk 
   const staff = (P.staff || []).map((t, k) => {
     const id = "team-" + t.id, members = (t.members || []).map((m) => put({ id: m.id, kind: "staff", name: m.name, rank: m.rank, role: "crew", pose: staffPose(m),
       on: !!m.on, state: m.state, since: (m.last || {}).end, room: id, raw: { ...m, team: t.name } }));
-    return room("team", id, t.name, "Team", t.name, heads.length + k, members, null, t.status || null);
+    return Object.assign(room("team", id, t.name, "Team", t.name, heads.length + k, members, null, t.status || null), { floor: at.team(t.id) });
   });
-  [pool, ...staff].forEach((r) => (who[r.id] = r));
+  [...pools, ...staff].forEach((r) => (who[r.id] = r));
 
   const all = [ceo, ...rooms, ...staff].filter(Boolean), night = !all.some((r) => r.awake);
   all.forEach((r) => (r.key = JSON.stringify([r.kind, r.name, r.area, r.team, r.people.map((p) => [p.id, p.pose, !!p.on]), r.busy, r.awake, r.more, r.live || 0, ...(r.status ? [r.status] : []), night])));

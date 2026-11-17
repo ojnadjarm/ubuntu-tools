@@ -37,10 +37,24 @@ def _validate(data):
                 raise ValueError(f"member {mid}: unit {m['unit']} is not a .timer or .service")
     if not isinstance(data.get("hidden", []), list):
         raise ValueError("hidden must be a list")
+    floors, on = set(), {}
+    for f in data.get("floors", []):
+        fid = str(f.get("id") or "").strip()
+        if not fid or not str(f.get("name") or "").strip() or fid == "main":
+            raise ValueError(f"floor {f.get('id')}: empty id or name, or the reserved id main")
+        if fid in floors:
+            raise ValueError(f"duplicate floor id {fid}")
+        floors.add(fid)
+        if not isinstance(f.get("teams"), list) or not f["teams"]:
+            raise ValueError(f"floor {fid}: teams must be a non-empty list")
+        for t in f["teams"]:
+            if t in on:
+                raise ValueError(f"team {t} on 2 floors: {on[t]}, {fid}")
+            on[t] = fid
 
 
 def load(p=None):
-    """The validated staff file: {teams, hidden}."""
+    """The validated staff file: {teams, hidden, floors?}."""
     with open(p or path()) as f:
         data = json.load(f)
     _validate(data)

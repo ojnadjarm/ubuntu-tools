@@ -65,6 +65,8 @@ def compose(org, ags, cfg):
     out = {"seats": seats, "sessions": sessions,
            "staff": [shown(t) for t in staff.assign(cfg["teams"], cfg.get("hidden", []), ags.get("roster", []), folders)],
            "agents": {"orchestrator": ags.get("orchestrator", {}), "subagents": subs, "claims": ags.get("claims", [])}}
+    if cfg.get("floors"):
+        out["floors"] = cfg["floors"]
     err = "; ".join(e for e in (org.get("error"), ags.get("error")) if e)
     return {**out, "error": err} if err else out
 

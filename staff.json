@@ -5,8 +5,7 @@
       {"id": "maintenance", "name": "Briar", "rank": "Caretaker"},
       {"id": "moodle-keeper", "name": "Wren", "rank": "Moodle Keeper"},
       {"id": "fleet-backup", "name": "Yarrow", "rank": "Archivist", "unit": "fleet-backup.timer"},
-      {"id": "sentinel", "name": "Ember", "rank": "Sentinel"},
-      {"id": "discord-liaison", "name": "Sorrel", "rank": "Liaison"}
+      {"id": "sentinel", "name": "Ember", "rank": "Sentinel"}
     ]},
     {"id": "quality", "name": "Quality", "members": [
       {"id": "code-review", "name": "Tarn", "rank": "Code Reviewer"},
@@ -22,7 +21,14 @@
     {"id": "finance", "name": "Finance", "members": [
       {"id": "hacienda", "name": "Laurel", "rank": "Tax Clerk"},
       {"id": "finance-web", "name": "Thrift", "rank": "Bookkeeper", "unit": "finance-web.service"}
+    ]},
+    {"id": "discord-crew", "name": "Discord Crew", "members": [
+      {"id": "discord-liaison", "name": "Sorrel", "rank": "Liaison"},
+      {"id": "discord-bot", "name": "Vesper", "rank": "Forum Bot", "unit": "discord-bot.service"}
     ]}
+  ],
+  "floors": [
+    {"id": "discord", "name": "Discord", "teams": ["discord", "discord-crew"]}
   ],
   "hidden": ["hello"]
 }

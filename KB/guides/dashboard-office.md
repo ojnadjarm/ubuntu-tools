@@ -1,10 +1,11 @@
 # Dashboard office: add a team, a member, a name; the 3D Org page (`staff.json`, `/api/office`)
 
-Ticket: T1601 (01-18), T1658, T1666, T1687 · Last verified: 2026-11-11 by T1687 (`tests/test_office_status.js`, `tests/test_section_status.py`, live `/api/office` vass paused), T1666 (`bin/tests/dashboard-office-drag.test.sh`), T1658 (`bin/tests/dashboard-office-chat.test.sh`); 2026-11-10 by T1601-16 (`staff.load()` 3 teams 12 members, live `GET /api/office`
+Ticket: T1601 (01-18), T1658, T1666, T1687, T1755 · Last verified: 2026-11-17 by T1755 (`tests/test_office_floor_model.js`, `tests/test_office_floors.py`, live `/api/office` floors, shots 2 floors × 5 widths); 2026-11-11 by T1687 (`tests/test_office_status.js`, `tests/test_section_status.py`, live `/api/office` vass paused), T1666 (`bin/tests/dashboard-office-drag.test.sh`), T1658 (`bin/tests/dashboard-office-chat.test.sh`); 2026-11-10 by T1601-16 (`staff.load()` 3 teams 12 members, live `GET /api/office`
 4 teams incl. Unassigned 1 (`memory-keeper`), `test_office_*.js` green, `GPU=1 tools/shots.mjs` margins at 5 widths)
 
 ## When to use
 - A new team, member, display name or rank in the office (Agents › Office, `#org`), or a seat in it.
+- A new floor of the office (T1755: the Discord projects' floor), or a team moved to another floor.
 - Changing the office scene (rooms, signs, camera) or its budgets. Not for chat rules or seats' wakes: guide `agent-chat`.
   Not for the dashboard eye (glyph swarm): guide `dashboard-threejs-glyph-eye`.
 
@@ -45,6 +46,19 @@ Ticket: T1601 (01-18), T1658, T1666, T1687 · Last verified: 2026-11-11 by T1687
   label under a rail, its racks keep their state, floor trace and lamp read as asleep; card state line "Paused since 11 Nov
   · N working now", note first; the list tags the seat or team. Rooms without one build byte-identical chunks. No status
   changes behaviour: a paused seat still works when woken. Shots `~/drop/T1687/`.
+- Floors (T1755, owner 2026-11-17: "discord projects will need its own floor"): a floor is one line in `staff.json`
+  `floors` (`{"id", "name", "teams": [...]}`); a team id names an org.json head seat (a PO under the CEO, with its whole
+  tree) or a staff.json team; everything not named stands on the main floor (id `main`, reserved), with the CEO.
+  `lib/staff.py` validates (empty id/name, `main`, duplicate, empty teams, a team on 2 floors); `office.compose` sends
+  `floors` only when set. Client: `office/floors.js` (pure: `floors(P)`, `placer(P)` → seat/team/starter floor,
+  `view(M, f)`, `working(M, list)`); `model.js` stamps `room.floor` and splits the desk pool per floor (a loose worker
+  sits on the floor of the staff member that started it: `started_by` = member id or `<id>-…`; `pool-<floor>` only
+  when it has people); a manager's po-work worker already sits in its seat's room, so it follows the seat. `org.js`
+  hands the renderer `view(M, floor)` (a floor change = `patch.layout`, full rebuild and camera fit), cards and the
+  list keep the whole model. The elevator panel `.oflr` (top left of the stage, top floor first, `aria-pressed`,
+  count of working people per floor) is hidden with one floor and in still mode; `#org?floor=<id>` keeps the floor
+  over a reload (`read`/`hash` exports). `layout.js` `rowsOf(M)` (shared with `build/hall.js`): seat rows from 1 (was
+  2), at least 2 rows in all for the pool by the stairs. The renderer and builders have no floor branch.
 - Unread mark in the 3D office: left out (T1658). The data is cheap (`/api/chat` `channels[].unread` per `dmOf(id)`), but a
   mark over a creature needs a per-creature lamp or halo in `model.js` + `gl/` (Room.key, diff, rebuild), not a few lines.
 
@@ -63,6 +77,8 @@ cd ~/agents
 # a team: one object in "teams"; a member: one object in its "members"; a name or rank: edit that object
 #   {"id": "<team>", "name": "<Team>", "members": [{"id": "<agent folder or unit id>", "name": "<Name>", "rank": "<Rank>"}]}
 #   "unit": "<x>.timer|.service" only for a member with no ~/agents/<id> folder; "hidden": ["<id>"] keeps one out
+# a floor: one line in "floors" (teams = org.json head seat ids and/or staff team ids; their trees and members follow)
+#   {"id": "<floor>", "name": "<Name>", "teams": ["<head seat id>", "<staff team id>"]}     the panel and #org?floor=<floor> follow
 python3 -c 'import sys; sys.path.insert(0, "lib"); import staff; d = staff.load(); print(len(d["teams"]), "teams ok")'   # ValueError names the first problem
 # set or clear a section's status (T1687): on its org.json seat or staff.json team line add
 #   "status": {"id": "paused|vacation", "since": "YYYY-MM-DD", "note": "<optional>"}; delete the key (or "id": "active") to clear;
@@ -72,6 +88,7 @@ curl -s http://127.0.0.1:19998/api/office | python3 -c 'import sys,json; d=json.
 cd dashboard
 python3 -m pytest tests/test_staff.py tests/test_office_api.py -q
 for t in model build fields gl screen signs gap touch keys avatar_only patch workers_drawn; do node tests/test_office_$t.js || break; done
+node --test tests/test_office_floor*.js && python3 -m pytest tests/test_office_floors.py -q   # floors (T1755)
 node tests/test_office_parity_org.js && node tests/test_office_parity_court.js && node tests/test_office_parity_roster.js
 bash ~/agents/bin/tests/dashboard-office-chat.test.sh      # talk panel + full screen, sandboxed (ONLY=desktop|full|phone|widths)
 bash ~/agents/bin/tests/dashboard-office-drag.test.sh      # talk panel drag, sandboxed (ONLY=desktop|touch|phone)

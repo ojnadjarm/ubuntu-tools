@@ -12,6 +12,7 @@ import { store } from "../store.js";
 import { verdict } from "../verdict.js";
 import { build, diff } from "../office/model.js";
 import { plan as planOf } from "../office/layout.js";
+import { MAIN, floors, view, working } from "../office/floors.js";
 import { until } from "../office/time.js";
 import { list } from "../office/overlay/list.js";
 import * as card from "../office/overlay/card.js";
@@ -23,7 +24,7 @@ const STALE_MS = 20000, FAST_MS = 4500, DRAG_PX = 6;
 const NOTE = "Still picture: this browser has no graphics acceleration. The list below is live.";
 const grid = document.getElementById("grid"), canvas = document.createElement("canvas");
 canvas.setAttribute("aria-hidden", "true");
-let talk = null, P = null, M = null, plan = null, applied = null, R = null, starting = false, at = 0, busy = false, err = "", down = null, over = null;
+let talk = null, P = null, M = null, V = null, floor = MAIN, plan = null, applied = null, R = null, starting = false, at = 0, busy = false, err = "", down = null, over = null;
 
 for (const href of ["/static/css/org.css", "/static/css/office.css"]) if (!document.querySelector(`link[href="${href}"]`)) {
   const l = document.createElement("link");
@@ -41,10 +42,37 @@ function talkTo(ch) {
   import("../office/overlay/talk.js").then((t) => { talk = t; if (root()) t.open(ch); });
 }
 
-/* Builds the model and its plan from the last read: the CEO's lamp from the store, the seats that talk now. */
+/* Builds the model from the last read (the CEO's lamp from the store, the seats that talk now), the shown floor's view of it and its plan. */
 function model() {
-  M = build(P, { needs: verdict(store.D).bad, talk: talking }); plan = planOf(M);
+  M = build(P, { needs: verdict(store.D).bad, talk: talking });
+  shown();
 }
+
+/* The view and plan of the shown floor; a floor the data no longer has falls back to the main floor. */
+function shown() {
+  if (!floors(P).some((f) => f.id === floor)) floor = MAIN;
+  V = view(M, floor); plan = planOf(V);
+}
+
+/* The floor buttons, top floor first: number, name, people working there; empty with one floor. */
+function floorNav() {
+  const list = floors(P), n = working(M, list);
+  if (list.length < 2) return "";
+  return list.map((f, i) => `<button type="button" data-floor="${esc(f.id)}" aria-pressed="${f.id === floor}" aria-label="${esc(f.name)} floor, ${n[f.id]} working">` +
+    `<span class="fn" aria-hidden="true">${i + 1}F</span><span class="fl" aria-hidden="true">${esc(f.name)}</span><b class="fc${n[f.id] ? " on" : ""}" aria-hidden="true">${n[f.id]}</b></button>`).reverse().join("");
+}
+
+/* Shows floor id: the scene, the buttons and the address follow; an open card closes. */
+function goFloor(id) {
+  if (id === floor || !M) return;
+  floor = id; card.close(); shown();
+  history.replaceState(history.state, "", hash());
+  paint();
+}
+
+/* The floor from the address (#org?floor=<id>), kept across a reload. */
+export function read(q) { floor = new URLSearchParams(q).get("floor") || MAIN; }
+export const hash = () => "#org" + (floor !== MAIN ? "?floor=" + encodeURIComponent(floor) : "");
 
 /* Reads /api/office when the copy is missing or older than max ms; never while the tab is hidden. */
 function pull(max) {
@@ -71,9 +99,9 @@ function line() {
 /* Hands the renderer what changed since its last model; redraw forces a frame after the canvas came back. */
 function show(redraw) {
   if (!R || !M || !canvas.isConnected) return;
-  const patch = applied !== M ? diff(applied, M) : redraw ? { rooms: [(M.ceo || M.rooms[0]).id] } : null;
-  if (patch) R.apply(M, plan, patch);
-  applied = M;
+  const first = V.ceo || V.rooms[0] || V.staff[0], patch = applied !== V ? diff(applied, V) : redraw && first ? { rooms: [first.id] } : null;
+  if (patch) R.apply(V, plan, patch);
+  applied = V;
 }
 
 /* The creature or sign under a pointer event on the canvas, or null. */
@@ -122,6 +150,7 @@ function paint() {
   if (!M || !el) { go("org", true); return; }
   sync(el.querySelector(".bt"), line());
   sync(el.querySelector(".olist"), list(M));
+  sync(el.querySelector(".oflr"), floorNav());
   card.refresh(M);
   show(false);
 }
@@ -137,7 +166,7 @@ export function render() {
   queueMicrotask(mount);
   return `<div class="nxs org office"><section class="band" aria-label="Office summary"><div class="perch" id="perch" aria-hidden="true"></div><div class="bt">${line()}</div></section>` +
     `<section class="stage" aria-label="The office"><div class="hud"><button type="button" id="office-zin" aria-label="Zoom in">+</button><button type="button" id="office-zout" aria-label="Zoom out">−</button><button type="button" id="office-reset">Reset view</button></div>` +
-    `<div class="ofs">${full.button()}</div><p class="hint">Drag to turn · wheel or pinch to zoom · tap a creature or a room's sign</p><p class="still">${NOTE}</p></section>` +
+    `<nav class="oflr" aria-label="Floors">${floorNav()}</nav><div class="ofs">${full.button()}</div><p class="hint">Drag to turn · wheel or pinch to zoom · tap a creature or a room's sign</p><p class="still">${NOTE}</p></section>` +
     `<div class="olist">${list(M)}</div></div>`;
 }
 
@@ -157,6 +186,8 @@ export function click(e) {
     return true;
   }
   if (e.target.closest && e.target.closest("#office-full")) { full.toggle(); return true; }
+  const f = e.target.closest && e.target.closest(".office [data-floor]");
+  if (f) { goFloor(f.dataset.floor); return true; }
   const t = e.target.closest && e.target.closest("[data-who], [data-close], #office-zin, #office-zout, #office-reset");
   if (!t) return false;
   if ("close" in t.dataset) card.close();
