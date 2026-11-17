@@ -99,6 +99,17 @@ sed -i 's/\tPemberton\t/\tpemberton\t/' "$S/checks/questions.d/core.tsv"; fx pyt
 quiz --changed
 ev "--changed: a row edited on an unchanged page is asked again (1 asked)" '[ "$rc" = 0 ] && [ "$(asked)" = 1 ] && grep -q mascot "$LOG"' || cat "$LOG"
 
+# 10. The quiz of a staging copy (T1726): the model's `memory load` reads the staged store, so a fact only on the staged
+# core card is answered while MEMORY_HOME still names the live store.
+ST="$WORK/staging"; cp -r "$S" "$ST"; rm -rf "$ST/.git"
+printf -- '- The fleet kettle is copper. (26-04-03) ^c09\n' >>"$ST/core/CORE.md"
+printf 'c09\tWhat is the fleet kettle made of?\tcopper\tkettle.md\n' >>"$ST/checks/questions.d/core.tsv"
+fx env MEMORY_HOME="$ST" python3 "$ROOT/lib/memory_quiz.py" merge >/dev/null
+: >"$LOG"
+fx python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import memory_check, memory_quiz, memory_store; memory_quiz.check(memory_store.Store(sys.argv[2]), {})' \
+  "$ROOT/lib" "$ST" 2>"$WORK/err"
+ev "staged quiz: the staged core line is answered, 8/8 green" 'grep -qx "quiz · 8/8 green" "$WORK/err" && grep -q kettle "$LOG"' || cat "$WORK/err"
+
 # 7. The gate module keeps its size cap.
 ev "memory_check.py is at most 300 lines" '[ "$(wc -l <"$ROOT/lib/memory_check.py")" -le 300 ]'
 

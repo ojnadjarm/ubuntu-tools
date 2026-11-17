@@ -177,7 +177,8 @@ def _groups(rivals):
 
 
 def fire(graph, cues, session=None):
-    """[Firing] above threshold with at least MIN_PATHS cue paths, one per place and rival set, strongest first.
+    """[Firing] above threshold with at least MIN_PATHS cue paths, one per rival set and topic file; a card (unrelated
+    rules) again on cues its shown firings did not use; strongest first.
 
     session: a dict whose "residual" (concepts and memories still lit) primes this prompt and is rewritten by it.
     """
@@ -211,15 +212,16 @@ def fire(graph, cues, session=None):
         session["residual"] = {n: round(v, 4) for kind in ("c:", "m:")
                                for v, n in [x for x in lit if x[1].startswith(kind)][:RESIDUAL_N]}
     total = {n[2:]: v + graph.mem[n[2:]][1] for n, v in act.items() if n.startswith("m:") and n[2:] in graph.mem}
-    group, seen, out = _groups(graph.rivals), set(), []
+    group, seen, used, out = _groups(graph.rivals), set(), {}, []
     for m, v in sorted(total.items(), key=lambda x: (-x[1], x[0])):
-        place = graph.mem[m][0]
-        if v < graph.mem[m][2] or len(_origins(paths.get("m:" + m, ()))) < MIN_PATHS:
+        place, origins = graph.mem[m][0], _origins(paths.get("m:" + m, ()))
+        if v < graph.mem[m][2] or len(origins) < MIN_PATHS:
             continue
-        keys = {("p", place), ("r", group.get(m, m))}
-        if not keys & seen:
+        card = place.endswith(("/DOMAIN.md", "/CORE.md"))
+        if group.get(m, m) not in seen and (place not in used or card and not used[place] & origins):
             out.append(Firing(m, place, round(v, 3), tuple(sorted(paths["m:" + m]))))
-            seen |= keys
+            seen.add(group.get(m, m))
+            used.setdefault(place, set()).update(origins)
     return out
 
 

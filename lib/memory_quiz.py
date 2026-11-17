@@ -18,6 +18,7 @@ BHEAD = ["key", "pass", "page", "id", "page_sha", "row_sha"]
 CHUNK = 25
 VOTES = 3
 Q = namedtuple("Q", "key domain page id question must")
+QID = re.compile(r"\^?[a-z][a-z0-9-]*?\d+[a-z]?")
 
 
 def _tsv(path):
@@ -57,6 +58,24 @@ def rows(store, private=False):
     return out
 
 
+def lint(store):
+    """[Finding] per questions.d row that breaks its file's header: cell count, an id as question, a bad page or id."""
+    out = []
+    for f in _files(store, QD, False) + _files(store, QD, True):
+        with open(f, encoding="utf-8") as fh:
+            rows = [l.rstrip("\n").split("\t") for l in fh]
+        head = rows[0] if rows else []
+        for n, r in enumerate(rows[1:], 2):
+            c = dict(zip(head, (x.strip() for x in r)))
+            what = (None if not any(c.values()) else f"{len(r)} cells, the header has {len(head)}" if len(r) != len(head)
+                    else "an id in the question cell" if QID.fullmatch(c.get("question", ""))
+                    else f"page {c['page']!r} is not a page" if c.get("page") and not os.path.isfile(store.path(c["page"]))
+                    else f"id {c['id']!r} is not an id" if c.get("id") and not QID.fullmatch(c["id"]) else None)
+            if what:
+                out.append(Finding("quiz-rows", os.path.relpath(f, store.root), n, what + ": follow the file's header"))
+    return out
+
+
 def merge(store):
     """Write the generated views checks/questions.tsv (public questions) and checks/ids.tsv from questions.d/ and ids.d/."""
     qs = rows(store)
@@ -81,10 +100,19 @@ def _carrier():
     return mod
 
 
-def ask(prompt, domains):
-    """The one model call, (answer, tokens): the carrier's seam (MEMORY_QUIZ_CMD, else haiku through agent-exec, closed-book)."""
+def ask(prompt, domains, store):
+    """The one model call, (answer, tokens): the carrier's seam (MEMORY_QUIZ_CMD, else haiku through agent-exec, closed-book);
+    its `memory load` reads the quizzed store (a staging copy during `memory apply`), not the live one."""
     os.environ["PATH"] = os.path.join(ROOT, "bin") + os.pathsep + os.environ.get("PATH", "")
-    return _carrier().ask_usage(prompt, domains)
+    old = os.environ.get("MEMORY_HOME")
+    os.environ["MEMORY_HOME"] = store.root
+    try:
+        return _carrier().ask_usage(prompt, domains)
+    finally:
+        if old is None:
+            del os.environ["MEMORY_HOME"]
+        else:
+            os.environ["MEMORY_HOME"] = old
 
 
 def pages_for(store, domain):
@@ -120,7 +148,7 @@ def quiz(store, qs, used):
         group = [q for q in qs if q.domain == dom]
         for c in range(0, len(group), CHUNK):
             part = group[c:c + CHUNK]
-            text, tokens = ask(prompt(store, dom, part), [] if dom == "core" else [dom])
+            text, tokens = ask(prompt(store, dom, part), [] if dom == "core" else [dom], store)
             used.update(tokens, calls=1)
             got = answers(text)
             for i, q in enumerate(part, 1):

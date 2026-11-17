@@ -217,6 +217,36 @@ mem apply "$S" >"$T/c.out" 2>&1; rc=$?
   && ! grep -q gd08 "$St/domains/garden/DOMAIN.md"; } && ok || no "rc $rc: $(cat "$T/c.out")"
 rm -rf "$S" "$S.base.tsv"
 
+# --- T1726: private notes stay out of git, a rejected note leaves a REVIEW.md line, checks/ edits get no ledger line ----
+note() { printf 'source: agent\nseat: orchestrator\ndomain: %s\ndate: 2026-11-17T01:00:00+0100\nsession: -\ntext: %s\n' "$1" "$2" >"$St/inbox/$3"; }
+printf '%s/purse purse\n' "$T/proj" >>"$St/domains.map"
+mkdir -p "$St/domains/purse"; printf 'PRIVATE: orchestrator\n# Purse card\n' >"$St/domains/purse/DOMAIN.md"
+git -C "$St" add -A && git -C "$St" commit -qm "fixture: private purse domain"
+note purse "Purse coins are counted on Fridays." n9-purse.md
+note - "His tea brand is a private matter." n10-listed.md
+note garden "Seed trays are washed in spring." n11-public.md
+note garden "Policy per secret: free, ruled. The seed API key is $TOK" n12-token.md
+S="$(mem stage)"; printf 'n10-listed.md\n' >"$S/notes-private.txt"
+GH_VISIBILITY=PRIVATE mem apply "$S" >"$T/pv.out" 2>&1; rc=$?
+t "private notes: apply green; purse and listed notes in archive/notes-private"
+{ [ "$rc" = 0 ] && [ -f "$St/archive/notes-private/n9-purse.md" ] && [ -f "$St/archive/notes-private/n10-listed.md" ] \
+  && [ -f "$St/archive/notes/n11-public.md" ] && [ ! -e "$St/archive/notes/n9-purse.md" ] && [ ! -e "$St/archive/notes/n10-listed.md" ] \
+  && [ ! -e "$St/notes-private.txt" ]; } && ok || no "rc $rc: $(cat "$T/pv.out"; ls "$St/archive/"*)"
+t "private notes: git-ignored, git status shows nothing new tracked, origin has none"
+{ grep -qx 'archive/notes-private/' "$St/.gitignore" && [ -z "$(git -C "$St" status --porcelain)" ] \
+  && [ -z "$(git -C "$St" ls-files archive/notes-private)" ] && git -C "$St" ls-files --error-unmatch archive/notes/n11-public.md >/dev/null 2>&1 \
+  && ! git -C "$T/origin.git" log -p main | grep -qE 'Purse coins|tea brand'; } \
+  && ok || no "$(git -C "$St" status --porcelain; git -C "$St" ls-files archive)"
+t "rejected note: a REVIEW.md line names it, the note is kept outside the store"
+{ grep -q 'inbox/n12-token.md · rejected by secrets' "$St/REVIEW.md" && [ -f "$AGENT_WORK/memory-keeper/rejected/n12-token.md" ] \
+  && ! grep -rqF "$TOK" "$St" --exclude-dir=.git; } && ok || no "$(cat "$St/REVIEW.md")"
+t "checks/ edit: committed as owner:, no owner-edit ledger line"
+lines0="$(wc -l <"$St/core/ledger.md")"
+printf 'gd01\tHow wide are seed photos, in px?\t800\tseed.md\n' >>"$St/checks/questions.d/garden.tsv"
+S="$(mem stage)"; mem apply "$S" >"$T/ck.out" 2>&1; rc=$?
+{ [ "$rc" = 0 ] && [ "$(wc -l <"$St/core/ledger.md")" = "$lines0" ] && git -C "$St" log --format=%s | grep -q '^owner: ' \
+  && [ -z "$(git -C "$St" status --porcelain)" ]; } && ok || no "rc $rc: $(cat "$T/ck.out"; tail -2 "$St/core/ledger.md")"
+
 # --- PRECHECK: the keeper's agent.env through the real agent-run, model stubbed --------------------------------
 t "PRECHECK: nothing to do, agent-run skips in under 1 s, 0 model calls"
 setup

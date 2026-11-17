@@ -11,7 +11,10 @@ import memory_store
 from agent_work import agent_work
 
 NOTES = "archive/notes"
+NOTES_PRIVATE = "archive/notes-private"
+PRIVATE_LIST = "notes-private.txt"
 LEDGER = "core/ledger.md"
+NO_LEDGER = ("checks/",)
 
 
 def _base(staging):
@@ -67,8 +70,30 @@ def _read(path):
         return f.read()
 
 
+def _private_notes(store, stg, notes):
+    """Notes bound for a PRIVATE page (named in the keeper's notes-private.txt, consumed here, or whose domain card is
+    PRIVATE); their archive folder is git-ignored in the staging copy."""
+    listed = set()
+    if os.path.isfile(stg.path(PRIVATE_LIST)):
+        listed = {os.path.basename(l.strip()) for l in _read(stg.path(PRIVATE_LIST)).splitlines() if l.strip()}
+        os.remove(stg.path(PRIVATE_LIST))
+    out = set()
+    for r in notes:
+        src = store.path(r) if os.path.isfile(store.path(r)) else stg.path(r)
+        dom = memory_check.note_fields(_read(src)).get("domain", "-") if os.path.isfile(src) else "-"
+        card = stg.card(dom) if dom in stg.domains() else None
+        if os.path.basename(r) in listed or (card and os.path.isfile(stg.path(card)) and stg.private_seats(card) is not None):
+            out.add(r)
+    ign = stg.path(".gitignore")
+    have = _read(ign).splitlines() if os.path.isfile(ign) else []
+    if NOTES_PRIVATE + "/" not in have:
+        memory_store._atomic(ign, "".join(f"{l}\n" for l in have + [NOTES_PRIVATE + "/"]))
+    return out
+
+
 def commit_others(store, today):
-    """Commit edits made outside the keeper first: a manager's domain as `<manager>:`, the rest as `owner:` plus a ledger line."""
+    """Commit edits made outside the keeper first: a manager's domain as `<manager>:`, the rest as `owner:` plus a ledger
+    line naming them (none for checks/)."""
     st = git(store, "status", "--porcelain", "-z", "--untracked-files=all").stdout
     paths = [e[3:] for e in st.split("\0") if len(e) > 3 and "inbox" not in e[3:].split("/")]
     groups = {}
@@ -79,9 +104,10 @@ def commit_others(store, today):
             who = w if w and w != "keeper" else "owner"
         groups.setdefault(who, []).append(p)
     for who, ps in sorted(groups.items()):
-        if who == "owner" and os.path.isfile(store.path(LEDGER)):
+        noted = sorted(p for p in ps if not p.startswith(NO_LEDGER))
+        if who == "owner" and noted and os.path.isfile(store.path(LEDGER)):
             with open(store.path(LEDGER), "a", encoding="utf-8") as f:
-                f.write(f"- {today} · owner edit, committed before the keeper run: {', '.join(sorted(ps))} · (git `owner:` commit)\n")
+                f.write(f"- {today} · owner edit, committed before the keeper run: {', '.join(noted)} · (git `owner:` commit)\n")
             ps = sorted(set(ps) | {LEDGER})
         git(store, "add", "-A", "--", *ps)
         git(store, "commit", "-q", "-m", f"{who}: edits before the keeper run {today}")
@@ -146,10 +172,11 @@ def apply(store, staging, car=None):
     notes = sorted(r for r in base if is_note(r))
     bad = {f.file: f.checker for f in memory_check.secrets(store, {}) + memory_check.machine_values(store, {})}
     rejected = {r: bad[r] for r in notes if r in bad}
+    private = _private_notes(store, stg, notes)
     for r in notes:
         src = store.path(r) if os.path.isfile(store.path(r)) else stg.path(r)
         if r not in rejected and os.path.isfile(src):
-            _put(src, stg.path(f"{NOTES}/{os.path.basename(r)}"))
+            _put(src, stg.path(f"{NOTES_PRIVATE if r in private else NOTES}/{os.path.basename(r)}"))
         if os.path.isfile(stg.path(r)):
             os.remove(stg.path(r))
 
@@ -174,9 +201,11 @@ def apply(store, staging, car=None):
         print("\n".join(red))
         return 1
 
-    if held:
+    review = held + [f"- {today[2:]} · {r} · rejected by {c}: kept in $AGENT_WORK/memory-keeper/rejected/, "
+                     "re-file it without the value\n" for r, c in sorted(rejected.items())]
+    if review:
         with open(stg.path("REVIEW.md"), "a", encoding="utf-8") as f:
-            f.write("".join(held))
+            f.write("".join(review))
     if os.path.isdir(stg.path("checks/ids.d")):
         import memory_quiz
         memory_quiz.merge(stg)

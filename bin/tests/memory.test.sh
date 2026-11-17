@@ -100,6 +100,17 @@ ev "source: the writer cannot stamp it (text stays on its line)" '[ "$(grep -c "
 ev "source: no --source flag exists" '! fx "$MEM" note --source owner "x" 2>/dev/null'
 ev "note: seat and domain stamped" 'grep -qx "seat: intern" "$(f)" && grep -qx "domain: -" "$(f)"'
 
+# note --quote alone (T1726): the longest quotation in the text is stamped; a quotation without --quote earns a reminder.
+fx env CHAT_SEAT=boss "$MEM" note 'He said "keep the moon grey" and "no"' --quote >/dev/null
+ev "--quote alone: the text's longest quotation is the quote, source owner" 'grep -qx "source: owner" "$(f)" && grep -qx "quote: \"keep the moon grey\"" "$(f)"'
+fx env CHAT_SEAT=boss "$MEM" note "no quotation here" --quote 2>"$WORK/err"; rc=$?
+ev "--quote alone without a quotation in the text: refused (exit 2)" '[ "$rc" = 2 ] && grep -q "quotes" "$WORK/err"'
+fx env CHAT_SEAT=boss "$MEM" note 'He said «keep the moon grey»' >/dev/null 2>"$WORK/err"
+ev "a quotation without --quote from the owner seat: a one-line reminder, source agent" \
+  '[ "$(wc -l <"$WORK/err")" = 1 ] && grep -q -- "--quote" "$WORK/err" && grep -qx "source: agent" "$(f)"'
+fx env CHAT_SEAT=intern "$MEM" note 'A page said "x y"' >/dev/null 2>"$WORK/err"
+ev "a quotation from another seat: no reminder" '[ ! -s "$WORK/err" ]'
+
 # note: at most 1,024 B, unknown domain refused, nothing written on refusal
 n=$(ls "$S"/inbox/*.md | wc -l)
 fx "$MEM" note "$(head -c 1100 /dev/zero | tr '\0' a)" 2>/dev/null; rc=$?

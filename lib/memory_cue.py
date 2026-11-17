@@ -3,6 +3,7 @@ import re
 import unicodedata
 
 MAX_CUES = 8
+SUFFIXES = ("ing", "ed", "es", "or", "s")
 STOP = set("a an the of to in on for and or is are be was it its his he him with at by from as that this not no never "
            "only when what which does do how who where than then into out up any all one every each per after before i "
            "should can now you me my we please".split())
@@ -14,17 +15,24 @@ STOP_NET = set("el la los las un una unos unas de del al en que se su sus por pa
 
 
 def stem(w):
-    """A crude English stem: one plural or verb suffix off a long word."""
-    for suf in ("ing", "ed", "es", "s"):
+    """A crude English stem: one plural, verb or agent suffix off a long word, then a final e (update, updating: updat)."""
+    for suf in SUFFIXES:
         if len(w) > len(suf) + 3 and w.endswith(suf):
-            return w[:-len(suf)]
-    return w
+            w = w[:-len(suf)]
+            break
+    return w[:-1] if len(w) > 4 and w.endswith("e") else w
+
+
+# Full word and its usual short form are one concept (environment, env).
+ALIAS = {stem(k): v for k, v in {"environment": "env", "repository": "repo", "configuration": "config", "database": "db",
+                                  "directory": "dir", "application": "app", "development": "dev", "production": "prod"}.items()}
 
 
 def tokens(text):
-    """Lower-case stemmed content words of text, accents folded, English and Spanish stop words dropped."""
+    """Lower-case stemmed content words of text (short forms for ALIAS words), accents folded, stop words dropped."""
     plain = "".join(c for c in unicodedata.normalize("NFKD", text.lower()) if not unicodedata.combining(c))
-    return [stem(w) for w in re.findall(r"[a-z0-9]+", plain) if w not in STOP and w not in STOP_NET and len(w) > 1]
+    return [ALIAS.get(stem(w), stem(w)) for w in re.findall(r"[a-z0-9]+", plain)
+            if w not in STOP and w not in STOP_NET and len(w) > 1]
 
 
 def cues(text, graph):

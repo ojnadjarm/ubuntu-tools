@@ -123,5 +123,22 @@ printf 'source: owner\nseat: boss\ndomain: zebra\ndate: 2026-01-13\nsession: %s\
 out=$(env -i PATH="$PATH" HOME="$H" HARNESS_CONFIG="$H/.config/pc-harness/config.env" MEMORY_HOME="$D" "$MEM" check inbox 2>&1)
 is "mid-turn quote passes, peer quote is the one provenance finding" "$out" "provenance · inbox/20260113-peer.md:0 · source owner: the quote is not in the owner's turns of its transcript"
 
+# Secrets on a value, not a keyword (T1726): "secret: <plain word>" in prose passes, a value after the keyword is a finding.
+V="$WORK/value"; cp -r "$FX/store" "$V"
+printf -- '- Policy per secret: free (sandbox keys), ruled, critical. ^z09\n' >>"$V/domains/zebra/DOMAIN.md"
+out=$(env -i PATH="$PATH" HOME="$H" HARNESS_CONFIG="$H/.config/pc-harness/config.env" MEMORY_HOME="$V" "$MEM" check domains --before "$V" 2>&1)
+is "secrets: a keyword with a plain word after it is no finding" "$out" ""
+printf -- '- The feeder secret: Zq7Lm2Px9w. ^z10\n' >>"$V/domains/zebra/DOMAIN.md"
+out=$(env -i PATH="$PATH" HOME="$H" HARNESS_CONFIG="$H/.config/pc-harness/config.env" MEMORY_HOME="$V" "$MEM" check domains --before "$V" 2>&1)
+has "secrets: a value after the keyword is a finding" '^secrets · domains/zebra/DOMAIN\.md:[0-9]+ · secret-like text \(masked\)'
+
+# Quiz rows follow their file's header (T1726): an id-first row under a `question must page source` header is a finding.
+mkdir -p "$V/checks/questions.d"
+printf 'question\tmust\tpage\tsource\nWhat is the lead zebra called?\tBellamy\tdomains/zebra/DOMAIN.md\tzebra.md\nz05\tWho feeds the herd?\tkeeper\tagent 26-11-11\n' \
+  >"$V/checks/questions.d/zebra.tsv"
+out=$(env -i PATH="$PATH" HOME="$H" HARNESS_CONFIG="$H/.config/pc-harness/config.env" MEMORY_HOME="$V" "$MEM" check checks --before "$V" 2>&1)
+is "quiz rows: the misaligned row is the one finding" "$out" \
+  "quiz-rows · checks/questions.d/zebra.tsv:3 · an id in the question cell: follow the file's header"
+
 [ "$bad" = 0 ] && echo "all memory-check cases pass"
 exit $bad

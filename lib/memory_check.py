@@ -24,6 +24,7 @@ IMPERATIVE = re.compile(r"^\W*(always|never|must|do not|don't|ignore|run|push|de
 URL = re.compile(r"\b[a-z][a-z0-9+.-]*://\S+|\bwww\.\S+", re.I)
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+")
 PATHLIKE = re.compile(r"(?<![\w.~/-])(~?/[\w.@+-]+(?:/[\w.@+-]+)*)")
+PROSE_KEY, PROSE_WORD = re.compile(r"(?:token|topic|secret):\s+", re.I), re.compile(r"[a-z]{1,12}[.,:)]?")
 
 
 def fmt(f):
@@ -127,10 +128,17 @@ def line_format(store, before):
     return out
 
 
+def holds_secret(line):
+    """A redaction pattern (lib/redact.py) hits a value: `secret: <plain lower-case word>` in prose is a keyword, not a value."""
+    secret, *values = redact.patterns()
+    prose = [PROSE_KEY.fullmatch(m.group(1)) and PROSE_WORD.fullmatch(m.group(0)[m.end(3) - m.start():]) for m in secret.finditer(line)]
+    return redact.redact(line) != line and (any(p.search(line) for p in values) or not all(prose))
+
+
 def secrets(store, before):
-    """No line a redaction pattern (lib/redact.py) would change; the hit is masked, never printed."""
+    """No line that holds a secret value (holds_secret); the hit is masked, never printed."""
     return [Finding("secrets", rel, n, "secret-like text (masked): name the config key, never the value")
-            for rel, text in lint_files(store) for n, l in enumerate(text.splitlines(), 1) if redact.redact(l) != l]
+            for rel, text in lint_files(store) for n, l in enumerate(text.splitlines(), 1) if holds_secret(l)]
 
 
 @lru_cache(maxsize=1)
@@ -257,7 +265,13 @@ def concepts(store, before):
     return out
 
 
-CHECKERS = [budgets, ids, line_format, secrets, machine_values, untrusted, provenance, experience_only, concepts]
+def quiz_rows(store, before):
+    """checks/questions.d rows follow their file's header (lib/memory_quiz.py lint)."""
+    import memory_quiz
+    return memory_quiz.lint(store)
+
+
+CHECKERS = [budgets, ids, line_format, secrets, machine_values, untrusted, provenance, experience_only, concepts, quiz_rows]
 ON_DEMAND = {"quiz": quiz, "quiz-changed": quiz_changed}
 
 

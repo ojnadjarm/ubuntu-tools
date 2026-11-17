@@ -20,6 +20,8 @@ import memory_store  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 LIVE_N = 5
+FROM_TEXT = object()
+QUOTED = re.compile(r'"([^"]+)"|“([^”]+)”|«([^»]+)»')
 
 
 def carrier():
@@ -75,6 +77,13 @@ def note(store, seat, args):
     """Write one inbox note; the source is stamped here from the seat, never by the writer."""
     if args.domain:
         unknown(store, [args.domain])
+    quoted = [next(g for g in m.groups() if g) for m in QUOTED.finditer(args.text)]
+    if args.quote is FROM_TEXT:
+        if not quoted:
+            die("--quote without words takes them from a quotation in the text: put his exact words in quotes")
+        args.quote = max(quoted, key=len)
+    elif args.quote is None and quoted and memory_route.owner_seat(seat, store):
+        print("memory: the text quotes someone; if these are his words, stamp them: add --quote", file=sys.stderr)
     fields = [("source", memory_route.source_for(seat, args.quote is not None, store)), ("seat", seat or "-"),
               ("domain", args.domain or "-"), ("date", time.strftime("%Y-%m-%dT%H:%M:%S%z")),
               ("session", os.environ.get("CLAUDE_CODE_SESSION_ID") or "-"), ("text", " ".join(args.text.split()))]
@@ -286,7 +295,8 @@ def main():
     p = sub.add_parser("note", help="drop one lesson (at most 1,024 B) in the inbox")
     p.add_argument("--domain")
     p.add_argument("text")
-    p.add_argument("--quote", help="the exact words it rests on")
+    p.add_argument("--quote", nargs="?", const=FROM_TEXT,
+                   help="the exact words it rests on; alone: the longest quotation in the text")
     p = sub.add_parser("check", help="the gate: budgets, ids, format, secrets, machine values, untrusted, provenance, experience")
     p.add_argument("--before", help="the store folder to compare ids against (default: the store's git HEAD)")
     p.add_argument("folders", nargs="*", help="check only these folders of the store")

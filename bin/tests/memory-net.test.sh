@@ -139,6 +139,21 @@ a1="$(net -- 'hay north' | sed -E 's/.*@([0-9.]+).*/\1/')"; a2="$(net -- 'bale n
 ev "fan effect: two rare cues light b01 more than a common and a rare one ($a2 > $a1)" \
   'python3 -c "import sys; sys.exit(not $a2 > $a1)"'
 
+# --- T1726: the three measured recall misses, one class each ------------------------------------------------------
+page domains/desk/DOMAIN.md <<'EOF'
+# Desk card
+- The resume pdf: updating it means one re-render. (26-10-01) ^d01
+- A fresh env for a trial run comes from the install skill. (26-10-01) ^d02
+- The lamp project narrates the evening at the table. (26-10-01) ^d03
+- Its art is drawn by code, never by an image generator. (26-10-01) ^d04
+EOF
+"$MEM" net build >/dev/null
+is "stem: update finds updating (and resume, resumes)" "$(net -- 'update my resumes' | ids)" "d01[resum,updat]"
+is "short form: environment finds env" "$(net -- 'an environment for the trial' | ids)" "d02[env,trial]"
+is "one card, two hints on disjoint cues: the project line and the rule line" \
+  "$(net -- 'generate an image for the lamp project' | ids | tr ' ' '\n' | sed 's/\[.*//' | sort | tr '\n' ' ')" "d03 d04 "
+is "one topic file, one hint even on disjoint cues" "$(net -- 'watering at dusk, clay drains after a storm' | ids | wc -w)" 1
+
 # --- the build inside `memory apply` ------------------------------------------------------------------------------
 rm -rf "$S/net"
 git -C "$S" init -q -b main && git -C "$S" add -A && git -C "$S" commit -qm fixture
