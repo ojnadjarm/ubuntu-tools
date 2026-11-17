@@ -15,6 +15,9 @@ the other adapters are measured against it.
 | `hooks/session-start.sh` | 2-line wrapper: `harness context --json` |
 | `hooks/audit-log.py` | maps Claude's PostToolUse event onto `hooks/audit-log.py`'s generic record |
 | `hooks/memory-recall` | T1624 recall carrier: UserPromptSubmit prompt (or, on SubagentStart, the brief of the pending Agent call in the parent transcript) → `memory_recall.recall` → hint block; ids-only row per call in `$AGENT_WORK/memory-recall/hooks/`; any failure 0 B, exit 0 |
+| `hooks/spawn-context` | T1754 SubagentStart: `harness context --worker` plus the cards of the brief's `Memory:` line (core left out; over 10,000 chars one `memory load` line) as additionalContext |
+| `hooks/agent-spawn-gate` | T1754 PreToolUse on Agent: `bin/spawn-gate` exit 3 denies the spawn unless the description says `[light]`; any other outcome allows |
+| `hooks/send-message-guard` | T1754 PreToolUse on SendMessage: denies a message to an agent whose transcript is under `subagents/workflows/` (steer it by its brief file) |
 
 ## Flags `run` uses
 
@@ -39,6 +42,7 @@ session and subagent):
 | `SubagentStart` / `SubagentStop` | `bin/orbit-hook start` / `stop` | — (the Eye's orbiters; Claude-only, see `~/the-dark-eye`) |
 | `PostCompact` | `hooks/image-reread.py` | — (resets the compacted context's image-read counts, T513) |
 | `UserPromptSubmit`, `SubagentStart` | `adapters/claude/hooks/memory-recall` (timeout 2) | — (T1624 recall hints; kill switch `MEMORY_RECALL=off`) |
+| `SubagentStart`; `PreToolUse` Agent, SendMessage | `hooks/spawn-context` (5); `hooks/agent-spawn-gate`, `hooks/send-message-guard` (2) | — (T1754; `bin/tests/spawn-hooks.test.sh`) |
 
 The rest of `permissions` (`defaultMode`, `allow`, the owner's own `deny` rules), `model`, `effortLevel`,
 `outputStyle`, the `Stop` hook owned by the Moodle harness and every other key are preserved

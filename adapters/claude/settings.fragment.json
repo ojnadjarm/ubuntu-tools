@@ -45,6 +45,18 @@
         "hooks": [
           { "type": "command", "command": "@HARNESS_HOME@/hooks/image-reread.py", "timeout": 5 }
         ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          { "type": "command", "command": "@HARNESS_HOME@/adapters/claude/hooks/agent-spawn-gate", "timeout": 2 }
+        ]
+      },
+      {
+        "matcher": "SendMessage",
+        "hooks": [
+          { "type": "command", "command": "@HARNESS_HOME@/adapters/claude/hooks/send-message-guard", "timeout": 2 }
+        ]
       }
     ],
     "PostCompact": [
@@ -71,6 +83,11 @@
       {
         "hooks": [
           { "type": "command", "command": "@HARNESS_HOME@/adapters/claude/hooks/memory-recall", "timeout": 2 }
+        ]
+      },
+      {
+        "hooks": [
+          { "type": "command", "command": "@HARNESS_HOME@/adapters/claude/hooks/spawn-context", "timeout": 5 }
         ]
       }
     ],

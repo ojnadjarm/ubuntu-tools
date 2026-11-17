@@ -1,0 +1,104 @@
+#!/usr/bin/env -S python3 -S
+"""SubagentStart hook (T1754): hands a sub-agent `harness context --worker` plus the cards its brief's `Memory:` line names.
+
+The brief is the spawn's Agent prompt (memory-recall's finder, over the session transcript, then recent sub-agent
+transcripts for a nested spawn) or the first .md file that prompt names.
+Cards come from `MEMORY_WORKER=1 memory load <domains>` without the core card; over CAP characters, one line naming the
+command replaces them. No brief or no `Memory:` line: the worker context only. Any failure: no output, exit 0.
+"""
+import contextlib
+import glob
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+BIN = os.environ.get("SPAWN_CONTEXT_BIN") or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(HERE))), "bin")
+CAP, RUN_TIMEOUT, NESTED_S, LEDGER = 10000, 3, 60, "spawn-context.json"
+MEMORY_LINE = re.compile(r"^\s*(?:[-*]\s*)?Memory:(.*)$", re.M)
+MD_PATH = re.compile(r"(?:~|/)[\w./@+-]*\.md\b")
+
+
+def recall_hook():
+    """adapters/claude/hooks/memory-recall as a module (its spawn_brief finds this spawn's Agent prompt)."""
+    loader = importlib.machinery.SourceFileLoader("memory_recall_hook", os.path.join(HERE, "memory-recall"))
+    mod = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(mod)
+    return mod
+
+
+def find_prompt(rh, hook):
+    """This spawn's Agent prompt: the session transcript first, then sub-agent transcripts written in the last NESTED_S."""
+    brief = rh.spawn_brief(hook, LEDGER)
+    tp = str(hook.get("transcript_path") or "")
+    if brief or not tp.endswith(".jsonl"):
+        return brief
+    runtime = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "memory-recall")
+    now = time.time()
+    for path in glob.glob(os.path.join(glob.escape(tp[:-len(".jsonl")]), "subagents", "agent-*.jsonl")):
+        if now - os.path.getmtime(path) < NESTED_S:
+            brief = rh.take_brief(dict(hook, transcript_path=path), runtime, LEDGER)
+            if brief:
+                return brief
+    return None
+
+
+def domains(text):
+    """Domain names after `memory load` on the text's `Memory:` line, in order, no repeats."""
+    m = MEMORY_LINE.search(text)
+    if not m:
+        return []
+    names = [w for seg in re.findall(r"memory load\s+([\w -]+)", m.group(1)) for w in seg.split()]
+    return list(dict.fromkeys(n for n in names if re.fullmatch(r"[a-z0-9][a-z0-9-]*", n)))
+
+
+def brief_domains(prompt):
+    """domains() of the prompt, else of the first existing .md file it names."""
+    found = domains(prompt)
+    if found:
+        return found
+    for path in MD_PATH.findall(prompt)[:5]:
+        path = os.path.expanduser(path)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8", errors="replace") as f:
+                return domains(f.read(200000))
+    return []
+
+
+def without_core(text):
+    """`memory load` output minus its `# memory: core` section."""
+    parts = re.split(r"(?m)^(?=# memory: )", text)
+    return "".join(p for p in parts if not p.startswith("# memory: core\n")).strip("\n")
+
+
+def main():
+    hook = json.load(sys.stdin)
+    if not hook.get("agent_id"):
+        return
+    prompt = ""
+    with contextlib.suppress(Exception):
+        prompt = find_prompt(recall_hook(), hook) or ""
+    names = brief_domains(prompt) if prompt else []
+    cwd = hook.get("cwd") if os.path.isdir(hook.get("cwd") or "") else None
+    run = dict(stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, cwd=cwd)
+    ctx = subprocess.Popen([os.path.join(BIN, "harness"), "context", "--worker"], **run)
+    mem = subprocess.Popen([os.path.join(BIN, "memory"), "load", *names], env=dict(os.environ, MEMORY_WORKER="1"),
+                           **run) if names else None
+    machine = ctx.communicate(timeout=RUN_TIMEOUT)[0].strip("\n")
+    cards = without_core(mem.communicate(timeout=RUN_TIMEOUT)[0]) if mem else ""
+    text = "\n\n".join(x for x in (machine, cards) if x)
+    if len(text) > CAP:
+        text = machine + f"\nMemory: run `memory load {' '.join(names)}` (cards over the {CAP}-character hook cap)."
+    if text:
+        sys.stdout.write(json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": text}}))
+
+
+if __name__ == "__main__":
+    with contextlib.suppress(BaseException):
+        main()
+    sys.exit(0)

@@ -1,0 +1,32 @@
+#!/usr/bin/env -S python3 -S
+"""PreToolUse hook on SendMessage (T1754): denies a message to an agent whose transcript lives under a Workflow.
+
+A workflow agent's transcript is <session>/subagents/workflows/wf_*/agent-<id>.jsonl; a `to` that is not such an id
+(a name, "main", a session) is allowed. Any error: allow (no output, exit 0).
+"""
+import contextlib
+import glob
+import json
+import os
+import re
+import sys
+
+
+def main():
+    hook = json.load(sys.stdin)
+    to = str((hook.get("tool_input") or {}).get("to") or "").split(" [")[0].strip()
+    tp = str(hook.get("transcript_path") or "")
+    if not re.fullmatch(r"a[0-9a-f-]{6,}", to) or not tp.endswith(".jsonl"):
+        return
+    if not glob.glob(os.path.join(glob.escape(tp[:-len(".jsonl")]), "subagents", "workflows", "*", f"agent-{to}.jsonl")):
+        return
+    reason = (f"{to} runs inside a Workflow: a message breaks its barrier. "
+              "Steer it by appending to its brief file instead.")
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                             "permissionDecisionReason": reason}}))
+
+
+if __name__ == "__main__":
+    with contextlib.suppress(BaseException):
+        main()
+    sys.exit(0)

@@ -61,10 +61,10 @@ def pending_calls(transcript):
     return [c for c in calls if c.get("id") not in done]
 
 
-def take_brief(hook, runtime):
-    """The prompt of this subagent's Agent call: the oldest pending one not taken yet (same subagent_type first)."""
+def take_brief(hook, runtime, name="spawns.json"):
+    """The prompt of this subagent's Agent call: the oldest pending one not taken yet in ledger `name` (same subagent_type first)."""
     calls = pending_calls(hook["transcript_path"])
-    ledger = os.path.join(runtime, "spawns.json")
+    ledger = os.path.join(runtime, name)
     with open(ledger + ".lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         try:
@@ -84,7 +84,7 @@ def take_brief(hook, runtime):
     return str((pick.get("input") or {}).get("prompt") or "") or None
 
 
-def spawn_brief(hook):
+def spawn_brief(hook, name="spawns.json"):
     """take_brief, polled SPAWN_WAIT_S since the Agent row can land just after the hook fires (0 s for a workflow)."""
     tp = hook.get("transcript_path") or ""
     runtime = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "memory-recall")
@@ -92,7 +92,7 @@ def spawn_brief(hook):
     workflow = os.path.isdir(os.path.join(tp[:-len(".jsonl")] if tp.endswith(".jsonl") else tp, "subagents", "workflows"))
     end = time.monotonic() + (0 if workflow else SPAWN_WAIT_S)
     while True:
-        brief = take_brief(hook, runtime)
+        brief = take_brief(hook, runtime, name)
         if brief or time.monotonic() > end:
             return brief
         time.sleep(0.05)

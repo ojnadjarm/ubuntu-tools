@@ -1,0 +1,33 @@
+#!/usr/bin/env -S python3 -S
+"""PreToolUse hook on Agent (T1754): `spawn-gate` exit 3 (CPU busy) denies the spawn unless its description says [light].
+
+Gate: $SPAWN_GATE_BIN, else bin/spawn-gate. Absent, slow, any other exit or any error: allow (no output, exit 0).
+"""
+import contextlib
+import json
+import os
+import subprocess
+import sys
+
+GATE = os.environ.get("SPAWN_GATE_BIN") or os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))), "bin", "spawn-gate")
+TIMEOUT = 0.7
+
+
+def main():
+    hook = json.load(sys.stdin)
+    if "[light]" in str((hook.get("tool_input") or {}).get("description") or ""):
+        return
+    r = subprocess.run([GATE], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=TIMEOUT)
+    if r.returncode != 3:
+        return
+    why = (r.stdout.strip().splitlines() or ["cpu busy"])[0]
+    reason = f"{why}: wait for CPU to free up, or put [light] in the Agent description for one light ticket."
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                             "permissionDecisionReason": reason}}))
+
+
+if __name__ == "__main__":
+    with contextlib.suppress(BaseException):
+        main()
+    sys.exit(0)
