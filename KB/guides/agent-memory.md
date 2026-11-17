@@ -18,7 +18,8 @@ One store, `$MEMORY_HOME` (default `~/memory`, its own local git repo; a private
 | `checks/` | ids (no lesson lost), quiz questions, quiz baseline |
 
 Carriers (written by `memory install`, idempotent): `@~/memory/core/CORE.md` in `~/CLAUDE.md`; `CLAUDE.local.md` stubs in
-each mapped folder (git-excluded, never in a protected folder); the orchestrator's `MEMORY.md` becomes a generated page;
+each mapped folder (git-excluded, never in a protected folder); the orchestrator's `MEMORY.md` becomes a generated page
+(the index only: subagents read it; the owner seat's card comes by the SessionStart hook `memory-carrier session-start`, T1752);
 `MEMORY_DOMAINS` in each rostered `agent.env`; the Claude adapter appends `memory load` to every headless run.
 The keeper (`~/agents/memory-keeper`, timer 04:10, `PRECHECK` skips an empty night) files notes into pages in a staging
 copy, gates with `memory check`, commits; Sunday adds the weekly pass and the full quiz.
@@ -26,7 +27,7 @@ copy, gates with `memory check`, commits; Sunday adds the weekly pass and the fu
 ## Exact commands
 ```bash
 memory load                          # routed by cwd, $CHAT_SEAT, $MEMORY_DOMAINS
-memory load mooblox                  # core + one domain card (brief line: `Memory: memory load <d>`)
+memory load mooblox                  # core + one domain card (brief line: `Memory: memory load <d>`); core skipped where ~/CLAUDE.md gave it
 memory note "Example lesson: the widget build needs the cache flag" --domain example
 memory check                         # the gate: budgets, ids, format, secrets, machine values, untrusted, provenance
 memory check --quiz --changed        # closed-book quiz on changed pages (haiku, majority of 3 on reds)

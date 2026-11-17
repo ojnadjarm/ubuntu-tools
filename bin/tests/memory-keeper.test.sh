@@ -184,9 +184,10 @@ t "his edit committed first as owner: with a ledger line; then keeper:"
   && grep -q 'owner edit' "$St/core/ledger.md" && grep -q '\^or02' "$St/domains/orchestrator/DOMAIN.md" \
   && [ -z "$(git -C "$St" status --porcelain)" ]; } && ok || no "$(git -C "$St" log --format=%s; git -C "$St" status --porcelain)"
 
-t "views: INDEX.md within 3,072 B, ids.tsv rebuilt, MEMORY.md regenerated"
+t "views: INDEX.md within 3,072 B, ids.tsv rebuilt, MEMORY.md regenerated (index only, no orchestrator card: T1752)"
 { [ -s "$St/INDEX.md" ] && [ "$(wc -c <"$St/INDEX.md")" -le 3072 ] && grep -qP '^k0[3-9]\tcore/CORE.md\tlive' "$St/checks/ids.tsv" \
-  && grep -q 'Briefs name the ticket' "$P/$(enc "$HOME")/memory/MEMORY.md" && grep -q 'memory: index' "$P/$(enc "$HOME")/memory/MEMORY.md"; } && ok || no "$(wc -c <"$St/INDEX.md")"
+  && grep -qxF -e "$(grep 'orchestrator/DOMAIN.md' "$St/INDEX.md")" "$P/$(enc "$HOME")/memory/MEMORY.md" \
+  && ! grep -q 'Briefs name the ticket' "$P/$(enc "$HOME")/memory/MEMORY.md" && grep -q 'memory: index' "$P/$(enc "$HOME")/memory/MEMORY.md"; } && ok || no "$(wc -c <"$St/INDEX.md")"
 
 t "push guard: gh reads PUBLIC, no push"
 { ! git -C "$T/origin.git" rev-parse -q --verify main >/dev/null && grep -q 'visibility' "$T/gh.log"; } \

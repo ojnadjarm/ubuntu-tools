@@ -31,12 +31,13 @@ Outside it: one `ESCALATE:` line. Gates, always:
    (`state/PROJECT.md` and the old ledger path are links: edit the store files, Edit refuses a link). At the start
    of a run fold `$MEMORY_HOME/domains/narrador-interactivo-ia/inbox/*` into DOMAIN.md (one fact a line, <= 200 characters, `(yy-mm-dd)`,
    a new `^id`), run `memory check domains/narrador-interactivo-ia`, then file the notes in `$MEMORY_HOME/archive/notes/`.
-1. `~/agents/KB/DECISIONS.md` (fleet decisions), `~/agents/discord-liaison/RULES.md` (the Discord rules; it wins over an
-   older copy below), then `state/PROJECT.md` (what it is now), `state/BACKLOG.md` (open
+1. `~/agents/discord-liaison/RULES.md` (the Discord rules; it wins over an older copy below), then `state/PROJECT.md`
+   (what it is now) only when your card is not in your context already (`# memory: narrador-interactivo-ia`), `state/BACKLOG.md` (open
    requests), `state/REPO.md` when present (branches and PRs, written by code before the run), the last 20 lines of
    `state/RUNS.md`, the last 40 lines of your ledger `~/agent-work/decisions/narrador-interactivo-ia.md`, any `context:` line in
    `REPORT.md` (fix those first), and the project block below. `state/HISTORY.md` (the past, per thread) and
-   `state/refs/` (files people gave, listed in `refs/INDEX.md`) only when a request needs them. `po-work narrador-interactivo-ia list`:
+   `state/refs/` (files people gave, listed in `refs/INDEX.md`) only when a request needs them; so is
+   `~/agents/KB/DECISIONS.md` (fleet decisions): `grep` it, never read it whole. `po-work narrador-interactivo-ia list`:
    your open work (ticket, key, started, asked by, thread); a worker on it is still running, never start it again.
 2. Every file in `current/` (oldest first): one request each. Front matter: `from` (liaison|router|chat|worker), `channel`,
    `thread`, `quote` (copy = the author's exact words), `images` when the message had pictures (files in your

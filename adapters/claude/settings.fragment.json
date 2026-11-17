@@ -28,7 +28,8 @@
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "@HARNESS_HOME@/adapters/claude/hooks/session-start.sh" }
+          { "type": "command", "command": "@HARNESS_HOME@/adapters/claude/hooks/session-start.sh" },
+          { "type": "command", "command": "@HARNESS_HOME@/adapters/claude/memory-carrier session-start", "timeout": 5 }
         ]
       }
     ],

@@ -59,8 +59,8 @@ is "stubs hidden from git: exclude line once, git status clean" \
 is "protected folders (map flag, matcher) get 0 files" "$(find "$H/proj/locked" "$H/clients/acme" -newer "$WORK/stamp" -type f | wc -l)" 0
 ev "protected and missing folders are listed" 'grep -qx "skipped (protected): ~/proj/locked" <<<"$out" && grep -qx "skipped (protected): ~/clients/acme" <<<"$out" && grep -qx "skipped (missing): ~/proj/gone" <<<"$out"'
 mem=$(cat "$MEMDIR/MEMORY.md")
-ev "MEMORY.md: owner card + index, PRIVATE card left out, within 200 lines" \
-  'grep -q "06:40" <<<"$mem" && grep -q "stripes, fence" <<<"$mem" && ! grep -q marmalade <<<"$mem" && ! grep -q "\^b01" <<<"$mem" && [ "$(wc -l <<<"$mem")" -le 200 ]'
+ev "MEMORY.md: index only (subagents read it): no owner card, no PRIVATE card, within 200 lines" \
+  '! grep -q "06:40" <<<"$mem" && grep -q "stripes, fence" <<<"$mem" && ! grep -q marmalade <<<"$mem" && ! grep -q "\^b01" <<<"$mem" && [ "$(wc -l <<<"$mem")" -le 200 ]'
 ev "the old MEMORY.md is archived word for word first" 'grep -rqx "old hand notes" "$S/archive/2026-11-auto-memory/"'
 is "rostered agent.env get their routed domains" \
   "$(tail -1 "$H/agents/herd-po/agent.env") | $(tail -1 "$H/agents/drover/agent.env")" "export MEMORY_DOMAINS=zebra | export MEMORY_DOMAINS=herd"
@@ -154,6 +154,20 @@ ev "install: served build skipped, no stub, rc 0" \
   '[ "$rc" = 0 ] && grep -qx "skipped (served build): ~/sites/blog" <<<"$out" && [ ! -e "$H/sites/blog/CLAUDE.local.md" ]'
 out=$(fx MEMORY_QUIZ_CMD=quiz-stub "$BIN/memory" check --live --domains zebra 2>/dev/null)
 ev "--live: no approval line for the served build" '! grep -q "sites/blog" <<<"$out"'
+
+# 8. T1752: the owner card reaches the owner seat's own session only; the core card arrives once.
+ss() { printf '%s' "$1" | fx CHAT_SEAT="$2" "${@:3}" "$ROOT/adapters/claude/memory-carrier" session-start; }
+out=$(ss '{"source":"startup"}' boss)
+ev "session-start, owner seat: SessionStart JSON with the owner card, ids stripped, no PRIVATE card" \
+  'jq -e ".hookSpecificOutput.hookEventName == \"SessionStart\"" <<<"$out" >/dev/null && grep -q "06:40" <<<"$out" && ! grep -q "\^b01\|marmalade" <<<"$out"'
+is "session-start: subagent (agent_id), worker marker, other seat each print nothing" \
+  "$(ss '{"agent_id":"a1"}' boss | wc -c) $(ss '{}' boss MEMORY_WORKER=1 | wc -c) $(ss '{}' herd | wc -c)" "0 0 0"
+printf '#!/usr/bin/env bash\nwhile [ "${1:-}" != -- ]; do shift; done; shift; CLAUDECODE=1 CLAUDE_PID=$$ "$@"\n' >"$WORK/bin/claudei"
+chmod +x "$WORK/bin/claudei"
+cores() { (cd "$1" && fx "${@:2}" memory load zebra 2>/dev/null | grep -c '^# memory: core'); }
+is "memory load core count: interactive session at HOME, approved project, unapproved project, claude -p, no CLAUDECODE" \
+  "$(cores "$H" claudei --) $(cores "$H/proj/zebra" claudei --) $(cores "$H/proj/plain" claudei --) $(cores "$H" claudei -p --) $(cores "$H" claude --)" \
+  "0 0 1 1 1"
 
 [ "$bad" = 0 ] && echo "memory-carrier.test.sh: all green" || echo "memory-carrier.test.sh: FAILURES"
 exit "$bad"

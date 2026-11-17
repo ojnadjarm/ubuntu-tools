@@ -142,17 +142,54 @@ def served(folder):
     return os.path.isfile(os.path.join(folder, "build.json"))
 
 
-def generated(store):
-    """The orchestrator's MEMORY.md: the owner seat's cards (PRIVATE pages left out: subagents read it) and INDEX.md."""
-    seats = [w[5:] for w, _, fl in store.map() if w.startswith("seat:") and "owner" in fl]
+def seat_cards(store, seat):
+    """An owner seat's cards (PRIVATE pages left out), ids stripped: the main session's SessionStart text."""
     parts = []
-    for d in dict.fromkeys(d for s in seats for d in memory_route.domains_for(home(), s, {}, store)):
+    for d in memory_route.domains_for(home(), seat, {}, store):
         page = store.card(d)
         if os.path.isfile(store.path(page)) and store.private_seats(page) is None:
             parts.append(f"# memory: {d}\n" + memory_store.strip_ids(store.text(page)).rstrip("\n"))
-    if os.path.isfile(store.path("INDEX.md")):
-        parts.append("# memory: index\n" + memory_store.strip_ids(store.text("INDEX.md")).rstrip("\n"))
-    return MARK + "\n" + "\n\n".join(parts) + "\n" if parts else None
+    return "\n\n".join(parts)
+
+
+def session_start(store, hook):
+    """SessionStart hook JSON for an owner seat's own session; None for any other seat or a worker (subagents read MEMORY.md, never this)."""
+    seat = os.environ.get("CHAT_SEAT", "")
+    if hook.get("agent_id") or not memory_route.owner_seat(seat, store) or is_worker():
+        return None
+    text = seat_cards(store, seat)
+    return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}} if text else None
+
+
+def core_carried():
+    """True in an interactive Claude Code session (or its subagent) whose ~/CLAUDE.md imports the core card (project HOME or approved)."""
+    if not os.environ.get("CLAUDECODE"):
+        return False
+    if not re.search(r"^@.*/core/CORE\.md\s*$", read(os.path.join(home(), "CLAUDE.md")) or "", re.M):
+        return False
+    try:
+        pid = os.environ["CLAUDE_PID"]
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            if {b"-p", b"--print"} & set(f.read().split(b"\0")):
+                return False
+        root = git_root(os.readlink(f"/proc/{pid}/cwd"))
+    except (KeyError, OSError):
+        return False
+    if root == home():
+        return True
+    try:
+        with open(claude_json(), encoding="utf-8") as f:
+            project = json.load(f).get("projects", {}).get(root, {})
+    except (OSError, ValueError):
+        return False
+    return root.startswith(home() + "/") and bool(project.get("hasClaudeMdExternalIncludesApproved"))
+
+
+def generated(store):
+    """The orchestrator's MEMORY.md: INDEX.md only; subagents read this file, so the owner seat's cards come by session_start."""
+    if not os.path.isfile(store.path("INDEX.md")):
+        return None
+    return MARK + "\n# memory: index\n" + memory_store.strip_ids(store.text("INDEX.md")).rstrip("\n") + "\n"
 
 
 def archive_copy(store, w, text):
@@ -324,7 +361,15 @@ def main():
         sys.exit(0)
     if verb == "is-worker":
         sys.exit(0 if is_worker() else 1)
-    print("usage: memory-carrier install [--plan] | verify | is-worker", file=sys.stderr)
+    if verb == "session-start":
+        try:
+            out = session_start(store, json.load(sys.stdin))
+        except Exception:  # a hook never fails the session
+            out = None
+        if out:
+            print(json.dumps(out))
+        sys.exit(0)
+    print("usage: memory-carrier install [--plan] | verify | is-worker | session-start", file=sys.stderr)
     sys.exit(2)
 
 

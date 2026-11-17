@@ -55,12 +55,15 @@ def unknown(store, domains):
 
 
 def load(store, seat, args):
-    """Print the core card, then each domain's card, ids stripped; a PRIVATE page only for its seats."""
+    """Print the core card (unless the session's instruction files carry it), then each domain's card, ids stripped; a PRIVATE page only for its seats."""
     domains = args.domains or memory_route.domains_for(os.getcwd(), seat, os.environ, store)
     if args.domains:
         unknown(store, domains)
-    out = []
-    for name in ["core"] + domains:
+    out, core = [], ["core"]
+    if carrier().core_carried():
+        print("memory: skipped core (this session has it from ~/CLAUDE.md)", file=sys.stderr)
+        core = []
+    for name in core + domains:
         page = store.card(name)
         if not os.path.isfile(store.path(page)):
             continue
@@ -148,6 +151,7 @@ def questions(store, domains):
 def loaded(domains):
     """The text `memory load` gives a worker the carrier starts with these domains (same env, a fresh cwd); "" when it fails."""
     env = dict(os.environ, MEMORY_DOMAINS=",".join(domains), MEMORY_WORKER="1")
+    env.pop("CLAUDECODE", None)
     with tempfile.TemporaryDirectory(prefix="memory-live.") as t:
         r = subprocess.run([os.path.realpath(__file__), "load"], env=env, cwd=t, capture_output=True, text=True, timeout=60)
     return r.stdout if r.returncode == 0 else ""

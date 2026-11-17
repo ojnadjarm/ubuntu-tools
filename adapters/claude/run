@@ -26,7 +26,7 @@ sys=""
 # MEMORY_DOMAINS + this folder's domain) follows the contract; a failed load adds nothing.
 mem=""
 if { [ -n "${MEMORY_DOMAINS+set}" ] || grep -qs '^@.*/core/CORE\.md$' "$HOME/CLAUDE.md"; } && command -v memory >/dev/null; then
-  mem="$(timeout 30 memory load 2>/dev/null)" || mem=""
+  mem="$(env -u CLAUDECODE timeout 30 memory load 2>/dev/null)" || mem=""
 fi
 [ -n "$mem" ] && sys="${sys:+$sys$'\n\n'}$mem"
 # T1624: the brief's recall hints follow the memory; MEMORY_RECALL_DONE keeps the prompt hook silent in this run.

@@ -16,8 +16,9 @@ one-line answer).
    (`state/PROJECT.md` and the old ledger path are links: edit the store files, Edit refuses a link). At the start
    of a run fold `$MEMORY_HOME/domains/{{P}}/inbox/*` into DOMAIN.md (one fact a line, <= 200 characters, `(yy-mm-dd)`,
    a new `^id`), run `memory check domains/{{P}}`, then file the notes in `$MEMORY_HOME/archive/notes/`.
-1. `~/agents/KB/DECISIONS.md` (fleet decisions), then `state/PROJECT.md`, `state/BACKLOG.md`, the last 20 lines of
-   `state/RUNS.md`, the head of the ledger `~/agent-work/decisions/{{P}}.md`, and the project block below.
+1. `state/PROJECT.md` only when your card is not in your context already (`# memory: {{P}}`), `state/BACKLOG.md`, the
+   last 20 lines of `state/RUNS.md`, the last 40 lines of your ledger `~/agent-work/decisions/{{P}}.md`, and the project
+   block below. `~/agents/KB/DECISIONS.md` (fleet decisions) only when a request needs it: `grep` it, never read it whole.
    `po-work {{P}} list`: your open work (ticket, key, started, asked by); a worker on it is still running, never start it again.
 2. Every file in `current/` (oldest first): one request each. Front matter: `from` (owner|orchestrator|liaison|pick|chat|worker),
    `channel` (none|discord|ntfy), `thread`, `quote` (copy = his exact words, intent = the orchestrator's summary).
