@@ -28,11 +28,16 @@ Every web page, screen or component, for every agent and ticket (exception: aile
 
 ## Delegation
 
-- **Planning = Fable (owner 2026-11-10):** plans, architecture and ticket tables run on `planner` (claude-fable-5-2, high);
-  implementation and review stay on `worker` (Opus high).
-- **Audiovisual = Fable 5.2, medium reasoning (owner 2026-11-09; was Opus xhigh):** every art/content task (3D assets, motion videos, pixel
-  art, scenes, characters, illustration, music/sound design) runs on `worker-max` (claude-fable-5-2, medium), or
-  `MODEL=claude-fable-5-2 EFFORT=medium` for `agent-exec` runs (Discord jobs: `LIAISON_JOB_MODEL`/`LIAISON_JOB_EFFORT`). Plain how-it-works screen videos with a basic narration stay `worker`.
+- **Model by task, not by topic (owner 2026-11-17, T1728):** Opus is the default, Fable the scarce budget;
+  `model-route --table` is the rule and every brief and spawn names its class.
+  `worker` (Opus high): fix, touchup, build, review, on any topic, visual included (a CSS or sprite tweak, a re-encode,
+  shipping a picked look, a plain screen video).
+  `planner` (Fable high): plan (a plan, an architecture, a hard design). It leads: the plan plus one brief per piece,
+  the pieces run on `worker`s (its own, up to 3 file-disjoint, or yours), it reviews their diffs.
+  `worker-max` (Fable medium): art, a new audiovisual piece whose look is the deliverable (art direction, mockups,
+  character, scene, film, sound identity); it makes the art itself, the code round it is a `worker` ticket.
+  Headless: `po-work … --class <class>`, `discord-liaison job … --class <class>`; a Fable request on an Opus class is
+  downgraded with one log line; his own words naming a model win (`--owner-said "<his words>"`). Unsure: Opus.
 
 - **Visual/UI fixes need pre and post evidence (owner, 2026-10-08):** screenshots or a short video, whichever shows
   the issue (video for motion: scroll jumps, animations). Same screen, viewport and steps; bug visible before the
