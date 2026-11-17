@@ -3,7 +3,7 @@ import { seatState, titled } from "../seats.js";
 import { claimRow } from "../claims.js";
 import { store } from "../store.js";
 import { verdict } from "../verdict.js";
-import { MAIN, placer } from "./floors.js";
+import { placer } from "./floors.js";
 
 export const SLOTS = 6;
 const SESSION = { working: "working", idle: "idle" };
@@ -72,10 +72,10 @@ export function build(P, { now = Date.now(), needs = verdict(store.D).bad, talk 
   const rooms = heads.flatMap((h, t) => [seatRoom(h, t, "seat"), ...down(h.id, t)]);
   const loose = S.filter((s) => !s.seat && !(s.parent in byId && s.parent !== (top && top.id)));
   const poolPeople = workingFirst([...loose.map((s) => worker(s, "pool")), ...subs.filter((a) => a.state === "working" && !placed.has(a.id) && !who[a.id]).map((a) => agent(a, "pool"))]);
-  /* One desk pool a floor that has loose people (the main one always): a worker sits on the floor of whoever started it. */
-  const at = placer(P), fl = (p) => at.starter(p.raw.started_by), poolId = (f) => (f === MAIN ? "pool" : "pool-" + f);
+  /* A desk pool per floor with loose people (the CEO's always); a worker sits on its starter's floor. */
+  const at = placer(P), fl = (p) => at.starter(p.raw.started_by), poolId = (f) => (f === at.home ? "pool" : "pool-" + f);
   poolPeople.forEach((p) => (p.room = poolId(fl(p))));
-  const pools = [...new Set([MAIN, ...poolPeople.map(fl)])].map((f) => Object.assign(room("pool", poolId(f), "Desk pool", "Agents", "", -1, poolPeople.filter((p) => fl(p) === f)), { floor: f })), pool = pools[0];
+  const pools = [...new Set([at.home, ...poolPeople.map(fl)])].map((f) => Object.assign(room("pool", poolId(f), "Desk pool", "Agents", "", -1, poolPeople.filter((p) => fl(p) === f)), { floor: f }));
   [ceo, ...rooms].filter(Boolean).forEach((r) => { r.floor = at.seat(r.id); if (at.head(r.id)) r.head = true; });
   rooms.push(...pools);
   const live = subs.filter((a) => a.state === "working"), bad = subs.find((a) => a.state === "error" && now - ms(a.last) < FAIL_MS);

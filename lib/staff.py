@@ -4,6 +4,8 @@ import os
 
 import section_status
 
+REST = ("po", "team")
+
 
 def path():
     """The staff file: $STAFF_FILE, else $HARNESS_HOME/staff.json (default ~/agents)."""
@@ -37,7 +39,7 @@ def _validate(data):
                 raise ValueError(f"member {mid}: unit {m['unit']} is not a .timer or .service")
     if not isinstance(data.get("hidden", []), list):
         raise ValueError("hidden must be a list")
-    floors, on = set(), {}
+    floors, on, rest = set(), {}, {}
     for f in data.get("floors", []):
         fid = str(f.get("id") or "").strip()
         if not fid or not str(f.get("name") or "").strip() or fid == "main":
@@ -53,6 +55,14 @@ def _validate(data):
             on[t] = fid
         if "head" in f and f["head"] not in f["teams"]:
             raise ValueError(f"floor {fid}: head {f['head']} is not one of its teams")
+        if not isinstance(f.get("rest", []), list):
+            raise ValueError(f"floor {fid}: rest must be a list")
+        for k in f.get("rest", []):
+            if k not in REST:
+                raise ValueError(f"floor {fid}: rest {k} is not one of {', '.join(REST)}")
+            if k in rest:
+                raise ValueError(f"rest {k} on 2 floors: {rest[k]}, {fid}")
+            rest[k] = fid
 
 
 def load(p=None):

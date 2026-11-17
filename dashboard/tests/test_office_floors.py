@@ -37,6 +37,21 @@ class Floors(unittest.TestCase):
             self.load([dict(FLOOR, head="mooblox")])
         self.assertIn("not one of its teams", str(e.exception))
 
+    def test_four_floors_load_in_order(self):
+        lines = [dict(FLOOR, id="ops", name="Operations", teams=["quality"], rest=["team"]),
+                 dict(FLOOR, id="projects", name="Projects", teams=["mooblox"], rest=["po"]),
+                 dict(FLOOR, head="discord"),
+                 {"id": "ceo", "name": "CEO", "teams": ["orchestrator"], "head": "orchestrator"}]
+        self.assertEqual([f["name"] for f in self.load(lines)["floors"]], ["Operations", "Projects", "Discord", "CEO"])
+
+    def test_bad_rest(self):
+        labs = dict(FLOOR, id="labs", teams=["mooblox"])
+        for floors, word in (([dict(FLOOR, rest=["seat"])], "not one of po, team"), ([dict(FLOOR, rest="po")], "must be a list"),
+                             ([dict(FLOOR, rest=["po"]), dict(labs, rest=["po"])], "rest po on 2 floors")):
+            with self.subTest(word=word), self.assertRaises(ValueError) as e:
+                self.load(floors)
+            self.assertIn(word, str(e.exception))
+
     def test_compose_sends_floors_only_when_set(self):
         org, ags = {"seats": [], "sessions": []}, {"roster": [], "subagents": []}
         self.assertEqual(office.compose(org, ags, {"teams": TEAMS, "floors": [FLOOR]})["floors"], [FLOOR])

@@ -1,6 +1,6 @@
 # Dashboard office: add a team, a member, a name; the 3D Org page (`staff.json`, `/api/office`)
 
-Ticket: T1601 (01-18), T1658, T1666, T1687, T1755, T1756 · Last verified: 2026-11-17 by T1756 (floor head, `tests/test_office_floor_model.js`, shots `~/drop/T1756/`), T1755 (`tests/test_office_floor_model.js`, `tests/test_office_floors.py`, live `/api/office` floors, shots 2 floors × 5 widths); 2026-11-11 by T1687 (`tests/test_office_status.js`, `tests/test_section_status.py`, live `/api/office` vass paused), T1666 (`bin/tests/dashboard-office-drag.test.sh`), T1658 (`bin/tests/dashboard-office-chat.test.sh`); 2026-11-10 by T1601-16 (`staff.load()` 3 teams 12 members, live `GET /api/office`
+Ticket: T1601 (01-18), T1658, T1666, T1687, T1755, T1756, T1757 · Last verified: 2026-11-17 by T1757 (four floors, `tests/test_office_floor_four.js`, `test_office_floors.py` rest, live `/api/office`, shots `~/drop/T1757/` 4 floors × 5 widths), T1756 (floor head, `tests/test_office_floor_model.js`, shots `~/drop/T1756/`), T1755 (`tests/test_office_floor_model.js`, `tests/test_office_floors.py`, live `/api/office` floors, shots 2 floors × 5 widths); 2026-11-11 by T1687 (`tests/test_office_status.js`, `tests/test_section_status.py`, live `/api/office` vass paused), T1666 (`bin/tests/dashboard-office-drag.test.sh`), T1658 (`bin/tests/dashboard-office-chat.test.sh`); 2026-11-10 by T1601-16 (`staff.load()` 3 teams 12 members, live `GET /api/office`
 4 teams incl. Unassigned 1 (`memory-keeper`), `test_office_*.js` green, `GPU=1 tools/shots.mjs` margins at 5 widths)
 
 ## When to use
@@ -57,7 +57,19 @@ Ticket: T1601 (01-18), T1658, T1666, T1687, T1755, T1756 · Last verified: 2026-
   hands the renderer `view(M, floor)` (a floor change = `patch.layout`, full rebuild and camera fit), cards and the
   list keep the whole model. The elevator panel `.oflr` (top left of the stage, top floor first, `aria-pressed`,
   count of working people per floor) is hidden with one floor and in still mode; `#org?floor=<id>` keeps the floor
-  over a reload (`read`/`hash` exports). `layout.js` `rowsOf(M)` (shared with `build/hall.js`): seat rows from 1 (was
+  over a reload (`read`/`hash` exports).
+- Four floors (T1757, owner 2026-11-17: CEO floor, personal projects, maintenance/finance): the `floors` lines are the
+  whole building, bottom floor first (1F = first line; the panel shows the last line on top). The line whose `teams`
+  holds the CEO seat (`orchestrator`) is the CEO's floor (`floors.js` `home(P)`): there is then no `main` floor, the
+  page opens on it, an unknown `?floor=` falls back to it (`pick`), the desk pool `pool` and any worker of an unknown
+  starter stand on it. Listing the CEO seat holds the CEO only, not its tree. Today: 1F Operations (`operations`,
+  `quality`, `improvement`, `finance`, `"rest": ["team"]`), 2F Projects (`mooblox`, `vass`, `"rest": ["po"]`), 3F
+  Discord, 4F CEO. Default floor of a newcomer: an org.json seat on no line goes to its nearest listed parent's floor
+  below the CEO (a new Discord PO: Discord), else to the `"rest": ["po"]` floor (Projects); a staff team on no line,
+  Unassigned included, to the `"rest": ["team"]` floor (Operations); with no `rest` line, the CEO's floor. Without a
+  CEO line the old `main` floor comes back (fixtures of T1755/T1756). Panel: a column up to a 600 px stage; a
+  narrower stage (container query) puts it two by two across the top, Full screen at the bottom left; six floors =
+  3 rows there (about 140 px), a 6-button column (about 280 px) on wider stages. `layout.js` `rowsOf(M)` (shared with `build/hall.js`): seat rows from 1 (was
   2), at least 2 rows in all for the pool by the stairs. The renderer and builders have no floor branch.
 - Unread mark in the 3D office: left out (T1658). The data is cheap (`/api/chat` `channels[].unread` per `dmOf(id)`), but a
   mark over a creature needs a per-creature lamp or halo in `model.js` + `gl/` (Room.key, diff, rebuild), not a few lines.
@@ -80,6 +92,8 @@ cd ~/agents
 # a floor: one line in "floors" (teams = org.json head seat ids and/or staff team ids; their trees and members follow)
 #   {"id": "<floor>", "name": "<Name>", "teams": ["<head seat id>", "<staff team id>"]}     the panel and #org?floor=<floor> follow
 #   "head": "<seat id in teams>" seats it in the raised office (the CEO's on main; T1756 `office/floors.js` view, `build/room.js` headSpot); no head = an empty one
+#   lines are bottom floor first; the line whose teams hold "orchestrator" is the CEO's floor (no main then)
+#   "rest": ["po"] / ["team"] takes every seat / staff team no line names (one floor each; validated in lib/staff.py)
 python3 -c 'import sys; sys.path.insert(0, "lib"); import staff; d = staff.load(); print(len(d["teams"]), "teams ok")'   # ValueError names the first problem
 # set or clear a section's status (T1687): on its org.json seat or staff.json team line add
 #   "status": {"id": "paused|vacation", "since": "YYYY-MM-DD", "note": "<optional>"}; delete the key (or "id": "active") to clear;

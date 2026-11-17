@@ -12,7 +12,7 @@ import { store } from "../store.js";
 import { verdict } from "../verdict.js";
 import { build, diff } from "../office/model.js";
 import { plan as planOf } from "../office/layout.js";
-import { MAIN, floors, view, working } from "../office/floors.js";
+import { floors, home, pick, view, working } from "../office/floors.js";
 import { until } from "../office/time.js";
 import { list } from "../office/overlay/list.js";
 import * as card from "../office/overlay/card.js";
@@ -24,7 +24,7 @@ const STALE_MS = 20000, FAST_MS = 4500, DRAG_PX = 6;
 const NOTE = "Still picture: this browser has no graphics acceleration. The list below is live.";
 const grid = document.getElementById("grid"), canvas = document.createElement("canvas");
 canvas.setAttribute("aria-hidden", "true");
-let talk = null, P = null, M = null, V = null, floor = MAIN, plan = null, applied = null, R = null, starting = false, at = 0, busy = false, err = "", down = null, over = null;
+let talk = null, P = null, M = null, V = null, floor = null, plan = null, applied = null, R = null, starting = false, at = 0, busy = false, err = "", down = null, over = null;
 
 for (const href of ["/static/css/org.css", "/static/css/office.css"]) if (!document.querySelector(`link[href="${href}"]`)) {
   const l = document.createElement("link");
@@ -48,9 +48,9 @@ function model() {
   shown();
 }
 
-/* The view and plan of the shown floor; a floor the data no longer has falls back to the main floor. */
+/* The view and plan of the shown floor; no floor or one the data does not have falls back to the CEO's floor. */
 function shown() {
-  if (!floors(P).some((f) => f.id === floor)) floor = MAIN;
+  floor = pick(P, floor);
   V = view(M, floor); plan = planOf(V);
 }
 
@@ -71,8 +71,8 @@ function goFloor(id) {
 }
 
 /* The floor from the address (#org?floor=<id>), kept across a reload. */
-export function read(q) { floor = new URLSearchParams(q).get("floor") || MAIN; }
-export const hash = () => "#org" + (floor !== MAIN ? "?floor=" + encodeURIComponent(floor) : "");
+export function read(q) { floor = new URLSearchParams(q).get("floor"); }
+export const hash = () => "#org" + (floor && floor !== home(P) ? "?floor=" + encodeURIComponent(floor) : "");
 
 /* Reads /api/office when the copy is missing or older than max ms; never while the tab is hidden. */
 function pull(max) {

@@ -28,7 +28,10 @@
     ]}
   ],
   "floors": [
-    {"id": "discord", "name": "Discord", "teams": ["discord", "discord-crew"], "head": "discord"}
+    {"id": "operations", "name": "Operations", "teams": ["operations", "quality", "improvement", "finance"], "rest": ["team"]},
+    {"id": "projects", "name": "Projects", "teams": ["mooblox", "vass"], "rest": ["po"]},
+    {"id": "discord", "name": "Discord", "teams": ["discord", "discord-crew"], "head": "discord"},
+    {"id": "ceo", "name": "CEO", "teams": ["orchestrator"], "head": "orchestrator"}
   ],
   "hidden": ["hello"]
 }
