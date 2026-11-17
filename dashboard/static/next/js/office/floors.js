@@ -19,6 +19,9 @@ export const floors = (P) => {
 /* Floor id as shown: id when payload P has it, else the CEO's floor. */
 export const pick = (P, id) => (floors(P).some((f) => f.id === id) ? id : home(P));
 
+/* The ids of the floors whose line says `"deck": false`: no raised office there. */
+export const flat = (P) => lines(P).filter((f) => f.deck === false).map((f) => f.id);
+
 /* placer(P) → {seat(id), team(id), starter(by), head(id), home}: the floor of a seat (its own line or its nearest parent's below the CEO, else the line with `rest` "po"), of a staff team (its line, else the `rest` "team" line), of a worker by who started it (a staff member's id, alone or before "-…"), whether a seat heads its floor, the CEO's floor; whatever no line places stands on the CEO's floor. */
 export function placer(P) {
   const at = new Map(lines(P).flatMap((f) => f.teams.map((t) => [t, f.id]))), heads = new Set(lines(P).map((f) => f.head));
@@ -34,10 +37,10 @@ export function placer(P) {
   return { seat, team, starter, head: (id) => heads.has(id), home: base };
 }
 
-/* The model as one floor shows it: that floor's rooms and teams; the raised office holds the CEO on its floor, the floor's head (as kind "head", out of the bays) elsewhere, else nobody. */
-export function view(M, f) {
-  const here = M.rooms.filter((r) => r.floor === f), head = here.find((r) => r.head), top = M.ceo && M.ceo.floor === f;
-  return { ...M, floor: f, ceo: top ? M.ceo : head ? { ...head, kind: "head" } : null, rooms: here.filter((r) => top || r !== head), staff: M.staff.filter((r) => r.floor === f) };
+/* The model as floor f of payload P shows it: that floor's rooms and teams, `deck` false when its line says so; the raised office holds the CEO on its floor, the floor's head (as kind "head", out of the bays) elsewhere, else nobody; a floor with no deck has none. */
+export function view(M, f, P) {
+  const deck = !flat(P).includes(f), here = M.rooms.filter((r) => r.floor === f), head = deck && here.find((r) => r.head), top = deck && M.ceo && M.ceo.floor === f;
+  return { ...M, floor: f, deck, ceo: top ? M.ceo : head ? { ...head, kind: "head" } : null, rooms: here.filter((r) => top || r !== head), staff: M.staff.filter((r) => r.floor === f) };
 }
 
 /* People working on each floor: {floor id: n}. */

@@ -1,6 +1,6 @@
 # Dashboard office: add a team, a member, a name; the 3D Org page (`staff.json`, `/api/office`)
 
-Ticket: T1601 (01-18), T1658, T1666, T1687, T1755, T1756, T1757 · Last verified: 2026-11-17 by T1757 (four floors, `tests/test_office_floor_four.js`, `test_office_floors.py` rest, live `/api/office`, shots `~/drop/T1757/` 4 floors × 5 widths), T1756 (floor head, `tests/test_office_floor_model.js`, shots `~/drop/T1756/`), T1755 (`tests/test_office_floor_model.js`, `tests/test_office_floors.py`, live `/api/office` floors, shots 2 floors × 5 widths); 2026-11-11 by T1687 (`tests/test_office_status.js`, `tests/test_section_status.py`, live `/api/office` vass paused), T1666 (`bin/tests/dashboard-office-drag.test.sh`), T1658 (`bin/tests/dashboard-office-chat.test.sh`); 2026-11-10 by T1601-16 (`staff.load()` 3 teams 12 members, live `GET /api/office`
+Ticket: T1601 (01-18), T1658, T1666, T1687, T1755, T1756, T1757, T1759 · Last verified: 2026-11-17 by T1759 (deck key, `tests/test_office_floor_work.js`, `test_office_floors.py` deck, live `/api/office` 5 floors, shots `~/drop/T1759/`), T1757 (four floors, `tests/test_office_floor_four.js`, `test_office_floors.py` rest, live `/api/office`, shots `~/drop/T1757/` 4 floors × 5 widths), T1756 (floor head, `tests/test_office_floor_model.js`, shots `~/drop/T1756/`), T1755 (`tests/test_office_floor_model.js`, `tests/test_office_floors.py`, live `/api/office` floors, shots 2 floors × 5 widths); 2026-11-11 by T1687 (`tests/test_office_status.js`, `tests/test_section_status.py`, live `/api/office` vass paused), T1666 (`bin/tests/dashboard-office-drag.test.sh`), T1658 (`bin/tests/dashboard-office-chat.test.sh`); 2026-11-10 by T1601-16 (`staff.load()` 3 teams 12 members, live `GET /api/office`
 4 teams incl. Unassigned 1 (`memory-keeper`), `test_office_*.js` green, `GPU=1 tools/shots.mjs` margins at 5 widths)
 
 ## When to use
@@ -71,6 +71,14 @@ Ticket: T1601 (01-18), T1658, T1666, T1687, T1755, T1756, T1757 · Last verified
   narrower stage (container query) puts it two by two across the top, Full screen at the bottom left; six floors =
   3 rows there (about 140 px), a 6-button column (about 280 px) on wider stages. `layout.js` `rowsOf(M)` (shared with `build/hall.js`): seat rows from 1 (was
   2), at least 2 rows in all for the pool by the stairs. The renderer and builders have no floor branch.
+- Personal and Work floors (T1759, owner 2026-11-17: "another floor for work related projects", "Personal and Work
+  related projects shouldn't have an upper section"): five floors, top to bottom CEO, Discord, Personal projects
+  (`personal`: mooblox, `rest: ["po"]`, so a new PO lands here), Work projects (`work`: vass), Operations. Key
+  `"deck": false` on a floor line (default true: absent = the raised office) drops the mezzanine column: `floors.js`
+  `flat(P)` lists those floors, `view(M, f, P)` sets `deck` and puts nobody up there, `layout.js` `x0Of(M)` starts the
+  bays half a GAP from the left wall (`plan.hall.x0`), the desk pool takes a bay (`layout.js` `baysOf(M)` counts it, also in the
+  hall stamp), `build/hall.js` draws no deck, stairs or kitchen and windows the whole left wall. `lib/staff.py`:
+  `deck` must be a bool, and a line with `head` and `deck: false` is an error ("needs the raised office").
 - Unread mark in the 3D office: left out (T1658). The data is cheap (`/api/chat` `channels[].unread` per `dmOf(id)`), but a
   mark over a creature needs a per-creature lamp or halo in `model.js` + `gl/` (Room.key, diff, rebuild), not a few lines.
 
@@ -94,6 +102,7 @@ cd ~/agents
 #   "head": "<seat id in teams>" seats it in the raised office (the CEO's on main; T1756 `office/floors.js` view, `build/room.js` headSpot); no head = an empty one
 #   lines are bottom floor first; the line whose teams hold "orchestrator" is the CEO's floor (no main then)
 #   "rest": ["po"] / ["team"] takes every seat / staff team no line names (one floor each; validated in lib/staff.py)
+#   "deck": false = no raised office, no stairs, rooms from the left wall (default true; not with "head"; T1759)
 python3 -c 'import sys; sys.path.insert(0, "lib"); import staff; d = staff.load(); print(len(d["teams"]), "teams ok")'   # ValueError names the first problem
 # set or clear a section's status (T1687): on its org.json seat or staff.json team line add
 #   "status": {"id": "paused|vacation", "since": "YYYY-MM-DD", "note": "<optional>"}; delete the key (or "id": "active") to clear;

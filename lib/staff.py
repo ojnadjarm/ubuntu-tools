@@ -55,6 +55,10 @@ def _validate(data):
             on[t] = fid
         if "head" in f and f["head"] not in f["teams"]:
             raise ValueError(f"floor {fid}: head {f['head']} is not one of its teams")
+        if not isinstance(f.get("deck", True), bool):
+            raise ValueError(f"floor {fid}: deck must be true or false")
+        if "head" in f and f.get("deck") is False:
+            raise ValueError(f"floor {fid}: head {f['head']} needs the raised office (deck false)")
         if not isinstance(f.get("rest", []), list):
             raise ValueError(f"floor {fid}: rest must be a list")
         for k in f.get("rest", []):

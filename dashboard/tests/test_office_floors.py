@@ -52,6 +52,17 @@ class Floors(unittest.TestCase):
                 self.load(floors)
             self.assertIn(word, str(e.exception))
 
+    def test_deck_defaults_on_and_may_be_off(self):
+        self.assertNotIn("deck", self.load([FLOOR])["floors"][0])
+        self.assertIs(self.load([dict(FLOOR, deck=False)])["floors"][0]["deck"], False)
+
+    def test_bad_deck(self):
+        for floor, word in ((dict(FLOOR, deck="no"), "deck must be true or false"),
+                            (dict(FLOOR, deck=False, head="discord"), "head discord needs the raised office")):
+            with self.subTest(word=word), self.assertRaises(ValueError) as e:
+                self.load([floor])
+            self.assertIn(word, str(e.exception))
+
     def test_compose_sends_floors_only_when_set(self):
         org, ags = {"seats": [], "sessions": []}, {"roster": [], "subagents": []}
         self.assertEqual(office.compose(org, ags, {"teams": TEAMS, "floors": [FLOOR]})["floors"], [FLOOR])

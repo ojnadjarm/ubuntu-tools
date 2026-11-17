@@ -1,6 +1,7 @@
 /* Plan → chunks: the hall or one room built on its own batch in short steps, lit by the lamps the caller hands to bake; a day-night flip re-reads lamps and glows without geometry. */
 import { batch } from "./batch.js";
 import { hall, DECK } from "./hall.js";
+import { baysOf } from "../layout.js";
 import { seatRoom, teamRoom, ceoSpot, headSpot, pool } from "./room.js";
 
 export const HALL = "hall";
@@ -10,7 +11,7 @@ const envOf = (theme, M) => theme.env[M.night ? "night" : "day"];
 
 /* Everything but day or night that decides the geometry of chunk `id`: an equal stamp keeps the buffers. */
 export function stamp(id, M, plan) {
-  if (id === HALL) return JSON.stringify([plan.hall, M.rooms.filter((r) => r.kind !== "pool").length, M.staff.length]);
+  if (id === HALL) return JSON.stringify([plan.hall, baysOf(M), M.staff.length]);
   return JSON.stringify([JSON.parse(room(M, id).key).slice(0, -1), plan.cells[id]]);
 }
 

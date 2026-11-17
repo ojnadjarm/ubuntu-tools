@@ -51,7 +51,7 @@ function model() {
 /* The view and plan of the shown floor; no floor or one the data does not have falls back to the CEO's floor. */
 function shown() {
   floor = pick(P, floor);
-  V = view(M, floor); plan = planOf(V);
+  V = view(M, floor, P); plan = planOf(V);
 }
 
 /* The floor buttons, top floor first: number, name, people working there; empty with one floor. */

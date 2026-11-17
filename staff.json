@@ -29,7 +29,8 @@
   ],
   "floors": [
     {"id": "operations", "name": "Operations", "teams": ["operations", "quality", "improvement", "finance"], "rest": ["team"]},
-    {"id": "projects", "name": "Projects", "teams": ["mooblox", "vass"], "rest": ["po"]},
+    {"id": "work", "name": "Work projects", "teams": ["vass"], "deck": false},
+    {"id": "personal", "name": "Personal projects", "teams": ["mooblox"], "rest": ["po"], "deck": false},
     {"id": "discord", "name": "Discord", "teams": ["discord", "discord-crew"], "head": "discord"},
     {"id": "ceo", "name": "CEO", "teams": ["orchestrator"], "head": "orchestrator"}
   ],

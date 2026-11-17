@@ -106,7 +106,7 @@ html.ofill .office .oflr { top: max(.7rem, env(safe-area-inset-top)); }
 @container (max-width: 599px) {
   .office .oflr { right: .7rem; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .office .oflr button { min-width: 0; gap: .35rem; padding: .3rem .5rem; letter-spacing: .08em; grid-template-columns: auto minmax(0, 1fr) auto; }
-  .office .oflr .fl { overflow: hidden; text-overflow: ellipsis; }
+  .office .oflr .fl { white-space: normal; line-height: 1.15; }
   .office .oflr:not(:empty) ~ .ofs { top: auto; right: auto; left: .7rem; bottom: .7rem; }
   html.ofill .office .oflr:not(:empty) ~ .ofs { bottom: max(.7rem, env(safe-area-inset-bottom)); }
 }
