@@ -32,7 +32,7 @@ tail ~/agents/log/pulse.log
 ```
 
 ## Rules
-- Lesson builds stop at weekly 80% (owner standing order): `plan-usage --check 80` before each new ticket.
+- No automatic stop at any percentage (owner 2026-11-17: "the rule shouldn't exists it's just something I call"); the old 80 % stop for lesson builds went with it.
 - The weekly reset time is known (`plan-usage`); spare weekly budget before the reset is lost, so use it.
 
 ## Pitfalls (measured)
