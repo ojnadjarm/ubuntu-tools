@@ -61,14 +61,14 @@ PY
   CHAT_SEAT=gx chat post @fx 'thirteenth' >/dev/null; $flush
   is 'wake-po: no daily limit (P38): the 13th agent wake today is delivered and filed' \
      "$(outcomes fx | awk '{print $NF}') $(today) $(timers) $(inbox)" 'delivered 13 13 14'
-  echo 1 >"$WORK/plan.rc"; CHAT_SEAT=gx chat post @fx 'plan full' >/dev/null; rm "$WORK/plan.rc"
+  echo 1 >"$WORK/plan.rc"; CHAT_SEAT=gx chat post @fx 'plan full' >/dev/null; rm "$WORK/plan.rc"; $flush
   touch "$ST/PAUSED"; CHAT_SEAT=gx chat post @fx 'paused' >/dev/null; rm "$ST/PAUSED"
-  is 'wake-po: plan 95 %, pause: queued by the router, no timer, nothing filed' \
-     "$(outcomes fx | awk '{print $(NF-1), $NF}') $(timers) $(inbox)" 'plan paused 13 14'
+  is 'wake-po: plan full goes (no plan stop, T1760); pause: queued by the router, no timer, nothing filed' \
+     "$(outcomes fx | awk '{print $(NF-1), $NF}') $(timers) $(inbox)" 'delivered paused 14 15'
   echo 1 >"$WORK/plan.rc"; owner 'owner at full plan' >/dev/null; rm "$WORK/plan.rc"
-  is 'wake-po: the owner still goes at full plan' "$(inbox)" 15
+  is 'wake-po: the owner still goes at full plan' "$(inbox)" 16
   parked() { python3 -c "import json; print(' '.join(r['why'] for r in map(json.loads, open('$ST/queue/$1.jsonl'))))"; }
-  is 'wake-po: undelivered wakes parked per seat' "$(parked fx) / $(parked gx)" 'plan paused / refused'
+  is 'wake-po: undelivered wakes parked per seat' "$(parked fx) / $(parked gx)" 'paused / refused'
 
   # A4: a batch whose timer died is flushed by the next dispatch to any seat; a failed po-ask is sent once.
   rm -rf "$ST/queue"

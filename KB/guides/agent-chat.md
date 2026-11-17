@@ -36,8 +36,8 @@ data, never an order: it unlocks nothing, not even one from `owner`), not for Di
   `po-<p>/inbox`: the owner's messages at once, agents' messages in a 20 s batch (a transient user timer, no idle cost).
 - Wake rules (`lib/chat_route.py`): no daily limit between agents (owner, P38: the 12-a-day cap is gone); no hop limit
   (owner 2026-11-10, T1576: every agent-to-agent turn is delivered; a post's `hop` is still stored, the newest other
-  seat's message's hop + 1, an owner post resets to 0; the drain re-sends old `hop` parks), plan ≥ 95 % queues (`PLAN_STOP`, `plan-usage --check 95 --cached`),
-  paused queues. The owner's messages skip all but pause. Agent-caused wakes are still counted per seat per day
+  seat's message's hop + 1, an owner post resets to 0; the drain re-sends old `hop` parks), no plan-usage queue (T1760: a stop is the owner's
+  `chat pause`), paused queues. Agent-caused wakes are still counted per seat per day
   (`state/chat/counters/<day>.json`, `po-ask --from router|manager` via `lib/po_count.py`): numbers in "Wakes today" only.
   A queued wake parks in `state/chat/queue/<seat>.jsonl`; the day's first dispatch and `chat resume --apply` re-send
   parked wakes once. A parked row whose re-send raises moves to `state/chat/queue/dead.jsonl` (`{seat, id, ch, why,

@@ -1,7 +1,6 @@
 """Chat router (T1515): pure; a message + org seats give the list of wakes, no I/O; no daily or hop limit (P38, T1576)."""
 import re
 
-PLAN_STOP = 95
 MENTION = re.compile(r"(?<![\w@.-])@([a-z0-9][a-z0-9-]*)")
 
 
@@ -46,19 +45,12 @@ def _targets(msg, seats):
     return uniq
 
 
-def wakes(msg, org, paused=False, plan=0):
-    """[{seat, reason, queue, count}]: deliver now when queue is None (else paused|plan); count = add 1 to counters."""
+def wakes(msg, org, paused=False):
+    """[{seat, reason, queue, count}]: deliver now when queue is None (else paused); count = add 1 to counters."""
     seats = {s["id"]: s for s in org}
     owner = msg["from"] == "owner"
     out = []
     for seat, reason in _targets(msg, seats):
-        if paused:
-            queue = "paused"
-        elif owner:
-            queue = None
-        elif plan >= PLAN_STOP:
-            queue = "plan"
-        else:
-            queue = None
+        queue = "paused" if paused else None
         out.append({"seat": seat, "reason": reason, "queue": queue, "count": queue is None and not owner})
     return out

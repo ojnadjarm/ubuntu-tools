@@ -4,7 +4,6 @@ import fcntl
 import glob
 import json
 import os
-import subprocess
 import sys
 import time
 
@@ -17,16 +16,6 @@ import org
 def paused():
     """True while the PAUSED file exists in the store (`chat pause`, `agents-stop`)."""
     return os.path.exists(os.path.join(chat_store.root(), "PAUSED"))
-
-
-def plan_pct():
-    """95 when `plan-usage --check 95 --cached` says the plan is at or above it, else 0 (no reading counts as 0)."""
-    try:
-        rc = subprocess.run(["plan-usage", "--check", str(chat_route.PLAN_STOP), "--cached"],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10).returncode
-    except (OSError, subprocess.TimeoutExpired):
-        return 0
-    return chat_route.PLAN_STOP if rc == 1 else 0
 
 
 @contextlib.contextmanager
@@ -152,8 +141,7 @@ def dispatch(msg, seats=None, only=None):
     if only is None and not paused():
         chat_wake.sweep()
     by_id = {s["id"]: s for s in seats}
-    plan = 0 if msg["from"] == "owner" else plan_pct()
-    due = chat_route.wakes(msg, seats, paused=paused(), plan=plan)
+    due = chat_route.wakes(msg, seats, paused=paused())
     out = []
     for w in due:
         if only and w["seat"] != only:

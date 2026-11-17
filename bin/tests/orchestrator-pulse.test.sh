@@ -13,7 +13,7 @@ WORK=$(mktemp -d)
 TMX=$(mktemp -d /tmp/tmx.XXXXXX)
 mkdir -p "$WORK/stubs"
 FXS="pulse-fx-$$"
-# Read-only stubs: argv goes to stubs.argv; needs.json, failed.txt and plan.rc set the queue.
+# Read-only stubs: argv goes to stubs.argv; needs.json and failed.txt set the queue; plan.rc, plan95.rc fake a full plan.
 for s in pc plan-usage systemctl; do
   printf '#!/bin/sh\necho "%s $*" >>"$WORK/stubs.argv"\n' "$s" >"$WORK/stubs/$s"
 done
@@ -125,21 +125,16 @@ mv "$ESC/20261027T090000Z-111.md" "$ESC/done/"
 out=$(SEED=$recent run_case escalation-done '\033[7m \033[27m')
 case "$out" in *"skip"*"queue empty"*"escalations 0"*) ok "done escalation leaves the queue";; *) nok "done escalation leaves the queue" "$out";; esac
 
-# T1412: between 80 and 95 % only a new escalation fires, with an escalation-only turn; at 95 % nothing does.
-echo 1 >"$WORK/plan.rc"
-out=$(SEED=$old run_case over80-no-escalation '\033[7m \033[27m')
-case "$out" in *"skip"*"plan >= 80%"*) ok "80-95 % without an escalation skips";; *) nok "80-95 % without an escalation skips" "$out";; esac
-echo fx >"$ESC/20261027T100000Z-222.md"
-out=$(SEED=$recent run_case over80-escalation '\033[7m \033[27m')
-case "$out" in *" fired session="*"new: escalation $ESC/20261027T100000Z-222.md"*) ok "80-95 %: a new escalation fires";;
-  *) nok "80-95 %: a new escalation fires" "$out";; esac
-grep -qF "Week plan 80-95%: only the escalation, no standing queue." "$WORK/typed" && ! grep -qF "continue the standing queue" "$WORK/typed" \
-  && ok "80-95 %: escalation-only turn" || nok "80-95 %: escalation-only turn" "$(cat "$WORK/typed" 2>/dev/null)"
-out=$(SEED=$old run_case over80-same-escalation '\033[7m \033[27m')
-case "$out" in *"skip"*"no new escalation"*) ok "80-95 %: same escalation skips even past the floor";; *) nok "80-95 %: same escalation skips" "$out";; esac
-echo 1 >"$WORK/plan95.rc"; echo fx >"$ESC/20261027T110000Z-333.md"
-out=$(SEED=$recent run_case over95-escalation '\033[7m \033[27m')
-case "$out" in *"skip"*"plan >= 95%"*) ok ">= 95 %: even a new escalation skips";; *) nok ">= 95 %: even a new escalation skips" "$out";; esac
+# T1760: no plan stop; with the plan stub at 80 and 95 % the pulse fires as below 80 %, without the escalation-only turn.
+echo 1 >"$WORK/plan.rc"; echo 1 >"$WORK/plan95.rc"
+out=$(SEED=$old run_case full-plan-floor '\033[7m \033[27m')
+case "$out" in *" fired session="*) ok "full plan: the floor still fires";; *) nok "full plan: the floor still fires" "$out";; esac
+echo fx >"$ESC/20261027T110000Z-333.md"
+out=$(SEED=$recent run_case full-plan-escalation '\033[7m \033[27m')
+case "$out" in *" fired session="*"new: escalation $ESC/20261027T110000Z-333.md"*) ok "full plan: a new escalation fires";;
+  *) nok "full plan: a new escalation fires" "$out";; esac
+grep -qF "continue the standing queue" "$WORK/typed" && ! grep -qF "Week plan" "$WORK/typed" \
+  && ok "full plan: the standing-queue turn" || nok "full plan: the standing-queue turn" "$(cat "$WORK/typed" 2>/dev/null)"
 rm -f "$WORK/plan.rc" "$WORK/plan95.rc"
 rm -rf "$WORK/agents/discord-liaison"
 
@@ -159,7 +154,7 @@ rm -f "$WORK/status"
 out=$(NAME="${FXS}x" run_case prefix-name '\033[7m \033[27m')
 case "$out" in *"no tmux session"*) ok "session name prefix never matches";; *) nok "session name prefix never matches" "$out";; esac
 
-if grep -vxE 'pc need list --json|plan-usage --check (80|95)|systemctl --user list-units --state=failed --plain --no-legend' \
+if grep -vxE 'pc need list --json|systemctl --user list-units --state=failed --plain --no-legend' \
      "$WORK/stubs.argv" 2>/dev/null | grep -q .; then
   nok "stubs saw only read-only verbs" "$(sort -u "$WORK/stubs.argv" | tr '\n' ';')"
 else ok "stubs saw only read-only verbs"; fi

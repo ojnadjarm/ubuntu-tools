@@ -28,16 +28,14 @@ print([(r['wake'], r['outcome']) for r in map(json.loads, open('$ST/audit.jsonl'
   day="$ST/counters/$(date +%F).json"
   echo 1 >"$WORK/plan.rc"
   id=$(CHAT_SEAT=gx chat post @fx 'plan full')
-  is 'plan 95 %: parked' "$(wakes "$id") $(queued)" "[('fx', 'plan')] 1"
-  chat pause --apply >/dev/null
-  is 'resume while the plan is still full: parked again, nothing lost' "$(chat resume --apply | tail -1) $(queued)" \
-     'chat: 1 held wake re-sent: fx plan 1'
+  is 'plan full (T1760): no plan stop, the wake goes, nothing parked' "$(wakes "$id") $(queued)" "[('fx', 'queued')] 0"
+  mkdir -p "$ST/queue"; printf '{"id": %s, "ch": "dm-fx--gx", "why": "refused"}\n' "$id" >"$ST/queue/fx.jsonl"
   rm "$day" "${day%.json}.drained" "$WORK/plan.rc"
   CHAT_SEAT=fx chat post harness 'first post of a new day' >/dev/null
   is "new day: the first post re-sends the parked wake" "$(wakes "$id" | grep -o "'fx', '[a-z]*')]$") $(queued)" \
      "'fx', 'queued')] 0"
   CHAT_SEAT=fx chat post harness 'second post' >/dev/null
-  is 'new day: only the first post drains' "$(grep -c "\"id\": $id" "$ST/audit.jsonl")" 4
+  is 'new day: only the first post drains' "$(grep -c "\"id\": $id" "$ST/audit.jsonl")" 3
 
   # agents-stop on fakes: systemctl, claude, notify-owner in the fixture's bin; no user bus to reach.
   mkdir -p "$HOME/agents/bin" "$SB" "$WORK/run"

@@ -13,7 +13,7 @@ the owner. Not for token counts per session (those are in `~/.claude/projects` t
   endpoint `/usage` reads: the plan's own percentage, no tokens spent.
 - Architecture: source adapter `fetch()` (one endpoint → `{5h, week, scoped}`), cache `~/agents/state/usage.json`
   (last good reading, fallback on any failure, `stale` > 30 min), CLI `plan-usage` (line / `--json` / `--check`),
-  pulse `orchestrator-pulse` (guarded `tmux send-keys`, echo then Enter; skips at `plan-usage --check 80` ≥ 80%).
+  pulse `orchestrator-pulse` (guarded `tmux send-keys`, echo then Enter; no plan-usage stop since T1760: a stop is the owner's call, `agents-stop` or `chat pause`).
   Its hourly `orchestrator-pulse.timer` is disabled since 2026-10-18 (owner: "not doing anything"); the live trigger is
   `pulse-5h-reset.timer` (every 10 min at :02) → `pulse-5h-reset`: reads `resets_at` from `plan-usage --json`, keeps it
   in `~/agents/state/pulse-5h-reset`, and once that time passes runs one pulse with `PULSE_FLOOR_H=0` (no

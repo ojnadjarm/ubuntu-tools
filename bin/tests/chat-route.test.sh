@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # T1515-P11: lib/chat_route.wakes (pure): direct messages, @names, the owner in a seat's own channel, every #harness post (T1590);
-# no daily limit per seat (P38), no hop limit (T1576), pause, plan >= 95 %. Fixture org only; the module does no I/O.
+# no daily limit per seat (P38), no hop limit (T1576), pause, no plan stop (T1760). Fixture org only; the module does no I/O.
 set -uo pipefail
 AG=$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)
 . "$AG/bin/tests/lib/assert.sh"
@@ -8,6 +8,7 @@ AG=$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)
 is "selftest: the module imports no I/O" "$(grep -cE '^(import|from) |open\(' "$AG/lib/chat_route.py")" 1
 
 python3 - "$AG" <<'PY'
+import inspect
 import sys
 sys.path.insert(0, f"{sys.argv[1]}/lib")
 import chat_route as r
@@ -51,7 +52,7 @@ check("a plain harness post wakes the ceo", go(r.wakes(msg("harness", "moo", "st
 check("a harness post naming the ceo wakes it once", go(r.wakes(msg("harness", "disc", "@ceo hi", to=["ceo"]), ORG)) == [("ceo", "to")])
 check("the ceo's own harness post wakes nobody", r.wakes(msg("harness", "ceo", "note to all"), ORG) == [])
 check("a harness post when paused is queued", r.wakes(msg("harness", "moo"), ORG, paused=True)[0]["queue"] == "paused")
-check("a harness post at plan 95 is queued", r.wakes(msg("harness", "moo"), ORG, plan=95)[0]["queue"] == "plan")
+check("a harness post not paused goes", r.wakes(msg("harness", "moo"), ORG)[0]["queue"] is None)
 check("the owner is never a wake target", r.wakes(msg("dm-moo--owner", "moo", "@owner"), ORG) == [])
 check("a mention in a direct message wakes nobody outside it",
       go(r.wakes(msg("dm-ceo--moo", "ceo", "@disc x", to=["disc"]), ORG)) == [("moo", "dm")])
@@ -76,13 +77,14 @@ check("next_hop: a reply to the owner starts at 1", r.next_hop("moo", {"from": "
 check("next_hop: the owner always 0", r.next_hop("owner", {"from": "moo", "hop": 3}) == 0)
 check("next_hop: no parent is 0", r.next_hop("moo", None) == 0)
 
-# Plan >= 95 %: agent wakes queue, the owner's still go.
-check("plan 95: agent wake queued", r.wakes(msg("dm-ceo--moo", "ceo"), ORG, plan=95)[0]["queue"] == "plan")
-check("plan 94: agent wake goes", r.wakes(msg("dm-ceo--moo", "ceo"), ORG, plan=94)[0]["queue"] is None)
-check("plan 99: owner wake goes", r.wakes(msg("moo", "owner"), ORG, plan=99)[0]["queue"] is None)
+# No plan stop (T1760): the router takes no plan reading; agent and owner wakes go.
+check("no plan input: wakes has no plan parameter, no PLAN_STOP",
+      "plan" not in inspect.signature(r.wakes).parameters and not hasattr(r, "PLAN_STOP"))
+check("agent wake goes", r.wakes(msg("dm-ceo--moo", "ceo"), ORG)[0]["queue"] is None)
+check("owner wake goes", r.wakes(msg("moo", "owner"), ORG)[0]["queue"] is None)
 
 # Pause: stored, nobody woken, the owner included; pause wins over every other reason.
-check("paused: agent wake queued", r.wakes(msg("dm-ceo--moo", "ceo", hop=7), ORG, paused=True, plan=99)[0]["queue"] == "paused")
+check("paused: agent wake queued", r.wakes(msg("dm-ceo--moo", "ceo", hop=7), ORG, paused=True)[0]["queue"] == "paused")
 check("paused: owner wake queued too", r.wakes(msg("moo", "owner"), ORG, paused=True)[0]["queue"] == "paused")
 
 m = msg("dm-ceo--moo", "ceo"); snap = (repr(m), repr(ORG))

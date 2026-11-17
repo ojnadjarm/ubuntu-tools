@@ -9,18 +9,18 @@ t_drain() {
   last() { python3 -c "import json
 print([r['outcome'] for r in map(json.loads, open('$ST/audit.jsonl')) if r.get('id') == $1 and 'wake' in r][-1])"; }
   queued() { cat "$ST/queue/fx.jsonl" 2>/dev/null | wc -l; }
-  plan() { echo 1 >"$WORK/plan.rc"; CHAT_SEAT=gx chat post @fx "$1"; rm "$WORK/plan.rc"; }
+  held() { mkdir -p "$ST"; touch "$ST/PAUSED"; CHAT_SEAT=gx chat post @fx "$1"; rm "$ST/PAUSED"; }
   newday() { rm -f "$day.json" "$day.drained"; }
 
-  id=$(plan 'parked yesterday'); newday
+  id=$(held 'parked yesterday'); newday
   python3 "$BIN/../lib/po_count.py" add fx
   CHAT_SEAT=fx chat post harness 'day start' >/dev/null
   is 'drain (A6): po_count first, then a post: the parked wake is re-sent, queue empty' "$(last "$id") $(queued)" 'delivered 0'
-  n=$(grep -c "\"id\": $id," "$ST/audit.jsonl"); id=$(plan 'parked today')
+  n=$(grep -c "\"id\": $id," "$ST/audit.jsonl"); id=$(held 'parked today')
   CHAT_SEAT=fx chat post harness 'second post' >/dev/null
-  is 'drain (A6): only the first post drains' "$n $(last "$id") $(queued)" '3 plan 1'
+  is 'drain (A6): only the first post drains' "$n $(last "$id") $(queued)" '3 paused 1'
 
-  a=$(plan 'good one'); printf '{"id": 1, "ch\n' >>"$ST/queue/fx.jsonl"; b=$(plan 'good two'); newday
+  a=$(held 'good one'); printf '{"id": 1, "ch\n' >>"$ST/queue/fx.jsonl"; b=$(held 'good two'); newday
   out=$(CHAT_SEAT=fx chat post harness 'day start 2' 2>&1); rc=$?
   is 'drain (A9): a torn queue line: the post exits 0, prints only its id' "$rc $(grep -vc '^[0-9]*$' <<<"$out")" '0 0'
   is 'drain (A9): both good rows re-sent, queue empty' "$(last "$a") $(last "$b") $(queued)" 'queued queued 0'
@@ -30,7 +30,7 @@ print([r['outcome'] for r in map(json.loads, open('$ST/audit.jsonl')) if r.get('
   is 'drain (A9): resume with a bad line: rc 0, the good row re-sent' "$rc ${out##*$'\n'} $(last "$c") $(queued)" \
      '0 chat: 1 held wake re-sent: fx queued queued 0'
 
-  a=$(plan 'after the crash'); printf '{"id": 5, "ch": "../x", "why": "plan"}\n' >"$ST/queue/fx.jsonl"
+  a=$(held 'after the crash'); printf '{"id": 5, "ch": "../x", "why": "plan"}\n' >"$ST/queue/fx.jsonl"
   printf '{"id": %s, "ch": "dm-fx--gx", "why": "plan"}\n' "$a" >>"$ST/queue/fx.jsonl"; newday
   out=$(CHAT_SEAT=fx chat post harness 'day start 3' 2>&1); rc=$?
   is 'drain (X6): a row that raises: the post exits 0 with one warning naming dead.jsonl' \
