@@ -38,7 +38,7 @@ Model by class: `model-route --table`. A brief holds, once each:
 
 No time limit, time box or estimate in a brief (his words, 11-11). Hand the agent the brief path, not its text:
 the stop gate finds the brief by its path and holds the handback until its CHECK is green; `brief-lint <brief>`
-before spawning. Media and JS briefs: delete lossless intermediates and `node_modules` at the drop (T360). Lesson
+before spawning. `drop-link` refuses intermediates and `node_modules` (exit 3, `--allow-intermediates`). Lesson
 builds: `tsc` and node tests before the drop, `test:changed` after his OK.
 
 ## Projects with a PO
