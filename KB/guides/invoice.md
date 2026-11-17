@@ -45,8 +45,7 @@ invoice list --unpaid ; invoice paid 2026-C-11 ; invoice check
 - `issue` reads the draft under the lock: a second concurrent `issue` of the same draft exits "already issued"
   instead of taking a second number (F47, 2026-10-15; selftest case "concurrent issue of one draft").
 - Chrome needs its own `--user-data-dir` per run or it clashes with an open profile; the HTML temp lives in `~/invoices/.tmp`.
-- His original invoices carry no NIF and no IVA-exemption reason; `config.json` `issuer.tax_id` and client `defaults.notes`
-  print them when filled.
+- `config.json` `issuer.tax_id` and client `defaults.notes` print the tax id and the IVA-exemption reason when filled.
 
 ## Links
 - Code: `~/.claude/skills/invoice/`, CLI symlink `~/agents/bin/invoice`
