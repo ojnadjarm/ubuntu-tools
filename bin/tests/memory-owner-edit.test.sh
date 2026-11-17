@@ -77,7 +77,7 @@ t "edit during the run, the keeper leaves the page: carried in, exit 0"
 setup; older_note
 S="$(mem stage)"; his_edit
 mem apply "$S" >"$T/c.out" 2>&1; rc=$?
-{ [ "$rc" = 0 ] && grep -qxF -- "$HIS" "$St/$CARD" && git -C "$St" log --format=%s | grep -q '^owner: '; } && ok || no "rc $rc: $(cat "$T/c.out")"
+{ [ "$rc" = 0 ] && grep -qxF -- "$HIS" "$St/$CARD" && git -C "$St" log --format=%s | grep '^owner: ' >/dev/null; } && ok || no "rc $rc: $(cat "$T/c.out")"
 
 t "Obsidian: a workspace.json change makes no commit and is never tracked"
 setup; S="$(mem stage)"; mem apply "$S" >/dev/null 2>&1   # settle the generated views first
