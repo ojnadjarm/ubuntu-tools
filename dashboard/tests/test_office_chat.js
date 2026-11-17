@@ -129,7 +129,7 @@ async function fullscreen(b) {
   assert.strictEqual(await p.textContent("#office-full"), "Full screen", "the button leaves full screen");
   await p.context().close();
 
-  const f = await office0(b, 400, 850, () => { Object.defineProperty(Document.prototype, "fullscreenEnabled", { get: () => false }); });
+  const f = await office0(b, 400, 850, () => { for (const k of ["fullscreenEnabled", "webkitFullscreenEnabled"]) Object.defineProperty(Document.prototype, k, { get: () => false }); });
   await f.p.click("#office-full");
   const fill = await f.p.evaluate(() => { const r = document.querySelector(".office .stage").getBoundingClientRect(), hit = document.elementFromPoint(20, 20);
     return { cls: document.documentElement.classList.contains("ofill"), r: [r.left, r.top, r.width, r.height].map(Math.round), top: !!hit.closest(".office .stage"), sw: document.documentElement.scrollWidth }; });

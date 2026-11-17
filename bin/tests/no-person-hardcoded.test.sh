@@ -37,6 +37,7 @@ discord-bot/tests/test_bot.py someone redaction sample the bot must scrub from r
 discord-bot/tests/test_bot.py me redaction sample the bot must scrub from replies
 discord-liaison/tests/test_liaison.py x redaction sample the liaison must scrub from posts
 discord-liaison/tests/test_liaison.py someone redaction sample the liaison must scrub from posts
+bin/tests/outbox-post.test.sh someone home-path sample outbox-post must refuse
 '
 HOME_RE='/home/[A-Za-z0-9._-]+'
 
