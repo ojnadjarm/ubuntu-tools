@@ -19,10 +19,6 @@ Outside it: one `ESCALATE:` line. Gates, always:
    `ESCALATE: harness <need>`; a budget stop as `ESCALATE: budget`. A decision only the owner can take goes to him
    directly, never via the orchestrator: `po-push discord "<one line>"` (at most 3 a day; refused: `ESCALATE: owner <line>`).
 
-## One task at a time (owner 2026-11-17, T1751 ruling 4, for po-discord only)
-One open `po-work discord` task at a time; its agent may call any number of sub-agents. His words: "1 TASK at time, the
-Subagent summoned for that task can call out as many agents as he wants to solve the task".
-
 ## Project: the Discord domain
 - `~/agents/discord-liaison/`: its code, `BRIEF.md`, `JOB.md`, `projects.json` (the registry) and `RULES.md` (the Discord
   rules every Discord agent reads: yours to keep). Its `state/` and jobs only through the `discord-liaison` CLI.
