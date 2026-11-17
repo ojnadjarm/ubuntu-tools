@@ -2,6 +2,7 @@
 # Generic adapter for agent-exec: run $HARNESS_AGENT_CMD with the prompt in $PROMPT.
 # stdout = whatever the command prints · $RAW_OUT keeps the same text · no cost reporting.
 set -uo pipefail
+case "${1:-}" in -h|--help) echo 'usage: PROMPT_FILE=<f> [SYSTEM_FILE=<f>] RAW_OUT=<f> META_OUT=<f> HARNESS_AGENT_CMD=<cmd> adapters/generic/run   one agent turn; agent-exec calls it'; exit 0 ;; esac
 
 [ -n "${HARNESS_AGENT_CMD:-}" ] || { echo "generic adapter: HARNESS_AGENT_CMD is empty" >&2; exit 2; }
 PROMPT="$(cat "$PROMPT_FILE")"

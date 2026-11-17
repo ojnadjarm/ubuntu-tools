@@ -145,7 +145,9 @@ def library():
 
 
 cmd = sys.argv[1] if len(sys.argv) > 1 else ""
-if cmd == "auth":
+if cmd in ("-h", "--help"):
+    print("usage: spotify_api.py auth|search <q>|library|play <uri>")
+elif cmd == "auth":
     auth()
 elif cmd == "search":
     search(sys.argv[2])

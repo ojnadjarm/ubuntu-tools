@@ -25,4 +25,11 @@ ev "other .html: direct page link" '[ $rc = 0 ] && [ "$out" = "$DROP_URL/t99/pag
 ev "sub with .. is refused (exit 2)" '[ $rc = 2 ] && [ ! -e "$T/x" ]'
 DROP_URL=http://127.0.0.1:9 "$BIN/drop-link" "$T/src/a b.txt" t99 >/dev/null 2>&1; rc=$?
 ev "dead server: exit 1" '[ $rc = 1 ]'
+mkdir -p "$T/src/app/node_modules/x" "$T/src/film"; echo a >"$T/src/app/index.html"; echo v >"$T/src/film/comp.MKV"
+err=$("$BIN/drop-link" "$T/src/app" t98 2>&1 >/dev/null); rc=$?
+ev "node_modules: refused (exit 3), nothing copied, the line says how to pass" '[ $rc = 3 ] && [ ! -e "$T/drop/t98" ] && grep -q "delete it, or pass --allow-intermediates" <<<"$err"'
+"$BIN/drop-link" "$T/src/film" t98 >/dev/null 2>&1; rc=$?
+ev "lossless intermediate (.mkv): refused (exit 3)" '[ $rc = 3 ] && [ ! -e "$T/drop/t98" ]'
+out=$("$BIN/drop-link" --allow-intermediates "$T/src/app" t98); rc=$?
+ev "--allow-intermediates: published" '[ $rc = 0 ] && [ "$out" = "$DROP_URL/t98/app/" ]'
 exit $bad

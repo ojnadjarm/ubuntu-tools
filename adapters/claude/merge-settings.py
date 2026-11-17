@@ -10,6 +10,9 @@ preserved byte for byte. Prints "no changes" when nothing moved.
 """
 import json, os, sys
 
+if sys.argv[1:2] in (["-h"], ["--help"]):
+    print(__doc__.strip())
+    sys.exit(0)
 if len(sys.argv) != 5 or sys.argv[1] not in ("install", "uninstall"):
     sys.exit(__doc__)
 mode, spath, fpath, home = sys.argv[1:]

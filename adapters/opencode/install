@@ -4,6 +4,7 @@
 #   2. an `instructions` entry for AGENTS.md in ~/.config/opencode/opencode.json
 # The binary itself is not installed here (https://opencode.ai/install, no sudo, ~/.opencode/bin).
 set -uo pipefail
+case "${1:-}" in -h|--help) echo 'usage: adapters/opencode/install   links the skills and the AGENTS.md instructions entry into ~/.config/opencode; takes no arguments'; exit 0 ;; esac
 BIN="$(cd "$(dirname "$(readlink -f "$0")")/../../bin" && pwd)"
 # shellcheck source=/dev/null
 . "$BIN/env.sh"

@@ -231,6 +231,9 @@ def sweep(claims, stop=None):
 
 def main():
     verb = (sys.argv[1:2] or ["start"])[0]
+    if verb in ("-h", "--help"):
+        print("usage: orbit-hook [start|stop|relabel|taskstop|sweep]   Claude hook: reads the hook JSON on stdin (sweep: none)")
+        return
     hook = json.load(sys.stdin) if verb != "sweep" else {}
     tid = str((hook.get("tool_input") or {}).get("task_id") or "") if verb == "taskstop" else ""
     agent_id = str(hook.get("agent_id") or "")

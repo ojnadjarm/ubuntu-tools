@@ -3,6 +3,7 @@
 # stdout = the run's result text · $RAW_OUT = opencode's JSON event stream (one object per line)
 # · $META_OUT = cost/tokens/tool counts · every tool call is audited through audit-from-stream.
 set -uo pipefail
+case "${1:-}" in -h|--help) echo 'usage: PROMPT_FILE=<f> [SYSTEM_FILE=<f>] RAW_OUT=<f> META_OUT=<f> adapters/opencode/run   one agent turn; agent-exec calls it'; exit 0 ;; esac
 HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 
 OC="${OPENCODE_BIN:-$(command -v opencode || echo "$HOME/.opencode/bin/opencode")}"

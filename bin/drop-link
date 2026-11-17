@@ -8,16 +8,20 @@ BASE=${DROP_URL:-https://${HARNESS_TAILNET_FQDN:-$HARNESS_HOST}:8470}
 
 usage() {
   cat <<'EOF'
-usage: drop-link <file|dir> <sub>    hard-link (copy across filesystems) into ~/drop/<sub>/, print the https URL, check it answers 200
-       drop-link <path-in-drop>      print and check the URL of something already in ~/drop
+usage: drop-link [--allow-intermediates] <file|dir> <sub>    hard-link (copy across filesystems) into ~/drop/<sub>/, print the https URL, check it answers 200
+       drop-link [--allow-intermediates] <path-in-drop>      print and check the URL of something already in ~/drop
 A folder with no index.html gets the dashboard Files link (:8498/#files?p=…, previews images); a folder with one and index.html get a trailing-slash URL; other .html files open as pages; any other file downloads.
-exit 0 link answers 200 · 1 link does not answer · 2 usage
+Refused: a path holding node_modules or lossless intermediates (.mkv FFV1 composites, .y4m, .exr; T360); --allow-intermediates for a deliberate case.
+exit 0 link answers 200 · 1 link does not answer · 2 usage · 3 refused
 EOF
 }
 
 [ "${1:-}" = -h ] || [ "${1:-}" = --help ] && { usage; exit 0; }
+allow=0; [ "${1:-}" = --allow-intermediates ] && { allow=1; shift; }
 [ -e "${1:-}" ] || { usage >&2; exit 2; }
 src=$(readlink -f "$1"); drop=$(readlink -f "$DROP")
+heavy=$(find "$src" \( -name node_modules -o -iname '*.mkv' -o -iname '*.y4m' -o -iname '*.exr' \) -print -quit 2>/dev/null)
+[ -z "$heavy" ] || [ "$allow" = 1 ] || { echo "drop-link: refused, $heavy is node_modules or a lossless intermediate: delete it, or pass --allow-intermediates for a deliberate case" >&2; exit 3; }
 
 if [[ "$src" == "$drop"/* ]]; then
   dest=$src

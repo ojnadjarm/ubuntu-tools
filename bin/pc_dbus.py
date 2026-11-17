@@ -68,6 +68,9 @@ def walk(conn, bus, name, path, out, seen, shapes=None):
 
 
 def main():
+    if sys.argv[1:2] in (["-h"], ["--help"]):
+        print("usage: " + __doc__.strip())
+        return
     bus = "user"
     if "--bus" in sys.argv:
         bus = sys.argv[sys.argv.index("--bus") + 1]

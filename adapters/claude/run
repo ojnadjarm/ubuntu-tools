@@ -2,6 +2,7 @@
 # Claude Code adapter for agent-exec: the flags agent-run used before GH07.
 # stdout = the run's result text · $RAW_OUT = claude's own result JSON · $META_OUT = cost/tokens/tools.
 set -uo pipefail
+case "${1:-}" in -h|--help) echo 'usage: PROMPT_FILE=<f> [SYSTEM_FILE=<f>] RAW_OUT=<f> META_OUT=<f> adapters/claude/run   one agent turn; agent-exec calls it'; exit 0 ;; esac
 
 # TSP-013: headless runs load no MCP servers, no auto-memory, only $AGENT_TOOLS, and skip the
 # orchestrator's ~/CLAUDE.md; the fleet contract arrives once, through $SYSTEM_FILE.

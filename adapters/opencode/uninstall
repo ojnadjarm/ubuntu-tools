@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # OpenCode adapter uninstaller — reverses `install` and nothing more.
 set -uo pipefail
+case "${1:-}" in -h|--help) echo 'usage: adapters/opencode/uninstall   reverses install; takes no arguments'; exit 0 ;; esac
 BIN="$(cd "$(dirname "$(readlink -f "$0")")/../../bin" && pwd)"
 # shellcheck source=/dev/null
 . "$BIN/env.sh"

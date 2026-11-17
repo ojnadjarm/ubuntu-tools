@@ -19,21 +19,20 @@ while read -r c k; do KNOWN[$c]=$k; done <<'EOF'
 agents-start help bogus
 agents-stop help bogus
 baseline.sh help
-boot-check.sh help bogus
+boot-check.sh bogus
 code-review-sandbox help bogus
 compose-services help bogus
-fleetlib.sh help bogus
-lockcheck.sh help bogus
+fleetlib.sh bogus
+lockcheck.sh bogus
 moodle-login-check help bogus
 mv-lut bogus
-orbit-hook help bogus
+orbit-hook bogus
 orchestrator-pulse help bogus
-pc_dbus.py help bogus
+pc_dbus.py bogus
 pc-selftest bogus
 playwright-mcp help bogus
 power-profile-auto help bogus
 pulse-5h-reset help bogus
-spotify_api.py help
 EOF
 
 WORK=$(mktemp -d) || exit 1; trap 'rm -rf "$WORK"' EXIT

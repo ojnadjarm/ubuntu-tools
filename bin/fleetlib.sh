@@ -8,6 +8,7 @@
 #   fleet_path              export the hermetic fleet PATH (a systemd user shell inherits almost none)
 #   fleet_lock <file> <fd>  exclusive non-blocking flock on <file> through <fd>; 1 when another run holds it
 #   agent_name_check <cli> <name>  2 unless <name> is an existing ~/agents/<name>/BRIEF.md
+[[ ${BASH_SOURCE[0]} != "$0" ]] || { echo 'usage: . "$HOME/agents/bin/fleetlib.sh"   (a library to source; run, it does nothing)'; exit 0; }
 # shellcheck source=/dev/null
 [ -n "${HARNESS_ENV_LOADED:-}" ] || . "$HOME/agents/bin/env.sh"
 # FLEET_BACKUPS_DIR or LIAISON_PAPERS unset = env.sh loaded before T1597/T1603 added the material keys: load it again.

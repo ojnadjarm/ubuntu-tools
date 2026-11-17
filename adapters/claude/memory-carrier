@@ -352,6 +352,9 @@ def _tokens(folder):
 
 def main():
     verb = sys.argv[1] if len(sys.argv) > 1 else ""
+    if verb in ("-h", "--help"):
+        print("usage: memory-carrier install [--plan] | verify | is-worker | session-start")
+        sys.exit(0)
     store = memory_store.Store(memory_store.home())
     if verb == "install":
         sys.exit(install(store, "--plan" in sys.argv[2:]))

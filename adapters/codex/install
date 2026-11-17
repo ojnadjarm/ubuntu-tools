@@ -2,6 +2,7 @@
 # Codex adapter installer — idempotent. Symlinks the portable skills into ~/.agents/skills,
 # the location Codex reads. UNVERIFIED: no codex CLI is installed on this machine.
 set -uo pipefail
+case "${1:-}" in -h|--help) echo 'usage: adapters/codex/install   symlinks the portable skills into ~/.agents/skills (CODEX_SKILLS_DIR); takes no arguments'; exit 0 ;; esac
 BIN="$(cd "$(dirname "$(readlink -f "$0")")/../../bin" && pwd)"
 # shellcheck source=/dev/null
 . "$BIN/env.sh"

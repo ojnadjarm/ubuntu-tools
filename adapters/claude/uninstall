@@ -2,6 +2,7 @@
 # Claude Code adapter uninstaller — reverses `install` and nothing more.
 # Leaves permissions, model, effortLevel, the Moodle hooks and ~/.claude/CLAUDE.md alone.
 set -uo pipefail
+case "${1:-}" in -h|--help) echo 'usage: adapters/claude/uninstall   reverses install (hooks, links, context); takes no arguments'; exit 0 ;; esac
 HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 BIN="$(cd "$HERE/../../bin" && pwd)"
 # shellcheck source=/dev/null

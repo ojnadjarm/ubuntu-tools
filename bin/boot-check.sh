@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Post-boot health check: one OK/FAIL line per item, exit 1 if anything failed.
+case "${1:-}" in -h|--help) echo 'usage: boot-check.sh   post-boot health check, one OK/FAIL line per item; exit 1 if any failed'; exit 0 ;; esac
 # shellcheck source=/dev/null
 . "$HOME/agents/bin/env.sh"
 fail=0

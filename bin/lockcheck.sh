@@ -1,5 +1,6 @@
 #!/bin/bash
 # Prints OK if the always-on desktop keys hold their values and the screen is not locked.
+case "${1:-}" in -h|--help) echo 'usage: lockcheck.sh   prints OK if the always-on desktop keys hold and the screen is not locked'; exit 0 ;; esac
 . "$(dirname "$0")/env.sh"
 fail=0
 declare -A SCHEMA
