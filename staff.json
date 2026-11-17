@@ -28,7 +28,7 @@
     ]}
   ],
   "floors": [
-    {"id": "discord", "name": "Discord", "teams": ["discord", "discord-crew"]}
+    {"id": "discord", "name": "Discord", "teams": ["discord", "discord-crew"], "head": "discord"}
   ],
   "hidden": ["hello"]
 }

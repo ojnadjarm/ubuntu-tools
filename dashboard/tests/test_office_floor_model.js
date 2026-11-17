@@ -96,3 +96,43 @@ test("layout keeps two bay rows at least and puts staff teams on rows of their o
   assert.deepStrictEqual(L.rowsOf(F.view(M, F.MAIN)), { rows: 1, all: 3 }, "a fifth team opens a second staff row");
   assert.deepStrictEqual(L.rowsOf(build(BASE, { needs: false })), { rows: 2, all: 3 }, "the single-floor fixture's grid is unchanged");
 });
+
+/* withFloors() with the Discord PO as the Discord floor's head. */
+function withHead() {
+  const P = withFloors();
+  P.floors[0].head = "discord";
+  return P;
+}
+
+test("a floor's head takes the raised office: out of the bays, the gap closed, its state and workers as before", async () => {
+  const { build } = await load("office/model.js"), F = await load("office/floors.js"), L = await load("office/layout.js");
+  const P = withHead();
+  P.sessions.push(session(2001, { parent: "discord", name: "T9201" }), session(2002, { parent: "discord", name: "T9202", state: "idle" }));
+  const M = build(P, { needs: false }), D = F.view(M, "discord"), seat = M.rooms.find((r) => r.id === "discord");
+  assert.strictEqual(D.ceo.id, "discord");
+  assert.strictEqual(D.ceo.kind, "head");
+  assert.ok(!D.rooms.some((r) => r.id === "discord"), "its old bay goes");
+  assert.deepStrictEqual(D.ceo.people.map((p) => [p.id, p.pose]), seat.people.map((p) => [p.id, p.pose]), "same lead and workers, same poses");
+  assert.strictEqual(seat.kind, "seat", "the whole model keeps the seat for cards and the list");
+  assert.deepStrictEqual(D.ceo.people.slice(1).map((p) => p.id), ["pid2001", "pid2002"]);
+  const cells = L.plan(D).cells, bays = D.rooms.filter((r) => r.kind !== "pool").map((r) => cells[r.id]);
+  assert.deepStrictEqual(cells.discord, { x: 2, z: 1.6, w: 4, d: 3.2, slots: 0 }, "the mezzanine cell");
+  assert.deepStrictEqual(bays.map((c) => [c.x, c.z]), [0, 1].map((i) => [L.bay(i).x, L.bay(i).z]), "the two other bays close the gap");
+  assert.ok(F.working(M, F.floors(P)).discord >= 2, "the head and its working worker still count");
+});
+
+test("a floor with no head keeps the raised office empty", async () => {
+  const { build } = await load("office/model.js"), F = await load("office/floors.js");
+  const M = build(withFloors(), { needs: false }), D = F.view(M, "discord");
+  assert.strictEqual(D.ceo, null);
+  assert.ok(D.rooms.some((r) => r.id === "discord" && r.kind === "seat"));
+});
+
+test("the main floor is unchanged by another floor's head", async () => {
+  const { build } = await load("office/model.js"), F = await load("office/floors.js"), L = await load("office/layout.js");
+  const a = F.view(build(withFloors(), { needs: false }), F.MAIN), b = F.view(build(withHead(), { needs: false }), F.MAIN);
+  assert.strictEqual(b.ceo.id, "orchestrator");
+  assert.strictEqual(b.ceo.kind, "ceo");
+  assert.deepStrictEqual(b.rooms.map((r) => [r.id, r.key]), a.rooms.map((r) => [r.id, r.key]));
+  assert.deepStrictEqual(L.plan(b), L.plan(a));
+});

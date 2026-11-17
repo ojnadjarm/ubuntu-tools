@@ -1,6 +1,6 @@
 # Dashboard office: add a team, a member, a name; the 3D Org page (`staff.json`, `/api/office`)
 
-Ticket: T1601 (01-18), T1658, T1666, T1687, T1755 · Last verified: 2026-11-17 by T1755 (`tests/test_office_floor_model.js`, `tests/test_office_floors.py`, live `/api/office` floors, shots 2 floors × 5 widths); 2026-11-11 by T1687 (`tests/test_office_status.js`, `tests/test_section_status.py`, live `/api/office` vass paused), T1666 (`bin/tests/dashboard-office-drag.test.sh`), T1658 (`bin/tests/dashboard-office-chat.test.sh`); 2026-11-10 by T1601-16 (`staff.load()` 3 teams 12 members, live `GET /api/office`
+Ticket: T1601 (01-18), T1658, T1666, T1687, T1755, T1756 · Last verified: 2026-11-17 by T1756 (floor head, `tests/test_office_floor_model.js`, shots `~/drop/T1756/`), T1755 (`tests/test_office_floor_model.js`, `tests/test_office_floors.py`, live `/api/office` floors, shots 2 floors × 5 widths); 2026-11-11 by T1687 (`tests/test_office_status.js`, `tests/test_section_status.py`, live `/api/office` vass paused), T1666 (`bin/tests/dashboard-office-drag.test.sh`), T1658 (`bin/tests/dashboard-office-chat.test.sh`); 2026-11-10 by T1601-16 (`staff.load()` 3 teams 12 members, live `GET /api/office`
 4 teams incl. Unassigned 1 (`memory-keeper`), `test_office_*.js` green, `GPU=1 tools/shots.mjs` margins at 5 widths)
 
 ## When to use
@@ -79,6 +79,7 @@ cd ~/agents
 #   "unit": "<x>.timer|.service" only for a member with no ~/agents/<id> folder; "hidden": ["<id>"] keeps one out
 # a floor: one line in "floors" (teams = org.json head seat ids and/or staff team ids; their trees and members follow)
 #   {"id": "<floor>", "name": "<Name>", "teams": ["<head seat id>", "<staff team id>"]}     the panel and #org?floor=<floor> follow
+#   "head": "<seat id in teams>" seats it in the raised office (the CEO's on main; T1756 `office/floors.js` view, `build/room.js` headSpot); no head = an empty one
 python3 -c 'import sys; sys.path.insert(0, "lib"); import staff; d = staff.load(); print(len(d["teams"]), "teams ok")'   # ValueError names the first problem
 # set or clear a section's status (T1687): on its org.json seat or staff.json team line add
 #   "status": {"id": "paused|vacation", "since": "YYYY-MM-DD", "note": "<optional>"}; delete the key (or "id": "active") to clear;

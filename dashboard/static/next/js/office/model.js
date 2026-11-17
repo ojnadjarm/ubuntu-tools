@@ -76,7 +76,7 @@ export function build(P, { now = Date.now(), needs = verdict(store.D).bad, talk 
   const at = placer(P), fl = (p) => at.starter(p.raw.started_by), poolId = (f) => (f === MAIN ? "pool" : "pool-" + f);
   poolPeople.forEach((p) => (p.room = poolId(fl(p))));
   const pools = [...new Set([MAIN, ...poolPeople.map(fl)])].map((f) => Object.assign(room("pool", poolId(f), "Desk pool", "Agents", "", -1, poolPeople.filter((p) => fl(p) === f)), { floor: f })), pool = pools[0];
-  [ceo, ...rooms].filter(Boolean).forEach((r) => (r.floor = at.seat(r.id)));
+  [ceo, ...rooms].filter(Boolean).forEach((r) => { r.floor = at.seat(r.id); if (at.head(r.id)) r.head = true; });
   rooms.push(...pools);
   const live = subs.filter((a) => a.state === "working"), bad = subs.find((a) => a.state === "error" && now - ms(a.last) < FAIL_MS);
   if (ceo) {

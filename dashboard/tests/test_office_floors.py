@@ -31,6 +31,12 @@ class Floors(unittest.TestCase):
                 self.load(floors)
             self.assertIn(word, str(e.exception))
 
+    def test_head_is_one_of_its_teams(self):
+        self.assertEqual(self.load([dict(FLOOR, head="discord")])["floors"][0]["head"], "discord")
+        with self.assertRaises(ValueError) as e:
+            self.load([dict(FLOOR, head="mooblox")])
+        self.assertIn("not one of its teams", str(e.exception))
+
     def test_compose_sends_floors_only_when_set(self):
         org, ags = {"seats": [], "sessions": []}, {"roster": [], "subagents": []}
         self.assertEqual(office.compose(org, ags, {"teams": TEAMS, "floors": [FLOOR]})["floors"], [FLOOR])

@@ -2,6 +2,7 @@
 import { hash, genome } from "../../familiars/genome.js";
 import { mul, glow, lamp, rack, grow, holo } from "./props.js";
 import { board } from "./sign.js";
+import { SLOTS } from "../model.js";
 
 export const SEAT = 0.28, SCALE = 0.36;
 const CREAM = [0.6, 0.66, 0.62], OFF = [0.12, 0.14, 0.14], STANDBY = [0.16, 0.32, 0.36];
@@ -108,8 +109,8 @@ export function pool(ctx, R) {
   places(ctx, R, R.people, tint, w, d, slots, true, true);
 }
 
-/* The CEO's place: a neon ring on the deck, a wide desk under three holo screens, the name board and the Conductor standing on the floor with the model's motes, lamp and failing agent. */
-export function ceoSpot(ctx, R) {
+/* The raised office round its lead's pose: a neon ring on the deck, a wide desk under three holo screens, the name board (sign: board options, R its room), a floor lamp and a desk lamp in the state's colour. */
+function office(ctx, R, sign) {
   const { B, th } = ctx, on = R.pose === "working" || R.pose === "talking", col = th.state[R.pose] || th.accent, k = on ? 1 : R.pose === "sleep" ? 0.15 : 0.5;
   B.model("rugRound", { s: [2.6, 1, 2.6], tint: { carpet: [0.1, 0.13, 0.26], carpetDarker: [0.5, 0.28, 0.2], carpetWhite: mul(CREAM, 0.8) } });
   B.ring(0, 0.012, 0, 1.2, 1.24, 0, Math.PI * 2, 40, 1, col, glow(ctx, [...mul(col, k), 1]));
@@ -117,10 +118,29 @@ export function ceoSpot(ctx, R) {
   B.model("books", { x: -0.5, y: 0.384, z: -0.75 }); B.model("computerKeyboard", { x: 0, y: 0.384, z: -0.68 });
   for (const s of [-1, 0, 1]) { B.push({ x: s * 0.5, y: 0.46, z: -0.86 + Math.abs(s) * 0.1, r: -s * 0.5 }); holo(ctx, [-0.22, 0, 0], [0.44, 0, 0], [0, 0.34, 0], s ? th.second : col, on ? 1 : 0.35); B.pop(); }
   grow(ctx, 1.25, -0.6, -0.5, { w: 0.6 });
-  B.push({ x: -1.35, z: -0.3, r: 0.8 }); board(ctx, { busy: on ? 1 : 0, awake: R.pose !== "sleep" }, { id: "sign-" + R.id, who: R.id, name: R.rank || R.name, w: 0.9, sh: 0.6, y: 0.35, h: 1.05 }); B.pop();
+  B.push({ x: -1.35, z: -0.3, r: 0.8 }); board(ctx, R, { w: 0.9, sh: 0.6, y: 0.35, h: 1.05, ...sign }); B.pop();
   B.model("lampRoundFloor", { x: -0.9, z: 0.75, glow: { lamp: glow(ctx, [1, 0.82, 0.5, 1]) } }); lamp(ctx, -0.9, 0.95, 0.85, ctx.night ? 0.8 : 0.5, 1.3, { halo: 0.3 });
   lamp(ctx, 0, 0.7, -0.6, on ? 0.8 : 0.3, 0.9, { col, halo: on ? 0.4 : 0.15 });
+}
+
+/* The CEO's place: the raised office and the Conductor standing on the floor with the model's motes, lamp and failing agent. */
+export function ceoSpot(ctx, R) {
+  const { B } = ctx, on = R.pose === "working" || R.pose === "talking";
+  office(ctx, { busy: on ? 1 : 0, awake: R.pose !== "sleep", pose: R.pose }, { id: "sign-" + R.id, who: R.id, name: R.rank || R.name });
   const p = B.at(0, 0, 0), L = R.live || { motes: [], lamp: "ok", failing: null };
   ctx.actors.push({ id: R.id, role: "ceo", pose: R.pose, x: p.x, y: p.y, z: p.z, yaw: p.r, scale: 0.4, live: { motes: L.motes.map((id) => ({ id, hue: genome(id).hue })), lamp: L.lamp, failing: L.failing } });
+  ctx.labels.push({ id: R.id, pos: [p.x, p.y + 1.12, p.z] });
+}
+
+/* A floor head's place (a seat that heads another floor): the raised office under its room's board, the seat standing where the CEO stands, its workers standing at the front of the deck. */
+export function headSpot(ctx, R) {
+  const { B } = ctx, lead = R.people[0];
+  office(ctx, R, { id: R.sign, name: R.info.name });
+  const p = B.at(0, 0, 0);
+  ctx.actors.push({ id: lead.id, role: lead.role, pose: lead.pose, x: p.x, y: p.y, z: p.z, yaw: p.r, scale: 0.4 });
+  R.people.slice(1, 1 + SLOTS).forEach((wk, i) => {
+    const q = B.at(0.6 + (i % 3) * 0.45, 0, 0.45 + Math.floor(i / 3) * 0.45);
+    ctx.actors.push({ id: wk.id, role: wk.role, pose: wk.pose, x: q.x, y: q.y, z: q.z, yaw: q.r, scale: SCALE });
+  });
   ctx.labels.push({ id: R.id, pos: [p.x, p.y + 1.12, p.z] });
 }

@@ -51,6 +51,8 @@ def _validate(data):
             if t in on:
                 raise ValueError(f"team {t} on 2 floors: {on[t]}, {fid}")
             on[t] = fid
+        if "head" in f and f["head"] not in f["teams"]:
+            raise ValueError(f"floor {fid}: head {f['head']} is not one of its teams")
 
 
 def load(p=None):

@@ -1,10 +1,10 @@
 /* Plan → chunks: the hall or one room built on its own batch in short steps, lit by the lamps the caller hands to bake; a day-night flip re-reads lamps and glows without geometry. */
 import { batch } from "./batch.js";
 import { hall, DECK } from "./hall.js";
-import { seatRoom, teamRoom, ceoSpot, pool } from "./room.js";
+import { seatRoom, teamRoom, ceoSpot, headSpot, pool } from "./room.js";
 
 export const HALL = "hall";
-const ROOMS = { seat: seatRoom, team: teamRoom, ceo: ceoSpot, pool };
+const ROOMS = { seat: seatRoom, team: teamRoom, ceo: ceoSpot, head: headSpot, pool };
 const room = (M, id) => [M.ceo, ...M.rooms, ...M.staff].find((r) => r && r.id === id);
 const envOf = (theme, M) => theme.env[M.night ? "night" : "day"];
 
@@ -22,7 +22,7 @@ function run(id, M, plan, theme, kit, ink, dry) {
   B.model = (name, o = {}) => { for (const k in o.glow) o.glow[k] ||= ctx.glows.push(null) - 1; return dry ? kit.models[name].s : model(name, o); };
   if (id === HALL) hall(ctx, plan);
   else {
-    const R = room(M, id), c = plan.cells[id], up = R.kind === "ceo";
+    const R = room(M, id), c = plan.cells[id], up = R === M.ceo;
     B.push({ x: c.x, y: up ? DECK : 0, z: c.z + (up ? 0.25 : 0) });
     ROOMS[R.kind](ctx, R);
     B.pop();
