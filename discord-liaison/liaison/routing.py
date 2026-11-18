@@ -1,4 +1,4 @@
-"""Job or escalate (T1416): work goes to a worker; only a blocked worker reaches the orchestrator."""
+"""Job or escalate (T1416): work goes to a worker; a blocked worker escalates to po-discord (T1771)."""
 BLOCKERS = {
     'permission': 'a permission or classifier denial',
     'owner': 'a decision only the owner can take',
