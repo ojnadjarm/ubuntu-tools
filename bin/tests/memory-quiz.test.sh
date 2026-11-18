@@ -110,6 +110,16 @@ fx python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import memory_check,
   "$ROOT/lib" "$ST" 2>"$WORK/err"
 ev "staged quiz: the staged core line is answered, 8/8 green" 'grep -qx "quiz · 8/8 green" "$WORK/err" && grep -q kettle "$LOG"' || cat "$WORK/err"
 
+# 11. A must cell "a|b" (T1768) passes on either word; ";" still needs every word.
+OR="$WORK/or"; cp -r "$S" "$OR"; rm -rf "$OR/.git"
+printf 'c01\tIs the mascot Pemberton or Bobbington?\tBobbington|Pemberton\tor.md\n' >>"$OR/checks/questions.d/core.tsv"
+printf 'c02\tAre deploys on Thursday and Fridayx?\tThursday;Fridayx\tor.md\n' >>"$OR/checks/questions.d/core.tsv"
+fx env MEMORY_HOME="$OR" python3 "$ROOT/lib/memory_quiz.py" merge >/dev/null
+fx python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import memory_check, memory_quiz, memory_store; memory_quiz.check(memory_store.Store(sys.argv[2]), {})' \
+  "$ROOT/lib" "$OR" 2>"$WORK/err"
+ev "or cell: a|b is green on one word, a;b red on one missing word" \
+  'grep -qx "quiz · 8/9 green" "$WORK/err" && grep -q "^quiz · red · core/CORE.md · c02$" "$WORK/err" && ! grep -q "· c01$" "$WORK/err"' || cat "$WORK/err"
+
 # 7. The gate module keeps its size cap.
 ev "memory_check.py is at most 300 lines" '[ "$(wc -l <"$ROOT/lib/memory_check.py")" -le 300 ]'
 

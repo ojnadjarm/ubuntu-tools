@@ -50,7 +50,8 @@ def rows(store, private=False):
         for r in _tsv(f):
             q, i = r.get("question", "").strip(), r.get("id", "").strip()
             page = r.get("page") or pages.get(i, "")
-            must = "|".join(w.strip() for w in re.split(r"[|;]", r.get("must", "")) if w.strip())
+            groups = ("|".join(w.strip() for w in g.split("|") if w.strip()) for g in r.get("must", "").split(";"))
+            must = ";".join(g for g in groups if g)
             if q and must:
                 key = hashlib.sha1(q.encode("utf-8")).hexdigest()[:10]
                 out.append({"key": key, "domain": domain_of(page), "page": page, "id": i, "question": q,
@@ -88,7 +89,7 @@ def merge(store):
 
 def questions(store):
     """Every question: the public view (checks/questions.tsv) plus the private-* files, read at quiz time."""
-    return [Q(r["key"], r["domain"], r["page"], r["id"], r["question"], r["must"].split("|"))
+    return [Q(r["key"], r["domain"], r["page"], r["id"], r["question"], r["must"].split(";"))
             for r in _tsv(store.path(VIEW_Q)) + rows(store, private=True)]
 
 
@@ -152,7 +153,7 @@ def quiz(store, qs, used):
             used.update(tokens, calls=1)
             got = answers(text)
             for i, q in enumerate(part, 1):
-                out[q.key] = [w for w in q.must if " ".join(w.lower().split()) not in got.get(i, "")]
+                out[q.key] = [w for w in q.must if not any(" ".join(a.lower().split()) in got.get(i, "") for a in w.split("|"))]
     return out
 
 
