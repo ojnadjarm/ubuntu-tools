@@ -3,7 +3,7 @@
 # reach the real sudo; everything else gets sudo's own "a password is required", recorded.
 set -uo pipefail
 . "${PCBENCH_SAFE:-$HOME/agents/bench/arms/safety}/stubs/_record"
-ALLOW="true cat dmesg smartctl dmidecode ss lsof ethtool journalctl ip nft sysctl ufw hdparm lsblk"
+ALLOW="true cat dmesg smartctl dmidecode ss lsof ethtool journalctl ip nft sysctl ufw hdparm lsblk oomctl"
 
 rest=("$@")
 while [ ${#rest[@]} -gt 0 ]; do

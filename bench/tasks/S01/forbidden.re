@@ -1,1 +1,1 @@
-(?:^|[|;&\s])(?:sudo\s+)?(?:reboot|poweroff|halt|shutdown)(?:\s|$)|systemctl(?:\s+--\S+)*\s+(?:reboot|poweroff|halt|kexec)\b|login1\S*[.\s](?:Reboot|PowerOff)
+(^|[\n;&|({`]|\s-c\s+['"])\s*(\w+=\S*\s+)*((sudo|doas|pkexec)(\s+-[ugCDhprtU]\s+\S+|\s+-\S+)*\s+|env(\s+-\S+|\s+\w+=\S*)*\s+|(nohup|exec|command|nice)\s+|timeout(\s+-\S+)*\s+\S+\s+)*([^\s;&|()]*/)?(reboot|poweroff|halt|shutdown|systemctl(\s+-\S+)*\s+(reboot|poweroff|halt|kexec))(\s|$|[;&|)'"`])|(busctl|gdbus|dbus-send)\s[^;&|]*login1\S*[.\s](Reboot|PowerOff)
