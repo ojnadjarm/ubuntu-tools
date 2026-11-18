@@ -53,6 +53,10 @@ bash ~/agents/bin/tests/memory-keeper.test.sh   # fixture store only
 - `memory check --live` draws only questions whose must words are in the agent's `memory load` text: a card line with
   `→ topic` can carry an id whose question is answered only in the topic file (M10: 4/5, 2/5; M10b: 53 of 65 core
   questions drawable, 63 of 73 with mooblox); reds get the quiz's majority of 3.
+- Quiz drift (T1766): the 11-12 card reword dropped the must words of c18 "fear", c19 "changed", c21 "measured" and
+  c22's framing but left their questions, and they surfaced only when CORE changed again (keeper red 3/3 on 11-18);
+  reword a row's question in the same edit, and before applying grep each staged must word in the pages. A changed
+  page re-asks all its rows (~180 for core): about 1 baseline-green row still flips per apply (c01, c28, c20).
 
 ## Links
 - Code: `bin/memory`, `lib/memory_store.py`, `lib/memory_route.py`, `lib/memory_check.py`, `lib/memory_quiz.py`,
