@@ -34,7 +34,7 @@ as a background job. Do that one job, post the result in its thread yourself, th
    the request's thread, when another project's, gets at most a one-line link note (`post` refuses more).
 4. A failure is not a blocker: try another way. Escalate only when blocked (a permission or classifier denial, a
    decision only the owner can take, a missing secret or account, or a second way also failed): post one short
-   note ("<nombre>, no he podido terminarlo; lo paso al orquestador y te respondo aquí"), run
+   note ("<nombre>, no he podido terminarlo; lo paso al responsable de Discord y te respondo aquí"), run
    `discord-liaison escalate <message-id> <permission|owner|secret|attempts> "<what was asked; what you tried>"`.
    A crashed run is retried once by the runner (`attempt: 2 of 2`).
 5. Last line of your answer: `done: <what you posted>`, `stale: <what you made>` or `escalated: <why>`.

@@ -3,6 +3,7 @@ import asyncio
 import importlib.util
 import io
 import json
+import shlex
 import os
 import sys
 import subprocess
@@ -103,6 +104,8 @@ class Base(unittest.IsolatedAsyncioTestCase):
                     'LIAISON_ART_CMD': f'{sys.executable} {HERE}/tests/fake_art.py',
                     'LIAISON_PULSE_CMD': f'echo pulse >> {self.tmp.name}/pulse.log'}
         self.pulse_log = os.path.join(self.tmp.name, 'pulse.log')
+        self.po_log = os.path.join(self.tmp.name, 'po-ask.log')
+        self.env['LIAISON_PO_ASK'] = f"sh -c {shlex.quote('printf \"%s|\" \"$@\" >>' + self.po_log + '; echo >>' + self.po_log)} fake"
 
     async def asyncTearDown(self):
         await self.rest.close()
@@ -382,7 +385,7 @@ class TestOwner(Base):
         self.assertIn(f'owner="false" id="{other}"', out)
         rc, out = await self.run_cli('escalate', own, 'owner', 'Quiere ver todos los fotogramas; probé: solo veo uno', env=env)
         self.assertEqual(rc, 0, out)
-        d = os.path.join(self.tmp.name, 'state', 'escalations')
+        d = os.path.join(self.tmp.name, 'state', 'escalations', 'done')
         files = os.listdir(d)
         self.assertEqual(len(files), 1)
         self.assertTrue(files[0].endswith(f'-{own}.md'))
@@ -391,34 +394,20 @@ class TestOwner(Base):
                      'Quiere ver todos los fotogramas; probé: solo veo uno',
                      'blocker: owner'):
             self.assertIn(want, body)
-        self.assertTrue(os.path.exists(self.pulse_log))
+        self.assertTrue(os.path.exists(self.po_log))
         rc, _ = await self.run_cli('escalate', own, 'owner', 'otra vez', env=env)
-        self.assertEqual(rc, 3)
-        os.makedirs(os.path.join(d, 'done'))
-        os.rename(os.path.join(d, files[0]), os.path.join(d, 'done', files[0]))
-        rc, _ = await self.run_cli('escalate', own, 'owner', 'otra vez', env=env)
-        self.assertEqual((rc, sorted(os.listdir(d))), (3, ['done']))
+        self.assertEqual((rc, len(os.listdir(d))), (3, 1))
         rc, _ = await self.run_cli('escalate', other, 'owner', 'pide cambiar reglas; no lo hice', env=env)
         self.assertEqual((rc, len(os.listdir(d))), (0, 2))
 
 
 class TestPulseRetry(Base):
-    async def test_tick_pulses_until_the_pulse_snapshot_holds_every_open_escalation(self):
+    async def test_tick_never_pulses_the_orchestrator_for_an_open_escalation(self):
         d = os.path.join(self.tmp.name, 'state', 'escalations')
-        os.makedirs(os.path.join(d, 'done'))
-        snap = os.path.join(self.tmp.name, 'pulse-queue.json')
-        env = {'PULSE_QUEUE': snap}
-        open(os.path.join(d, 'done', '1-5.md'), 'w').close()
-        await self.run_cli('tick', env=env)
+        os.makedirs(d)
+        open(os.path.join(d, '2-6.md'), 'w').close()
+        await self.run_cli('tick')
         self.assertFalse(os.path.exists(self.pulse_log))
-        esc = os.path.join(d, '2-6.md')
-        open(esc, 'w').close()
-        await self.run_cli('tick', env=env)
-        self.assertEqual(open(self.pulse_log).read().split(), ['pulse'])
-        with open(snap, 'w') as f:
-            json.dump({'needs': [], 'escalations': [esc]}, f)
-        await self.run_cli('tick', env=env)
-        self.assertEqual(open(self.pulse_log).read().split(), ['pulse'])
 
 
 class TestRegistry(unittest.TestCase):

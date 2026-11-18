@@ -26,11 +26,11 @@ class TestRoute(unittest.TestCase):
 
 class TestRoutingCli(JobBase):
     def escalations(self):
-        d = os.path.join(self.tmp.name, 'state', 'escalations')
+        d = os.path.join(self.tmp.name, 'state', 'escalations', 'done')
         return sorted(os.listdir(d)) if os.path.isdir(d) else []
 
     def read_escalation(self):
-        with open(os.path.join(self.tmp.name, 'state', 'escalations', self.escalations()[0])) as f:
+        with open(os.path.join(self.tmp.name, 'state', 'escalations', 'done', self.escalations()[0])) as f:
             return f.read()
 
     async def test_escalate_without_blocker_is_refused_toward_a_job(self):
@@ -47,6 +47,29 @@ class TestRoutingCli(JobBase):
         text = self.read_escalation()
         self.assertIn('blocker: secret (a missing secret or account)', text)
         self.assertIn('needs an X account', text)
+
+    async def test_escalate_files_a_po_ask_for_po_discord_and_no_pulse(self):
+        (a,) = await self.inbox('publica en mi cuenta de X')
+        rc, out = await self.run_cli('escalate', a, 'secret', 'needs an X account; none in config')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('escalated to po-discord', out)
+        with open(self.po_log) as f:
+            ask = f.read()
+        self.assertTrue(ask.startswith('discord|--from|liaison|--channel|discord|--thread|400|--copy|'), ask)
+        self.assertIn('needs an X account; none in config', ask)
+        self.assertFalse(os.path.exists(self.pulse_log))
+        d = os.path.join(self.tmp.name, 'state', 'escalations')
+        self.assertEqual(os.listdir(d), ['done'])
+        rc, _ = await self.run_cli('escalate', a, 'secret', 'otra vez')
+        self.assertEqual(rc, 3)
+
+    async def test_failed_po_ask_leaves_the_escalation_open(self):
+        (a,) = await self.inbox('publica en mi cuenta de X')
+        rc, out = await self.run_cli('escalate', a, 'secret', 'needs an X account', env={'LIAISON_PO_ASK': 'false'})
+        self.assertNotEqual(rc, 0)
+        self.assertIn('po-ask failed', out)
+        d = os.path.join(self.tmp.name, 'state', 'escalations')
+        self.assertTrue([f for f in os.listdir(d) if f.endswith(f'-{a}.md')])
 
     async def test_worker_retries_once_then_succeeds_without_escalation(self):
         (a,) = await self.inbox('haz un PR')

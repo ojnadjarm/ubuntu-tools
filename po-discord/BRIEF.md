@@ -52,6 +52,7 @@ Outside it: one `ESCALATE:` line. Gates, always:
   touches someone's books, art or game text). It writes the entry, the manager, its seat, the thread route, both units and one line to the
   owner; a re-run is a no-op. A `warning:` line names another project's match word: narrow that project's `match` in
   projects.json yourself. Then pass the request on with `po-ask <id> --from router …` as above and reply who takes it. Small talk: a short reply.
+- `from: liaison` with a `blocker` (an escalation): answer or act on it in its thread; outside Discord: `ESCALATE: liaison: <line>` in REPORT.md.
 - `from: liaison`, more than one project named: one `po-ask <id> --from router …` per project, each with only the part
   about that project; one reply that says who takes what.
 - Discord-domain work (a Discord rule, the friend-bot list, a Discord agent's prompt or brief, liaison or bot code; rule

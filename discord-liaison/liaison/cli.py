@@ -231,7 +231,6 @@ class App:
         if await po.approvals(self, self.env):
             print('passed the owner\'s ✅ to the manager')
         print(f'{len(msgs)} new, inbox {len(self.state.inbox)}')
-        self.nudge()
         if not self.state.inbox:
             return 0
         if not self.caps.take('run'):
@@ -343,7 +342,8 @@ class App:
         kept = {x['id'] for j in self.jobs.list() for x in j.get('messages', [j['message']])}
         esc = os.path.join(self.papers, 'escalations')
         for m in shown:
-            if m['bot'] or m['id'] in kept or glob.glob(os.path.join(glob.escape(esc), f'*-{m["id"]}.md')):
+            if m['bot'] or m['id'] in kept or glob.glob(os.path.join(glob.escape(esc), f'*-{m["id"]}.md')) + glob.glob(
+                    os.path.join(glob.escape(esc), 'done', f'*-{m["id"]}.md')):
                 continue
             try:
                 await self.rest.call('DELETE', f'/channels/{m["thread_id"]}/messages/{m["id"]}/reactions/{quote("👀")}/@me')
@@ -513,24 +513,8 @@ class App:
                            '--ttl', '900', '--asked', asked], stdin=subprocess.DEVNULL, capture_output=True, text=True)
         return r.stdout.strip() if r.returncode == 0 else ''
 
-    def pulse(self):
-        subprocess.call(self.env.get('LIAISON_PULSE_CMD', 'orchestrator-pulse'), shell=True, stdin=subprocess.DEVNULL,
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-    def nudge(self):
-        """Pulse again while an open escalation is missing from the pulse's last-fire snapshot (it skips when busy)."""
-        open_ = set(glob.glob(os.path.join(glob.escape(self.papers), 'escalations', '*.md')))
-        snap = self.env.get('PULSE_QUEUE', os.path.expanduser('~/agents/log/pulse-queue.json'))
-        try:
-            with open(snap) as f:
-                sent = set(json.load(f).get('escalations', []))
-        except (OSError, ValueError):
-            sent = set()
-        if open_ - sent:
-            self.pulse()
-
     def escalate(self, args):
-        """Hand a blocked request to the orchestrator: state/escalations/<utc>-<msg>.md naming the blocker."""
+        """Hand a blocked request to po-discord: state/escalations/<utc>-<msg>.md naming the blocker, filed by po-ask."""
         msgs = self.state.inbox + [j['message'] for j in self.jobs.list()]
         m = next((m for m in msgs if args and m['id'] == args[0]), None)
         usage = (f'usage: discord-liaison escalate <message-id from the inbox or a job> <{"|".join(BLOCKERS)}> '
@@ -549,11 +533,14 @@ class App:
         if not path:
             print(f'refused: message {m["id"]} is already escalated (open or done)')
             return 3
-        print(f'escalated to the orchestrator: {path}')
+        if os.path.basename(os.path.dirname(path)) != 'done':
+            return 1
+        print(f'escalated to po-discord: {path}')
         return 0
 
     def write_escalation(self, m, blocker, tried):
-        """Write the escalation file and pulse; None when this message was escalated before."""
+        """Write the escalation file, file it for po-discord and move it to done/ (left open when po-ask fails); its
+        path, or None when this message was escalated before."""
         d = os.path.join(self.papers, 'escalations')
         if glob.glob(os.path.join(glob.escape(d), f'*-{m["id"]}.md')) + glob.glob(
                 os.path.join(glob.escape(d), 'done', f'*-{m["id"]}.md')):
@@ -564,9 +551,18 @@ class App:
         with open(path, 'w') as f:
             f.write(f'# Discord escalation\n\nchannel: {m.get("channel", "foro")} ({m["thread_id"]})\nmessage: {m["id"]}\n'
                     f'author: {m["author"]}{who}\nblocker: {blocker} ({BLOCKERS[blocker]})\n\n## Request\n\n{m["content"]}\n\n## What the liaison tried\n\n'
-                    f'{tried}\n\nAnswer in the channel, then move this file to done/.\n')
-        self.pulse()
-        return path
+                    f'{tried}\n\nAnswer or act on it in its thread.\n')
+        with open(path) as f:
+            text = f.read()
+        ask = shlex.split(self.env.get('LIAISON_PO_ASK', 'po-ask')) + [
+            'discord', '--from', 'liaison', '--channel', 'discord', '--thread', m['thread_id'], '--copy', text]
+        if subprocess.call(ask, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL) != 0:
+            print(f'error: po-ask failed; the escalation stays open: {path}')
+            return path
+        os.makedirs(os.path.join(d, 'done'), exist_ok=True)
+        done = os.path.join(d, 'done', os.path.basename(path))
+        os.rename(path, done)
+        return done
 
     def job(self, args):
         """Hand a conversation to one background worker: anchored on its newest message, all its messages and images
@@ -650,7 +646,7 @@ class App:
             await self.notify_failure(j, 'launch failed')
 
     async def notify_failure(self, job, why):
-        """After the last attempt: a short Spanish note in the request's thread, then an escalation to the orchestrator."""
+        """After the last attempt: a short Spanish note in the request's thread, then an escalation to po-discord."""
         m = job['message']
         try:
             await self.post([m['thread_id'], FAILED.format(author=m['author'])])

@@ -11,7 +11,7 @@ Secrets: discord-bot-token
   approval.
 - Never answer "no puedo" or "lo decide el owner". Work, or a tool this run lacks (a change to your own tools
   included), is a job (Delegate): workers have the full fleet tools and skills. Escalate only when blocked:
-  a short ack ("Lo paso al orquestador, te respondo aquí"), then `discord-liaison escalate <message-id>
+  a short ack ("Lo paso al responsable de Discord, te respondo aquí"), then `discord-liaison escalate <message-id>
   <blocker> "<what is asked; what was tried>"`, blocker = `permission` (a permission or classifier denial), `owner` (a
   decision only the owner can take), `secret` (a missing secret or account), `attempts` (two failed attempts). Any
   other reason is refused: start a job. A message already escalated is refused: do not retry it. No `notify-owner`

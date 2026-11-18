@@ -144,9 +144,9 @@ class TestJobCli(JobBase):
         sent = self.fake.sent('400')
         self.assertEqual(len(sent), 1)
         self.assertIn('no he podido terminarlo', sent[0])
-        esc = os.listdir(os.path.join(self.tmp.name, 'state', 'escalations'))
+        esc = os.listdir(os.path.join(self.tmp.name, 'state', 'escalations', 'done'))
         self.assertTrue(esc[0].endswith(f'-{a}.md'))
-        self.assertTrue(os.path.exists(self.pulse_log))
+        self.assertTrue(os.path.exists(self.po_log))
 
     async def test_triage_runs_while_a_job_runs(self):
         (a,) = await self.inbox('haz un PR largo')
