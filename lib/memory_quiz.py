@@ -4,7 +4,9 @@ import importlib.machinery
 import importlib.util
 import os
 import re
+import subprocess
 import sys
+import tempfile
 from collections import Counter, namedtuple
 
 from memory_check import Finding
@@ -191,8 +193,24 @@ def shas(store, q):
     return _sha(page), _sha("\t".join([q.id, q.page, "|".join(q.must)]))
 
 
+def loaded(store, domain):
+    """The text the quiz gives the model for a domain's rows (a worker's `memory load` plus the memory pages), normalised."""
+    env = dict(os.environ, MEMORY_HOME=store.root, MEMORY_DOMAINS="" if domain == "core" else domain, MEMORY_WORKER="1")
+    env.pop("CLAUDECODE", None)
+    with tempfile.TemporaryDirectory(prefix="memory-quiz.") as t:
+        load = subprocess.run([os.path.join(ROOT, "bin", "memory"), "load"], env=env, cwd=t, capture_output=True,
+                              text=True, timeout=60).stdout
+    return " ".join((load + "\n" + prompt(store, domain, [])).lower().split())
+
+
+def brittle(q, text):
+    """Every must word (any `|` word) is in the loaded text: the lesson is there, the model missed it."""
+    return all(any(" ".join(a.lower().split()) in text for a in w.split("|")) for w in q.must)
+
+
 def check(store, before, only_changed=False):
-    """A question green in the baseline that is red now is a finding; a green gate updates the baseline for the asked ones."""
+    """A question green in the baseline, red now and missing a must word from its loaded text is a finding; red with
+    every must word loaded is brittle (a stderr line, never blocking); a green gate updates the baseline for the asked ones."""
     qs = questions(store)
     base = {r["key"]: r for r in _tsv(store.path(BASELINE))}
     if only_changed:
@@ -200,10 +218,15 @@ def check(store, before, only_changed=False):
         qs = [q for q in qs if base.get(q.key, {}).get("row_sha") != shas(store, q)[1]
               or (q.page in pages and base[q.key].get("page_sha") != shas(store, q)[0])]
     miss = vote(store, qs) if qs else {}
+    flipped = [q for q in qs if miss[q.key] and base.get(q.key, {}).get("pass") == "1"]
+    texts = {d: loaded(store, d) for d in {q.domain for q in flipped}}
+    weak = {q.key for q in flipped if brittle(q, texts[q.domain])}
     out = [Finding("quiz", q.page, 0, f"{q.id or q.key}: green in the baseline, red now (missing: {', '.join(miss[q.key])})")
-           for q in qs if miss[q.key] and base.get(q.key, {}).get("pass") == "1"]
+           for q in flipped if q.key not in weak]
     for q in qs:
-        if miss[q.key] and not any(f.what.startswith(f"{q.id or q.key}:") and f.file == q.page for f in out):
+        if q.key in weak:
+            print(f"quiz · brittle · {q.page} · {q.id or q.key} · red by vote, every must word loaded (not blocking)", file=sys.stderr)
+        elif miss[q.key] and not any(f.what.startswith(f"{q.id or q.key}:") and f.file == q.page for f in out):
             print(f"quiz · red · {q.page} · {q.id or q.key}", file=sys.stderr)
     print(f"quiz · {sum(not m for m in miss.values())}/{len(qs)} green", file=sys.stderr)
     if not out and qs:

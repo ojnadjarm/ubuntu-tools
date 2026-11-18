@@ -256,14 +256,21 @@ def apply(store, staging, car=None):
 
 
 def _append_merge(store, stg, rel, base_sha):
-    """An append-only ledger changed on both sides: the store's text plus the staging copy's new tail, when both extend the base."""
+    """An append-only ledger changed on both sides: the store's text plus the staging copy's tail lines it lacks, when both
+    extend the base (idempotent: a tail merged in by an earlier red apply is not added twice)."""
     live, mine = _read(store.path(rel)), _read(stg.path(rel))
     a, b = live.splitlines(keepends=True), mine.splitlines(keepends=True)
-    k = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b)))
-    head = "".join(a[:k])
-    if hashlib.sha256(head.encode("utf-8")).hexdigest() != base_sha:
+    h, k = hashlib.sha256(), None
+    for i in range(len(b) + 1):
+        if h.hexdigest() == base_sha:
+            k = i
+            break
+        if i < len(b):
+            h.update(b[i].encode("utf-8"))
+    if k is None or a[:k] != b[:k]:
         return False
-    memory_store._atomic(stg.path(rel), live + "".join(b[k:]))
+    have = set(a)
+    memory_store._atomic(stg.path(rel), live + "".join(l for l in b[k:] if l not in have))
     return True
 
 

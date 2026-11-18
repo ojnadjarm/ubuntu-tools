@@ -218,6 +218,24 @@ mem apply "$S" >"$T/c.out" 2>&1; rc=$?
   && ! grep -q gd08 "$St/domains/garden/DOMAIN.md"; } && ok || no "rc $rc: $(cat "$T/c.out")"
 rm -rf "$S" "$S.base.tsv"
 
+# --- T1772: a red apply merges the store's new ledger lines into the staging; re-applying that staging stays idempotent ---
+t "ledger re-apply: a red apply, the same staging again: no 'changed in both' on the ledger"
+S="$(mem stage)"
+printf -- '- 26-11-18 · staged ledger line\n' >>"$S/core/ledger.md"
+printf -- '- See https://portal.harbor-example.test for the rules. (26-11-10) ^hb09\n' >>"$S/domains/harbor/DOMAIN.md"
+printf -- '- 26-11-18 · store ledger line one\n' >>"$St/core/ledger.md"
+mem apply "$S" >"$T/l1.out" 2>&1; rc1=$?
+mem apply "$S" >"$T/l2.out" 2>&1; rc2=$?
+{ [ "$rc1" = 1 ] && [ "$rc2" = 1 ] && grep -q experience-only "$T/l2.out" && ! grep -q 'core/ledger.md · changed in' "$T/l2.out"; } \
+  && ok || no "rc $rc1 $rc2: $(cat "$T/l2.out")"
+t "ledger re-apply: the store appends again, the fixed staging lands green, each line once"
+printf -- '- 26-11-18 · store ledger line two\n' >>"$St/core/ledger.md"
+sed -i '/\^hb09/d' "$S/domains/harbor/DOMAIN.md"
+mem apply "$S" >"$T/l3.out" 2>&1; rc=$?
+{ [ "$rc" = 0 ] && [ "$(grep -c 'staged ledger line' "$St/core/ledger.md")" = 1 ] \
+  && [ "$(grep -c 'store ledger line one' "$St/core/ledger.md")" = 1 ] && [ "$(grep -c 'store ledger line two' "$St/core/ledger.md")" = 1 ]; } \
+  && ok || no "rc $rc: $(cat "$T/l3.out"; tail -5 "$St/core/ledger.md")"
+
 # --- T1726: private notes stay out of git, a rejected note leaves a REVIEW.md line, checks/ edits get no ledger line ----
 note() { printf 'source: agent\nseat: orchestrator\ndomain: %s\ndate: 2026-11-17T01:00:00+0100\nsession: -\ntext: %s\n' "$1" "$2" >"$St/inbox/$3"; }
 printf '%s/purse purse\n' "$T/proj" >>"$St/domains.map"

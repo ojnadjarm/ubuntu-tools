@@ -1,6 +1,6 @@
 # Agent memory: load the core and a domain card, note a lesson, check the store, run the keeper (agent-memory)
 
-Ticket: T1599 (M00-M10) · Last verified: 2026-11-10 by `memory check` (exit 0), `memory-index-cap.test.sh`, `fleet-backup.test.sh` (25/25), `memory-keeper.test.sh`, `memory check --live` on the real store (5/5, 5/5 with mooblox; M10b)
+Ticket: T1599 (M00-M10), T1772 · Last verified: 2026-11-18 by `memory-quiz.test.sh`, `memory-check.test.sh`, `memory-keeper.test.sh` (all green) and `memory apply` of the slim cards (1f9df6e, green, 1 brittle row)
 
 ## When to use
 - You need what the owner taught the fleet: `memory load [domain]` (core card, then the domain cards, ids stripped).
@@ -23,6 +23,8 @@ each mapped folder (git-excluded, never in a protected folder); the orchestrator
 `MEMORY_DOMAINS` in each rostered `agent.env`; the Claude adapter appends `memory load` to every headless run.
 The keeper (`~/agents/memory-keeper`, timer 04:10, `PRECHECK` skips an empty night) files notes into pages in a staging
 copy, gates with `memory check`, commits; Sunday adds the weekly pass and the full quiz.
+Quiz gate (T1772): a row green in the baseline and red by vote blocks only when a must word (any `|` word) is gone from
+the text the quiz loads for it (`memory load` + pages); with every must word loaded it is `quiz · brittle` on stderr, never blocking.
 
 ## Exact commands
 ```bash
@@ -62,6 +64,8 @@ bash ~/agents/bin/tests/memory-keeper.test.sh   # fixture store only
   (T1768); each red row is now re-asked alone, one question per call (T1769): 2 calls per red, 6 for 3 reds.
   The 2-of-3 vote re-asks in the same chunked context, so its asks are not independent: on 11-18 c14 "only he" (rule
   unchanged) was red in 2 of 2 applies yet green asked alone; c20 "page" (11-18 12:05) and 60087263e2 "claims" too.
+- A red apply merged the store's new ledger lines into the staging; re-applying that staging went red on `core/ledger.md`
+  "changed in both" (T1771: 2 of 3 applies). `_append_merge` now adds only the staging's tail lines the store lacks (T1772).
 
 ## Links
 - Code: `bin/memory`, `lib/memory_store.py`, `lib/memory_route.py`, `lib/memory_check.py`, `lib/memory_quiz.py`,

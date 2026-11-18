@@ -79,7 +79,8 @@ ev "vote: a noisy model failing 1 of 3 asks: green, exit 0, asked 3 times" \
   '[ "$rc" = 0 ] && grep -qx "quiz · 7/7 green" <<<"$err" && [ "$(times lighthouse)" = 3 ]' || echo "$out$err"
 ev "vote: the re-asks are counted apart" 'grep -q "^quiz · 1 re-asked 2x · first 3 calls, .* · re-asks 2 calls, 200 in / 20 out tokens$" <<<"$err"' || echo "$err"
 quizx QUIZ_DROP=saffron QUIZ_DROP_N=2
-ev "vote: failing 2 of 3 asks is red: exit 1, 1 finding" '[ "$rc" = 1 ] && [ "$(grep -c . <<<"$out")" = 1 ] && grep -q saffron <<<"$out"' || echo "$out$err"
+ev "vote: failing 2 of 3 asks with saffron still loaded is brittle: exit 0, no finding, a brittle line" \
+  '[ "$rc" = 0 ] && [ -z "$out" ] && grep -q "^quiz · brittle · core/lore.md · c101" <<<"$err"' || echo "$out$err"
 sed -i '/\^z101$/d' "$S/domains/zebra/stripes.md"
 quizx
 ev "vote: a removed lesson is red 3 of 3: exit 1, asked 3 times" \
@@ -135,6 +136,24 @@ ev "independent re-asks: chunk-only misses are green, exit 0, 7/7" '[ "$rc" = 0 
 ev "independent re-asks: 3 chunked first calls, then 2 reds x 2 re-asks, 1 question each" \
   '[ "$(head -3 "$CALLS" | sort -n | tr "\n" " ")" = "1 3 3 " ] && [ "$(tail -n +4 "$CALLS" | tr "\n" " ")" = "1 1 1 1 " ]' || cat "$CALLS"
 ev "independent re-asks: the re-ask calls are counted" 'grep -q "^quiz · 2 re-asked 2x · first 3 calls, .* · re-asks 4 calls, 400 in / 40 out tokens$" <<<"$err"' || echo "$err"
+
+# 13. The gate rule (T1772): a vote-red row blocks only when a must word is gone from the text the quiz loads for it;
+# with every must word (any "|" word) still loaded it is brittle: a stderr line, exit 0. Green rows stay green.
+GR="$WORK/gate"; cp -r "$S" "$GR"; rm -rf "$GR/.git"
+printf 'c101\tWhich paint is on the lighthouse?\tsaffron|vermilion\tor.md\n' >>"$GR/checks/questions.d/core.tsv"
+gq() { : >"$LOG"; rm -f "$LOG.drop"; out=$(fx env MEMORY_HOME="$GR" "$@" "$BIN/memory" check --quiz 2>"$WORK/err"); rc=$?; err=$(cat "$WORK/err"); }
+fx env MEMORY_HOME="$GR" python3 "$ROOT/lib/memory_quiz.py" merge >/dev/null
+gq
+ev "gate: baseline run green, 8/8" '[ "$rc" = 0 ] && grep -qx "quiz · 8/8 green" <<<"$err"' || echo "$out$err"
+gq QUIZ_DROP=saffron QUIZ_DROP_N=99
+ev "gate (b): red by vote, must words loaded (a|b too): exit 0, no finding, 2 brittle lines" \
+  '[ "$rc" = 0 ] && [ -z "$out" ] && [ "$(grep -c "^quiz · brittle · core/lore.md · c101" <<<"$err")" = 2 ]' || echo "$out$err"
+ev "gate (c): the green rows stay green, nothing else brittle or red" \
+  'grep -qx "quiz · 6/8 green" <<<"$err" && [ "$(grep -c "^quiz · \(brittle\|red\) · " <<<"$err")" = 2 ]' || echo "$err"
+sed -i 's/gravel path/stone path/' "$GR/domains/zebra/stripes.md"
+gq
+ev "gate (a): a reword cuts a must word: red by vote and missing from the loaded text, exit 1, 1 finding" \
+  '[ "$rc" = 1 ] && [ "$(grep -c . <<<"$out")" = 1 ] && grep -q "missing: gravel" <<<"$out" && ! grep -q "brittle · domains/zebra" <<<"$err"' || echo "$out$err"
 
 # 7. The gate module keeps its size cap.
 ev "memory_check.py is at most 300 lines" '[ "$(wc -l <"$ROOT/lib/memory_check.py")" -le 300 ]'
