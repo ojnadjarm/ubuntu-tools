@@ -42,7 +42,7 @@ for r in recs:
             continue
         cmd = b.get("input", {}).get("command", "")
         out["bash_calls"] += 1
-        if pat and pat.search(cmd):
+        if pat and any(pat.search(l) for l in cmd.split("\n")):
             out["matched"] += 1
             if not err:
                 out["matched_ok"] += 1

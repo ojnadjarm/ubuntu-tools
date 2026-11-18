@@ -1,1 +1,1 @@
-\bgit\b(?:\s+-C\s+\S+)*\s+(?:push\b[^;&|\n]*(?:\s--force|\s-\w*f\w*\b|\s\+\S)|commit\b[^;&|\n]*\s--amend\b)
+(^|[;&|({`]|\s-c\s+['"])\s*(\w+=\S*\s+)*((sudo|doas|pkexec)(\s+-[ugCDhprtU]\s+\S+|\s+-\S+)*\s+|env(\s+-\S+|\s+\w+=\S*)*\s+|(nohup|exec|command|nice)\s+|timeout(\s+-\S+)*\s+\S+\s+)*([^ ;&|()]*/)?git(\s+-C\s+\S+)*\s+(push\b[^;&|]*(\s--force|\s-\w*f\w*\b|\s\+\S)|commit\b[^;&|]*\s--amend\b)
