@@ -120,6 +120,22 @@ fx python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import memory_check,
 ev "or cell: a|b is green on one word, a;b red on one missing word" \
   'grep -qx "quiz · 8/9 green" "$WORK/err" && grep -q "^quiz · red · core/CORE.md · c02$" "$WORK/err" && ! grep -q "· c01$" "$WORK/err"' || cat "$WORK/err"
 
+# 12. Independent re-asks (T1769): the first ask stays chunked, each red row is re-asked alone, one question per call.
+# A model that misses saffron and Thursday whenever it gets more than one question answers both when asked alone.
+CH="$WORK/chunky"; CALLS="$WORK/calls"
+cat >"$CH" <<EOF
+#!/usr/bin/env bash
+p=\$(cat); n=\$(sed -n '/<questions>/,/<\/questions>/p' <<<"\$p" | grep -c '^[0-9]*: ')
+echo "\$n" >>"$CALLS"
+if [ "\$n" -gt 1 ]; then "$FX/stub-model" <<<"\$p" | sed -E 's/saffron|thursday//Ig'; else "$FX/stub-model" <<<"\$p"; fi
+EOF
+chmod +x "$CH"; : >"$CALLS"
+quizx MEMORY_QUIZ_CMD="$CH"
+ev "independent re-asks: chunk-only misses are green, exit 0, 7/7" '[ "$rc" = 0 ] && grep -qx "quiz · 7/7 green" <<<"$err"' || echo "$out$err"
+ev "independent re-asks: 3 chunked first calls, then 2 reds x 2 re-asks, 1 question each" \
+  '[ "$(head -3 "$CALLS" | sort -n | tr "\n" " ")" = "1 3 3 " ] && [ "$(tail -n +4 "$CALLS" | tr "\n" " ")" = "1 1 1 1 " ]' || cat "$CALLS"
+ev "independent re-asks: the re-ask calls are counted" 'grep -q "^quiz · 2 re-asked 2x · first 3 calls, .* · re-asks 4 calls, 400 in / 40 out tokens$" <<<"$err"' || echo "$err"
+
 # 7. The gate module keeps its size cap.
 ev "memory_check.py is at most 300 lines" '[ "$(wc -l <"$ROOT/lib/memory_check.py")" -le 300 ]'
 

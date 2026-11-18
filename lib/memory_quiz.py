@@ -158,13 +158,14 @@ def quiz(store, qs, used):
 
 
 def vote(store, qs, asker=quiz):
-    """{key: [missing must words]}: ask once, re-ask the reds VOTES-1 times; red only when most of the VOTES asks fail."""
+    """{key: [missing must words]}: ask once in chunks, re-ask each red alone VOTES-1 times; red only when most asks fail."""
     first, again = Counter(), Counter()
     miss = asker(store, qs, first)
     reds = [q for q in qs if miss[q.key]]
     fails = Counter(q.key for q in reds)
     for _ in range(VOTES - 1 if reds else 0):
-        fails.update(k for k, m in asker(store, reds, again).items() if m)
+        for q in reds:
+            fails.update(k for k, m in asker(store, [q], again).items() if m)
     print(f"quiz · {len(reds)} re-asked {VOTES - 1}x · first {_cost(first)} · re-asks {_cost(again)}", file=sys.stderr)
     return {k: m if fails[k] * 2 > VOTES else [] for k, m in miss.items()}
 

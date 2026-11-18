@@ -58,6 +58,8 @@ bash ~/agents/bin/tests/memory-keeper.test.sh   # fixture store only
   reword a row's question in the same edit, and before applying grep each staged must word in the pages. A changed
   page re-asks all its rows (~180 for core): about 1 baseline-green row still flips per apply (c01, c28, c20).
 - A must cell is `a;b` (every word) or `a|b` (any word), T1768; before it every "|" word was required (74 staged cells).
+- Re-asks in the same chunk as the first ask are not independent votes: c14 went red in 2 applies and passed alone
+  (T1768); each red row is now re-asked alone, one question per call (T1769): 2 calls per red, 6 for 3 reds.
   The 2-of-3 vote re-asks in the same chunked context, so its asks are not independent: on 11-18 c14 "only he" (rule
   unchanged) was red in 2 of 2 applies yet green asked alone; c20 "page" (11-18 12:05) and 60087263e2 "claims" too.
 
