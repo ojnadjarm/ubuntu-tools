@@ -17,11 +17,11 @@ function glazed(ctx, ax, az, bx, bz, h) {
   B.pop();
 }
 
-/* The whole shell for the plan; the office and the pit are other chunks and bring their own floors. */
+/* The whole shell for the plan; the office and the pit are other chunks and bring their own floors. The door-side wall has no top cap: from the camera's side its edge crossed the room. */
 export function shell(ctx, plan) {
   const { B } = ctx, { w: W, d: D, h: H } = plan.hall, col = (i, j) => tone(mul(STONE, 0.62), i, j, 0.1), opt = { cell: 0.34, stagger: true };
   wall(B, 0, 0, W, 0, H, col, opt);
   glazed(ctx, W, 0, W, D, H);
-  wall(B, W, D, 0, D, H, col, opt);
+  B.push({ x: W, z: D, r: Math.PI }); B.cells([0, 0, 0], [W, 0, 0], [0, H, 0], Math.ceil(W / (opt.cell * 2.2)), Math.ceil(H / opt.cell), col, { stagger: true }); B.pop();
   glazed(ctx, 0, D, 0, 0, H);
 }

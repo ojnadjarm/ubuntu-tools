@@ -36,6 +36,14 @@ export function events(a, b) {
     ...[...was.values()].filter((t) => !now.has(t.id)).map((t) => ({ id: t.id, dir: "back", floor: t.floor }))];
 }
 
+/* True when the agents read A lists a working agent the office read P lacks, or one whose state moved since: the office is behind. */
+export function behind(P, A) {
+  if (!P || !A) return false;
+  const was = new Map(((P.agents || {}).subagents || []).map((s) => [s.id, s.state]));
+  for (const s of P.sessions || []) if (s.pid) was.set("pid" + s.pid, null);
+  return (A.subagents || []).some((s) => (was.has(s.id) ? was.get(s.id) !== null && was.get(s.id) !== s.state : s.state === "working"));
+}
+
 /* The patch entry for the capsule moves between two models: {events} when a ticket started or stopped, else nothing. */
 export function moves(a, b) {
   const ev = a && a.ceo && b.ceo ? events(a.ceo.desk, b.ceo.desk) : [];

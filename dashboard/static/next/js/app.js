@@ -173,10 +173,10 @@ function life() {
 function agents() {
   return getJSON("/api/agents").then((a) => { store.A = a; life(); }).catch(() => {});
 }
-/* Fast agents poll while the office is on screen and someone works; otherwise agents ride the 30 s tick. */
+/* Fast agents poll while the office is on screen (a new ticket shows within 5 s); otherwise agents ride the 30 s tick. */
 function fast() {
   clearTimeout(aTimer);
-  if (document.hidden || cur !== "org" || !WORKING(store.A)) return;
+  if (document.hidden || cur !== "org") return;
   aTimer = setTimeout(() => agents().then(() => { refresh(); fast(); }), 5000);
 }
 /* The 30 s tick, aligned to the wall clock so the minute display is never late; nothing runs while hidden. */

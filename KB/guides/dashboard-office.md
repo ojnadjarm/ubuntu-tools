@@ -1,6 +1,6 @@
 # Dashboard office: add a team, a member, a name; the 3D Org page (`staff.json`, `/api/office`)
 
-Ticket: T1601 (01-18), T1658, T1666, T1687, T1755, T1756, T1757, T1759, T1758 · Last verified: 2026-11-17 by T1758 (CEO floor, `tests/test_office_ceo.js` 7, shots `~/drop/T1758/`), T1759 (deck key, `tests/test_office_floor_work.js`, `test_office_floors.py` deck, live `/api/office` 5 floors, shots `~/drop/T1759/`), T1757 (four floors, `tests/test_office_floor_four.js`, `test_office_floors.py` rest, live `/api/office`, shots `~/drop/T1757/` 4 floors × 5 widths), T1756 (floor head, `tests/test_office_floor_model.js`, shots `~/drop/T1756/`), T1755 (`tests/test_office_floor_model.js`, `tests/test_office_floors.py`, live `/api/office` floors, shots 2 floors × 5 widths); 2026-11-11 by T1687 (`tests/test_office_status.js`, `tests/test_section_status.py`, live `/api/office` vass paused), T1666 (`bin/tests/dashboard-office-drag.test.sh`), T1658 (`bin/tests/dashboard-office-chat.test.sh`); 2026-11-10 by T1601-16 (`staff.load()` 3 teams 12 members, live `GET /api/office`
+Ticket: T1601 (01-18), T1658, T1666, T1687, T1755, T1756, T1757, T1759, T1758, T1767 · Last verified: 2026-11-18 by T1767 (CEO floor polish, `tests/test_office_ceo_polish.js` 4, shots `~/drop/T1767/`); 2026-11-17 by T1758 (CEO floor, `tests/test_office_ceo.js` 7, shots `~/drop/T1758/`), T1759 (deck key, `tests/test_office_floor_work.js`, `test_office_floors.py` deck, live `/api/office` 5 floors, shots `~/drop/T1759/`), T1757 (four floors, `tests/test_office_floor_four.js`, `test_office_floors.py` rest, live `/api/office`, shots `~/drop/T1757/` 4 floors × 5 widths), T1756 (floor head, `tests/test_office_floor_model.js`, shots `~/drop/T1756/`), T1755 (`tests/test_office_floor_model.js`, `tests/test_office_floors.py`, live `/api/office` floors, shots 2 floors × 5 widths); 2026-11-11 by T1687 (`tests/test_office_status.js`, `tests/test_section_status.py`, live `/api/office` vass paused), T1666 (`bin/tests/dashboard-office-drag.test.sh`), T1658 (`bin/tests/dashboard-office-chat.test.sh`); 2026-11-10 by T1601-16 (`staff.load()` 3 teams 12 members, live `GET /api/office`
 4 teams incl. Unassigned 1 (`memory-keeper`), `test_office_*.js` green, `GPU=1 tools/shots.mjs` margins at 5 widths)
 
 ## When to use
@@ -91,13 +91,13 @@ Ticket: T1601 (01-18), T1658, T1666, T1687, T1755, T1756, T1757, T1759, T1758 ·
   error?:   "…" }                                                                    last good body kept on a source error
 ```
 
-## CEO floor: the Switchboard (T1758, last verified 2026-11-17)
+## CEO floor: the Switchboard (T1758, T1767, last verified 2026-11-18)
 
-The CEO's floor line, when it holds only the CEO and the desk pool, is its own room (`view()` sets `shell: "ceo"`); any other case keeps the loft. No mezzanine: the office is a stone platform, the pit one step (0.16 m) lower.
+The CEO's floor line, when it holds only the CEO and the desk pool, is its own room (`view()` sets `shell: "ceo"`); any other case keeps the loft. No mezzanine: the office is a stone platform, the pit one step (0.28 m) lower. Room 11 × 9.8 m, walls and glass 4.6 m (T1767; was 9.2 × 7.4 × 2.9).
 
 | Object | Live from | Files |
 |---|---|---|
-| Patch wall: a column per floor (top first), a cable + pilot per ticket (green working, dim waiting, red failing), floor plate lit while a ticket runs there | workers and sub-agents in `/api/office`, by `room.floor`; the orchestrator's own sub-agents plug into the CEO column | `office/ceo/desk.js` `tickets`, `columns`; `build/ceo/wall.js` |
+| Patch wall (9.8 m, the whole back): a column per floor (top first) as wide as its name needs (1 m at least), head plate = numeral over the name in ivory on black enamel, every name one size (`wall.js` `plates(names)`), a cable + pilot per ticket (green working, dim waiting, red failing), plate letters bright while a ticket runs there | workers and sub-agents in `/api/office`, by `room.floor`; the orchestrator's own sub-agents plug into the CEO column | `office/ceo/desk.js` `tickets`, `columns`; `build/ceo/wall.js` |
 | Round table: a sheet per ticket, newest on top; the Conductor stands at it | the same tickets (`sheets`, 12 at most) | `build/ceo/table.js` |
 | His chair and reading lamp (amber, the only warm light) | the needs-you verdict (`ceo.live.lamp`, `lampOn`) | `build/ceo/nook.js` |
 | Well: a capsule drops for a ticket that starts, rises for one that ends or fails; one run per event | the difference between two reads (`events`, sent as `patch.events`) | `build/ceo/well.js` (rails), `gl/capsule.js` |
@@ -108,8 +108,10 @@ The CEO's floor line, when it holds only the CEO and the desk pool, is its own r
 - A new floor shell = one entry `{hall, rooms, at}` in `build/index.js` `shellOf` plus a plan in `layout.js`; the renderer is untouched.
 - `ceo.desk` is in the CEO's `Room.key`, so a ticket anywhere rebuilds the CEO chunk (9,700 vertices, about 16 ms under node); the one-hall office (no floor lines) gets no desk.
 - Measured (fixture, 1366, GPU): 76,406 → 17,861 vertices, 11 → 11 draw calls, frame median 0.2 → 0.2 ms; a capsule is 1 extra draw only while it moves.
-- Pitfall: with nobody working the page reads `/api/office` on the 30 s tick, so the first brief out of a calm office shows up to 30 s late (5 s once anything runs).
-- No closed ceiling (the camera lives above): a bronze head beam on the glass walls only.
+- First sheet (T1767): on `#org` the app reads `/api/agents` every 5 s, idle or not (`app.js` `fast()`; it was only while a sub-agent worked, so a calm office waited for the 30 s tick: 29.7 s measured); `org.js` `tick()` reads `/api/office` when `ceo/desk.js` `behind(P, A)` sees a working agent the last office read lacks or a state change, else every 30 s at rest, 4.5 s apart at most. Fixture: 29.7 → 4.6 s; live add up to 3 s of the server's `office` cache.
+- Plates at the home view (fixture, T1767): name capitals 400 px 2.2-3.9 → 7.6-7.8 px, 1366 4.0-7.0 → 12.1-12.9, 2560 8.7-15.3 → 26.5-28.3; numerals 1.6 × the name. A tall stage looks from `azTall` 0.32 (0.06 was larger type but put the 5F plate under the 768 px floor panel); `home.top` = the plates' top, so the fit keeps them on screen. Screen-space labels were not used: owner rejected tags over the scene (17).
+- Measured (fixture, 1366, GPU, T1767): 3 tickets 17,601 → 21,919 vertices, 11 → 11 draw calls; idle 16,541 → 20,859, 7 → 7.
+- No closed ceiling (the camera lives above): a bronze head beam on the glass walls only. The door-side wall has no top cap: its edge crossed the room from the camera's side.
 
 ## Exact commands
 ```bash

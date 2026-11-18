@@ -14,13 +14,14 @@ import { build, diff } from "../office/model.js";
 import { plan as planOf } from "../office/layout.js";
 import { floors, home, pick, view, working } from "../office/floors.js";
 import { until } from "../office/time.js";
+import { behind } from "../office/ceo/desk.js";
 import { list } from "../office/overlay/list.js";
 import * as card from "../office/overlay/card.js";
 import * as full from "../office/overlay/full.js";
 
 export { seatState, titled, dmOf } from "../seats.js";
 export const own = true, keep = true;
-const STALE_MS = 20000, FAST_MS = 4500, DRAG_PX = 6;
+const STALE_MS = 30000, FAST_MS = 4500, DRAG_PX = 6;
 const NOTE = "Still picture: this browser has no graphics acceleration. The list below is live.";
 const grid = document.getElementById("grid"), canvas = document.createElement("canvas");
 canvas.setAttribute("aria-hidden", "true");
@@ -170,10 +171,10 @@ export function render() {
     `<div class="olist">${list(M)}</div></div>`;
 }
 
-/* The dashboard's tick: the lamp follows the store at once, a fresh read every 20 s, every 5 s while someone works. */
+/* The dashboard's tick (every 5 s on this screen): the lamp follows the store at once, a fresh read every 30 s, every 5 s while someone works or the agents read moved. */
 export function tick() {
   relamp();
-  pull(M && (M.line.working || M.panels.running.length) ? FAST_MS : STALE_MS);
+  pull(behind(P, store.A) || (M && (M.line.working || M.panels.running.length)) ? FAST_MS : STALE_MS);
 }
 
 /* A list button or a chip opens its card, the card's × closes it; the stage buttons move the camera; Full screen toggles it;
