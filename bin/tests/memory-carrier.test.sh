@@ -130,9 +130,9 @@ for i in 1 2 3 4 5; do echo "$i: $m"; done
 EOS
 chmod +x "$WORK/bin/quiz-flaky"
 out=$(fx MEMORY_QUIZ_CMD=quiz-flaky FLAKY_WRONG=0 "$BIN/memory" check --live --domains zebra 2>/dev/null); rc=$?
-is "--live: majority of 3 (wrong, right, right) -> green" "$rc $(grep -x 'live · 5/5' <<<"$out") $(cat "$H/flaky.n")" "0 live · 5/5 3"
-rm -f "$H/flaky.n"; out=$(fx MEMORY_QUIZ_CMD=quiz-flaky FLAKY_WRONG="0 1" "$BIN/memory" check --live --domains zebra 2>/dev/null); rc=$?
-is "--live: majority of 3 (wrong, wrong, right) -> red" "$rc $(grep -x 'live · 0/5' <<<"$out") $(cat "$H/flaky.n")" "1 live · 0/5 3"
+is "--live: majority of 3 (wrong, right, right) -> green" "$rc $(grep -x 'live · 5/5' <<<"$out") $(cat "$H/flaky.n")" "0 live · 5/5 11"
+rm -f "$H/flaky.n"; out=$(fx MEMORY_QUIZ_CMD=quiz-flaky FLAKY_WRONG="0 1 2 3 4 5" "$BIN/memory" check --live --domains zebra 2>/dev/null); rc=$?
+is "--live: majority of 3 (wrong, wrong, right) -> red" "$rc $(grep -x 'live · 0/5' <<<"$out") $(cat "$H/flaky.n")" "1 live · 0/5 11"
 if [ "${MEMORY_LIVE:-}" = 1 ]; then
   out=$(cd "$WORK" && MEMORY_HOME="$S" "$BIN/memory" check --live --domains zebra); rc=$?
   ev "MEMORY_LIVE=1: one real haiku run through the adapter prints 5/5" '[ "$rc" = 0 ] && grep -qx "live · 5/5" <<<"$out"' || echo "$out"
