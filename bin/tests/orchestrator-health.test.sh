@@ -19,7 +19,7 @@ BIN="$WORK/agents/bin"; ST="$WORK/agents/sentinel/state"; CALLS="$WORK/calls.log
 FXS="claude-fx-$$"; FXU="claude-fx-$$.service"
 mkdir -p "$BIN" "$ST" "$WORK/xdg/pc-status" "$WORK/fxbin"
 REAL_TMUX=$(command -v tmux)
-fx() { env -u TMUX TMUX_TMPDIR="$TMX" HOME="$WORK" HARNESS_HOME="$WORK/agents" \
+fx() { env -u TMUX TMUX_TMPDIR="$TMX" HOME="$WORK" HARNESS_HOME="$WORK/agents" PC_REBOOT_FILE="$WORK/reboot-required" \
        XDG_RUNTIME_DIR="$WORK/xdg" ORCHESTRATOR_TMUX_SESSION="$FXS" ORCHESTRATOR_UNIT="$FXU" \
        KEEPALIVE_UNITS=fx-keep.service KEEPALIVE_HTTP=fx=http://127.0.0.1:1/ HARNESS_ENV_LOADED=1 \
        PATH="$BIN:$PATH" CALLS="$CALLS" SENTINEL_STATUS_CMD="$BIN/status-real" SENTINEL_ORCH_WAIT=1 SENTINEL_SETTLE=0 FX_UNIT_ENABLED="${FX_UNIT_ENABLED:-enabled}" "$@"; }
