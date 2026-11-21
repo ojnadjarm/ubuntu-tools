@@ -366,7 +366,7 @@ class App:
         return bool(self.forum) and ch.get('parent_id') == self.forum
 
     def image_ok(self, path):
-        """A PNG/JPEG made by `art` (<= 10 MB), or a PNG/JPEG/GIF/WebP/MP4 inside a job's folder or a `media_roots`
+        """A PNG/JPEG made by `art` (<= 10 MB), or a PNG/JPEG/GIF/WebP/MP4/PDF inside a job's folder or a `media_roots`
         folder (<= 25 MB)."""
         real = os.path.realpath(path)
         if not os.path.isfile(real):
@@ -378,6 +378,7 @@ class App:
             return head.startswith(IMAGE_MAGIC) and size <= MAX_IMAGE
         rel = os.path.relpath(real, os.path.realpath(self.jobs.dir))
         media = head.startswith(SEEN_MAGIC) or (head[:4] == b'RIFF' and head[8:12] == b'WEBP') or head[4:8] == b'ftyp'
+        media = media or head.startswith(b'%PDF-')
         if any(real.startswith(os.path.realpath(r) + os.sep) for r in self.media_roots):
             return media and size <= MAX_MEDIA
         return not rel.startswith('..') and os.sep in rel and media and size <= MAX_MEDIA
@@ -408,7 +409,7 @@ class App:
             return 4
         if len(images) > MAX_FILES or not all(map(self.image_ok, images)):
             print(f'refused: --image (at most {MAX_FILES}) takes a PNG/JPEG made by `discord-liaison art` (max 10 MB) '
-                  'or a PNG/JPEG/GIF/WebP/MP4 in your job folder (max 25 MB)')
+                  'or a PNG/JPEG/GIF/WebP/MP4/PDF in your job folder (max 25 MB)')
             return 3
         if has_owner_name(text):
             print("refused: the text holds the owner's name or e-mail (D481); write it without them")

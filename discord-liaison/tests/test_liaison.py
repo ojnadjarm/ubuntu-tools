@@ -257,6 +257,23 @@ class TestImages(Base):
             self.assertEqual(m['message_reference'], {'message_id': '77', 'fail_if_not_exists': False})
             self.assertEqual(m['content'], 'mira')
 
+    async def test_pdf_ok_in_job_and_media_roots_not_art_or_too_big(self):
+        app = cli.App(dict(self.env), self.rest)
+        pdf = b'%PDF-1.7\n' + b'0' * 64
+        job = os.path.join(self.tmp.name, 'state', 'jobs', 'j1')
+        root = os.path.join(self.tmp.name, 'po-cafe')
+        art = os.path.join(self.tmp.name, 'state', 'art')
+        for d in (job, root, art):
+            os.makedirs(d)
+        app.media_roots = (root,)
+        cases = {os.path.join(job, 'carta.pdf'): (pdf, True), os.path.join(root, 'carta.pdf'): (pdf, True),
+                 os.path.join(root, 'big.pdf'): (pdf + b'0' * (25 * 1024 * 1024), False),
+                 os.path.join(art, 'carta.pdf'): (pdf, False)}
+        for p, (data, ok) in cases.items():
+            with open(p, 'wb') as f:
+                f.write(data)
+            self.assertEqual(app.image_ok(p), ok, p)
+
     async def test_post_media_refused_outside_a_job_folder_too_big_or_not_media(self):
         jobs = os.path.join(self.tmp.name, 'state', 'jobs')
         job = os.path.join(jobs, 'j1')
