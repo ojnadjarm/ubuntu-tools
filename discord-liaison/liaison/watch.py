@@ -4,7 +4,8 @@ import re
 
 CDN = ('https://cdn.discordapp.com/', 'https://media.discordapp.net/')
 IMAGE_EXT = ('.png', '.jpg', '.jpeg', '.webp', '.gif')
-MAX_ATTACHMENT, MAX_ATTACHMENTS, MAX_TEXT = 8 * 1024 * 1024, 4, 1500
+VIDEO_EXT = ('.mp4', '.mov', '.webm')
+MAX_ATTACHMENT, MAX_VIDEO, MAX_ATTACHMENTS, MAX_TEXT = 8 * 1024 * 1024, 25 * 1024 * 1024, 4, 1500
 TYPED = re.compile(r'(?<![\w@./:`>-])@agents?\b(?![@.]\w)', re.IGNORECASE)
 
 
@@ -16,11 +17,16 @@ def addressed(m, me, role):
             or any(TYPED.search(line) for line in m.get('content', '').splitlines() if not line.startswith('>')))
 
 
+def cap(name):
+    """The download cap for an attachment's extension; 0 when it is neither image nor video."""
+    ext = os.path.splitext(name)[1].lower()
+    return MAX_ATTACHMENT if ext in IMAGE_EXT else MAX_VIDEO if ext in VIDEO_EXT else 0
+
+
 def images(m, cdn=CDN):
-    """The message's image attachments worth downloading: Discord CDN, image extension, <= 8 MB, at most 4."""
+    """The message's image and video attachments worth downloading: Discord CDN, images <= 8 MB, videos <= 25 MB, at most 4."""
     out = [{'filename': a['filename'], 'url': a['url'], 'size': a.get('size', 0)} for a in m.get('attachments', [])
-           if a.get('url', '').startswith(tuple(cdn)) and a.get('size', 0) <= MAX_ATTACHMENT
-           and os.path.splitext(a.get('filename', ''))[1].lower() in IMAGE_EXT]
+           if a.get('url', '').startswith(tuple(cdn)) and 0 < cap(a.get('filename', '')) >= a.get('size', 0)]
     return out[:MAX_ATTACHMENTS]
 
 

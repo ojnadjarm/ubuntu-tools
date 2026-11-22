@@ -168,13 +168,13 @@ class TestManagers(Base):
         cdn = str(self.server.make_url('/cdn'))
         self.env['LIAISON_CDN_PREFIXES'] = cdn + '/'
         att = lambda n, size: {'filename': n, 'size': size, 'url': f'{cdn}/{n}'}  # noqa: E731
-        lost = [att('big.png', 9 * 1024 * 1024), att('clip.mp4', 2 * 1024 * 1024)]
+        lost = [att('big.png', 9 * 1024 * 1024), att('clip.mp3', 2 * 1024 * 1024)]
         await self.run_cli('tick')
         self.fake.say('400', '2', 'mira esto ' + 'x' * 1980, attachments=lost)
         self.fake.say('999', '5', '@agents mira', users=['900'], attachments=lost)
         rc, out = await self.run_cli('tick')
         self.assertEqual(rc, 0, out)
-        notes = ('[attachment not delivered: big.png, 9.0 MB]', '[attachment not delivered: clip.mp4, 2.0 MB]')
+        notes = ('[attachment not delivered: big.png, 9.0 MB]', '[attachment not delivered: clip.mp3, 2.0 MB]')
         req = self.given('po-ten')
         for note in notes + ('[message cut at 1500 of 1990 characters]',):
             self.assertIn(note, req)

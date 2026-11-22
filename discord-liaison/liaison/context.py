@@ -7,7 +7,7 @@ BUDGET, BOT_MAX, HUMAN_MAX = 8192, 280, 500
 
 def self_line(images_left):
     """Current capabilities, built by code so the model never guesses them from old replies."""
-    return (f'You can: see attached images with Read (a GIF/WebP arrives as a numbered contact sheet of up to 12 frames); '
+    return (f'You can: see attached images with Read (a GIF/WebP/video arrives as a numbered contact sheet of up to 12 frames); '
             f'make images (`art` + `post --image`, {images_left} left today); react 👀/✅; escalate to po-discord. '
             f'New messages wake you about 20 s after they arrive (a poll every {POLL} is the fallback). '
             f'This line overrides anything you said earlier in <history>.')

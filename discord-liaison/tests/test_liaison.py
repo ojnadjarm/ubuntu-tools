@@ -28,7 +28,7 @@ from liaison import cli  # noqa: E402
 from liaison.caps import Caps  # noqa: E402
 from liaison.registry import Registry  # noqa: E402
 from liaison.state import State  # noqa: E402
-from liaison.watch import Watcher  # noqa: E402
+from liaison.watch import Watcher, lost  # noqa: E402
 
 PROJECTS = {'projects': [
     {'id': 'ten', 'repo': 'Org/Tiny_Epic_Narrator', 'clone': '~/x', 'match': {'tags': ['tiny epic'], 'title': ['narrador']},
@@ -355,6 +355,33 @@ class TestAttachments(Base):
         self.assertFalse(os.path.exists(work))
         self.assertTrue(self.fake.cdn_headers)
         self.assertFalse(any('Authorization' in h for h in self.fake.cdn_headers))
+
+    async def test_video_becomes_contact_sheet_and_too_big_one_is_skipped(self):
+        self.fake.files['clip.mp4'] = mp4()
+        w = Watcher(self.rest, '100', '300', cdn=(self.cdn + '/',))
+        _, cur = await w.poll({})
+        self.fake.say('400', '2', 'mira el vídeo', attachments=[
+            self.att('clip.mp4', size=len(self.fake.files['clip.mp4'])), self.att('big.mp4', size=26 * 1024 * 1024)])
+        msgs, _ = await w.poll(cur)
+        self.assertEqual([a['filename'] for a in msgs[0]['attachments']], ['clip.mp4'])
+        self.assertIn('[attachment not delivered: big.mp4, 26.0 MB]', lost(msgs[0]))
+        app = cli.App(self.env, self.rest)
+        await app.fetch_images(msgs)
+        mid = msgs[0]['id']
+        self.assertEqual(sorted(os.listdir(app.work)), [f'{mid}-0.note', f'{mid}-0.png'])
+        with open(os.path.join(app.work, f'{mid}-0.png'), 'rb') as f:
+            self.assertEqual(f.read(8), PNG[:8])
+        self.assertEqual(app.note(os.path.join(app.work, f'{mid}-0.png')),
+                         'MP4 video, 20 frames, 2.0 s: contact sheet of 12 frames sampled evenly, numbered, in order')
+
+
+def mp4():
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, 'clip.mp4')
+        subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=160x120:rate=10', '-t', '2',
+                        '-c:v', 'mpeg4', p], check=True, stdin=subprocess.DEVNULL)
+        with open(p, 'rb') as f:
+            return f.read()
 
 
 def gif(frames, size='160x120'):

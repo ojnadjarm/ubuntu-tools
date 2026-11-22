@@ -32,7 +32,7 @@ from .runlock import run_lock
 from .state import State
 from .threads import batch, key, merge, newer
 from .wake import debounce
-from .watch import CDN, MAX_ATTACHMENT, Watcher, lost
+from .watch import CDN, VIDEO_EXT, Watcher, cap, lost
 
 GENERAL = '#general'
 ME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -69,10 +69,11 @@ def _probe(path):
 
 
 def still(path):
-    """Replace a GIF/WebP with one PNG contact sheet (up to 12 evenly sampled frames, numbered, in order); return a note.
+    """Replace a GIF/WebP/video with one PNG contact sheet (up to 12 evenly sampled frames, numbered, in order); return a note.
 
     Read takes stills only. The file is dropped when ffmpeg cannot decode it."""
-    png, kind = os.path.splitext(path)[0] + '.png', os.path.splitext(path)[1][1:].upper()
+    png, ext = os.path.splitext(path)[0] + '.png', os.path.splitext(path)[1].lower()
+    kind = ext[1:].upper() + (' video' if ext in VIDEO_EXT else '')
     note = ''
     try:
         frames, secs = _probe(path)
@@ -244,8 +245,8 @@ class App:
             shutil.rmtree(self.work, ignore_errors=True)
 
     async def fetch_images(self, msgs=None):
-        """Download the messages' (default: the inbox's) images into state/work: CDN only, no token, <= 8 MB, magic checked;
-        a failed one (60 s total) is skipped."""
+        """Download the messages' (default: the inbox's) images and videos into state/work: CDN only, no token, images <= 8 MB,
+        videos <= 25 MB, magic checked; a failed one (60 s total) is skipped."""
         os.makedirs(self.work, exist_ok=True)
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as http:
             for m in self.state.inbox if msgs is None else msgs:
@@ -253,6 +254,7 @@ class App:
                     if not a['url'].startswith(self.cdn):
                         continue
                     ext = os.path.splitext(a['filename'])[1].lower()
+                    limit = cap(a['filename'])
                     dest = os.path.join(self.work, f'{m["id"]}-{i}{ext}')
                     try:
                         async with http.get(a['url'], allow_redirects=False) as r:
@@ -260,13 +262,14 @@ class App:
                             if r.status == 200:
                                 async for chunk in r.content.iter_chunked(65536):
                                     data += chunk
-                                    if len(data) > MAX_ATTACHMENT:
+                                    if len(data) > limit:
                                         break
                         webp = data[:4] == b'RIFF' and data[8:12] == b'WEBP'
-                        if 0 < len(data) <= MAX_ATTACHMENT and (data.startswith(SEEN_MAGIC) or webp):
+                        video = ext in VIDEO_EXT and (data[4:8] == b'ftyp' or data.startswith(b'\x1a\x45\xdf\xa3'))
+                        if 0 < len(data) <= limit and (data.startswith(SEEN_MAGIC) or webp or video):
                             with open(dest, 'wb') as f:
                                 f.write(data)
-                            if ext in ('.gif', '.webp'):
+                            if ext in ('.gif', '.webp') + VIDEO_EXT:
                                 note = still(dest)
                                 if note:
                                     with open(os.path.splitext(dest)[0] + '.note', 'w') as f:
