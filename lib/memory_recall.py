@@ -3,6 +3,7 @@ residual and shown ids, log an ids-only event (T1624)."""
 import hashlib
 import json
 import os
+import re
 import tempfile
 import time
 from collections import namedtuple
@@ -14,8 +15,11 @@ import memory_route
 import memory_store
 from agent_work import _key, agent_work
 
-Context = namedtuple("Context", "cwd seat worker session")
+Context = namedtuple("Context", "cwd seat worker session recent", defaults=(None,))
 SESSION_MAX, SHOWN_MAX = 4096, 200
+RECENT_N, TAIL = 5, 1 << 20
+# Text the harness wrote into the prompt slot (task notifications, hand-backs), not him (T1838).
+HARNESS = re.compile(r"\A\s*(<[a-z-]+[ >]|Another Claude session sent a message:)")
 Result = namedtuple("Result", "block firings cues private")
 
 
@@ -110,9 +114,47 @@ def log_event(session, cues, ids):
         f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')}\t{session_hash(session)}\t{','.join(cues)}\t{','.join(ids)}\n")
 
 
+def owner_prompts(transcript, n=RECENT_N):
+    """The last n prompts he typed in a Claude Code transcript (no meta rows, tool results, harness text), oldest first."""
+    with open(transcript, "rb") as f:
+        f.seek(0, 2)
+        f.seek(max(0, f.tell() - TAIL))
+        rows = f.read().decode("utf-8", "replace").splitlines()
+    out = []
+    for row in rows:
+        if '"user"' not in row:
+            continue
+        try:
+            r = json.loads(row)
+            c = r["message"]["content"]
+        except (ValueError, KeyError, TypeError):
+            continue
+        if r.get("type") != "user" or r.get("isMeta") or not isinstance(c, (str, list)):
+            continue
+        if isinstance(c, list):
+            if any(isinstance(x, dict) and x.get("type") == "tool_result" for x in c):
+                continue
+            c = " ".join(x.get("text", "") for x in c if isinstance(x, dict) and x.get("type") == "text")
+        if c.strip() and not HARNESS.match(c):
+            out.append(c)
+    return out[-n:]
+
+
+def supported(graph, firings, recent, cues=()):
+    """The firings whose memory has a word of the recent prompts besides this prompt's cues; all when none was read."""
+    if not recent:
+        return firings
+    words = {"c:" + w for w in memory_cue.tokens(" ".join(recent))
+             if not any(memory_cue.variant(w, c[2:]) for c, _ in cues)}
+    return [f for f in firings if any("m:" + f.id in graph.links.get(w, ()) for w in words)]
+
+
 def recall(store, text, ctx, write=True):
-    """Result(block, firings, cues, PRIVATE ids) for one prompt; write=False is a dry run (no session file, no event row)."""
-    if off():
+    """Result(block, firings, cues, PRIVATE ids) for one prompt; write=False is a dry run (no session file, no event row).
+
+    ctx.recent: his previous prompts of the session; when given, a hint needs one of its words in them.
+    """
+    if off() or HARNESS.match(text):
         return Result("", [], [], set())
     pages = memory_route.pages_for(ctx.cwd, ctx.seat, os.environ, ctx.worker, store)
     private = any(pages.values())
@@ -121,10 +163,10 @@ def recall(store, text, ctx, write=True):
         pub, priv = memory_net.born(store, private=private)
         graph = memory_net.merge(pub, priv) if private else pub
     state = read_session(ctx.session) if ctx.session else {}
-    near = ("core/",) + tuple(f"domains/{d}/" for d in memory_route.domains_for(ctx.cwd, ctx.seat, os.environ, store))
+    near = tuple(f"domains/{d}/" for d in memory_route.domains_for(ctx.cwd, ctx.seat, os.environ, store))
     g = scope(graph, pages, loaded(store, ctx, pages) | set(state.get("shown", [])), near)
     cues = memory_cue.cues(text, g)
-    fired = memory_net.fire(g, cues, state)[:memory_hint.MAX_HINTS]
+    fired = supported(g, memory_net.fire(g, cues, state), ctx.recent, cues)[:memory_hint.MAX_HINTS]
     gists = {f.id: graph.gists.get(f.id) or memory_hint.gist(body(store, f.id, f.place)) for f in fired if not pages[f.place]}
     if write:
         if ctx.session:

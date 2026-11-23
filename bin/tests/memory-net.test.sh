@@ -128,8 +128,8 @@ is "rival inhibition: of the old line and its replacement only the new one fires
 is "rival inhibition: without the rival link both fire" "$(net no-rivals -- 'sourdough starter feed' | ids)" \
   "k02[feed,sourdough,starter] k01[feed,sourdough,starter]"
 is "priming: lantern alone is silent" "$(net -- 'lantern')" "-"
-is "priming: lantern fires after a harbour prompt in the same session" "$(net -- 'harbour weather' 'lantern' | ids)" \
-  "$(printf -- '-\nh01[lantern,~harbour]')"
+is "priming: a primed word is no second path, lantern stays silent after a harbour prompt (T1838)" "$(net -- 'harbour weather' 'lantern' | ids)" \
+  "$(printf -- '-\n-')"
 is "priming: an unrelated prompt does not prime" "$(net -- 'compost weather' 'lantern' | ids | tail -1)" "-"
 is "priming: the trace alone never fires (no cue in this prompt)" "$(net -- 'sourdough starter feed' q | tail -1)" "-"
 is "priming: the trace fades after 5 quiet prompts" "$(net -- 'harbour weather' q q q q q 'lantern' | tail -1)" "-"

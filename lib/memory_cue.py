@@ -35,10 +35,16 @@ ALIAS = {stem(k): v for k, v in {"environment": "env", "repository": "repo", "co
 
 
 def tokens(text):
-    """Lower-case stemmed content words of text (short forms for ALIAS words), accents folded, stop words dropped."""
+    """Lower-case stemmed content words (ALIAS short forms), accents folded; stop words and bare numbers dropped."""
     plain = "".join(c for c in unicodedata.normalize("NFKD", text.lower()) if not unicodedata.combining(c))
     return [ALIAS.get(stem(w), stem(w)) for w in re.findall(r"[a-z0-9]+", plain)
-            if w not in STOP and w not in STOP_NET and len(w) > 1]
+            if w not in STOP and w not in STOP_NET and len(w) > 1 and not w.isdigit()]
+
+
+def variant(a, b):
+    """True when two stems are one word in two spellings or languages (art, arte; document, documento)."""
+    a, b = sorted((a, b), key=len)
+    return a == b or len(a) >= 3 and len(b) - len(a) <= 2 and b.startswith(a)
 
 
 def cues(text, graph):

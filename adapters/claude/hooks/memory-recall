@@ -30,14 +30,18 @@ def carrier():
 
 
 def context(store, hook):
-    """The recall Context of this hook JSON, by `memory recall --hook`'s rules: agent_id or a worker process blanks an owner seat."""
+    """The recall Context of this hook JSON (`memory recall --hook`'s seat rules) and his recent prompts in the transcript."""
     import memory_recall
     import memory_route
     worker = bool(hook.get("agent_id")) or carrier().is_worker()
     seat = os.environ.get("CHAT_SEAT", "")
     if worker and memory_route.owner_seat(seat, store):
         seat = ""
-    return memory_recall.Context(hook.get("cwd") or os.getcwd(), seat, worker, hook.get("session_id"))
+    recent = None
+    if hook.get("transcript_path"):
+        with contextlib.suppress(Exception):
+            recent = [p for p in memory_recall.owner_prompts(hook["transcript_path"]) if p != hook.get("prompt")]
+    return memory_recall.Context(hook.get("cwd") or os.getcwd(), seat, worker, hook.get("session_id"), recent)
 
 
 def pending_calls(transcript):

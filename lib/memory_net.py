@@ -9,11 +9,11 @@ from collections import namedtuple
 import memory_concepts
 import memory_route
 import memory_store
-from memory_cue import tokens
+from memory_cue import tokens, variant
 
 SPREAD, STEPS, PRIME, PLACE_W, CC_W = 0.6, 2, 0.5, 0.5, 0.0
 BASE_W, DEFAULT_AGE, THETA, MIN_PATHS, S_ASSOC, W_MIN = 0.1, 365, 0.5, 2, 6.5, 0.05
-THETA_FAR = 0.7  # threshold off the session's own core and domains (T1827)
+THETA_FAR = 0.7  # threshold off the session's own domains (T1827), core topic files included (T1838)
 FAN_SHARE, FAN_FLOOR = 0.05, 8
 RESIDUAL_N, RESIDUAL_MIN = 10, 0.05
 NET, PUBLIC, PRIVATE = "net", "net/graph.json", "net/graph.private.json"
@@ -159,8 +159,13 @@ def load(store, private=False):
 
 
 def _origins(labels):
-    """The cue concepts behind the path labels; a firing needs MIN_PATHS of them, one from this prompt (no `~`)."""
-    return {l.split(">")[0].lstrip("~") for l in labels} if any(not l.startswith("~") for l in labels) else set()
+    """This prompt's cue concepts behind the path labels (no primed `~` word, one per variant spelling); a firing needs
+    MIN_PATHS of them (T1838)."""
+    out = set()
+    for o in sorted({l.split(">")[0] for l in labels if not l.startswith("~")}, key=len):
+        if not any(variant(o, x) for x in out):
+            out.add(o)
+    return out
 
 
 def _groups(rivals):
