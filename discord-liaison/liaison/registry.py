@@ -38,6 +38,8 @@ class Registry:
         if m.get('channel') == 'general':
             return None
         route = self.route(pid) if pid else None
-        if self.router and (route is None or self.named(m['content']) - {pid}):
+        repo = (self.get(pid) or {}).get('repo') if pid else None
+        others = {o for o in self.named(m['content']) - {pid} if not (repo and self.projects[o].get('repo') == repo)}
+        if self.router and (route is None or others):
             return self.router
         return route if route not in (None, 'liaison') else None

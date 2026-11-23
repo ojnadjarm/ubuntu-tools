@@ -1,12 +1,14 @@
 """T1416: a request goes to a worker; only a named blocker or two failed attempts reach the orchestrator."""
 import json
 import os
+import tempfile
 import unittest
 
 from discordbot.config import LANGUAGE_RULE
 from liaison import po
 from liaison.friendbots import MARK, WINDOW, loop_turns, over
 from liaison.jobs import GRACE
+from liaison.registry import Registry
 from liaison.routing import after_failure, route
 
 from .test_jobs import JobBase
@@ -197,6 +199,23 @@ class TestFriendBotCli(Base):
         again = self.fake.say('400', '77', 'réplica del bot', bot=True)
         await self.run_cli('check')
         self.assertIn(again, {m['id'] for m in self.state().inbox})
+
+
+class TestSharedRepoNamed(unittest.TestCase):
+    """T1879: a project in the thread's own repo named in the text is not another project."""
+    def test_same_repo_name_stays_with_the_thread_po(self):
+        projects = {'router': 'po-r', 'projects': [
+            {'id': 'a', 'repo': 'Org/R', 'match': {'tags': [], 'title': ['alfa']}, 'po': 'po-a'},
+            {'id': 'b', 'repo': 'Org/R', 'match': {'tags': [], 'title': ['spidey']}, 'po': 'po-b'},
+            {'id': 'c', 'repo': 'Org/C', 'match': {'tags': [], 'title': ['otro']}, 'po': 'po-c'}]}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'p.json')
+            with open(path, 'w') as f:
+                json.dump(projects, f)
+            r = Registry(path)
+        msg = lambda text: {'content': text, 'channel': 'foro'}  # noqa: E731
+        self.assertEqual(r.dispatch(msg('arregla el Spidey dashboard'), 'a'), 'po-a')
+        self.assertEqual(r.dispatch(msg('como en el otro juego'), 'a'), 'po-r')
 
 
 if __name__ == '__main__':
