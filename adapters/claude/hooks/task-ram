@@ -1,0 +1,161 @@
+#!/usr/bin/python3 -IS
+"""Task RAM hook (T1841): start line at SubagentStart, notes after a compaction or a warning at 70 % on PostToolUse, close on a green SubagentStop."""
+import json
+import os
+import sys
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+HARNESS = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+TAIL, WARN_AT, DEFAULT_WINDOW = 256 << 10, 0.7, 200000
+
+
+def load(name, path):
+    """A hyphenated or suffix-less script as a module."""
+    import importlib.machinery
+    import importlib.util
+    loader = importlib.machinery.SourceFileLoader(name, path)
+    mod = importlib.util.module_from_spec(importlib.util.spec_from_loader(name, loader))
+    loader.exec_module(mod)
+    return mod
+
+
+def off():
+    sys.path.insert(0, os.path.join(HARNESS, "lib"))
+    from agent_work import _key
+    return _key("TASK_RAM").lower() in ("off", "0", "no", "false")
+
+
+def start_line(t):
+    return (f"Task RAM {t}: save what a compaction must not lose, one line each: `ram note {t} fact|tried|decided|next|done "
+            f"\"<line>\" [--src <where>]`; `ram show {t}` reads it back; the harness shows it after a compaction.")
+
+
+def window(agent_type):
+    """Auto-compact window: the environment, then the agent definition, then settings.json."""
+    w = os.environ.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "")
+    if w.isdigit():
+        return int(w)
+    import re
+    claude = os.path.join(os.path.expanduser("~"), ".claude")
+    try:
+        with open(os.path.join(claude, "agents", os.path.basename(agent_type) + ".md"), encoding="utf-8") as f:
+            m = re.search(r"(?m)^autoCompactWindow:\s*(\d+)", f.read(8192))
+        if m:
+            return int(m.group(1))
+    except (OSError, TypeError):
+        pass
+    try:
+        with open(os.path.join(claude, "settings.json"), encoding="utf-8") as f:
+            return int(json.load(f).get("autoCompactWindow") or DEFAULT_WINDOW)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return DEFAULT_WINDOW
+
+
+def scan(path):
+    """(last compact_boundary uuid or '', context tokens of the last assistant row after it) from the transcript's tail."""
+    with open(path, "rb") as f:
+        f.seek(0, 2)
+        start = max(0, f.tell() - TAIL)
+        f.seek(start)
+        lines = f.read().decode("utf-8", "replace").split("\n")
+    if start:
+        lines = lines[1:]
+    tokens = None
+    for line in reversed(lines):
+        if '"compact_boundary"' in line:
+            return json.loads(line).get("uuid") or "", tokens or 0
+        if tokens is None and '"usage"' in line:
+            with_usage = json.loads(line)
+            if with_usage.get("type") == "assistant":
+                u = with_usage["message"]["usage"]
+                tokens = sum(int(u.get(k) or 0) for k in ("input_tokens", "cache_creation_input_tokens",
+                                                          "cache_read_input_tokens", "output_tokens"))
+    return "", tokens or 0
+
+
+def say(event, text):
+    sys.stdout.write(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}))
+
+
+def save(path, st):
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    with open(path + ".tmp", "w") as f:
+        json.dump(st, f)
+    os.replace(path + ".tmp", path)
+
+
+def main():
+    hook = json.loads(sys.stdin.buffer.read())
+    event, aid = hook.get("hook_event_name"), str(hook.get("agent_id") or "")
+    run = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
+    ctx = "".join(c for c in f"{hook.get('session_id', '')}-{aid}" if c.isalnum() or c == "-")
+    spath = os.path.join(run, "task-ram", ctx + ".json")
+    try:
+        with open(spath) as f:
+            st = json.load(f)
+    except (OSError, ValueError):
+        st = None
+    if event == "PostToolUse" and st is None and not os.environ.get("RAM_TICKET"):
+        return
+    if event not in ("SubagentStart", "PostToolUse", "SubagentStop") or off():
+        return
+    ram = load("ram", os.path.join(HARNESS, "bin", "ram"))
+    if event == "SubagentStart":
+        if not aid:
+            return
+        sc = load("spawn_context", os.path.join(HERE, "spawn-context"))
+        sc.LEDGER = "task-ram.json"
+        gate = load("subagent_stop_gate", os.path.join(HERE, "subagent-stop-gate.py"))
+        m = gate.BRIEF.search(sc.find_prompt(sc.recall_hook(), hook) or "")
+        if not m:
+            return
+        t = m.group(2).upper()
+        ram.gc()
+        save(spath, {"ticket": t, "agent_type": str(hook.get("agent_type") or ""),
+                     "transcript": str(hook.get("agent_transcript_path") or "")})
+        say(event, "\n".join(x for x in (start_line(t), ram.show(t)) if x))
+    elif event == "SubagentStop":
+        if not st:
+            return
+        t = st["ticket"]
+        try:
+            with open(os.path.join(ram.agent_work(), "evidence", t, "check.json")) as f:
+                green = json.load(f).get("ok") is True
+        except (OSError, ValueError, AttributeError):
+            green = False
+        if green:
+            ram.close(t)
+            os.remove(spath)
+    elif st is None:
+        t = os.environ["RAM_TICKET"]
+        if not ram.TICKET.fullmatch(t):
+            return
+        save(spath, {"ticket": t, "agent_type": str(hook.get("agent_type") or ""), "transcript": ""})
+        say(event, "\n".join(x for x in (start_line(t), ram.show(t)) if x))
+    else:
+        t, tp = st["ticket"], st.get("transcript") or ""
+        if not tp:
+            tp = load("subagent_stop_gate", os.path.join(HERE, "subagent-stop-gate.py")).transcript(hook) if aid \
+                else str(hook.get("transcript_path") or "")
+            if not os.path.isfile(tp):
+                return
+            st["transcript"] = tp
+            save(spath, st)
+        boundary, tokens = scan(tp)
+        if boundary and boundary != st.get("seen"):
+            st["seen"] = boundary
+            save(spath, st)
+            say(event, ram.show(t) or start_line(t))
+        elif tokens >= WARN_AT * window(st.get("agent_type") or "") and st.get("warned", 0) != st.get("seen", ""):
+            st["warned"] = st.get("seen", "")
+            save(spath, st)
+            say(event, f"Task RAM {t}: compaction is near (70 % of the window). Note your findings, dead ends, decisions "
+                       f"and next steps now: `ram note {t} <kind> \"<line>\"`.")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except BaseException:
+        pass
+    sys.exit(0)

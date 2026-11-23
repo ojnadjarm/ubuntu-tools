@@ -72,6 +72,12 @@
         "hooks": [
           { "type": "command", "command": "@HARNESS_HOME@/adapters/claude/hooks/audit-log.py", "async": true }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "@HARNESS_HOME@/adapters/claude/hooks/task-ram", "timeout": 2 }
+        ]
       }
     ],
     "SubagentStart": [
@@ -89,6 +95,11 @@
         "hooks": [
           { "type": "command", "command": "@HARNESS_HOME@/adapters/claude/hooks/spawn-context", "timeout": 5 }
         ]
+      },
+      {
+        "hooks": [
+          { "type": "command", "command": "@HARNESS_HOME@/adapters/claude/hooks/task-ram", "timeout": 5 }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -102,6 +113,11 @@
       {
         "hooks": [
           { "type": "command", "command": "@HARNESS_HOME@/bin/orbit-hook stop", "timeout": 5 }
+        ]
+      },
+      {
+        "hooks": [
+          { "type": "command", "command": "@HARNESS_HOME@/adapters/claude/hooks/task-ram", "timeout": 2 }
         ]
       }
     ]

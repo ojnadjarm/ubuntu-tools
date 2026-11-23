@@ -1,0 +1,130 @@
+#!/usr/bin/python3 -IS
+"""Task RAM (T1841): per-ticket notes in $AGENT_WORK/ram/T<n>/notes.md that the task-ram hook reads back after a compaction."""
+import fcntl
+import os
+import re
+import shutil
+import sys
+import time
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
+from agent_work import agent_work  # noqa: E402
+
+KINDS = ("fact", "tried", "decided", "next", "done")
+LINE_MAX, NOTES_MAX, DIGEST_MAX, GC_S = 240, 4096, 2000, 48 * 3600
+TICKET = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,39}")
+USAGE = 'usage: ram note T<n> <fact|tried|decided|next|done> "<line>" [--src <where>] | ram show T<n> | ram close T<n> | ram gc'
+
+
+def folder(ticket):
+    if not TICKET.fullmatch(ticket or ""):
+        raise ValueError(f"ram: bad ticket id: {ticket!r}")
+    return os.path.join(agent_work(), "ram", ticket)
+
+
+def kind(line):
+    m = re.match(r"- \d\d:\d\d (\w+) · ", line)
+    return m.group(1) if m else ""
+
+
+def note(ticket, k, text, src=""):
+    """Append one note; `next` replaces the previous one; over NOTES_MAX the oldest done, then fact lines go to notes.old.md."""
+    from redact import redact
+    text = " ".join(text.split())
+    if k not in KINDS:
+        raise ValueError(f"ram: kind must be one of {', '.join(KINDS)}")
+    if not text or len(text) > LINE_MAX:
+        raise ValueError(f"ram: a note is one line of 1 to {LINE_MAX} characters ({len(text)} given); split it or keep the gist")
+    d = folder(ticket)
+    os.makedirs(d, exist_ok=True)
+    row = f"- {time.strftime('%H:%M')} {k} · {redact(text)}" + (f" · {redact(' '.join(src.split()))}" if src else "") + "\n"
+    with open(os.path.join(d, ".lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        path = os.path.join(d, "notes.md")
+        try:
+            with open(path, encoding="utf-8") as f:
+                lines = f.readlines()
+        except FileNotFoundError:
+            lines = []
+        if k == "next":
+            lines = [x for x in lines if kind(x) != "next"]
+        lines.append(row)
+        moved = []
+        for old in ("done", "fact"):
+            while sum(len(x.encode()) for x in lines) > NOTES_MAX and any(kind(x) == old for x in lines[:-1]):
+                i = next(i for i, x in enumerate(lines) if kind(x) == old)
+                moved.append(lines.pop(i))
+        if moved:
+            with open(os.path.join(d, "notes.old.md"), "a", encoding="utf-8") as f:
+                f.writelines(moved)
+        with open(path + ".tmp", "w", encoding="utf-8") as f:
+            f.writelines(lines)
+        os.replace(path + ".tmp", path)
+
+
+def show(ticket):
+    """The digest: next, decided, tried, then the newest facts, DIGEST_MAX characters at most; '' when no notes."""
+    try:
+        with open(os.path.join(folder(ticket), "notes.md"), encoding="utf-8") as f:
+            lines = [x.rstrip("\n") for x in f]
+    except (OSError, ValueError):
+        return ""
+    if not lines:
+        return ""
+    out = [f"Task RAM {ticket}, your notes (newest first):"]
+    for k in ("next", "decided", "tried", "fact"):
+        for x in reversed([x for x in lines if kind(x) == k]):
+            if sum(len(y) + 1 for y in out) + len(x) > DIGEST_MAX:
+                return "\n".join(out)
+            out.append(x)
+    return "\n".join(out)
+
+
+def close(ticket):
+    """notes.md to $AGENT_WORK/evidence/<ticket>/ram.md, then the folder removed."""
+    d = folder(ticket)
+    if not os.path.isdir(d):
+        return
+    if os.path.isfile(os.path.join(d, "notes.md")):
+        ev = os.path.join(agent_work(), "evidence", ticket)
+        os.makedirs(ev, exist_ok=True)
+        shutil.copyfile(os.path.join(d, "notes.md"), os.path.join(ev, "ram.md"))
+    shutil.rmtree(d)
+
+
+def gc():
+    """Remove ticket folders whose newest file is older than GC_S."""
+    root = os.path.join(agent_work(), "ram")
+    now = time.time()
+    for name in os.listdir(root) if os.path.isdir(root) else []:
+        d = os.path.join(root, name)
+        newest = max([os.path.getmtime(d)] + [os.path.getmtime(os.path.join(d, f)) for f in os.listdir(d)])
+        if now - newest > GC_S:
+            shutil.rmtree(d, ignore_errors=True)
+
+
+def main(argv):
+    if argv[:1] == ["note"] and len(argv) in (4, 6) and (len(argv) == 4 or argv[4] == "--src"):
+        note(argv[1], argv[2], argv[3], argv[5] if len(argv) == 6 else "")
+    elif argv[:1] == ["show"] and len(argv) == 2:
+        out = show(argv[1])
+        if out:
+            print(out)
+    elif argv[:1] == ["close"] and len(argv) == 2:
+        close(argv[1])
+    elif argv == ["gc"]:
+        gc()
+    elif argv[:1] in (["-h"], ["--help"]):
+        print(USAGE)
+    else:
+        print(USAGE, file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        sys.exit(2)
