@@ -191,7 +191,8 @@ def apply(store, staging, car=None):
             else:
                 _put(store.path(rel), stg.path(rel))
         elif n == b and head and rel.endswith(".md") and rel.split("/")[0] in ("core", "domains") \
-                and _committed(store, head, rel) != (_read(store.path(rel)) if n else None):
+                and _committed(store, head, rel) != (_read(store.path(rel)) if n else None) \
+                and git(store, "check-ignore", "-q", "--", rel, check=False).returncode:  # PRIVATE page: no commit to compare
             held += _owner_wins(store, stg, rel, _committed(store, head, rel), today)
         elif n == b and s is None:
             red.append(f"apply · red · {rel} · the staging copy removes a file: retire lines, never delete a page")

@@ -117,6 +117,34 @@ mem apply "$S" >"$T/g.out" 2>&1; rc=$?
 { [ "$rc" = 0 ] && [ ! -e "$St/$CARD" ] && grep -qF "$CARD · held: owner edit wins · page deleted by hand" "$St/REVIEW.md"; } \
   && ok || no "rc $rc: $(cat "$T/g.out")"
 
+KILN="domains/kiln/DOMAIN.md" KL2='- Kilns cool for 12 hours. (26-03-02) ^kl02'
+private_setup() {  # the kiln page made PRIVATE (git-ignored, untracked) with a second line, as on the real store
+  setup
+  printf '%s\n' "$KL2" >>"$St/$KILN"
+  printf 'kl02\t%s\tlive\tseed.md\n' "$KILN" >>"$St/checks/ids.d/kiln.tsv"
+  echo 'domains/kiln/' >>"$St/.gitignore"
+  git -C "$St" rm -rq --cached domains/kiln && git -C "$St" add -A && git -C "$St" commit -q -m private
+  S="$(mem stage)"; mem apply "$S" >/dev/null 2>&1   # settle the generated views first
+}
+
+t "T1828 private page: a line the keeper removes stays gone after apply"
+private_setup
+S="$(mem stage)"
+sed -i '/\^kl02$/d' "$S/$KILN"
+sed -i "s#^kl02\t$KILN\tlive#kl02\t$KILN\tretired: fixture drop#" "$S/checks/ids.d/kiln.tsv"
+mem apply "$S" >"$T/h.out" 2>&1; rc=$?
+{ [ "$rc" = 0 ] && ! grep -q '\^kl02' "$St/$KILN" && grep -q '\^kl01' "$St/$KILN" \
+  && grep -q '^apply · green · .* 0 held' "$T/h.out"; } && ok || no "rc $rc: $(cat "$T/h.out")"
+
+t "T1828 private page: his hand edit before the run stays, the keeper's new line lands"
+private_setup
+swap "$St/$KILN" "- Firing logs are kept per glaze batch. (26-03-01) ^kl01" "- Firing logs are kept per kiln load. (26-11-22) ^kl01"
+S="$(mem stage)"
+printf -- '- Glaze tests fire on the top shelf. (26-11-22) ^kl03\n' >>"$S/$KILN"
+mem apply "$S" >"$T/i.out" 2>&1; rc=$?
+{ [ "$rc" = 0 ] && grep -qxF -- '- Firing logs are kept per kiln load. (26-11-22) ^kl01' "$St/$KILN" \
+  && grep -q '\^kl03$' "$St/$KILN" && grep -qxF -- "$KL2" "$St/$KILN"; } && ok || no "rc $rc: $(cat "$T/i.out")"
+
 t "the real store holds no fixture text"
 ! fixture_in_real && ok || no "fixture text found under the real store"
 
