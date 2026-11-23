@@ -68,9 +68,11 @@ def loaded(store, ctx, pages):
     return out
 
 
-def scope(graph, pages, mute):
-    """The graph cut to memories on pages: the rest neither fire nor conduct; mute ids conduct but never fire."""
-    mem = {m: [p, b, float("inf") if m in mute else t] for m, (p, b, t) in graph.mem.items() if p in pages}
+def scope(graph, pages, mute, near=None):
+    """The graph cut to memories on pages: the rest neither fire nor conduct; mute ids conduct but never fire; with near
+    (page prefixes), a memory off them fires only at THETA_FAR."""
+    mem = {m: [p, b, float("inf") if m in mute else t if near is None or p.startswith(near) else max(t, memory_net.THETA_FAR)]
+           for m, (p, b, t) in graph.mem.items() if p in pages}
     keep = {"m:" + m for m in mem}
     links = {}
     for n, row in graph.links.items():
@@ -119,7 +121,8 @@ def recall(store, text, ctx, write=True):
         pub, priv = memory_net.born(store, private=private)
         graph = memory_net.merge(pub, priv) if private else pub
     state = read_session(ctx.session) if ctx.session else {}
-    g = scope(graph, pages, loaded(store, ctx, pages) | set(state.get("shown", [])))
+    near = ("core/",) + tuple(f"domains/{d}/" for d in memory_route.domains_for(ctx.cwd, ctx.seat, os.environ, store))
+    g = scope(graph, pages, loaded(store, ctx, pages) | set(state.get("shown", [])), near)
     cues = memory_cue.cues(text, g)
     fired = memory_net.fire(g, cues, state)[:memory_hint.MAX_HINTS]
     gists = {f.id: graph.gists.get(f.id) or memory_hint.gist(body(store, f.id, f.place)) for f in fired if not pages[f.place]}

@@ -13,6 +13,7 @@ from memory_cue import tokens
 
 SPREAD, STEPS, PRIME, PLACE_W, CC_W = 0.6, 2, 0.5, 0.5, 0.0
 BASE_W, DEFAULT_AGE, THETA, MIN_PATHS, S_ASSOC, W_MIN = 0.1, 365, 0.5, 2, 6.5, 0.05
+THETA_FAR = 0.7  # threshold off the session's own core and domains (T1827)
 FAN_SHARE, FAN_FLOOR = 0.05, 8
 RESIDUAL_N, RESIDUAL_MIN = 10, 0.05
 NET, PUBLIC, PRIVATE = "net", "net/graph.json", "net/graph.private.json"

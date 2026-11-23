@@ -12,6 +12,12 @@ STOP_NET = set("el la los las un una unos unas de del al en que se su sus por pa
                "como cuando donde muy mas pero ya about if but so just also very too some such there these those they "
                "them their our your were been being have has had will would could might may why both own same again "
                "once".split())
+# Contraction stubs and filler of his speech: quoted in many memories, they lit off-topic hints (T1827).
+STOP_NET |= set("doesn don didn isn aren wasn weren wouldn couldn shouldn haven hasn hadn ain ll ve re im make makes made "
+                "making sense matter matters thing things stuff keep keeps still much many more most like seem seems think "
+                "thinking thought know want wanted get gets got go goes going gone really pretty yes yeah ok okay maybe "
+                "actually kind lot lots way well even cool nice sure right let lets something anything everything "
+                "nothing guess bit little bc because though already else enough here over".split())
 
 
 def stem(w):
