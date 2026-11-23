@@ -145,7 +145,10 @@ def hire(pid, name, thread, repo=None, rules=None, words=(), env=None, about=Non
         done.append('entry')
     else:
         if repo and not p.get('repo'):
-            p.update(repo=repo, clone=f'~/projects/collab/{repo.split("/")[1]}')
+            clone = f'~/projects/collab/{repo.split("/")[1]}'
+            if any(o.get('clone') == clone for o in data['projects']):
+                clone += f'-{pid}'  # another project works in that clone
+            p.update(repo=repo, clone=clone)
             done.append('repo')
         changed = {k: v for k, v in (rules or {}).items() if p.get('rules', {}).get(k) != v}
         if changed:

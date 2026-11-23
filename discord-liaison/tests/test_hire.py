@@ -123,6 +123,18 @@ class TestHire(unittest.TestCase):
         self.assertEqual(brief.count('## Project'), 1)
         self.assertIn('repo', self.calls()[-1])
 
+    def test_repo_shared_with_another_project_gets_its_own_clone(self):
+        self.hire()
+        with open(self.reg) as f:
+            data = json.load(f)
+        data['projects'][0]['clone'] = '~/projects/collab/Ten'
+        with open(self.reg, 'w') as f:
+            json.dump(data, f)
+        rc, out = self.hire(repo='Org/Ten', rules=None)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(Registry(self.reg).get('new-one')['clone'], '~/projects/collab/Ten-new-one')
+        self.assertIn('clone `~/projects/collab/Ten-new-one`', open(os.path.join(self.home, 'po-new-one', 'BRIEF.md')).read())
+
     def test_rule_on_a_hired_project_updates_entry_and_block_once(self):
         """T1694: po-discord changes a project rule (on the owner's word) with `discord-hire --rule`."""
         self.hire()

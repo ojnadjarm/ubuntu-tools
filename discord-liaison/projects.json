@@ -60,6 +60,80 @@
    },
    "skills": [],
    "po": "po-narrador-interactivo-ia"
+  },
+  {
+   "id": "aplicacion-coche",
+   "name": "Aplicación Coche",
+   "about": "App personal para gestionar un Ford Focus de 2011: consumo por kilómetros, mantenimiento por tiempo o kilometraje, calendario, ITV e impuestos en España, guías y archivo de documentos.",
+   "repo": "Rasalas93/AplicationCar",
+   "clone": "~/projects/collab/AplicationCar",
+   "match": {"tags": ["aplicación coche"], "title": ["aplicación coche"]},
+   "rules": {
+    "language": "Spanish by default, English when the message answered is in English or someone asks for English, never both languages in one post",
+    "pr_flow": "feature branch, push over SSH, gh pr create, link in the thread; never push main, never merge"
+   },
+   "skills": [],
+   "po": "po-aplicacion-coche"
+  },
+  {
+   "id": "qa-dashboard",
+   "name": "QA Dashboard",
+   "about": "A demo and learning test environment for a QA: an AI-driven loop of tests and reviews that keeps Jira updated until a story can be approved or not. Swappable skins (girly pop first) and a harness that plugs into Claude Code or any other AI.",
+   "repo": "RunarStudio/Spidey_PR_Dashboard",
+   "clone": "~/projects/collab/Spidey_PR_Dashboard-qa",
+   "match": {"tags": ["qa dashboard"], "title": ["qa dashboard", "qa dashboard"]},
+   "rules": {
+    "language": "Spanish by default, English when the message answered is in English or someone asks for English, never both languages in one post",
+    "pr_flow": "feature branch, push over SSH, gh pr create, link in the thread; never push main, never merge"
+   },
+   "skills": [],
+   "po": "po-qa-dashboard"
+  },
+  {
+   "id": "sinsmas-party",
+   "name": "Sinsmas Party",
+   "about": "Web del Sinsmas Party, un fan event gratuito de Hazbin Hotel × Helluva Boss en Barcelona (20 dic 2026). Primer encargo: modelo 3D y render del recinto como mapa de la web.",
+   "repo": "RunarStudio/sinners-day-web",
+   "clone": "~/projects/collab/sinners-day-web",
+   "match": {"tags": ["sinsmas party"], "title": ["sinsmas party"]},
+   "rules": {
+    "language": "Spanish by default, English when the message answered is in English or someone asks for English, never both languages in one post",
+    "pr_flow": "feature branch, push over SSH, gh pr create, link in the thread; never push main, never merge",
+    "copyright": "only original visuals: no official Hazbin Hotel or Helluva Boss logos, art or characters"
+   },
+   "skills": [],
+   "po": "po-sinsmas-party"
+  },
+  {
+   "id": "cafe-valle-de-tapias",
+   "name": "Café Valle de Tapias",
+   "about": "Menú en PDF para la finca cafetera familiar de PincheOrcaAsesina, para un evento de emprendimientos de la Fuerza Aérea Colombiana: fotos de productos, precios y propiedades.",
+   "repo": null,
+   "clone": null,
+   "match": {"tags": ["café valle de tapias"], "title": ["café valle de tapias", "valle de tapias"]},
+   "rules": {
+    "language": "Spanish by default, English when the message answered is in English or someone asks for English, never both languages in one post",
+    "pr_flow": "feature branch, push over SSH, gh pr create, link in the thread; never push main, never merge",
+    "assets": "solo las fotos reales de los productos que comparte el solicitante; cero arte IA genérico"
+   },
+   "skills": [],
+   "po": "po-cafe-valle-de-tapias"
+  },
+  {
+   "id": "ai-building",
+   "name": "AI Building",
+   "about": "Concept art for Daniel's AI office: his agents shown as a 2.5D building where you can see who is working, waiting or stopped. Caine, Daniel's bot, coordinates in the thread.",
+   "repo": "RunarStudio/Spidey_PR_Dashboard",
+   "clone": "~/projects/collab/Spidey_PR_Dashboard-ai-building",
+   "match": {"tags": ["ai building"], "title": ["ai building", "ai building"]},
+   "rules": {
+    "language": "Spanish by default, English when the message answered is in English or someone asks for English, never both languages in one post",
+    "pr_flow": "feature branch, push over SSH, gh pr create, link in the thread; never push main, never merge",
+    "copyright": "no Marvel or other studio characters, costumes, logos or panels: a spider-themed take is an original hero and city, as in Ciudad en Vela",
+    "assets": "drawn in code (no AI image unless asked, and then only as a concept); made-up data only, no real names, tickets or repos"
+   },
+   "skills": [],
+   "po": "po-ai-building"
   }
  ]
 }
