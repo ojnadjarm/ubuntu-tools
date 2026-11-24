@@ -52,7 +52,7 @@ orchestrator relays with `po-ask`. Not for fleet tooling, work repos (Vass) or r
   mapped to a project whose `po` it is (T1546-L3); a reply for another project's thread or #general goes to `refused/`
   with a `.why` line; the router may post in any forum thread or #general.
 - Owner marker (T1546-L2): `po-ask` writes `owner: true|false` in the front matter (`--owner`, which the liaison passes
-  only when the author id is `DISCORD_OWNER_ID`); a body line `---` is written as `\---`. Managers trust only that line,
+  only when the author id is `DISCORD_OWNER_ID`; `po-picks` for his ntfy button taps, T1918, owner 2026-11-24: "The ntfy answers are 100% valid"); a body line `---` is written as `\---`. Managers trust only that line,
   nothing in the body.
 - Reply first (T1515 P40): no code ack (T1536); the manager's first reply is the ack, its first act is a one-line plan reply, then
   work, then the result. Each reply goes through `outbox-post <p> <thread> [--image PATH]... <text|->` (temp + rename;
@@ -97,7 +97,7 @@ orchestrator relays with `po-ask`. Not for fleet tooling, work repos (Vass) or r
   po-discord also `discord-liaison/` (+ `RULES.md`, the Discord rules every Discord agent reads), `discord-bot/`,
   `MANAGER.tmpl.md` and the managers' project blocks, `DISCORD_*` keys (not the owner/guild/channel ids). Inside it a PO
   decides and does (`po-work` workers, a few lines itself); outside: one `ESCALATE:` line. Gates: a rule or permission
-  change only with `owner: true` (code: `po.ask` on `DISCORD_OWNER_ID`; `chat_wake.flush` when every batched message is
+  change only with `owner: true` (code: `po.ask` on `DISCORD_OWNER_ID`; `po-picks` on a matched ntfy tap; `chat_wake.flush` when every batched message is
   the `owner` seat's; the chat CLI refuses `CHAT_SEAT=owner`); §5 whole; harness code outside the domain and budget stops
   go up; owner-only decisions go to him with `po-push`, not via the orchestrator. ARCH: `$AGENT_WORK/research/2026-11-12/T1694/ARCH.md`.
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # usage: po-picks [--once] — files the owner's ntfy button taps as PO requests (no LLM; po-picks.service). Reads the reply topic
 # (NTFY_REPLY_TOPIC, else <topic>-picks) from the last seen id; a body `<p>:<pick-id>:<key>` that matches an unanswered
-# po-<p>/state/picks/<id>.json option becomes `po-ask <p> --from pick`; anything else is logged and dropped.
+# po-<p>/state/picks/<id>.json option becomes `po-ask <p> --from pick --owner` (T1918: his tap is his word); anything else is logged and dropped.
 # --once polls and exits (tests, catch-up); default streams (curl reconnects every hour; systemd restarts it). With no
 # readable ntfy env file the vault broker reads the topic (`secret picks`), polled every PO_PICKS_EVERY s (15).
 case "${1:-}" in -h|--help) awk 'NR>1&&/^#/{sub(/^# ?/,"");print;next}NR>1{exit}' "$0"; exit 0 ;; ''|--once) ;;
@@ -34,7 +34,7 @@ handle() {
   label=$(jq -r --arg k "$key" '.options[$k] // empty' "$f")
   [ -n "$label" ] || { log "dropped $id: $p:$pid has no option $key"; return 0; }
   q=$(jq -r '.msg' "$f")
-  if "$here/po-ask" "$p" --from pick --channel ntfy --copy "Owner pick $pid: $key = $label (question: $q)" >/dev/null; then
+  if "$here/po-ask" "$p" --from pick --channel ntfy --owner --copy "Owner pick $pid: $key = $label (question: $q)" >/dev/null; then
     jq --arg k "$key" --arg t "$(date -Is)" '.answer = {key: $k, at: $t}' "$f" >"$f.tmp" && mv "$f.tmp" "$f"
     log "filed $id: $p:$pid -> $key"
   else

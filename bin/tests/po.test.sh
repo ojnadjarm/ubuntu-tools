@@ -159,6 +159,7 @@ f=$(ls "$P"/inbox/*-pick-*.md 2>/dev/null)
 is 'po-picks: one request filed' "$(printf '%s' "$f" | grep -c .)" 1
 ev 'po-picks: request names the pick' 'grep -q "Owner pick $pid: B = Plain (question: \[fx\] pick a look" $f && grep -qx "channel: ntfy" $f'
 is 'po-picks: pick answered B' "$(jq -r .answer.key "$P/state/picks/$pid.json")" B
+ev 'po-picks: request is the owner'"'"'s (T1918)' 'grep -qx "owner: true" $f'
 is 'po-picks: 4 dropped in the log' "$(grep -c dropped "$HARNESS_HOME/log/po-picks.log")" 4
 po-picks --once
 is 'po-picks: second poll resumes after the last id' "$(grep '"get"' "$WORK/got.jsonl" | tail -1 | jq -r .get | grep -o 'since=[a-z0-9]*')" since=m6
