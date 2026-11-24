@@ -60,7 +60,7 @@ and receive these env vars: `PCBENCH_RUN`, `PCBENCH_TASK`, `PCBENCH_ARM`, `PCBEN
 
 `default_sink` `null_modules` `power_profile` `failed_user_units` `docker` `monitors`
 `tailscale` `ufw` `tmux_claude` `pc_mode` `win_list` `ledger_lines` `uptime_since`
-`dark_eye_head` `pcbench_units`
+`dark_eye_head` `pcbench_units` `media_entries`
 
 A change task that moves the sink writes `"allowed_side_effects": ["default_sink","ledger_lines"]`.
 

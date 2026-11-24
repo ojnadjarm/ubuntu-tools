@@ -4,6 +4,8 @@
 set -euo pipefail
 . "$(dirname "$0")/../_lib/task.sh"
 bash "$LIB/fixture.sh" reset
+# The arm binds this fixture stick over /run/media/$USER (TSP-066): empty at the start of every trial.
+stick="$(bash "$LIB/fixture.sh" root)/stick"; rm -rf "$stick"; mkdir -p "$stick"
 "$PWD/probe.sh" --record
 ledger_mark
 exit 0

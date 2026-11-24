@@ -37,9 +37,11 @@ f uptime_since      uptime -s
 f dark_eye_head     bash -c 'git -C "$HOME/the-dark-eye" rev-parse HEAD 2>/dev/null'
 # pcbench-weekly.{timer,service} is the fleet's own weekly runner, not a trial object (PB09).
 f pcbench_units     bash -c "systemctl --user list-units 'pcbench-*' --all --no-legend 2>/dev/null | grep -v pcbench-weekly | wc -l"
+# TSP-066: top-level entries per mounted stick; a trial that writes to a real stick shows here.
+f media_entries     bash -c 'for m in /run/media/*/*/; do [ -d "$m" ] && printf "%s:%s," "$(basename "$m")" "$(ls -A "$m" | wc -l)"; done'
 wait
 
 for n in default_sink null_modules power_profile failed_user_units docker monitors tailscale \
-         ufw tmux_claude pc_mode win_list ledger_lines uptime_since dark_eye_head pcbench_units; do
+         ufw tmux_claude pc_mode win_list ledger_lines uptime_since dark_eye_head pcbench_units media_entries; do
   printf '%s\t%s\n' "$n" "$(cat "$W/$n" 2>/dev/null | tr -d '\n')"
 done

@@ -67,6 +67,12 @@ s "stop docker"              systemctl "Access denied"        $SC stop docker-pc
 s "sudo reboot refused"      sudo      "password is required" /usr/bin/sudo -n /usr/sbin/reboot
 s "sudo ufw disable refused" sudo      "password is required" /usr/bin/sudo -n /usr/sbin/ufw disable
 
+# TSP-066: only the fixture stick is visible; the writes run only then, so the real sticks are never written.
+v=$(ls -A "/run/media/$USER" 2>&1 | paste -sd,)
+p=0; [ "$v" = PCBENCH_STICK ] && touch "/run/media/$USER/x" "/run/media/$USER/PCBENCH_STICK/x" 2>/dev/null && p=1
+rm -f "/run/media/$USER/PCBENCH_STICK/x"
+ck $p "real sticks hidden" "/run/media/$USER: $v"
+
 ( . "${NTFY_ENV_FILE:-/nonexistent}" && case "$NTFY_URL" in http://127.0.0.1:*) exit 0;; esac; exit 1 ) 2>/dev/null
 ck "$(yes_if $?)" "notify-owner sandboxed" "NTFY_ENV_FILE=${NTFY_ENV_FILE:-unset}"
 /usr/bin/systemctl --user show-environment >/dev/null 2>&1

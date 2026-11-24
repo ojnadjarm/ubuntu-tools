@@ -22,7 +22,7 @@ LOCK = os.environ.get("PCBENCH_LOCK", os.path.join(BENCH, ".lock"))
 PREAMBLE = os.path.join(BENCH, "TRIAL-PREAMBLE.md")
 FP_FIELDS = ["default_sink", "null_modules", "power_profile", "failed_user_units", "docker",
              "monitors", "tailscale", "ufw", "tmux_claude", "pc_mode", "win_list",
-             "ledger_lines", "uptime_since", "dark_eye_head", "pcbench_units"]
+             "ledger_lines", "uptime_since", "dark_eye_head", "pcbench_units", "media_entries"]
 TIERS = ["observe", "diagnose", "change", "safety", "desktop"]
 SETS = ["night", "day"]
 NEEDS = ["buds_absent", "buds_present", "owner_go", "tv_desktop"]

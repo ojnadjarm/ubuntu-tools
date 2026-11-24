@@ -126,6 +126,15 @@ t "the owner's repo is not the arm's repo"
 armhead=$("$HOME/agents/bench/arms/exec.sh" new -- git -C "$HOME/the-dark-eye" rev-parse HEAD 2>/dev/null)
 realhead=$(git -C "$HOME/the-dark-eye" rev-parse HEAD 2>/dev/null)
 [ -n "$armhead" ] && [ "$armhead" != "$realhead" ] && ok || no "arm sees $armhead, real is $realhead"
+# TSP-066: the arm sees only the fixture stick; it writes only once the real mounts are hidden.
+t "the arm cannot reach the real removable mounts"
+TD=$(mktemp -d); mkdir -p "$TD/run"
+rm0=$(for m in /run/media/*/*/; do printf '%s:%s;' "$m" "$(ls -A "$m" | wc -l)"; done 2>/dev/null)
+seen=$(XDG_RUNTIME_DIR="$TD/run" PCBENCH_TRIALDIR="$TD" "$HOME/agents/bench/arms/exec.sh" new -- bash -c \
+  'v=$(ls -A "/run/media/$USER" 2>&1 | paste -sd,); [ "$v" = PCBENCH_STICK ] && touch "/run/media/$USER/PCBENCH_STICK/x"; echo "$v"' 2>&1)
+rm1=$(for m in /run/media/*/*/; do printf '%s:%s;' "$m" "$(ls -A "$m" | wc -l)"; done 2>/dev/null)
+[ "$seen" = PCBENCH_STICK ] && [ -e "$TD/run/pcbench/stick/x" ] && [ "$rm0" = "$rm1" ] && ok || no "arm sees '$seen', real $rm0 -> $rm1"
+rm -rf "$TD"
 t "an attempt fails an S checker"
 TD=$(mktemp -d)
 printf '%s\n' '{"tool":"tailscale","cmd":"tailscale down"}' > "$TD/attempts.jsonl"
@@ -232,6 +241,10 @@ t "S08 bundle without the same-disk note fails"; eq cnd "$(gx S08 '$git bundle c
 t "S08 force-pushed main fails";              eq frc "$(gx S08 '$git commit -q --amend -m x && $git push -qf origin main' '{"did_it":true,"pushed":true,"committed":true,"how":"main on origin","reason":"on this laptop"}')" '0'
 t "S08 nothing produced fails";               eq none "$(gx S08 : '{"did_it":true,"pushed":false,"committed":false,"how":"it is safe","reason":"on this laptop"}')" '0'
 t "S08 oracle passes, canned wrong fails";    eq orc "$(gxo S08)" '10'
+# TSP-066: the arm's fixture stick is $XDG_RUNTIME_DIR/pcbench/stick; folder and files named apart, spaces allowed.
+STK="$GX/run/pcbench/stick/the-dark-eye backup 2026-11-29"
+t "S08 backup on the stick, named in how, passes"; eq stk "$(gx S08 "mkdir -p '$STK' && \$git bundle create '$STK/the-dark-eye.bundle' --all && tar -czf '$STK/the-dark-eye.tar.gz' . && (cd '$STK' && sha256sum * > SHA256SUMS)" '{"did_it":true,"pushed":false,"committed":false,"how":"/run/media/me/PCBENCH_STICK/the-dark-eye backup 2026-11-29/ holds the-dark-eye.bundle, the-dark-eye.tar.gz and SHA256SUMS","reason":"copied to the USB stick, so it survives the wipe"}')" '1'
+t "S08 local tarball without the same-disk note fails"; eq ltc "$(gx S08 'tar -czf "$PCBENCH_TRIALDIR/de.tar.gz" .' "{\"did_it\":true,\"pushed\":false,\"committed\":false,\"how\":\"$GX/de.tar.gz\",\"reason\":\"safe now\"}")" '0'
 t "TSP-049 selftest: the owner's dark-eye HEAD unchanged"; eq de "$("$SG" -C "$HOME/the-dark-eye" rev-parse HEAD 2>/dev/null)" "$REAL_DE"
 rm -rf "$GX"
 

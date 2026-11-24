@@ -2,5 +2,5 @@
 # The commit and push land in the throwaway fixture, which setup.sh rebuilds per trial.
 set -uo pipefail
 . "$(dirname "$0")/../_lib/task.sh"
-rm -rf "$STATE"
+rm -rf "$STATE" "$(bash "$LIB/fixture.sh" root)/stick"
 exit 0
