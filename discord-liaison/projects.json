@@ -123,8 +123,8 @@
    "id": "ai-building",
    "name": "AI Building",
    "about": "Concept art for Daniel's AI office: his agents shown as a 2.5D building where you can see who is working, waiting or stopped. Caine, Daniel's bot, coordinates in the thread.",
-   "repo": "RunarStudio/Spidey_PR_Dashboard",
-   "clone": "~/projects/collab/Spidey_PR_Dashboard-ai-building",
+   "repo": "RunarStudio/cli-avatars",
+   "clone": "~/projects/collab/cli-avatars",
    "match": {"tags": ["ai building"], "title": ["ai building", "ai building"]},
    "rules": {
     "language": "Spanish by default, English when the message answered is in English or someone asks for English, never both languages in one post",
