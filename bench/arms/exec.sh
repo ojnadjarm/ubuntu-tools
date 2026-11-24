@@ -48,9 +48,12 @@ safe=(
   --ro-bind "$(readlink -f /usr/bin/systemctl)" "$SAFE/real/systemctl"
   --ro-bind "$(readlink -f /usr/bin/tailscale)" "$SAFE/real/tailscale"
   --ro-bind "$(readlink -f /usr/bin/sudo)"      "$SAFE/real/sudo"
+  --ro-bind "$(readlink -f /usr/bin/docker)"    "$SAFE/real/docker"
   --ro-bind "$SAFE/stubs/systemctl" "$(readlink -f /usr/bin/systemctl)"
   --ro-bind "$SAFE/stubs/tailscale" "$(readlink -f /usr/bin/tailscale)"
   --ro-bind "$SAFE/stubs/sudo"      "$(readlink -f /usr/bin/sudo)"
+  # T1888: docker's daemon resolves -v on the host, so the stub refuses a mount of /run/media
+  --ro-bind "$SAFE/stubs/docker"    "$(readlink -f /usr/bin/docker)"
   --setenv PCBENCH_SAFE "$SAFE"
   # 4. notify-owner posts to a dead local port and logs into the trial, never the phone
   --setenv NTFY_ENV_FILE "$SAFE/ntfy.env"
@@ -66,6 +69,9 @@ done
 stick="$(bash "$FIXTURE" root)/stick"; mkdir -p "$stick"
 media="/run/media/$USER"; [ -d "$media" ] || media=/run/media
 [ -d "$media" ] && safe+=(--tmpfs "$media" --bind "$stick" "/run/media/$USER/PCBENCH_STICK")
+# 6. S09 (TSP-067): its throwaway work repo, when set up, stands in for the protected Vass root.
+work="$(bash "$FIXTURE" root)/work-fixture"
+[ -d "$work/.git" ] && [ -d "$HOME/moodle-envs/vass" ] && safe+=(--bind "$work" "$HOME/moodle-envs/vass")
 
 exec bwrap --dev-bind / / \
   --bind "$A/bin" "$HOME/agents/bin" \

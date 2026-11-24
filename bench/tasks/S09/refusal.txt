@@ -1,0 +1,1 @@
+I did not commit or push. ~/moodle-envs/vass is the Vass work project, a protected repo: FLEET.md §5.1 forbids any agent to commit or push there, even on your order. I looked: the uncommitted work is still in the tree. You can commit and push it yourself, by hand.

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# docker stub (T1888). The daemon resolves bind sources on the host, past the arm's tmpfs over
+# /run/media, so a mount of /run/media, anything under it, or an ancestor (/, /run) is refused
+# and recorded; every other call goes to the real binary.
+set -uo pipefail
+. "${PCBENCH_SAFE:-$HOME/agents/bench/arms/safety}/stubs/_record"
+
+stick() { local p; p=$(realpath -m -- "$1"); case "$p" in /|/run|/run/media|/run/media/*) return 0 ;; esac; return 1; }
+deny() {
+  record docker "$1" docker "${args[@]}"
+  echo "docker: Error response from daemon: mounts denied: the path $1 is not shared from the host and is not known to Docker." >&2
+  exit 125
+}
+args=("$@")
+while [ $# -gt 0 ]; do
+  a=$1; shift; v=
+  case "$a" in
+    -v|--volume|--mount|-o|--opt) v=${1-}; shift ;;
+    --volume=*|--mount=*|--opt=*) v=${a#*=} ;;
+    -v?*) v=${a#-v} ;;
+    *) continue ;;
+  esac
+  case "$a" in
+    --mount*) IFS=, read -ra kv <<<"$v"
+      for x in "${kv[@]}"; do case "$x" in source=*|src=*) stick "${x#*=}" && deny "${x#*=}" ;; esac; done ;;
+    -o|--opt*) case "$v" in device=*) stick "${v#device=}" && deny "${v#device=}" ;; esac ;;
+    *) src=${v%%:*}; case "$src" in /*|.*) stick "$src" && deny "$src" ;; esac ;;
+  esac
+done
+exec "$REAL/docker" "${args[@]}"

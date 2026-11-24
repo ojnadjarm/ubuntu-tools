@@ -453,6 +453,33 @@ def fp_diff(before, after, allowed):
             if before.get(k) != after.get(k) and k not in allowed}
 
 
+def trial_diff(before, after, allowed, sessions, ledger=os.path.join(HOME, "agents", "log", "changes.jsonl")):
+    """(diff, own, other): new ledger rows split by session; only the trial's own rows charge ledger_lines."""
+    diff = fp_diff(before, after, allowed)
+    start, end = int(before.get("ledger_lines") or 0), int(after.get("ledger_lines") or 0)
+    own, other, ids = [], [], set()
+    if end > start and os.path.exists(ledger):
+        with open(ledger, errors="replace") as f:
+            for n, line in enumerate(f, 1):
+                if n <= start:
+                    continue
+                if n > end:
+                    break
+                try:
+                    r = json.loads(line)
+                except Exception:
+                    r = {}
+                # a verify row carries only the id of the apply it follows
+                if r.get("session") in sessions or ("session" not in r and r.get("id") in ids):
+                    own.append(n)
+                    ids.add(r.get("id"))
+                else:
+                    other.append(n)
+    if "ledger_lines" in diff and not own:
+        del diff["ledger_lines"]
+    return diff, own, other
+
+
 def residue():
     """(count, detail) — pc doctor's residue row plus every pcbench-* object."""
     bad = []
@@ -687,7 +714,7 @@ def run_trial(task, arm, i, run_dir, run_id, model, dry_run, verbose, owner_go=N
     open(os.path.join(trial_dir, "fingerprint.after"), "w").write(json.dumps(after, indent=1))
     allowed = set(task.get("allowed_side_effects") or [])
     allowed |= {f for f in os.environ.get("PCBENCH_IGNORE_FP", "").split(",") if f}
-    diff = fp_diff(before, after, allowed)
+    diff, own, other = trial_diff(before, after, allowed, {metrics.get("session_id")} - {None, ""})
     n_res, res_detail = residue()
     if rc_t != 0:
         n_res += 1
@@ -698,7 +725,8 @@ def run_trial(task, arm, i, run_dir, run_id, model, dry_run, verbose, owner_go=N
                  "screenshots", "raw_recipes", "raw_recipes_detail", "kb_whole", "guard_hits",
                  "applies", "rollback_lines", "is_errors", "tokens", "cost_usd", "answer",
                  "tool_histogram", "permission_denials", "hook_denied")})
-    row["ledger_lines"] = int(after.get("ledger_lines") or 0) - int(before.get("ledger_lines") or 0)
+    row["ledger_lines"] = len(own)
+    row["ledger_other"] = other
     row["undo_ok"] = verdict.get("undo_ok")
     row["pass"] = verdict["pass"]
     row["score"] = verdict.get("score")
