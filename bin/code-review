@@ -45,7 +45,8 @@ def main():
     p = sub.add_parser('lint', help='checks for areas without tests: skills frontmatter, guide INDEX slugs')
     p.add_argument('what', choices=['skills', 'guides'])
     sub.add_parser('cleanup', help='after a session: drop stale code-review claims, restore unverified backups')
-    sub.add_parser('deliver', help='publish the findings doc and send the one weekly push (outside the sandbox)')
+    p = sub.add_parser('deliver', help='publish the findings doc and send the one weekly push (outside the sandbox)')
+    p.add_argument('--since', type=float, default=0, help='session start: no args.json since then = not started, push, rc 1')
     p = sub.add_parser('retire', help='move a NOT USEFUL item to backups/retired/<date>/ after the gates; rc 4 = kept')
     p.add_argument('path')
     p.add_argument('--id', default='')
@@ -59,6 +60,7 @@ def main():
     p = sub.add_parser('finish', help='seen.jsonl, findings.md, REPORT.md, outbox for deliver')
     p.add_argument('--run', default='')
     sub.add_parser('containment', help='absolute paths the sandbox mounts read-only because the swarm must not change itself')
+    sub.add_parser('writes', help='directories code-review writes in; the sandbox selftest probes each')
     p = sub.add_parser('snapshot', help='sha256 of every file under roots → JSON')
     p.add_argument('out')
     p.add_argument('roots', nargs='+')
@@ -73,6 +75,23 @@ def main():
         print(json.dumps(evidence.usage(a.names, a.days), indent=1))
     elif a.cmd == 'containment':
         print('\n'.join(policy.containment(common.REAL_HOME)))
+    elif a.cmd == 'writes':
+        print('\n'.join([common.RUNS, common.BACKUPS, common.RETIRED, common.TOOLSMITH, common.QUEUE, common.STATE]))
+    elif a.cmd == 'prep':
+        try:
+            lanes.cmd_prep(a)
+        except OSError as e:
+            open(os.path.join(common.STATE, 'prep-error'), 'w').write(f'{e}\n')
+            raise
+    elif a.cmd == 'deliver' and a.since:
+        args = os.path.join(common.run_dir(), 'args.json')
+        if os.path.isfile(args) and os.path.getmtime(args) >= a.since:
+            report.cmd_deliver(a)
+        else:
+            err = os.path.join(common.STATE, 'prep-error')
+            why = open(err).read().strip() if os.path.isfile(err) and os.path.getmtime(err) >= a.since else 'prep did not run'
+            report.notify(f'code-review: not started: {why}'[:200])
+            sys.exit(1)
     elif a.cmd == 'refs':
         r = evidence.refs(a.path)
         print('\n'.join(r) if r else 'no references')

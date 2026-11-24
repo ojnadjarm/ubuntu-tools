@@ -64,6 +64,28 @@ else
 t "sandbox (real): selftest proves owner data, containment and sockets"
 out="$(bash "$BIN/code-review-sandbox" --selftest 2>&1)" && ok || no "$out"
 fi
+
+# T1886: real-mode layout ($AGENT_WORK read-only, rw_after children) on a fake HOME under state/selftest/.
+t "sandbox (real layout, fake HOME): prep creates its run dir under a read-only \$AGENT_WORK"
+RL="$SBX/rl"; mkdir -p "$RL/agents/bin" "$RL/agents/hooks" "$RL/agents/code-review/state" "$RL/agent-work" "$RL/.claude"
+cp "$BIN"/{env.sh,code-review,code-review-netproxy,auditlib.py} "$RL/agents/bin/"  # copies: bwrap cannot mount over a symlink
+cp -r "$ROOT/lib" "$RL/agents/lib"; cp "$ROOT/hooks/audit-log.py" "$RL/agents/hooks/"
+for b in notify-owner plan-publish; do printf '#!/bin/sh\nexit 0\n' >"$RL/agents/bin/$b"; chmod +x "$RL/agents/bin/$b"; done
+real_runs="$(ls -A "$CODE_REVIEW_PAPERS/runs" 2>/dev/null | wc -l)"
+out="$(env -u AGENT_WORK -u FLEET_BACKUPS_DIR -u TOOLSMITH_PAPERS -u IMPROVE_PAPERS -u CODE_REVIEW_PAPERS -u ASR_CORPUS \
+  -u HARNESS_ENV_LOADED HOME="$RL" HARNESS_CONFIG="$RL/none" timeout 60 bash "$BIN/code-review-sandbox" -- \
+  python3 "$RL/agents/bin/code-review" prep 2>&1)"
+{ [ -f "$out" ] && case "$out" in "$RL/agent-work/code-review/runs/"*/args.json) true ;; *) false ;; esac &&
+  [ "$(ls -A "$CODE_REVIEW_PAPERS/runs" 2>/dev/null | wc -l)" = "$real_runs" ]; } && ok || no "$(tail -c 300 <<<"$out")"
+
+t "sandbox --post: a failed prep pushes once and exits 1"
+PF="$SBX/pf"; python3 "$CR/selftest/build.py" "$PF" >/dev/null
+mkdir -p "$PF/agent-work/code-review"; : >"$PF/agent-work/code-review/runs"
+timeout 60 bash "$BIN/code-review-sandbox" --fixture "$PF" --post -- bash -c \
+  'CR_HOME="$1" python3 "$2/code-review" prep; exit 0' _ "$PF" "$BIN" >"$WORK/pf.out" 2>&1; rc=$?
+nl="$PF/agents/code-review/state/outbox/notify.log"
+{ [ "$rc" = 1 ] && [ "$(wc -l <"$nl" 2>/dev/null)" = 1 ] && grep -q '^code-review: not started: ' "$nl"; } && ok ||
+  no "rc=$rc pushes=$(cat "$nl" 2>/dev/null | head -c 200) $(tail -c 200 "$WORK/pf.out")"
 fi
 }
 focus_checks() {
