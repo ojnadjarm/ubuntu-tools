@@ -128,7 +128,7 @@
    "match": {"tags": ["ai building"], "title": ["ai building", "ai building"]},
    "rules": {
     "language": "Spanish by default, English when the message answered is in English or someone asks for English, never both languages in one post",
-    "pr_flow": "feature branch, push over SSH, gh pr create, link in the thread; never push main, never merge",
+    "pr_flow": "feature branch wip/agents-<topic> or direct commit to dev over SSH; PR to dev only when asked; never push main, never merge, never force-push",
     "copyright": "no Marvel or other studio characters, costumes, logos or panels: a spider-themed take is an original hero and city, as in Ciudad en Vela",
     "assets": "drawn in code (no AI image unless asked, and then only as a concept); made-up data only, no real names, tickets or repos"
    },
