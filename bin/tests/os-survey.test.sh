@@ -20,7 +20,7 @@ cat >"$S/pc" <<'EOF'
 #!/bin/sh
 case "$*" in
   "status") printf '  ci_verdict       2 red                [WARN]\n  failed_units     0                    [OK]\n';;
-  "docker stats"*) printf 'NAME CPU%%\nvass-services-mongo-1 1.2%%\nmoodle52-app-1 0.0%%\n';;
+  "docker stats"*) printf 'NAME CPU%%\nglobex-services-mongo-1 1.2%%\nmoodle52-app-1 0.0%%\n';;
   *) echo "stub pc $* 42";;
 esac
 EOF
@@ -77,7 +77,7 @@ mkdir -p "$WORK/path"; printf '#!/bin/sh\n' >"$WORK/path/claims"; chmod +x "$WOR
 export PATH="$WORK/path:$PATH"
 mkdir -p "$WORK/ag/bin/tests"; printf 'ok() { :; }\n' >"$WORK/ag/bin/tests/x.test.sh"
 export OS_SURVEY_BIN="$S" AGENT_WORK="$WORK/aw" HARNESS_HOME="$WORK/ag" OS_SURVEY_PROJECTS="$WORK/proj" OS_SURVEY_CACHE="$WORK/cache" \
-  OS_SURVEY_PROC="$P" OS_SURVEY_CGROUP="$C" OS_SURVEY_NETDATA_WAIT=0.2
+  OS_SURVEY_PROC="$P" OS_SURVEY_CGROUP="$C" OS_SURVEY_NETDATA_WAIT=0.2 PROTECTED_PROJECTS=globex
 
 SECTIONS="status doctor failures cpu memory timers kernel journal fleet-ci agents-log boot disk network apparmor agent-work docker command-not-found caches daemons netdata sudo journal-sources io"
 QUICK="status doctor failures cpu memory timers kernel journal fleet-ci agents-log boot disk network"
@@ -86,11 +86,11 @@ out=$("$SRC" 2>&1); ok "full: rc 0" 0 $?
 miss=0; for s in $SECTIONS; do grep -qx "## $s" <<<"$out" || { echo "  missing ## $s"; miss=$((miss+1)); }; done
 ok "full: every section prints" 0 "$miss"
 ok "full: no n/a rows from stubs" 0 "$(grep -c 'n/a' <<<"$out")"
-ok "full: Vass row tagged" yes "$(has 'vass-services-mongo-1 1.2% (protected vass, owner-only)' "$out")"
-ok "full: non-Vass row untagged" no "$(has 'moodle52-app-1 0.0% (protected' "$out")"
+ok "full: protected row tagged" yes "$(has 'globex-services-mongo-1 1.2% (protected globex, owner-only)' "$out")"
+ok "full: non-protected row untagged" no "$(has 'moodle52-app-1 0.0% (protected' "$out")"
 a=$(PROTECTED_PROJECTS=acme PROTECTED_ACME_WORDS=moodle52 "$SRC" 2>&1)
-ok "acme (T1513): a second project's row tagged, the unlisted vass row not" "yes no" \
-  "$(has 'moodle52-app-1 0.0% (protected acme, owner-only)' "$a") $(has 'vass-services-mongo-1 1.2% (protected' "$a")"
+ok "acme (T1513): a second project's row tagged, the unlisted globex row not" "yes no" \
+  "$(has 'moodle52-app-1 0.0% (protected acme, owner-only)' "$a") $(has 'globex-services-mongo-1 1.2% (protected' "$a")"
 ok "status: only non-OK rows" "yes no" "$(has ci_verdict "$out") $(has failed_units "$out")"
 ok "journal: unit and count only" "yes no" "$(has 'kernel 2' "$out") $(has 'UFW BLOCK' "$out")"
 ok "apparmor: DENIED by profile" "yes yes" "$(has 'DENIED 24h: 2' "$out") $(has 'who 2' "$out")"
@@ -145,7 +145,7 @@ ok "no browser in the source" 0 "$(grep -iE 'chrom|firefox|playwright' "$SRC" | 
 ln -s "$(dirname "$SRC")/protectedlib.py" "$WORK/protectedlib.py"
 M="$WORK/mut"; sed 's/(protected {p}, owner-only)/(x)/' "$SRC" >"$M"; chmod +x "$M"
 printf '#!/bin/sh\necho "stub $*"\n' >"$S/systemd-analyze"; chmod +x "$S/systemd-analyze"
-ok "mutation: no Vass tag goes red" no "$(has '(protected vass, owner-only)' "$("$M" 2>&1)")"
+ok "mutation: no protected tag goes red" no "$(has '(protected globex, owner-only)' "$("$M" 2>&1)")"
 sed 's/startswith(.inotify.)/startswith("x")/' "$SRC" >"$M"; chmod +x "$M"
 ok "mutation: no inotify count goes red" no "$(has 'inotify watches 5' "$("$M" 2>&1)")"
 sed "s|('playwright-mcp', r'[^']*')|('playwright-mcp', r'playwright-mcp')|" "$SRC" >"$M"; chmod +x "$M"

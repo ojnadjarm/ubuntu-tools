@@ -6,7 +6,7 @@ REAL_HOME=$HOME
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 . "$HOME/agents/bin/tests/lib/assert.sh"
 
-export PROTECTED_PROJECTS=vass PROTECTED_VASS_UNITS="vass* moodle45*"  # fixture protected project (T1513)
+export PROTECTED_PROJECTS=globex PROTECTED_GLOBEX_UNITS="globex* moodle45*"  # fixture protected project (T1513)
 export HOME="$WORK/home" PC_FIXTURE="$WORK/fx" PC_CRASH_DIR="$WORK/crash" AGENT_WORK="$WORK/aw" CREATIVE_CI_LOG="$WORK/creative-ci.jsonl"
 mkdir -p "$AGENT_WORK/evidence/T1" "$AGENT_WORK/evidence/T2" "$AGENT_WORK/evidence/T3" "$HOME/agents/log" "$HOME/agents/state/ci-fix" "$HOME/agents/a1/logs" "$PC_FIXTURE/bin" "$PC_CRASH_DIR"
 now=$(date +%s); us() { echo $(( (now - $1) * 1000000 )); }
@@ -22,7 +22,7 @@ if [ "$1" = show ]; then
 fi
 case ${u:+--user} in
   --user) echo '[{"unit":"agent@x.service","load":"loaded","active":"failed","sub":"failed"}]';;
-  *) echo '[{"unit":"vass-services.service","load":"loaded","active":"failed","sub":"failed"}]';;
+  *) echo '[{"unit":"globex-services.service","load":"loaded","active":"failed","sub":"failed"}]';;
 esac
 EOF
 {
@@ -83,14 +83,14 @@ j=$("$BIN/pc-failures" --json)
 is 'json has every source' "$(jq -c 'keys' <<<"$j")" '["agents","audit","checks","ci","ci_healed","crashes","creative","creative_dev","creative_healed","errors","needs","since","units","units_healed"]'
 is 'journal is asked from the window start' "$(cat "$PC_FIXTURE/journalctl.args" | cut -d' ' -f1-2)" "--since @$(jq .since <<<"$j")"
 is 'failed now: user and system' "$(jq -r '[.units[] | select(.failed_now) | .unit + "/" + .scope] | sort | join(" ")' <<<"$j")" \
-  'agent@x.service/user vass-services.service/system'
+  'agent@x.service/user globex-services.service/system'
 is 'journal count, last time, latest result' \
   "$(jq -r '.units[] | select(.unit == "discord-bot.service") | "\(.count) \(.last) \(.result) \(.scope)"' <<<"$j")" \
   "3 $((now - 600)) exit-code user"
 is 'a 143 exit within 5 s of Stopping is a clean stop; status 1 or a late 143 stay' \
   "$(jq -r '[.units[] | select(.unit | test("stop|sigterm")) | .unit] | sort | join(" ")' <<<"$j")" 'late-sigterm.service stop-status1.service'
-is 'moodle45*/vass* are not ours' "$(jq -r '[.units[] | select(.ours | not) | .unit] | sort | join(" ")' <<<"$j")" \
-  'moodle45-cron.service vass-services.service'
+is 'moodle45*/globex* are not ours' "$(jq -r '[.units[] | select(.ours | not) | .unit] | sort | join(" ")' <<<"$j")" \
+  'globex-services.service moodle45-cron.service'
 is 'not-ours pattern is PC_NOT_OURS (pclib.sh default, env override)' \
   "$(PC_NOT_OURS='^discord' "$BIN/pc-failures" --json | jq -r '[.units[] | select(.ours | not) | .unit] | join(" ")')" 'discord-bot.service'
 is 'acme (T1513): a second protected project from config alone, unit globs' \
@@ -112,7 +112,7 @@ is '--since 7d widens agents, ci, crashes, audit' \
   "$(jq -r '"\(.agents | length) \(.ci | length) \(.crashes | length) \(.audit.calls) \(.checks | length)"' <<<"$j7")" '2 2 2 5 2'
 is '--since 7d reads the rotated .1.gz' "$(jq .audit.failed <<<"$j7")" 2
 t=$("$BIN/pc-failures")
-grep -q '^unit .*vass-services.service (system) .*protected  FAILED NOW' <<<"$t" && ok 'table tags protected and failed now' || nok table "$t"
+grep -q '^unit .*globex-services.service (system) .*protected  FAILED NOW' <<<"$t" && ok 'table tags protected and failed now' || nok table "$t"
 grep -qE '^ci +cpp-ci demo +1 [0-9-]+ [0-9:]+ +golden,perf$' <<<"$t" && ok 'table: ci <tool> <project> N LAST <failed stages>' || nok 'table creative' "$t"
 grep -q 'game-ci old' <<<"$t" && nok 'creative window' "$t" || ok 'creative: old red run outside the window hidden'
 grep -q '^check  T1 1d ' <<<"$t" && ok 'table: check <ticket> <age since first red>' || nok 'table check' "$t"

@@ -7,10 +7,10 @@ trap '[ -s "$R/wm.pids" ] && kill $(cut -d" " -f1 "$R/wm.pids") 2>/dev/null; [ -
 . "$HOME/agents/bin/tests/lib/assert.sh"
 
 case $R in /tmp/*) ok 'sandbox: fixture root under /tmp';; *) nok sandbox "$R"; exit 1;; esac
-export PC_TMP_ROOT="$R/root" PC_TMP_HISTORY="$R/history.md" PC_TMP_CLAIMS="$R/claims.md" PC_LEDGER="$R/changes.jsonl"
-S="$R/root/claude-$(id -u)/-home-x/sess/scratchpad"; V="$R/root/claude-$(id -u)/-home-x-moodle-envs-vass/sess/scratchpad"
+export PC_TMP_ROOT="$R/root" PC_TMP_HISTORY="$R/history.md" PC_TMP_CLAIMS="$R/claims.md" PC_LEDGER="$R/changes.jsonl" PROTECTED_PROJECTS=acme
+S="$R/root/claude-$(id -u)/-home-x/sess/scratchpad"; V="$R/root/claude-$(id -u)/-home-x-moodle-envs-acme/sess/scratchpad"
 for d in tmp.old tmp.new tmp.held remotion-webpack-bundle-a; do mkdir -p "$R/root/$d"; echo x >"$R/root/$d/f"; done
-for d in T100 T101 T102 T103 T104-x mov young cwd.held char3d-x Char3D-y VASS-z t714int; do mkdir -p "$S/$d/sub"; echo x >"$S/$d/sub/f"; done
+for d in T100 T101 T102 T103 T104-x mov young cwd.held char3d-x Char3D-y ACME-z t714int; do mkdir -p "$S/$d/sub"; echo x >"$S/$d/sub/f"; done
 mkdir -p "$V/T100" "$V/mov"; echo x >"$V/T100/f"; echo x >"$V/mov/f"; echo x >"$R/root/cc1.ltrans0.o"
 printf -- '- 2026-10-01 T100: done\n- 2026-10-01 T102 (w1): done\n- 2026-10-01 T103: done\n- 2026-10-01 T104: done\n- 2026-10-01 T999: see T101\n' >"$PC_TMP_HISTORY"
 printf -- '- T102 · /x · 2026-10-01 10:00\n' >"$PC_TMP_CLAIMS"
@@ -44,7 +44,7 @@ out=$("$BIN/pc-tmp" --apply)
 is 'last line is the rollback note' "$(tail -1 <<<"$out")" 'rollback: none, scratch only'
 left=$(cd "$R/root" && find . -name f -o -name '*.o' | LC_ALL=C sort | tr '\n' ' ')
 is 'only the 4 eligible removed' "$left" \
-  "./cc1.ltrans0.o ./claude-$(id -u)/-home-x-moodle-envs-vass/sess/scratchpad/T100/f ./claude-$(id -u)/-home-x-moodle-envs-vass/sess/scratchpad/mov/f ./claude-$(id -u)/-home-x/sess/scratchpad/Char3D-y/sub/f ./claude-$(id -u)/-home-x/sess/scratchpad/T101/sub/f ./claude-$(id -u)/-home-x/sess/scratchpad/T102/sub/f ./claude-$(id -u)/-home-x/sess/scratchpad/T103/sub/f ./claude-$(id -u)/-home-x/sess/scratchpad/T104-x/sub/f ./claude-$(id -u)/-home-x/sess/scratchpad/VASS-z/sub/f ./claude-$(id -u)/-home-x/sess/scratchpad/char3d-x/sub/f ./claude-$(id -u)/-home-x/sess/scratchpad/cwd.held/sub/f ./claude-$(id -u)/-home-x/sess/scratchpad/t714int/sub/f ./claude-$(id -u)/-home-x/sess/scratchpad/young/sub/f ./tmp.held/f ./tmp.new/f "
+  "./cc1.ltrans0.o ./claude-$(id -u)/-home-x-moodle-envs-acme/sess/scratchpad/T100/f ./claude-$(id -u)/-home-x-moodle-envs-acme/sess/scratchpad/mov/f ./claude-$(id -u)/-home-x/sess/scratchpad/ACME-z/sub/f ./claude-$(id -u)/-home-x/sess/scratchpad/Char3D-y/sub/f ./claude-$(id -u)/-home-x/sess/scratchpad/T101/sub/f ./claude-$(id -u)/-home-x/sess/scratchpad/T102/sub/f ./claude-$(id -u)/-home-x/sess/scratchpad/T103/sub/f ./claude-$(id -u)/-home-x/sess/scratchpad/T104-x/sub/f ./claude-$(id -u)/-home-x/sess/scratchpad/char3d-x/sub/f ./claude-$(id -u)/-home-x/sess/scratchpad/cwd.held/sub/f ./claude-$(id -u)/-home-x/sess/scratchpad/t714int/sub/f ./claude-$(id -u)/-home-x/sess/scratchpad/young/sub/f ./tmp.held/f ./tmp.new/f "
 is 'one ledger entry' "$(jq -r '.rollback + "|" + .before' "$PC_LEDGER")" 'none, scratch only|4 paths, 4 MB'
 is 'ledger after counts deleted and failed' "$(jq -r '"\(.after)|\(.verified)"' "$PC_LEDGER")" 'deleted 4, failed 0|true'
 

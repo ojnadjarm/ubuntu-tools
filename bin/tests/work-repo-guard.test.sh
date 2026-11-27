@@ -5,7 +5,6 @@ set -uo pipefail
 SELF=$(readlink -f "$0"); BIN=$(cd "$(dirname "$SELF")/.." && pwd); HOOK="$BIN/../hooks/sleep-loop-block.py"
 REAL_HOME=$HOME; REAL_GCFG="$REAL_HOME/.gitconfig"
 REAL_ROOTS=$("$BIN/protected" entries repo 2>/dev/null | sort -u | paste -sd' ')
-REAL_ROOTS=${REAL_ROOTS:-~/moodle-envs/vass ~/moodle-envs/4.5}
 T=$(mktemp -d /tmp/wrg-XXXXXX); trap 'rm -rf "$T"' EXIT
 stamp="$T/stamp"; touch "$stamp"; sum0=$(sha256sum "$REAL_GCFG" 2>/dev/null)
 MARKERS="CLAUDECODE CLAUDE_CODE_ENTRYPOINT HARNESS_AGENT OPENCODE GEMINI_CLI CODEX_SANDBOX CODEX_THREAD_ID"

@@ -68,11 +68,11 @@ out=$(head -1 "$WORK/facts.out")
 m="$WORK/moved.md"
 MOVED='## Ports, names and URLs (hand)
 - Tailscale name renamed from `old-host` on 2026-09-22.
-| 8045 | Moodle 4.5 vass (docker) | tailscale0 only |
+| 8045 | Moodle 4.5 acme (docker) | tailscale0 only |
 | 8070 | drop file server | tailscale0, 192.168.1.0/24 |
 | 8072 | local sites | tailscale0 only |
 - tailscale serve backends: 8070 drop; guide `https-drop-tailscale-serve`.
-- Moodle 4.5 (vass): code is the owner checkout (no git writes).
+- Moodle 4.5 (acme): code is the owner checkout (no git writes).
 - Status page :19998 routes: `/classic` the old dashboard.'
 printf '%s\nold\n%s\n\n%s\n\n%s\n' "$B" "$E" "$MOVED" "$TABLE" >"$m"
 # The live run gets a private cache and a refusing sudo (T1136): no root `ufw status`, the live cache untouched.

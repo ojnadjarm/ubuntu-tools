@@ -14,8 +14,8 @@ for c in docker systemctl notify-owner agent-run sentinel-runaway sentinel-waits
   printf '#!/bin/sh\necho "%s $*" >>"%s"\nexit 0\n' "$c" "$CALLS" >"$BIN/$c"; chmod +x "$BIN/$c"
 done
 printf '#!/bin/sh\ncat "%s/status.json"\n' "$WORK" >"$BIN/status-stub"; chmod +x "$BIN/status-stub"
-down='{"sections":{"keepalive":{"vass-frontend.service":{"state":"FAIL","value":"failed"},"http-moodle45":{"state":"FAIL","value":"502"}}}}'
-up='{"sections":{"keepalive":{"vass-frontend.service":{"state":"OK","value":"active"}}}}'
+down='{"sections":{"keepalive":{"acme-frontend.service":{"state":"FAIL","value":"failed"},"http-moodle45":{"state":"FAIL","value":"502"}}}}'
+up='{"sections":{"keepalive":{"acme-frontend.service":{"state":"OK","value":"active"}}}}'
 tick() { HOME="$WORK" HARNESS_ENV_LOADED=1 SENTINEL_BRIEF_CMD=false SENTINEL_STATUS_CMD="$BIN/status-stub" SENTINEL_TRIES=3 "$SCRIPT"; }
 
 # selftest: the shims win over the real commands on the script's PATH.
@@ -24,12 +24,12 @@ tick() { HOME="$WORK" HARNESS_ENV_LOADED=1 SENTINEL_BRIEF_CMD=false SENTINEL_STA
 
 echo "$down" >"$WORK/status.json"
 for _ in 1 2 3 4 5; do tick; done
-is "unit restarted 3 times" "$(grep -c 'systemctl --user restart vass-frontend.service' "$CALLS")" 3
+is "unit restarted 3 times" "$(grep -c 'systemctl --user restart acme-frontend.service' "$CALLS")" 3
 is "4.5 stack restarted 3 times" "$(grep -c 'docker compose -f .*/4.5/docker-compose.yml restart' "$CALLS")" 3
 is "one push per fault after the cap" "$(grep -c '^notify-owner .*repairs' "$CALLS")" 2
 
 echo "$up" >"$WORK/status.json"; tick
 is "counters reset once healthy" "$(find "$ST/tries" -type f | wc -l)" 0
 echo "$down" >"$WORK/status.json"; : >"$CALLS"; tick
-is "repairs resume after a clear" "$(grep -c 'systemctl --user restart vass-frontend.service' "$CALLS")" 1
+is "repairs resume after a clear" "$(grep -c 'systemctl --user restart acme-frontend.service' "$CALLS")" 1
 exit $bad

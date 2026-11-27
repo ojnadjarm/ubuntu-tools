@@ -66,7 +66,7 @@ seed screenshot 0
 seed wifi none
 seed lock unlocked
 seed mode agent
-seed keepalive "$(printf 'vass-frontend.service failed\nhttp-moodle45 502')"
+seed keepalive "$(printf 'acme-frontend.service failed\nhttp-moodle45 502')"
 # Info probes no case asserts (pc idle, agents-log, claude, upower, …): one fixture read every run reuses.
 seed_info() { local k; for k in look_ratio: idle:5 players:none seat_logins:0 claude_sessions:0 time_to_empty: power_profile:balanced dns:; do
   printf '%s\n%s\n' "$(date +%s)" "${k#*:}" >"$1/${k%%:*}"; done
@@ -90,7 +90,7 @@ has "brief lists the dashboard service"        "$fails" svc_dashboard
 has "brief lists internet"                     "$fails" internet
 has "brief lists screenshot"                   "$fails" screenshot
 has "brief still lists the old tags (disk)"    "$fails" disk
-has "brief lists a down keepalive unit"       "$fails" ka_vass-frontend.service
+has "brief lists a down keepalive unit"       "$fails" ka_acme-frontend.service
 has "brief lists a keepalive site not at 200"  "$fails" ka_http-moodle45
 
 # --- 2. the metric: how many tags can appear ---------------------------------

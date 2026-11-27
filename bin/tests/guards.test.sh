@@ -35,7 +35,7 @@ export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER
 mk() { /usr/bin/git init -q -b main "$1" && /usr/bin/git -C "$1" commit -q --allow-empty -m init \
        && /usr/bin/git init -q --bare "$1.remote.git" && /usr/bin/git -C "$1" remote add origin "$1.remote.git" \
        && /usr/bin/git -C "$1" push -q -u origin main 2>/dev/null; }
-for r in agents the-dark-eye moodle-harness projects/personal/p projects/collab/c moodle-envs/vass other agents/nested; do mk "$FH/$r"; done
+for r in agents the-dark-eye moodle-harness projects/personal/p projects/collab/c moodle-envs/acme other agents/nested; do mk "$FH/$r"; done
 case "$FH" in "$WORK"/*) ;; *) echo "FAIL fixture HOME outside the temp dir"; exit 1 ;; esac
 [ "$(readlink -f "$FH")" != "$(readlink -f "$HOME")" ] && [ -z "$(/usr/bin/git -C "$FH/agents" remote get-url origin | grep -v "^$WORK/")" ] \
   && ok 'selftest: fixture HOME and remotes under the temp dir' || { nok 'selftest: fixture HOME and remotes' "$FH"; exit 1; }
@@ -48,10 +48,10 @@ is 'personal ~/moodle-harness: commit from a subdir cwd passes' "$(cd "$FH/moodl
 is 'personal ~/the-dark-eye: --git-dir/--work-tree commit + push pass' \
    "$(g --git-dir="$FH/the-dark-eye/.git" --work-tree "$FH/the-dark-eye" commit -q --allow-empty -m a)$(g --git-dir="$FH/the-dark-eye/.git" --work-tree="$FH/the-dark-eye" push -q origin main)" 00
 is 'personal ~/projects/personal/p: commit + push pass' "$(g -C "$FH/projects/personal/p" commit -q --allow-empty -m a)$(g -C "$FH/projects/personal/p" push -q origin main)" 00
-is 'work repo: commit and push refused' "$(g -C "$FH/moodle-envs/vass" commit -q --allow-empty -m a)$(g -C "$FH/moodle-envs/vass" push -q)" 33
+is 'work repo: commit and push refused' "$(g -C "$FH/moodle-envs/acme" commit -q --allow-empty -m a)$(g -C "$FH/moodle-envs/acme" push -q)" 33
 is 'unknown repo under HOME: commit refused' "$(g -C "$FH/other" commit -q --allow-empty -m a)" 3
 is 'nested repo inside ~/agents: commit refused' "$(g -C "$FH/agents/nested" commit -q --allow-empty -m a)" 3
-is 'sudo git commit in a work repo refused' "$(g -c x.y=1 -C "$FH/moodle-envs/vass" commit -m a; HOME="$FH" sudo git -C "$FH/moodle-envs/vass" commit -m a >/dev/null 2>&1; echo $?)" "$(printf '3\n3')"
+is 'sudo git commit in a work repo refused' "$(g -c x.y=1 -C "$FH/moodle-envs/acme" commit -m a; HOME="$FH" sudo git -C "$FH/moodle-envs/acme" commit -m a >/dev/null 2>&1; echo $?)" "$(printf '3\n3')"
 for f in --force -f -fu -uf --force-with-lease --force-with-lease=main:abc +main --mirror; do
   is "personal push $f refused" "$(g -C "$FH/agents" push "$f" origin main)" 3
 done
@@ -76,7 +76,7 @@ gm() { local m=$1; shift; HOME="$FH" MEMORY_HOME="$m" git "$@" >/dev/null 2>&1; 
 is 'memory default ~/memory: commit + push pass' "$(gm '' -C "$FH/memory" commit -q --allow-empty -m a)$(gm '' -C "$FH/memory" push -q)$(rc "$FH/memory")" 002
 is 'memory $MEMORY_HOME store: commit + push pass' "$(gm "$S" -C "$S" commit -q --allow-empty -m a)$(gm "$S" -C "$S" push -q)$(rc "$S")" 002
 is 'memory $MEMORY_HOME set: ~/memory is no longer allowed' "$(gm "$S" -C "$FH/memory" commit -q --allow-empty -m a)" 3
-is 'memory $MEMORY_HOME set: work repo commit and push refused' "$(gm "$S" -C "$FH/moodle-envs/vass" commit -q --allow-empty -m a)$(gm "$S" -C "$FH/moodle-envs/vass" push -q)" 33
+is 'memory $MEMORY_HOME set: work repo commit and push refused' "$(gm "$S" -C "$FH/moodle-envs/acme" commit -q --allow-empty -m a)$(gm "$S" -C "$FH/moodle-envs/acme" push -q)" 33
 is 'memory $MEMORY_HOME set: unknown repo commit refused' "$(gm "$S" -C "$FH/other" commit -q --allow-empty -m a)" 3
 for f in --force -f --force-with-lease +main; do
   is "memory push $f refused" "$(gm "$S" -C "$S" push "$f" origin main)" 3

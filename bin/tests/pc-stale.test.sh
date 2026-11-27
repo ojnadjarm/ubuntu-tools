@@ -36,7 +36,7 @@ svc fwupd.service NetworkManager.service ssh.service docker.service user@$UID.se
 out=$("$BIN/pc-stale")
 is 'safe units → restart' "$(grep '^restart ' <<<"$out" | paste -sd,)" 'restart fwupd.service,restart bluetooth.service'
 is 'NetworkManager → held with the reboot date' "$(grep NetworkManager <<<"$out")" 'held NetworkManager.service (network: next reboot 2026-10-25)'
-is 'ssh, docker, user@, Vass held' "$(grep -oE '^held [^ ]+ \([^:]+' <<<"$out" | sed 's/^held //; s/ (/=/' | paste -sd,)" \
+is 'ssh, docker, user@, work project held' "$(grep -oE '^held [^ ]+ \([^:]+' <<<"$out" | sed 's/^held //; s/ (/=/' | paste -sd,)" \
   "NetworkManager.service=network,ssh.service=access,docker.service=fleet,user@$UID.service=access,moodle45-x.service=not ours"
 is 'dry run ends with would:' "$(tail -1 <<<"$out")" 'would: restart 2 units (--apply)'
 [ ! -e "$LOG" ] && ok 'dry run calls no pc units' || nok 'dry run' "called: $(cat "$LOG")"

@@ -49,11 +49,11 @@ out=$(fx restart nosuchcontainer 2>&1)
 case "$out" in *2) ;; esac
 [ -e "$WORK/l.jsonl" ] && nok 'no ledger yet' 'ledger exists' || ok 'no ledger yet'
 
-# 7a. recreate on a stub docker + curl (argv logged): fixture envs incl. Vass-named ones.
+# 7a. recreate on a stub docker + curl (argv logged): fixture envs incl. protected-named ones.
 ENVS="$WORK/envs"; cp -r "$FIX/moodle-envs" "$ENVS"
-mkdir -p "$ENVS/4.5" "$ENVS/vass-services" "$WORK/bin"
+mkdir -p "$ENVS/4.5" "$ENVS/globex-services" "$WORK/bin"
 printf 'name: moodle45\n' >"$ENVS/4.5/docker-compose.yml"
-printf 'name: vass-services\n' >"$ENVS/vass-services/docker-compose.yml"
+printf 'name: globex-services\n' >"$ENVS/globex-services/docker-compose.yml"
 cat >"$WORK/bin/docker" <<'STUB'
 #!/bin/sh
 echo "$*" >>"$STUB_DIR/docker.log"
@@ -95,15 +95,15 @@ rc 5.2 --apply >/dev/null 2>"$WORK/err"; is 'apply exits 1 when :8052 does not c
 is 'failed http read-back reported' "$(cat "$WORK/err")" 'http 8052: 000 (before 200)'
 rm -f "$WORK/code_after"
 : >"$WORK/docker.log"
-for v in 4.5 moodle45 vass-services vass; do
-  rc "$v" --apply >/dev/null 2>&1; is "recreate $v refused (exit 3)" "$?" 3
+for v in 4.5 moodle45 globex-services globex; do
+  PROTECTED_PROJECTS=globex PROTECTED_GLOBEX_CONTAINERS='globex* moodle45* 4.5' rc "$v" --apply >/dev/null 2>&1; is "recreate $v refused (exit 3)" "$?" 3
 done
-is 'Vass refusals call no docker at all' "$(wc -c <"$WORK/docker.log")" 0
-for verb in stop start restart; do for v in 4.5 moodle45 vass-services vass moodle45-app-1 vass-db-1; do
-  STUB_DIR=$WORK PATH="$WORK/bin:$PATH" PC_ENVS="$ENVS" XDG_RUNTIME_DIR="$WORK" PC_LEDGER="$WORK/rc.jsonl" \
+is 'protected refusals call no docker at all' "$(wc -c <"$WORK/docker.log")" 0
+for verb in stop start restart; do for v in 4.5 moodle45 globex-services globex moodle45-app-1 globex-db-1; do
+  PROTECTED_PROJECTS=globex PROTECTED_GLOBEX_CONTAINERS='globex* moodle45* 4.5' STUB_DIR=$WORK PATH="$WORK/bin:$PATH" PC_ENVS="$ENVS" XDG_RUNTIME_DIR="$WORK" PC_LEDGER="$WORK/rc.jsonl" \
     "$BIN/pc-docker" "$verb" "$v" --apply --force >/dev/null 2>&1; is "$verb $v refused (exit 3)" "$?" 3
 done; done
-is 'Vass stop/start/restart refusals call no docker at all' "$(wc -c <"$WORK/docker.log")" 0
+is 'protected stop/start/restart refusals call no docker at all' "$(wc -c <"$WORK/docker.log")" 0
 # 7a2. T1513: a second protected project from config alone (fixture acme: container globs + an env dir).
 mkdir -p "$ENVS/9.9"; printf 'name: acme-site\n' >"$ENVS/9.9/docker-compose.yml"
 acme() { PROTECTED_PROJECTS=acme PROTECTED_ACME_CONTAINERS='acme* 9.9' STUB_DIR=$WORK PATH="$WORK/bin:$PATH" \

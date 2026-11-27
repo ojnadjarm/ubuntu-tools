@@ -74,9 +74,9 @@ is 'json per-hour delta' "$(tx throttle --json | jq -c '[.package_throttle_per_h
 tx throttle --record >/dev/null
 is 'top unit is the leaf with the largest cpu delta' "$(tail -1 "$LOG" | cut -f6)" 'b.service:4s'
 D=0123456789ab$(printf 'f%.0s' {1..52}); cg system.slice/docker-$D.scope 90000000
-printf '0123456789ab\tvass-web-1\t2026-10-21T10:00:00\n' >"$WORK/names.tsv"
+printf '0123456789ab\tacme-web-1\t2026-10-21T10:00:00\n' >"$WORK/names.tsv"
 PC_MEM_NAMES="$WORK/names.tsv" tx throttle --record >/dev/null
-is 'docker scope named from docker-names.tsv' "$(tail -1 "$LOG" | cut -f6)" 'docker:vass-web-1:90s'
+is 'docker scope named from docker-names.tsv' "$(tail -1 "$LOG" | cut -f6)" 'docker:acme-web-1:90s'
 cnt 0 5 1; cnt 1 5 1
 tx throttle | grep -q '^package_throttle 10 (+10 since boot' && ok 'counter reset counts from boot' || nok 'counter reset counts from boot' "$(tx throttle)"
 is '--seconds window delta' "$(tx throttle --seconds 1 --json | jq -c '[.package_throttle_window,.window_s]')" '[0,1]'

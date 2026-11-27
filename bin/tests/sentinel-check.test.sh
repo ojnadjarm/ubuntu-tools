@@ -66,7 +66,7 @@ status_json() {
 
 TICKDIR="$WORK/tick"; mkdir -p "$TICKDIR"
 export CALLS TICK="$TICKDIR" SENTINEL_BRIEF_CMD=false   # no brief line: every tick reads the status stub
-export PROTECTED_PROJECTS=vass PROTECTED_VASS_UNITS='vass* moodle45*'  # fixture protected project (T1513)
+export PROTECTED_PROJECTS=acme PROTECTED_ACME_UNITS='acme* moodle45*'  # fixture protected project (T1513)
 out="$WORK/transcript.txt"
 : >"$out"
 
@@ -146,14 +146,14 @@ now=$(date +%s)
 case "$*" in
   "--user list-units --state=failed --plain --no-legend")
     for u in run-old.scope run-young.scope run-static.scope fx.service probe-old.service probe-young.service \
-      sentinel-probe.service vass-probe.service; do echo "$u loaded failed failed fixture"; done;;
+      sentinel-probe.service acme-probe.service; do echo "$u loaded failed failed fixture"; done;;
   "--user show run-old.scope "*)    printf 'Description=[systemd-run] bash -c balloon\nStateChangeTimestamp=@%s\nTransient=yes\n' $((now-1200));;
   "--user show run-young.scope "*)  printf 'Description=young\nStateChangeTimestamp=@%s\nTransient=yes\n' $((now-60));;
   "--user show run-static.scope "*) printf 'Description=static\nStateChangeTimestamp=@%s\nTransient=no\n' $((now-1200));;
   "--user show fx.service "*)       printf 'Description=persistent\nStateChangeTimestamp=@%s\nTransient=no\n' $((now-2400));;
   "--user show probe-old.service "*)   printf 'Description=[systemd-run] /usr/bin/sh -c "exit 3"\nStateChangeTimestamp=@%s\nTransient=yes\n' $((now-2400));;
   "--user show probe-young.service "*) printf 'Description=young probe\nStateChangeTimestamp=@%s\nTransient=yes\n' $((now-600));;
-  "--user show sentinel-probe.service "*|"--user show vass-probe.service "*)
+  "--user show sentinel-probe.service "*|"--user show acme-probe.service "*)
     printf 'Description=kept\nStateChangeTimestamp=@%s\nTransient=yes\n' $((now-2400));;
 esac
 exit 0
@@ -164,7 +164,7 @@ chmod +x "$BIN/systemctl"
   && ok "an old failed transient run-* scope is reset via pc units" || nok "transient reset" "$(grep '^pc ' "$CALLS")"
 grep -q '^pc units reset-failed probe-old.service --user --apply$' "$CALLS" \
   && ok "a named failed transient unit >= 30 min old is reset" || nok "named transient reset" "$(grep '^pc ' "$CALLS")"
-grep -qE '^pc units reset-failed (probe-young|sentinel-probe|vass-probe|fx)\.service' "$CALLS" \
+grep -qE '^pc units reset-failed (probe-young|sentinel-probe|acme-probe|fx)\.service' "$CALLS" \
   && nok "young, fleet, not-ours and persistent units are kept" "$(grep '^pc ' "$CALLS")" \
   || ok "young, fleet, not-ours and persistent units are kept"
 grep -q 'reset failed transient run-old.scope .*balloon' "$ST/sentinel.log" \
