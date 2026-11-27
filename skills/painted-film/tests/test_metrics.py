@@ -13,13 +13,6 @@ sys.path.insert(0, os.path.join(HERE, "fixtures"))
 import clips  # noqa: E402
 from atelier.metrics import DEFAULT_GATES, flick, gate, lookdist, purity, subframe  # noqa: E402
 
-FIX = os.path.join(HERE, "fixtures")
-
-
-def load(name):
-    import cv2
-    return cv2.imread(os.path.join(FIX, name))
-
 
 class Flick(unittest.TestCase):
     @classmethod
@@ -57,11 +50,11 @@ class Flick(unittest.TestCase):
 
 class Look(unittest.TestCase):
     def test_lookdist_self(self):
-        t = load("target-small.jpg")
+        t = clips.look_target()
         self.assertEqual(lookdist(t, t)["palette_dist"], 0.0)
 
     def test_lookdist_t2015_fails(self):
-        r = lookdist(load("t2015-f0084-small.jpg"), load("target-small.jpg"))
+        r = lookdist(clips.look_bad(), clips.look_target())
         failed = gate(r, DEFAULT_GATES)
         for name in ("palette_dist", "warm", "cool"):
             self.assertIn(name, failed, r)

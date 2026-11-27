@@ -63,3 +63,28 @@ def wobble(d, hz=4.0, gain=0.05, fps=24, seed=1):
     """A still picture whose brightness pulses at hz with the given gain."""
     a = crop(picture(seed))
     return write(d, [a * (1 + gain * np.sin(2 * np.pi * hz * i / fps)) for i in range(N)])
+
+
+def lab_bgr(L, a, b):
+    """BGR uint8 from float Lab planes."""
+    lab = np.stack([L, a, b], -1).astype(np.float32)
+    return np.clip(np.round(cv2.cvtColor(lab, cv2.COLOR_Lab2BGR) * 255), 0, 255).astype(np.uint8)
+
+
+def look_target(seed=3, w=480, h=270):
+    """A cool, dense, detailed night picture: blue-green values full of strokes and edges."""
+    rng = np.random.default_rng(seed)
+    n = sum(cv2.GaussianBlur(rng.normal(size=(h, w)).astype(np.float32), (0, 0), s) * s ** 0.5 for s in (1, 3, 9))
+    L = 30 + 12 * n / n.std()
+    for _ in range(240):
+        p = tuple(int(v) for v in rng.integers(0, (w, h)))
+        q = (p[0] + int(rng.integers(-40, 40)), p[1] + int(rng.integers(-20, 20)))
+        cv2.line(L, p, q, float(rng.uniform(10, 60)), int(rng.integers(1, 4)), cv2.LINE_AA)
+    return lab_bgr(np.clip(L, 0, 100), -6 + 3 * n / n.std(), np.full((h, w), -16.0))
+
+
+def look_bad(seed=4, w=480, h=270):
+    """A warm, empty picture: a smooth orange-brown glow with nothing drawn in it."""
+    y, x = np.mgrid[0:h, 0:w].astype(np.float32)
+    r = np.hypot((x - w / 2) / w, (y - h / 2) / h)
+    return lab_bgr(np.clip(35 - 40 * r, 0, 100), np.full((h, w), 14.0), 30 - 10 * r)
