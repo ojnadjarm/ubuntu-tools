@@ -269,6 +269,7 @@ Web, media, lessons:
 - `showcase-page` — rebuilds the page of the newest motion film and C++ game showcase.
 - `new-lesson`, `lesson-board` — scaffold an ailearning lesson; its board stages (skill /make-lesson).
 - `concept-img` — one AI concept image through OpenRouter, opt-in: only with `--asked "<requester's words asking for an AI image>"` (else exit 4: make it by code); $2 a job, $10 a month (T1632).
+- `genai ask --ticket T<n> --need "<what>" [--n 1..4] [--ref img]` — AI concept art through Google's Antigravity CLI (`agy`) on the owner's plan, one ask at a time, out to `~/drop/T<n>/concept/`; a concept, never the asset; `genai doctor` (T2006).
 - `secret-mask <file>... -- <cmd>` — runs a command with those files read empty in its whole process tree (bwrap, host otherwise as is; T1633): liaison jobs and po-work workers without an image grant run under it.
 - `glb-info <model>` — a .glb/.gltf's meshes, triangles, materials, textures, skins, clips, bounds.
 - `ctxrot corpus|run|report` — context-rot curve (skill /context-rot); `voice-progress` — pronunciation drill progress.

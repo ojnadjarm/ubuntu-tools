@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+"""genai: the fleet's one door for AI concept art, through Google's Antigravity CLI (agy) on the owner's plan."""
+import argparse
+import fcntl
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+
+USAGE = """usage: genai ask --ticket T<n> --need "<what the art is for and what it shows>" [--n 1..4] [--ref img]...
+       genai doctor
+ask: one ask at a time (flock), agy -p headless, writes ~/drop/T<n>/concept/<id>-<k>.png and <id>.md, prints the paths,
+logs ts, ticket, seat, n, backend, exit, seconds to ~/agents/log/genai.tsv. A generated image is a concept, never the
+delivered asset. doctor: agy installed, signed in, last ask; exit 0 only when an ask can run.
+env: GENAI_AGY (default ~/.local/bin/agy), DROP_DIR (default ~/drop), GENAI_LOG, CHAT_SEAT
+exit 0 made · 1 backend error · 2 usage · 3 quota exhausted · 5 agy missing or not signed in"""
+OWNER_STEPS = """genai: agy is missing or not signed in; the owner's two steps:
+  1. curl -fsSL https://antigravity.google/cli/install.sh | bash
+  2. run agy and sign in (his Google AI Pro account)"""
+# Unproven (no real agy here): flags, headless image tool approval, where images land; read from third-party sources.
+AGY_FLAGS = ["--output-format", "json"]
+IMAGE_EXT = (".png", ".jpg", ".jpeg", ".webp")
+QUOTA = re.compile(r"\b429\b|RESOURCE_EXHAUSTED|quota", re.I)
+AUTH = re.compile(r"not (signed|logged) in|sign in|log ?in|unauthori[sz]ed|\b401\b|credential", re.I)
+
+
+def agy_path():
+    """The agy binary: GENAI_AGY or ~/.local/bin/agy."""
+    return os.path.expanduser(os.environ.get("GENAI_AGY") or "~/.local/bin/agy")
+
+
+def log_path():
+    """The ask log TSV."""
+    return os.path.expanduser(os.environ.get("GENAI_LOG") or "~/agents/log/genai.tsv")
+
+
+def agy(args, cwd=None, timeout=600):
+    """Run agy headless; (exit code, stdout + stderr)."""
+    try:
+        r = subprocess.run([agy_path(), *args], cwd=cwd, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                           timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return 124, "agy: timed out"
+    return r.returncode, r.stdout + r.stderr
+
+
+def run_agy(prompt, n, refs, outdir):
+    """Ask agy for n images saved in outdir; (exit code, output, model, image paths, prompt sent)."""
+    ask = (f"Use your image generation tool to make exactly {n} concept image(s). Save each as a PNG file in "
+           f"{outdir}, named concept-1.png to concept-{n}.png. Do not create or edit any other file and run no shell "
+           "command. ")
+    if refs:
+        ask += "Keep the design of these reference images: " + ", ".join(refs) + ". "
+    ask += "The image: " + prompt
+    rc, out = agy(["-p", ask, *AGY_FLAGS], cwd=outdir)
+    model = "agy default"
+    try:
+        model = json.loads(out.strip().splitlines()[-1]).get("model") or model
+    except (ValueError, IndexError, AttributeError):
+        pass
+    found = [os.path.join(outdir, f) for f in sorted(os.listdir(outdir)) if f.lower().endswith(IMAGE_EXT)]
+    found += [p for p in re.findall(r"(/[^\s\"']+\.(?:png|jpe?g|webp))", out, re.I) if os.path.isfile(p)]
+    return rc, out, model, list(dict.fromkeys(found))[:n], ask
+
+
+def failure(rc, out):
+    """Map a failed agy run to genai's exit code and print why."""
+    if QUOTA.search(out):
+        reset = [ln.strip() for ln in out.splitlines() if re.search(r"reset", ln, re.I)]
+        print("genai: quota exhausted" + (f"; {reset[0]}" if reset else ""), file=sys.stderr)
+        return 3
+    if AUTH.search(out):
+        print(OWNER_STEPS, file=sys.stderr)
+        return 5
+    print(f"genai: agy exit {rc}: {out.strip()[-400:]}", file=sys.stderr)
+    return 1
+
+
+def ask(a):
+    """Run one ask under the lock and log it."""
+    t0 = time.time()
+    rc = do_ask(a)
+    os.makedirs(os.path.dirname(log_path()), exist_ok=True)
+    with open(log_path(), "a") as f:
+        f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')}\t{a.ticket}\t{os.environ.get('CHAT_SEAT') or '-'}\t{a.n}\tagy\t"
+                f"{rc}\t{time.time() - t0:.1f}\n")
+    return rc
+
+
+def do_ask(a):
+    """Call the backend and write the PNGs and the md; genai's exit code."""
+    if not os.access(agy_path(), os.X_OK):
+        print(OWNER_STEPS, file=sys.stderr)
+        return 5
+    os.makedirs(os.path.dirname(log_path()), exist_ok=True)
+    with open(log_path() + ".lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        work = tempfile.mkdtemp(prefix="genai-")
+        try:
+            rc, out, model, images, sent = run_agy(a.need, a.n, [os.path.abspath(r) for r in a.ref], work)
+            if rc != 0:
+                return failure(rc, out)
+            if not images:
+                print(f"genai: agy made no image: {out.strip()[-400:]}", file=sys.stderr)
+                return 1
+            dest = os.path.join(os.path.expanduser(os.environ.get("DROP_DIR") or "~/drop"), a.ticket, "concept")
+            os.makedirs(dest, exist_ok=True)
+            cid = base = time.strftime("%Y%m%d-%H%M%S")
+            k = 1
+            while os.path.exists(os.path.join(dest, cid + ".md")):
+                k += 1
+                cid = f"{base}-{k}"
+            paths = []
+            for i, src in enumerate(images, 1):
+                path = os.path.join(dest, f"{cid}-{i}.png")
+                if open(src, "rb").read(4) == b"\x89PNG":
+                    shutil.copyfile(src, path)
+                else:
+                    from PIL import Image
+                    Image.open(src).save(path)
+                paths.append(path)
+            md = os.path.join(dest, cid + ".md")
+            with open(md, "w") as f:
+                f.write(f"CONCEPT, not an asset\n\n- Need: {a.need}\n- Prompt sent: {sent}\n- Refs: "
+                        f"{', '.join(a.ref) or '-'}\n- Backend: agy\n- Model: {model}\n- Date: "
+                        f"{time.strftime('%Y-%m-%dT%H:%M:%S')}\n")
+            print("\n".join(paths + [md]))
+            return 0
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+
+def doctor():
+    """One line each: installed, signed in, last ask; 0 only when an ask can run."""
+    path = agy_path()
+    if not os.access(path, os.X_OK):
+        print(f"installed: no ({path})\nsigned in: unknown")
+        rc = 5
+    else:
+        _, ver = agy(["--version"], timeout=30)
+        print(f"installed: yes {path} {ver.strip().splitlines()[0] if ver.strip() else '?'}")
+        prc, out = agy(["-p", "Reply with the single word OK.", *AGY_FLAGS], timeout=120)
+        rc = 0 if prc == 0 else (3 if QUOTA.search(out) else 5 if AUTH.search(out) else 1)
+        print("signed in: " + {0: "yes", 3: "yes, quota exhausted", 5: "no"}.get(rc, f"unknown (agy exit {prc})"))
+    try:
+        last = open(log_path()).read().strip().splitlines()[-1].split("\t")
+        print(f"last ask: {last[0]} {last[1]} n={last[3]} exit {last[5]} in {last[6]} s")
+    except (OSError, IndexError):
+        print("last ask: none")
+    if rc == 5:
+        print(OWNER_STEPS, file=sys.stderr)
+    return rc
+
+
+def main():
+    p = argparse.ArgumentParser(usage=USAGE, add_help=False)
+    p.add_argument("cmd", nargs="?")
+    p.add_argument("-h", "--help", action="store_true")
+    p.add_argument("--ticket")
+    p.add_argument("--need")
+    p.add_argument("--n", type=int, default=1)
+    p.add_argument("--ref", action="append", default=[])
+    try:
+        a, extra = p.parse_known_args()
+    except SystemExit:
+        return 2
+    if a.help:
+        print(USAGE)
+        return 0
+    if a.cmd == "doctor" and not extra:
+        return doctor()
+    if (a.cmd != "ask" or extra or not a.need or not re.fullmatch(r"T\d+", a.ticket or "") or not 1 <= a.n <= 4
+            or not all(os.path.isfile(r) for r in a.ref)):
+        print(USAGE, file=sys.stderr)
+        return 2
+    return ask(a)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
