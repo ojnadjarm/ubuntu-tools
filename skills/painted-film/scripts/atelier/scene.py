@@ -115,6 +115,8 @@ class Seeds:
     width_m: np.ndarray  # (k,) f32, marks only
     length_m: np.ndarray  # (k,) f32, marks only
     rule: np.ndarray  # (k,) u8, colour rule
+    opacity: np.ndarray  # (k,) f32, the octave fade (A4)
+    px: np.ndarray  # (k,) f32, screen spacing of the seed's octave at its place (A4)
 
 
 class Scene(Protocol):
