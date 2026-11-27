@@ -1,17 +1,23 @@
 """Project tiles: one registry row per long-running project, its environment read live and read-only."""
-import html, os, re, shutil, threading
+import html, json, os, re, shutil, threading
 from datetime import datetime
 from dash.cache import cached, forget
 from dash.env import HOME, PUBLIC_HOST, run
 from dash.routes import route
 from dash.services import sites
 
-PROJECTS = {
-    "vass": {"name": "vass (Moodle 4.5)", "what": "customer Moodle 4.5 site, many custom plugins",
-             "folder": "projects/moodle/vass", "repo": "moodle-envs/vass/moodle", "containers": ("moodle45-", "vass-services-"),
-             "port": 8045, "tls": 8445, "mailhog": 8025, "frontend": 8446, "login": "admin",
-             "db": "localhost:5445 · pgsql 13"},
-}
+
+def load_projects():
+    """The project registry: $DASH_PROJECTS_FILE, else projects.json beside the harness config, else {}."""
+    cfg = os.environ.get("HARNESS_CONFIG") or os.path.join(HOME, ".config", "pc-harness", "config.env")
+    try:
+        with open(os.environ.get("DASH_PROJECTS_FILE") or os.path.join(os.path.dirname(cfg), "projects.json")) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+
+PROJECTS = load_projects()
 HEADING = re.compile(r"^(#+)\s+(.*)$")
 ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(?!\[[xX]\])")
 STATE = re.compile(r"^\s*[-*+]?\s*\**state\**\s*:\s*\**\s*(.*)$", re.I)
@@ -220,7 +226,7 @@ def git_facts(repo):
 
 def project(key, p, docker):
     """One tile record: containers up, site HTTP code, links, git state, open todos and open tickets."""
-    mine = [c for c in docker if c["name"].startswith(p["containers"])]
+    mine = [c for c in docker if c["name"].startswith(tuple(p["containers"]))]
     up = sum(c["state"] == "running" for c in mine)
     code = sites.http_code("http://127.0.0.1:%d/" % p["port"], "GET")
     folder = os.path.join(HOME, p["folder"])

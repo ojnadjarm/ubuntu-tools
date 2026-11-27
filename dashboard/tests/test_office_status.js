@@ -21,10 +21,10 @@ const PAUSED = { id: "paused", label: "Paused", since: "2026-11-11", note: "Cont
 let n = 0;
 const ok = (name, fn) => { fn(); console.log("ok " + ++n + " " + name); };
 
-/* The fixture with vass paused and the quality team on vacation. */
+/* The fixture with workproj paused and the quality team on vacation. */
 function resting() {
   const P = JSON.parse(JSON.stringify(FIX));
-  P.seats.find((s) => s.id === "vass").status = PAUSED;
+  P.seats.find((s) => s.id === "workproj").status = PAUSED;
   P.staff.find((t) => t.id === "quality").status = { id: "vacation", label: "On vacation" };
   return P;
 }
@@ -39,17 +39,17 @@ const flat = (c) => JSON.stringify([[...c.position], [...c.color], [...c.index],
   const room = (M, id) => [M.ceo, ...M.rooms, ...M.staff].find((r) => r.id === id);
 
   ok("model: a room carries its section's status, null while active; the key changes only for the resting rooms", () => {
-    assert.deepStrictEqual(room(B, "vass").status, PAUSED);
+    assert.deepStrictEqual(room(B, "workproj").status, PAUSED);
     assert.strictEqual(room(B, "team-quality").status.label, "On vacation");
-    assert.strictEqual(room(A, "vass").status, null);
+    assert.strictEqual(room(A, "workproj").status, null);
     assert.strictEqual(room(B, "mooblox").status, null);
     const changed = [B.ceo, ...B.rooms, ...B.staff].filter((r) => r.key !== room(A, r.id).key).map((r) => r.id);
-    assert.deepStrictEqual(changed, ["vass", "team-quality"]);
+    assert.deepStrictEqual(changed, ["workproj", "team-quality"]);
   });
 
   ok("diff: setting a status rebuilds only that room, no layout change, no person changes", () => {
     const d = Mo.diff(A, B);
-    assert.deepStrictEqual([d.layout, d.night, d.rooms, d.people], [false, false, ["vass", "team-quality"], []]);
+    assert.deepStrictEqual([d.layout, d.night, d.rooms, d.people], [false, false, ["workproj", "team-quality"], []]);
   });
 
   ok("time: day() writes a calendar date as D Mon, with the year when not this year's", () => {
@@ -58,13 +58,13 @@ const flat = (c) => JSON.stringify([[...c.position], [...c.color], [...c.index],
   });
 
   ok("cards: the room card's state line leads with the status and since, the note is its first line", () => {
-    const r = F.card(room(B, "vass"), NOW), t = F.card(room(B, "team-quality"), NOW);
-    assert.strictEqual(r.state.text, "Paused since 11 Nov · " + room(B, "vass").busy + " working now");
+    const r = F.card(room(B, "workproj"), NOW), t = F.card(room(B, "team-quality"), NOW);
+    assert.strictEqual(r.state.text, "Paused since 11 Nov · " + room(B, "workproj").busy + " working now");
     assert.strictEqual(r.lines[0], "Contract ended");
     assert.strictEqual(tiers(r).top.lines[0], "Contract ended");
     assert.strictEqual(t.state.text, "On vacation · " + room(B, "team-quality").busy + " working now");
     assert.deepStrictEqual(F.card(room(B, "mooblox"), NOW), F.card(room(A, "mooblox"), NOW), "an active room's card is unchanged");
-    assert.deepStrictEqual(F.card(room(A, "vass"), NOW).state.text, room(A, "vass").busy + " working now");
+    assert.deepStrictEqual(F.card(room(A, "workproj"), NOW).state.text, room(A, "workproj").busy + " working now");
   });
 
   ok("builders: the resting rooms' boards show the label in the rest colour; every other chunk is the same as without any status", () => {
@@ -72,18 +72,18 @@ const flat = (c) => JSON.stringify([[...c.position], [...c.color], [...c.index],
     assert.deepStrictEqual(PA, PB, "a status moves no room");
     for (const r of [A.ceo, ...A.rooms, ...A.staff]) {
       const a = Bd.chunk(r.id, A, PA, THEME, kit, ink), b = Bd.chunk(r.id, B, PB, THEME, kit, ink), same = flat(a) === flat(b);
-      assert.strictEqual(same, !["vass", "team-quality"].includes(r.id), r.id + (same ? " unchanged" : " changed"));
+      assert.strictEqual(same, !["workproj", "team-quality"].includes(r.id), r.id + (same ? " unchanged" : " changed"));
     }
-    const v = Bd.chunk("vass", B, PB, THEME, kit, ink), board = v.labels.filter((l) => l.quad);
+    const v = Bd.chunk("workproj", B, PB, THEME, kit, ink), board = v.labels.filter((l) => l.quad);
     assert.strictEqual(board.length, 1, "still one board, one tap target");
     const restInk = THEME.rest.map((c) => c * 0.6 + 0.4).join();
     assert.ok(v.quads.some((q) => q.col && q.col.join() === restInk), "the status label is drawn in the rest colour");
-    assert.ok(!Bd.chunk("vass", A, PA, THEME, kit, ink).quads.some((q) => q.col && q.col.join() === restInk), "no label without a status");
+    assert.ok(!Bd.chunk("workproj", A, PA, THEME, kit, ink).quads.some((q) => q.col && q.col.join() === restInk), "no label without a status");
   });
 
   ok("list: a resting seat and team carry a status tag and the rest class; active ones none", () => {
     const h = list(B), a = list(A);
-    assert.ok(/class="seat rest" data-seat="vass"/.test(h) && />Paused<\/span>/.test(h), "vass tagged Paused");
+    assert.ok(/class="seat rest" data-seat="workproj"/.test(h) && />Paused<\/span>/.test(h), "workproj tagged Paused");
     assert.ok(/class="team rest"/.test(h) && />On vacation<\/span>/.test(h), "quality tagged On vacation");
     assert.strictEqual((h.match(/class="ost"/g) || []).length, 2);
     assert.ok(!/class="ost"|rest"/.test(a), "no tag without a status");

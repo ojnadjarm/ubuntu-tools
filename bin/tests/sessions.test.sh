@@ -174,7 +174,10 @@ ev "selftest: no_touch flags a listing of the protected folder" \
 # The tracked org.json validates and carries no machine values.
 python3 -c "import sys; sys.path.insert(0, '$AG/lib'); import org; s = org.seats('$AG/org.json'); assert {x['role'] for x in s} >= {'owner', 'ceo', 'po'}" \
   && ok "tracked org.json validates (owner, ceo, po)" || nok "tracked org.json" "invalid"
-python3 -c "import sys; sys.path.insert(0, '$AG/lib'); import org; v = [s for s in org.seats('$AG/org.json') if s['id'] == 'vass']; assert v and v[0]['wake'] == 'pull' and v[0]['match'] == '~/moodle-envs/vass/moodle' and v[0]['parent'] == 'orchestrator'" 2>/dev/null \
-  && ok "tracked org.json: vass seat is pull, its folder ~/moodle-envs/vass/moodle" || nok "tracked org.json" "no vass pull seat on its folder"
+python3 -c "import sys; sys.path.insert(0, '$AG/lib'); import org; assert not [s for s in org.seats('$AG/org.json') if s['wake'] == 'pull' and s['match']]" 2>/dev/null \
+  && ok "tracked org.json: no pull seat on a folder (machine seat lives in org.local.json)" || nok "tracked org.json" "a pull seat with a match is tracked"
+printf '{"seats": [{"after": "mooblox", "id": "workproj", "name": "Workproj seat", "role": "po", "parent": "orchestrator", "wake": "pull", "match": "~/moodle-envs/workproj/moodle"}]}' >"$WORK/org.local.json"
+ORG_FILE="$AG/org.json" ORG_LOCAL_FILE="$WORK/org.local.json" python3 -c "import sys; sys.path.insert(0, '$AG/lib'); import org; v = [s for s in org.seats() if s['id'] == 'workproj']; assert v and v[0]['wake'] == 'pull' and v[0]['match'] == '~/moodle-envs/workproj/moodle' and v[0]['parent'] == 'orchestrator'" 2>/dev/null \
+  && ok "local org file: workproj seat is pull, its folder ~/moodle-envs/workproj/moodle" || nok "local org file" "no workproj pull seat on its folder"
 grep -q "$HOME" "$AG/org.json" && nok "tracked org.json" "contains \$HOME" || ok "tracked org.json has no home path"
 exit $bad

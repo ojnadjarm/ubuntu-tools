@@ -14,7 +14,7 @@ const ORG = { seats: [
   { id: "orchestrator", name: "DarkSaddler", rank: "CEO", role: "ceo", parent: "owner", wake: "channel", match: "~" },
   { id: "discord-po", name: "Cobalt", rank: "Product Owner", area: "Discord", role: "po", parent: "orchestrator", wake: "po-inbox", match: "~/agents/po-discord" },
   { id: "tiny-epic-narrator", name: "Bramble", rank: "Manager", area: "Tiny Epic Narrator", role: "manager", parent: "orchestrator", wake: "po-inbox", match: "~/projects/x" },
-  { id: "vass", name: "Vass", role: "po", parent: "orchestrator", wake: "pull", match: "~/vass" }],
+  { id: "workproj", name: "Work project", role: "po", parent: "orchestrator", wake: "pull", match: "~/workproj" }],
   sessions: [{ seat: "orchestrator", pid: 11, state: "working" }], hidden: 0 };
 const T0 = Date.UTC(2026, 10, 10, 9, 0);
 const ROWS = [{ id: T0, ts: new Date(T0).toISOString(), ch: "harness", from: "orchestrator", to: [], kind: "msg", text: "hello", re: null, hop: 0 }];
@@ -126,7 +126,7 @@ const BOX = ".chat .compose textarea", LIST = ".chat .compose [role=listbox]";
     assert.ok(!(await open()), "a@b (mail-like) does not open");
 
     const hint = () => p.$eval(".chat .compose .hint", (h) => h.textContent);
-    await typeIn("@discord-po @orchestrator @vass @nobody hi");
+    await typeIn("@discord-po @orchestrator @workproj @nobody hi");
     assert.strictEqual(await hint(), "Wakes Cobalt, DarkSaddler.", "the hint names who a send wakes");
     await p.waitForTimeout(3200);
     assert.strictEqual(await hint(), "Wakes Cobalt, DarkSaddler.", "the hint survives the repaint");

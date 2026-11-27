@@ -14,7 +14,7 @@ const ROOT = path.join(__dirname, ".."), JS = path.join(ROOT, "static", "next", 
 const FIX = require("./fixtures/office.json");
 const NOW = Date.parse("2026-11-10T15:00:00Z"), T0 = NOW / 1000 - 27 * 60;
 const STATUS = { host: "fixture", sites: [], units: [], timers: [], docker: [], plans: [], drop: { files: [] }, verdict: { ok: true, problems: [], needs: [] } };
-const MATCH = { orchestrator: "~", mooblox: "~/agents/po-mooblox", vass: "~/moodle-envs/vass/moodle", discord: "~/agents/po-discord",
+const MATCH = { orchestrator: "~", mooblox: "~/agents/po-mooblox", workproj: "~/moodle-envs/workproj/moodle", discord: "~/agents/po-discord",
   "tiny-epic-narrator": "~/agents/po-tiny-epic-narrator", mosaico: "~/agents/po-mosaico" };
 const ONLY = process.env.ONLY || "", KINDS = ["orchestrator", "mosaico", "tiny-epic-narrator", "team-operations", "pool", "sentinel", "pid1101"];
 let n = 0;

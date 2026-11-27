@@ -17,7 +17,7 @@ function calm() {
   const P = JSON.parse(JSON.stringify(BASE));
   P.floors = [
     { id: "operations", name: "Operations", teams: ["operations", "quality", "improvement"], rest: ["team"] },
-    { id: "work", name: "Work projects", teams: ["vass"], deck: false },
+    { id: "work", name: "Work projects", teams: ["workproj"], deck: false },
     { id: "personal", name: "Personal projects", teams: ["mooblox"], rest: ["po"], deck: false },
     { id: "discord", name: "Discord", teams: ["discord"], head: "discord" },
     { id: "ceo", name: "CEO", teams: ["orchestrator"], head: "orchestrator" },

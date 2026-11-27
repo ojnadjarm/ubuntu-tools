@@ -3,7 +3,7 @@
     {"id": "orchestrator", "name": "DarkSaddler", "rank": "CEO", "role": "ceo", "parent": "owner", "area": null, "about": "Runs the fleet.", "wake": "channel"},
     {"id": "mooblox", "name": "Mossfang", "rank": "Product Owner", "role": "po", "parent": "orchestrator", "area": "Mooblox", "about": "A 3D island course in the browser.", "wake": "po-inbox",
      "runner": {"name": "po-mooblox", "enabled": "no", "schedule": "on demand", "next": "", "last": {"end": "2026-11-10T09:12:00+01:00", "exit": "0", "seconds": "312"}, "kind": "on-demand", "on": false, "health": "off", "runner": {"kind": "on-demand", "unit": "agent@po-mooblox.service"}, "report": "Shipped zone 3 props.", "role": "po", "state": "off"}},
-    {"id": "vass", "name": "Thistle", "rank": "Product Owner", "role": "po", "parent": "orchestrator", "area": "Vass", "about": "A client project.", "wake": "pull"},
+    {"id": "workproj", "name": "Thistle", "rank": "Product Owner", "role": "po", "parent": "orchestrator", "area": "Work project", "about": "A client project.", "wake": "pull"},
     {"id": "discord", "name": "Cobalt", "rank": "Product Owner", "role": "po", "parent": "orchestrator", "area": "Discord", "about": "Discord projects.", "wake": "po-inbox",
      "runner": {"name": "po-discord", "enabled": "no", "schedule": "on demand", "next": "", "last": {"end": "2026-11-09T22:40:00+01:00", "exit": "0", "seconds": "95"}, "kind": "on-demand", "on": false, "health": "off", "runner": {"kind": "on-demand", "unit": "agent@po-discord.service"}, "report": "Handed 2 asks to managers.", "role": "po", "state": "off"}},
     {"id": "tiny-epic-narrator", "name": "Bramble", "rank": "Manager", "role": "manager", "parent": "discord", "area": "Tiny Epic Narrator", "about": "A narrated board-game helper.", "wake": "po-inbox",
@@ -16,7 +16,7 @@
     {"seat": null, "state": "working", "since": 1794321500, "pid": 1003, "parent": "tiny-epic-narrator", "name": "agent-T9001", "cwd": "~/projects/example-a", "started_by": "T9001", "rank": "Worker"},
     {"seat": null, "state": "idle", "since": 1794321600, "pid": 1004, "parent": "tiny-epic-narrator", "name": "agent-T9004", "cwd": "~/projects/example-a", "started_by": "T9004", "rank": "Worker"},
     {"seat": null, "state": "working", "since": 1794322000, "pid": 1005, "parent": "orchestrator", "name": "agent-T9002", "cwd": "~/agents", "started_by": "T9002", "rank": "Worker"},
-    {"seat": "vass", "state": "idle", "since": 1794322086}
+    {"seat": "workproj", "state": "idle", "since": 1794322086}
   ],
   "staff": [
     {"id": "operations", "name": "Operations", "members": [

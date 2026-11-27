@@ -43,7 +43,7 @@ const ok = (name, fn) => { fn(); n++; console.log("ok " + n + " " + name); };
   });
 
   ok("protected seat: state and last active only, the folder reads protected project", () => {
-    const c = C("vass");
+    const c = C("workproj");
     assert.deepStrictEqual(c.lines, ["A client project.", ROLE_PO, PULL]);
     assert.strictEqual(c.state.text, "Now yours");
     assert.deepStrictEqual(c.rows, [["Workers", "no workers"], ["Folder", "protected project"], ["Last active", ago(1794322086)]]);
@@ -114,8 +114,8 @@ const ok = (name, fn) => { fn(); n++; console.log("ok " + n + " " + name); };
     assert.deepStrictEqual(c.rows, [["Status", "off"], ["Schedule", "on demand"], ["Last run", "01:26 · 13.6 h ago"], ["Last exit", "0"], ["Took", "44 s"], ["Report", "Fixed a test drift."]]);
   });
 
-  ok("R7 a seat with no runner (vass, mosaico) gets no runner rows", () => {
-    for (const id of ["vass", "mosaico"]) assert.ok(!C(id).rows.some((r) => ["Last run", "Last exit", "Took", "Report"].includes(r[0])), id);
+  ok("R7 a seat with no runner (workproj, mosaico) gets no runner rows", () => {
+    for (const id of ["workproj", "mosaico"]) assert.ok(!C(id).rows.some((r) => ["Last run", "Last exit", "Took", "Report"].includes(r[0])), id);
   });
 
   ok("the Unassigned room: last staff room, a team card that says why and rolls its members", () => {

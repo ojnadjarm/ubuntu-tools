@@ -16,7 +16,7 @@ const ORG = { seats: [
   { id: "orchestrator", name: "DarkSaddler", rank: "CEO", role: "ceo", parent: "owner", wake: "channel", match: "~" },
   { id: "mooblox", name: "Mooblox", role: "po", parent: "orchestrator", wake: "po-inbox", match: "~/agents/po-mooblox" },
   { id: "discord", name: "Discord", role: "po", parent: "orchestrator", wake: "po-inbox", match: "~/agents/po-discord" },
-  { id: "vass", name: "Vass seat", role: "po", parent: "orchestrator", wake: "pull", match: null }], sessions: [], hidden: 0 };
+  { id: "workproj", name: "Workproj seat", role: "po", parent: "orchestrator", wake: "pull", match: null }], sessions: [], hidden: 0 };
 const T0 = Date.UTC(2026, 10, 9, 21, 0);
 const row = (id, ch, from, text, kind = "msg") => ({ id, ts: new Date(id).toISOString(), ch, from, to: [], kind, text, re: null, hop: 0 });
 const STORE = {
@@ -81,7 +81,7 @@ srv.on("request", (req, res) => {
     assert.strictEqual(await p.textContent(".chat .stream header h2"), "Mooblox", "cold load opens the hash's channel");
     assert.strictEqual(await p.evaluate(() => location.hash), "#chat?ch=dm-mooblox--owner", "cold load keeps the hash");
     const chans = await p.$$eval(".chat .chans a", (as) => as.map((a) => a.dataset.ch));
-    assert.deepStrictEqual(chans, ["", "harness", "org", "mooblox", "discord", "dm-orchestrator--owner", "dm-mooblox--owner", "dm-discord--owner", "dm-owner--vass"], "Recent, rooms, PO channels (no room for the pull seat vass) and a direct message per seat before any message");
+    assert.deepStrictEqual(chans, ["", "harness", "org", "mooblox", "discord", "dm-orchestrator--owner", "dm-mooblox--owner", "dm-discord--owner", "dm-owner--workproj"], "Recent, rooms, PO channels (no room for the pull seat workproj) and a direct message per seat before any message");
     await p.waitForFunction(() => /2/.test((document.querySelector('#subs [data-nav="chat"] i') || {}).textContent || ""), null, { timeout: 5000 });
     assert.strictEqual(await p.textContent('.chat [data-ch="org"] .unread'), "2", "unread badge on the channel");
 
@@ -123,7 +123,7 @@ srv.on("request", (req, res) => {
     await p.setViewportSize({ width: 1366, height: 768 });
     await p.waitForSelector(".chat .wakes .wk", { state: "visible", timeout: 5000 });
     const wk = await p.$$eval(".chat .wakes .wk", (r) => r.map((x) => x.querySelector("span").textContent + " " + x.querySelector("b").textContent));
-    assert.deepStrictEqual(wk, ["DarkSaddler 5", "Mooblox 13", "Discord 0"], "wakes today per seat as plain numbers (no limit, P38); the pull seat vass is never woken");
+    assert.deepStrictEqual(wk, ["DarkSaddler 5", "Mooblox 13", "Discord 0"], "wakes today per seat as plain numbers (no limit, P38); the pull seat workproj is never woken");
     assert.strictEqual(await p.$$eval(".chat .wakes progress", (l) => l.length), 0, "no bar to a limit");
     const fixed = await p.evaluate(() => getComputedStyle(document.querySelector(".chat .compose")).position);
     assert.notStrictEqual(fixed, "fixed", "from 900 px the composer sits under the stream");
@@ -206,6 +206,6 @@ srv.on("request", (req, res) => {
     await r.waitForFunction(() => !/paused|degraded/.test(document.querySelector(".chat .bsum").textContent), null, { timeout: 8000 }).catch(() => assert.fail("F2: the band drops both once the API stops sending them"));
     await c3.close();
     assert.deepStrictEqual(errs, [], "no page errors");
-    console.log("ok · cold #chat?ch= · 8 channels, no vass room · unread + /seen · composer sent/woke/held · fixed at 400 · swipe-proof · wakes today as numbers · thinking row + channel marker · Familiars in rows, channel box and direct list; sender talks ~2 s, owner silent · T1545-A: 0 names cut at 1366/1920, preview + time per row, by activity, box >= 430 at 1366x768, rich seam absent/present · F2: band shows wakes paused + degraded, drops them");
+    console.log("ok · cold #chat?ch= · 8 channels, no workproj room · unread + /seen · composer sent/woke/held · fixed at 400 · swipe-proof · wakes today as numbers · thinking row + channel marker · Familiars in rows, channel box and direct list; sender talks ~2 s, owner silent · T1545-A: 0 names cut at 1366/1920, preview + time per row, by activity, box >= 430 at 1366x768, rich seam absent/present · F2: band shows wakes paused + degraded, drops them");
   } finally { await b.close(); srv.close(); }
 })().catch((e) => { console.error(e); process.exit(1); });

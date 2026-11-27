@@ -1,0 +1,15 @@
+{
+ "<project>": {
+  "name": "<project> (Moodle 4.5)",
+  "what": "<one line>",
+  "folder": "projects/moodle/<project>",
+  "repo": "moodle-envs/<project>/moodle",
+  "containers": ["moodle45-", "<project>-services-"],
+  "port": 8045,
+  "tls": 8445,
+  "mailhog": 8025,
+  "frontend": 8446,
+  "login": "admin",
+  "db": "localhost:5445 · pgsql 13"
+ }
+}

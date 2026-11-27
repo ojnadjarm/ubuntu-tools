@@ -8,6 +8,18 @@ from dash.services import projects as P
 DOCKER = [{"name": "moodle45-app-1", "state": "running", "status": "1 h", "ports": [8045]},
           {"name": "moodle45-db-1", "state": "running", "status": "1 h", "ports": [5445]},
           {"name": "moodle52-app-1", "state": "running", "status": "9 d", "ports": [8052]}]
+REG = {"workproj": {"name": "workproj (Moodle 4.5)", "what": "fixture Moodle 4.5 site", "folder": "projects/moodle/workproj",
+                    "repo": "moodle-envs/workproj/moodle", "containers": ["moodle45-", "acme-services-"], "port": 8045, "tls": 8445,
+                    "mailhog": 8025, "frontend": 8446, "login": "admin", "db": "localhost:5445 · pgsql 13"}}
+_reg = mock.patch.object(P, "PROJECTS", REG)
+
+
+def setUpModule():
+    _reg.start()
+
+
+def tearDownModule():
+    _reg.stop()
 
 
 def notes(text):
@@ -23,12 +35,12 @@ def fake_run(log="2026-04-26T08:49:04Z\tMerge main", status=""):
 
 class Projects(unittest.TestCase):
     def test_todo_counts_open_items_of_its_section_only(self):
-        path = notes("# vass\n- not me\n## Todo\n- [ ] one\n- two\n- [x] done\n1. three\n### sub\n- four\n## Gotchas\n- no\n")
+        path = notes("# workproj\n- not me\n## Todo\n- [ ] one\n- two\n- [x] done\n1. three\n### sub\n- four\n## Gotchas\n- no\n")
         self.assertEqual(P.todo_count(path), 4)
         os.unlink(path)
 
     def test_todo_is_none_without_section_or_file(self):
-        path = notes("# vass\n## Gotchas\n- x\n")
+        path = notes("# workproj\n## Gotchas\n- x\n")
         self.assertIsNone(P.todo_count(path))
         self.assertIsNone(P.todo_count("/nonexistent/NOTES.md"))
         os.unlink(path)
@@ -42,24 +54,24 @@ class Projects(unittest.TestCase):
 
     def test_tile_up_with_links_git_and_only_its_containers(self):
         with mock.patch.object(P.sites, "http_code", return_value=200), mock.patch.object(P, "run", fake_run(status=" M a\n?? b\n")):
-            t = P.project("vass", P.PROJECTS["vass"], DOCKER)
+            t = P.project("workproj", P.PROJECTS["workproj"], DOCKER)
         self.assertEqual((t["state"], t["up"], t["site_code"], t["dirty"]), ("up", 2, 200, 2))
         self.assertEqual([c["name"] for c in t["containers"]], ["moodle45-app-1", "moodle45-db-1"])
         self.assertEqual(t["commit_at"], "2026-04-26T08:49:04Z")
         self.assertTrue(t["https"].endswith(":8445/") and t["http"].endswith(":8045/") and t["mailhog"].endswith(":8025/"))
         self.assertEqual(t["frontend"], "https://%s:8446/" % P.PUBLIC_HOST)
-        self.assertEqual(t["tickets_url"], "/projects/vass/tickets")
+        self.assertEqual(t["tickets_url"], "/projects/workproj/tickets")
 
     def test_login_is_the_user_name_only(self):
         with mock.patch.object(P.sites, "http_code", return_value=200), mock.patch.object(P, "run", fake_run()):
-            t = P.project("vass", P.PROJECTS["vass"], DOCKER)
+            t = P.project("workproj", P.PROJECTS["workproj"], DOCKER)
         self.assertEqual(t["login"], "admin")
         self.assertNotIn("PASSWORD", open(P.__file__).read())
 
     def test_tile_states_down_and_warn(self):
         with mock.patch.object(P.sites, "http_code", return_value=None), mock.patch.object(P, "run", fake_run(log="")):
-            down = P.project("vass", P.PROJECTS["vass"], [dict(c, state="exited") for c in DOCKER])
-            warn = P.project("vass", P.PROJECTS["vass"], DOCKER)
+            down = P.project("workproj", P.PROJECTS["workproj"], [dict(c, state="exited") for c in DOCKER])
+            warn = P.project("workproj", P.PROJECTS["workproj"], DOCKER)
         self.assertEqual((down["state"], down["up"], down["dirty"], down["commit_at"]), ("down", 0, None, None))
         self.assertEqual(warn["state"], "warn")
 
@@ -73,7 +85,7 @@ class Projects(unittest.TestCase):
 
 
 
-TICKETS = ("# vass tickets\n\nHeader text.\n\n## JIRA-1 — open one\n\n- **State:** waiting client\n- **Summary:** a\n\n"
+TICKETS = ("# workproj tickets\n\nHeader text.\n\n## JIRA-1 — open one\n\n- **State:** waiting client\n- **Summary:** a\n\n"
            "## JIRA-2 — done one\n\n- **State:** done\n- **Summary:** b\n\n## JIRA-3 — last open\n\n- **State:** pending\n")
 
 
@@ -82,7 +94,7 @@ class TicketEdits(unittest.TestCase):
 
     def setUp(self):
         self.home = tempfile.mkdtemp()
-        self.dir = os.path.join(self.home, P.PROJECTS["vass"]["folder"])
+        self.dir = os.path.join(self.home, P.PROJECTS["workproj"]["folder"])
         os.makedirs(self.dir)
         self.path = os.path.join(self.dir, "TICKETS.md")
         open(self.path, "w").write(TICKETS)
@@ -100,31 +112,31 @@ class TicketEdits(unittest.TestCase):
         return os.listdir(os.path.join(self.dir, ".tickets-backup"))
 
     def test_close_sets_only_that_state_line_to_done(self):
-        self.assertEqual(P.edit_ticket("vass", "JIRA-1", "close")[0], 200)
+        self.assertEqual(P.edit_ticket("workproj", "JIRA-1", "close")[0], 200)
         self.assertEqual(self.text(), TICKETS.replace("**State:** waiting client", "**State:** done"))
         self.assertEqual(P.open_tickets(self.path), 1)
         self.assertEqual(open(os.path.join(self.dir, ".tickets-backup", self.backups()[0])).read(), TICKETS)
 
     def test_delete_removes_the_done_section_only(self):
-        self.assertEqual(P.edit_ticket("vass", "JIRA-2", "delete")[0], 200)
+        self.assertEqual(P.edit_ticket("workproj", "JIRA-2", "delete")[0], 200)
         self.assertEqual(self.text(), TICKETS.replace("## JIRA-2 — done one\n\n- **State:** done\n- **Summary:** b\n\n", ""))
         self.assertEqual(len(self.backups()), 1)
 
     def test_delete_of_the_last_section_restores_the_bytes_before_it_was_appended(self):
         open(self.path, "a").write("\n## PROBE-1 — x\n\n- **State:** pending\n")
-        self.assertEqual(P.edit_ticket("vass", "PROBE-1", "close")[0], 200)
-        self.assertEqual(P.edit_ticket("vass", "PROBE-1", "delete")[0], 200)
+        self.assertEqual(P.edit_ticket("workproj", "PROBE-1", "close")[0], 200)
+        self.assertEqual(P.edit_ticket("workproj", "PROBE-1", "delete")[0], 200)
         self.assertEqual(self.text(), TICKETS)
 
     def test_delete_refused_when_not_done_and_close_refused_when_done(self):
-        self.assertEqual(P.edit_ticket("vass", "JIRA-1", "delete"), (400, {"error": "ticket is not done"}))
-        self.assertEqual(P.edit_ticket("vass", "JIRA-2", "close"), (400, {"error": "ticket is done"}))
+        self.assertEqual(P.edit_ticket("workproj", "JIRA-1", "delete"), (400, {"error": "ticket is not done"}))
+        self.assertEqual(P.edit_ticket("workproj", "JIRA-2", "close"), (400, {"error": "ticket is done"}))
         self.assertEqual(self.text(), TICKETS)
         self.assertFalse(os.path.exists(os.path.join(self.dir, ".tickets-backup")))
 
     def test_unknown_ids_projects_and_actions_are_refused_untouched(self):
-        for args in [("vass", "JIRA-9", "close"), ("vass", "vass", "delete"), ("vass", None, "close"), ("vass", "", "close"),
-                     ("nope", "JIRA-1", "close"), (None, "JIRA-1", "close"), ("vass", "JIRA-1", "rename")]:
+        for args in [("workproj", "JIRA-9", "close"), ("workproj", "workproj", "delete"), ("workproj", None, "close"), ("workproj", "", "close"),
+                     ("nope", "JIRA-1", "close"), (None, "JIRA-1", "close"), ("workproj", "JIRA-1", "rename")]:
             self.assertEqual(P.edit_ticket(*args)[0], 400, args)
         self.assertEqual(self.text(), TICKETS)
 
@@ -132,49 +144,49 @@ class TicketEdits(unittest.TestCase):
         open(self.path, "a").write("\n## JIRA-7 — noted\n\n- **State:** done (owner committed, 2 files)\n"
                                    "\n## JIRA-8 — open noted\n\n- **State:** waiting client (asked 10-30)\n")
         self.assertEqual(P.open_tickets(self.path), 3)
-        self.assertEqual(P.edit_ticket("vass", "JIRA-8", "close")[0], 200)
+        self.assertEqual(P.edit_ticket("workproj", "JIRA-8", "close")[0], 200)
         self.assertTrue(self.text().endswith("- **State:** done (asked 10-30)\n"))
         self.assertEqual(P.open_tickets(self.path), 2)
-        self.assertEqual(P.edit_ticket("vass", "JIRA-7", "delete")[0], 200)
+        self.assertEqual(P.edit_ticket("workproj", "JIRA-7", "delete")[0], 200)
         self.assertNotIn("JIRA-7", self.text())
 
     def test_close_without_a_state_line_adds_one(self):
         open(self.path, "a").write("\n## JIRA-4 — bare\nbody\n")
-        P.edit_ticket("vass", "JIRA-4", "close")
+        P.edit_ticket("workproj", "JIRA-4", "close")
         self.assertTrue(self.text().endswith("## JIRA-4 — bare\n\n- **State:** done\n\nbody\n"))
         self.assertEqual(P.open_tickets(self.path), 2)
 
     def test_close_skips_prose_that_starts_with_state(self):
         open(self.path, "a").write("\n## JIRA-5 — prose\n\nStateless handler loses the token.\n- **State:** open\n")
-        self.assertEqual(P.edit_ticket("vass", "JIRA-5", "close")[0], 200)
+        self.assertEqual(P.edit_ticket("workproj", "JIRA-5", "close")[0], 200)
         self.assertTrue(self.text().endswith("Stateless handler loses the token.\n- **State:** done\n"))
         self.assertEqual(P.open_tickets(self.path), 2)
 
     def test_delete_and_count_ignore_headings_inside_code_fences(self):
         open(self.path, "a").write("\n## JIRA-6 — fenced\n\n- **State:** done\n\n```sh\n# reproduce\n## not a ticket\ncurl x\n```\n\nnotes\n")
         self.assertEqual(P.open_tickets(self.path), 2)
-        self.assertEqual(P.edit_ticket("vass", "JIRA-6", "delete")[0], 200)
+        self.assertEqual(P.edit_ticket("workproj", "JIRA-6", "delete")[0], 200)
         self.assertEqual(self.text(), TICKETS)
 
     def test_state_lines_inside_code_fences_are_not_the_ticket_state(self):
         fence = "```yaml\nstate: done\n```\n"
         open(self.path, "a").write("\n## JIRA-9 — fenced state\n\n" + fence + "- **State:** open\n")
         self.assertEqual(P.open_tickets(self.path), 3)
-        self.assertEqual(P.edit_ticket("vass", "JIRA-9", "delete"), (400, {"error": "ticket is not done"}))
-        self.assertEqual(P.edit_ticket("vass", "JIRA-9", "close")[0], 200)
+        self.assertEqual(P.edit_ticket("workproj", "JIRA-9", "delete"), (400, {"error": "ticket is not done"}))
+        self.assertEqual(P.edit_ticket("workproj", "JIRA-9", "close")[0], 200)
         self.assertTrue(self.text().endswith(fence + "- **State:** done\n"))
         self.assertEqual(P.open_tickets(self.path), 2)
 
     def test_backups_keep_the_newest_twenty(self):
         for _ in range(12):
-            P.edit_ticket("vass", "JIRA-1", "close")
+            P.edit_ticket("workproj", "JIRA-1", "close")
             open(self.path, "w").write(TICKETS)
-            P.edit_ticket("vass", "JIRA-3", "close")
+            P.edit_ticket("workproj", "JIRA-3", "close")
             open(self.path, "w").write(TICKETS)
         self.assertEqual(len(self.backups()), P.BACKUPS)
 
     def test_page_shows_close_on_open_and_delete_on_done_only(self):
-        page = P.tickets_page("vass")
+        page = P.tickets_page("workproj")
         self.assertIn('data-tk="close" data-id="JIRA-1"', page)
         self.assertIn('data-tk="delete" data-id="JIRA-2"', page)
         self.assertIn('data-tk="close" data-id="JIRA-3"', page)

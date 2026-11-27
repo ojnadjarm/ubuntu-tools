@@ -14,7 +14,7 @@ SITES = {
     8644: ("The Eye", "talk to the eye from the phone", "https", 8644, "mine"),
     8052: ("Moodle 5.2", "the dev site, 17 fixture charts", "http", 8452, "moodle"),
     8053: ("Moodle 5.3", "the 5.3 dev site", "http", 8453, "moodle"),
-    8045: ("Moodle 4.5 vass", "the vass customer project site", "http", 8445, "moodle"),
+    8045: ("Moodle 4.5", "the work project site", "http", 8445, "moodle"),
     8025: ("MailHog", "every mail the Moodle sites send, caught here", "http", None, "moodle"),
     19999: ("Netdata", "live machine metrics, per second", "http", 8499, "metrics"),
     8642: ("Eye bridge", "the body's local API", None, None, None),

@@ -66,7 +66,7 @@ async function soft(b, base, [w, h]) {
     await p.keyboard.press("Escape");
     return r;
   };
-  const rows = [...await ses("vass"), ...await ses("tiny-epic-narrator"), ...await ses("a0000000000000002", true)];
+  const rows = [...await ses("workproj"), ...await ses("tiny-epic-narrator"), ...await ses("a0000000000000002", true)];
   await p.click('.office .olist [data-who="orchestrator"]');
   await p.click("#office-card .cdet > summary");
   const own = await p.$$eval("#office-card .cbody > dl dt, #office-card .cbody > .cdet > dl dt", (l) => l.filter((d) => d.textContent === "Folder").length);
@@ -113,7 +113,7 @@ const STAFF = {
   "night-relay": ["Status", "Schedule", "Unit", "Up since", "Unit state", "Tmux", "Report"],
   "ci-fix": ["Status", "Schedule", ...LAST4],
   "tiny-epic-narrator": ["Workers", "Folder", "Started by", "Last active", ...LAST4, "Files held"],
-  vass: ["Workers", "Folder", "Last active"],
+  workproj: ["Workers", "Folder", "Last active"],
 };
 /* The staff cards on the list path: row labels per runner kind, the id line, gold when bad, dim when off, no Message, the Unassigned room. */
 async function staffCards(b, base, [w, h]) {
@@ -187,8 +187,8 @@ async function gpu(base) {
     assert.deepStrictEqual([st.still, st.chunks], [false, 12], "with a graphics card: not still, the fixture's 12 chunks");
     assert.strictEqual(await p.$eval(".office .stage .still", (e) => getComputedStyle(e).display), "none", "no still note with a graphics card");
     const shown = await p.evaluate((ids) => { const c = document.querySelector(".office .stage canvas"); return ids.filter((id) => { const q = window.__office.project(id); return q.ok && q.x >= 0 && q.x <= c.clientWidth && q.y >= 0 && q.y <= c.clientHeight; }); },
-      ["orchestrator", "mooblox", "vass", "discord", "tiny-epic-narrator", "mosaico", "pool", "room-mooblox", "team-operations", "team-quality", "team-improvement", "team-unassigned"]);
-    for (const id of ["orchestrator", "mooblox", "vass", "discord", "tiny-epic-narrator", "mosaico", "pool", "room-mooblox", "team-operations", "team-quality", "team-improvement", "team-unassigned"]) assert.ok(shown.includes(id), "in view for a click: " + id);
+      ["orchestrator", "mooblox", "workproj", "discord", "tiny-epic-narrator", "mosaico", "pool", "room-mooblox", "team-operations", "team-quality", "team-improvement", "team-unassigned"]);
+    for (const id of ["orchestrator", "mooblox", "workproj", "discord", "tiny-epic-narrator", "mosaico", "pool", "room-mooblox", "team-operations", "team-quality", "team-improvement", "team-unassigned"]) assert.ok(shown.includes(id), "in view for a click: " + id);
     assert.strictEqual(await p.$$eval(".otag, .otags", (l) => l.length), 0, "no tags (owner 2026-11-10)");
     const at = (id) => p.evaluate((i) => { const q = window.__office.project(i), r = document.querySelector(".office .stage canvas").getBoundingClientRect(); return { x: r.left + q.x, y: r.top + q.y, ok: q.ok }; }, id);
     const m = await at("maintenance");

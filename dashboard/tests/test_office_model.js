@@ -29,8 +29,8 @@ const ok = (name, fn) => { fn(); n++; console.log("ok " + n + " " + name); };
       assert.ok(!org.includes(head) && !org.includes(head.replace("export ", "")), "org.js holds no copy of " + head);
     }
     assert.strictEqual(S.titled({ name: "Bramble", rank: "Manager" }), "Bramble · Manager");
-    assert.strictEqual(S.dmOf("vass"), "dm-owner--vass");
-    assert.strictEqual(S.seatState({ id: "vass" }, P.sessions), "yours");
+    assert.strictEqual(S.dmOf("workproj"), "dm-owner--workproj");
+    assert.strictEqual(S.seatState({ id: "workproj" }, P.sessions), "yours");
   });
 
   ok("ago, until, progress, took", () => {
@@ -53,7 +53,7 @@ const ok = (name, fn) => { fn(); n++; console.log("ok " + n + " " + name); };
     assert(!M.who.owner && !M.rooms.some((r) => r.id === "owner"));
     assert.strictEqual(M.ceo.kind, "ceo");
     assert.strictEqual(M.ceo.id, "orchestrator");
-    assert.deepStrictEqual(M.rooms.map((r) => r.id), ["mooblox", "vass", "discord", "tiny-epic-narrator", "mosaico", "pool"]);
+    assert.deepStrictEqual(M.rooms.map((r) => r.id), ["mooblox", "workproj", "discord", "tiny-epic-narrator", "mosaico", "pool"]);
     assert.deepStrictEqual(M.rooms.map((r) => r.team), [0, 1, 2, 2, 2, -1]);
     assert.deepStrictEqual(M.staff.map((r) => r.id), ["team-operations", "team-quality", "team-improvement", "team-unassigned"]);
     assert.deepStrictEqual(M.staff.map((r) => r.team), [3, 4, 5, 6]);
@@ -89,11 +89,11 @@ const ok = (name, fn) => { fn(); n++; console.log("ok " + n + " " + name); };
     assert.strictEqual(M.who.toolsmith.pose, "sleep");
     assert.strictEqual(M.who.orchestrator.pose, "working");
     assert.strictEqual(M.who.mooblox.pose, "sleep");
-    const v = M.who.vass;
+    const v = M.who.workproj;
     assert.strictEqual(v.state, "yours");
     assert.strictEqual(v.pose, "idle");
     assert.deepStrictEqual(Object.keys(v.raw.session).sort(), ["seat", "since", "state"]);
-    assert.strictEqual(M.rooms.find((r) => r.id === "vass").awake, true);
+    assert.strictEqual(M.rooms.find((r) => r.id === "workproj").awake, true);
   });
 
   ok("more counts the people beyond the cell's slots", () => {
@@ -127,7 +127,7 @@ const ok = (name, fn) => { fn(); n++; console.log("ok " + n + " " + name); };
     assert.strictEqual(M.panels.running[1].label, "office renderer");
     assert.ok(!("recent" in M.panels), "Recent 24 h is gone (owner 2026-11-10)");
     const prot = M.panels.sessions.find((r) => r.protected);
-    assert.deepStrictEqual(prot, { id: "vass", protected: true, session: "protected project", seat: "Thistle · Product Owner", folder: "hidden", state: "idle", by: "—", since: 1794322086 });
+    assert.deepStrictEqual(prot, { id: "workproj", protected: true, session: "protected project", seat: "Thistle · Product Owner", folder: "hidden", state: "idle", by: "—", since: 1794322086 });
     assert.strictEqual(M.panels.sessions.length, 6);
     assert.strictEqual(M.panels.sessions.find((r) => r.id === "pid1003").seat, "under Bramble · Manager");
     assert.deepStrictEqual(M.panels.claims[0].who, "T9001");
@@ -229,7 +229,7 @@ const ok = (name, fn) => { fn(); n++; console.log("ok " + n + " " + name); };
     assert.strictEqual(seat.state.text, "Now working · 30 min");
     assert.strictEqual(rowOf(seat, "Workers"), "2 workers, 1 working");
     assert.strictEqual(seat.actions[0].href, "#chat?ch=dm-owner--tiny-epic-narrator");
-    const v = F.card(M.who.vass, NOW); shape(v);
+    const v = F.card(M.who.workproj, NOW); shape(v);
     assert.strictEqual(v.state.text, "Now yours");
     const w = F.card(M.who.pid1003, NOW); shape(w);
     assert.deepStrictEqual([w.title, w.rank, w.sub], ["agent-T9001", "Worker", "Works for Bramble"]);

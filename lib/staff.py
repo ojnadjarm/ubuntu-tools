@@ -2,6 +2,7 @@
 import json
 import os
 
+import org
 import section_status
 
 REST = ("po", "team")
@@ -73,6 +74,9 @@ def load(p=None):
     """The validated staff file: {teams, hidden, floors?}."""
     with open(p or path()) as f:
         data = json.load(f)
+    extra = org.local("floors", p, "STAFF_FILE", path())
+    if extra:
+        data["floors"] = org.merge(data.get("floors", []), extra)
     _validate(data)
     return data
 

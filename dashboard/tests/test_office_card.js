@@ -11,7 +11,7 @@ const ABOUT = "A long project line that says in plain words what this project is
 const seat = (id, name, role, parent, wake, rank, area) => ({ id, name, role, parent, wake, match: null, rank, area, about: area ? area + ": " + ABOUT : undefined });
 const ORG = { seats: [
   seat("owner", "You", "owner", null, null), seat("orchestrator", "DarkSaddler", "ceo", "owner", "channel", "CEO"),
-  seat("mooblox", "Mossfang", "po", "orchestrator", "po-inbox", "Product Owner", "Mooblox"), seat("vass", "Thistle", "po", "orchestrator", "pull", "Product Owner", "Vass"),
+  seat("mooblox", "Mossfang", "po", "orchestrator", "po-inbox", "Product Owner", "Mooblox"), seat("workproj", "Thistle", "po", "orchestrator", "pull", "Product Owner", "Work project"),
   seat("discord", "Cobalt", "po", "orchestrator", "po-inbox", "Product Owner", "Discord"),
   ...["tiny-epic-narrator", "spidey-pr-dashboard", "mosaico", "narrador-interactivo-ia"].map((id, i) => seat(id, ["Bramble", "Gloam", "Speckle", "Murmur"][i], "manager", "discord", "po-inbox", "Manager", id))],
 sessions: [], hidden: 0 };

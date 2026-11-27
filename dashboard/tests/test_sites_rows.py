@@ -53,11 +53,11 @@ class SitesRows(unittest.TestCase):
 
 class OwnedListeners(unittest.TestCase):
     def test_a_listener_with_a_unit_or_container_is_up_under_other_not_stray(self):
-        rows = run([3000, 6379], {(3000, "/"): 200}, containers=[{"name": "vass-services-redis-1", "state": "running", "status": "1 h", "ports": [6379]}],
-                   units={3000: "vass-frontend.service"})
+        rows = run([3000, 6379], {(3000, "/"): 200}, containers=[{"name": "acme-services-redis-1", "state": "running", "status": "1 h", "ports": [6379]}],
+                   units={3000: "acme-frontend.service"})
         other = {r["port"]: r for r in rows if r["port"] in (3000, 6379)}
         self.assertEqual({p: (r["group"], r["state"], r["name"]) for p, r in other.items()},
-                         {3000: ("other", "up", "vass-frontend"), 6379: ("other", "up", "vass-services-redis-1")})
+                         {3000: ("other", "up", "acme-frontend"), 6379: ("other", "up", "acme-services-redis-1")})
         self.assertEqual(other[3000]["url"], "http://%s:3000/" % HOST)
         self.assertEqual(other[6379]["url"], "")
 
@@ -69,7 +69,7 @@ class OwnedListeners(unittest.TestCase):
         self.assertEqual((r["group"], r["state"], r["url"]), ("other", "up", ""))
 
     def test_a_tailscale_front_maps_to_the_site_it_fronts(self):
-        rows = run([3001, 8446], {(3001, "/"): 200}, units={3001: "vass-frontend-proxy.service", 8446: "tailscaled.service"}, fronts={8446: 3001})
+        rows = run([3001, 8446], {(3001, "/"): 200}, units={3001: "acme-frontend-proxy.service", 8446: "tailscaled.service"}, fronts={8446: 3001})
         self.assertEqual([r["port"] for r in rows if r["port"] == 8446], [])
         r = [r for r in rows if r["port"] == 3001][0]
         self.assertEqual((r["url"], r["tls"], r["state"]), ("https://%s:8446/" % HOST, True, "up"))
@@ -80,7 +80,7 @@ class OwnedListeners(unittest.TestCase):
         self.assertEqual(sorted(r["port"] for r in rows if r["port"] in (8474, 8475, 8644)), [8474, 8644])
 
     def test_a_loopback_only_listener_gets_no_tailnet_http_link(self):
-        rows = run([3000, 3001], {(3000, "/"): 200, (3001, "/"): 200}, units={3000: "vass-frontend.service", 3001: "vass-frontend-proxy.service"},
+        rows = run([3000, 3001], {(3000, "/"): 200, (3001, "/"): 200}, units={3000: "acme-frontend.service", 3001: "acme-frontend-proxy.service"},
                    fronts={8446: 3001}, loopback={3000, 3001})
         url = {r["port"]: (r["url"], r["state"]) for r in rows if r["port"] in (3000, 3001)}
         self.assertEqual(url, {3000: ("", "up"), 3001: ("https://%s:8446/" % HOST, "up")})

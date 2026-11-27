@@ -1,0 +1,6 @@
+{"seats": [
+  {"after": "mooblox", "id": "<project>", "name": "<name>", "area": "<area>", "about": "<about>", "role": "po", "parent": "orchestrator", "wake": "pull", "match": "~/<folder>", "status": {"id": "paused", "since": "<date>"}}
+],
+ "floors": [
+  {"after": "operations", "id": "work", "name": "Work projects", "teams": ["<project>"], "deck": false}
+]}

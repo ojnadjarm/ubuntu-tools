@@ -27,7 +27,7 @@ test("rooms stand on the floor their team's line names, the rest on the main flo
   const M = build(withFloors(), { needs: false });
   const on = (f) => [M.ceo, ...M.rooms, ...M.staff].filter((r) => r && r.floor === f).map((r) => r.id).sort();
   assert.deepStrictEqual(on("discord"), ["discord", "mosaico", "team-discord-crew", "tiny-epic-narrator"]);
-  assert.deepStrictEqual(on(F.MAIN), ["mooblox", "orchestrator", "pool", "team-improvement", "team-operations", "team-quality", "team-unassigned", "vass"]);
+  assert.deepStrictEqual(on(F.MAIN), ["mooblox", "orchestrator", "pool", "team-improvement", "team-operations", "team-quality", "team-unassigned", "workproj"]);
   assert.deepStrictEqual(F.floors(withFloors()).map((f) => f.id), ["main", "discord"]);
 });
 

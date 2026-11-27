@@ -18,7 +18,7 @@ function four() {
   P.staff.push({ id: "discord-crew", name: "Discord Crew", members: [liaison] });
   P.floors = [
     { id: "operations", name: "Operations", teams: ["operations", "quality", "improvement"], rest: ["team"] },
-    { id: "projects", name: "Projects", teams: ["mooblox", "vass"], rest: ["po"] },
+    { id: "projects", name: "Projects", teams: ["mooblox", "workproj"], rest: ["po"] },
     { id: "discord", name: "Discord", teams: ["discord", "discord-crew"], head: "discord" },
     { id: "ceo", name: "CEO", teams: ["orchestrator"], head: "orchestrator" },
   ];
@@ -51,7 +51,7 @@ test("each floor holds its teams: Discord with its head, Projects, Operations wi
   const M = build(four(), { needs: false });
   assert.deepStrictEqual(on(M, "discord"), ["discord", "mosaico", "team-discord-crew", "tiny-epic-narrator"]);
   assert.strictEqual(F.view(M, "discord").ceo.id, "discord");
-  assert.deepStrictEqual(on(M, "projects"), ["mooblox", "vass"]);
+  assert.deepStrictEqual(on(M, "projects"), ["mooblox", "workproj"]);
   assert.strictEqual(F.view(M, "projects").ceo, null, "no head named: the raised office stays empty");
   assert.deepStrictEqual(on(M, "operations"), ["team-improvement", "team-operations", "team-quality", "team-unassigned"]);
   assert.deepStrictEqual(on(M, "ceo"), ["orchestrator", "pool"]);

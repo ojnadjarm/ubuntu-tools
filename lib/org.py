@@ -20,6 +20,41 @@ def path():
     return os.environ.get("ORG_FILE") or os.path.join(home, "org.json")
 
 
+def local_path():
+    """The machine's local seats and floors: $ORG_LOCAL_FILE, else org.local.json beside the harness config."""
+    cfg = os.environ.get("HARNESS_CONFIG") or os.path.expanduser("~/.config/pc-harness/config.env")
+    return os.environ.get("ORG_LOCAL_FILE") or os.path.join(os.path.dirname(cfg), "org.local.json")
+
+
+def local(key, p, env, read):
+    """The local records under key, only for a default read of this checkout's file or when $ORG_LOCAL_FILE is set."""
+    own = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), os.path.basename(read))
+    if p is not None or not (os.environ.get("ORG_LOCAL_FILE")
+                             or (not os.environ.get(env) and os.path.realpath(read) == os.path.realpath(own))):
+        return []
+    try:
+        with open(local_path()) as f:
+            return json.load(f).get(key, [])
+    except FileNotFoundError:
+        return []
+
+
+def merge(rows, extra):
+    """rows with each extra record in place of the same id, else after its `after` id, else last; `after` dropped."""
+    out = list(rows)
+    for r in extra:
+        r = dict(r)
+        after = r.pop("after", None)
+        ids = [x["id"] for x in out]
+        if r["id"] in ids:
+            out[ids.index(r["id"])] = r
+        elif after in ids:
+            out.insert(ids.index(after) + 1, r)
+        else:
+            out.append(r)
+    return out
+
+
 def _validate(seats):
     """Raise ValueError on the first problem in a seat list."""
     ids = {}
@@ -59,6 +94,7 @@ def seats(p=None):
     """The validated seats of the org file, in file order."""
     with open(p or path()) as f:
         out = json.load(f)["seats"]
+    out = merge(out, local("seats", p, "ORG_FILE", path()))
     _validate(out)
     return out
 

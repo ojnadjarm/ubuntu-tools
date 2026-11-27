@@ -16,7 +16,7 @@ function five() {
   const P = JSON.parse(JSON.stringify(BASE));
   P.floors = [
     { id: "operations", name: "Operations", teams: ["operations", "quality", "improvement"], rest: ["team"] },
-    { id: "work", name: "Work projects", teams: ["vass"], deck: false },
+    { id: "work", name: "Work projects", teams: ["workproj"], deck: false },
     { id: "personal", name: "Personal projects", teams: ["mooblox"], rest: ["po"], deck: false },
     { id: "discord", name: "Discord", teams: ["discord"], head: "discord" },
     { id: "ceo", name: "CEO", teams: ["orchestrator"], head: "orchestrator" },
@@ -47,7 +47,7 @@ test("a floor line has its raised office by default; deck false names the floor 
 test("Personal and Work floors hold their projects in bays and nobody in a raised office", async () => {
   const { build } = await load("office/model.js"), F = await load("office/floors.js"), P = five();
   const M = build(P, { needs: false });
-  for (const [f, id] of [["personal", "mooblox"], ["work", "vass"]]) {
+  for (const [f, id] of [["personal", "mooblox"], ["work", "workproj"]]) {
     const V = F.view(M, f, P);
     assert.strictEqual(V.deck, false, f);
     assert.strictEqual(V.ceo, null, f + ": no raised office");

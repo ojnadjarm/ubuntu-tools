@@ -92,7 +92,7 @@ async function screen(b, base, w, h) {
     assert.ok(await p.$eval(".office .stage canvas", (c) => c.classList.contains("hot")), "hover on a board: pointer cursor");
     ok(`${w}: the pointer over a board is a hand`);
   }
-  for (const [id, who] of [["team-quality", "team-quality"], ["room-vass", "room-vass"], ["pool", "pool"], ["sign-orchestrator", "orchestrator"]]) {
+  for (const [id, who] of [["team-quality", "team-quality"], ["room-workproj", "room-workproj"], ["pool", "pool"], ["sign-orchestrator", "orchestrator"]]) {
     if (w < 900) await p.touchscreen.tap(...m[id].page); else await p.mouse.click(...m[id].page);
     assert.strictEqual(await card(p), who, `${w}: ${id} opens the card of ${who}`);
     await p.keyboard.press("Escape");
