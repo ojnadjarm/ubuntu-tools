@@ -99,7 +99,7 @@ def add_seat(path, pid, name, parent):
     """Append the manager's org seat (one line, file style kept): a proper name, the project as its area; False when there."""
     with open(path) as f:
         text = f.read()
-    seats = json.loads(text)['seats']
+    seats = json.loads(text)['seats'] + org.local('seats', None, 'ORG_FILE', path)
     if any(s['id'] == pid for s in seats):
         return False
     seat = {'id': pid, 'name': org.proper_name(pid, [s['name'] for s in seats]), 'area': name, 'role': 'manager', 'parent': parent, 'wake': 'po-inbox',

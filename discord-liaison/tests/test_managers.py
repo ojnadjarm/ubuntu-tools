@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import unittest
 from unittest import mock
 
@@ -250,6 +251,30 @@ class TestManagers(Base):
         self.assertIn('ESCALATE:` goes to po-r', brief)
         self.assertTrue(os.path.exists(os.path.join(self.tmp.name, 'work', 'decisions', 'ten.md')))
         self.assertEqual(managers.make('nope', dict(self.env)), 2)
+
+
+class TestAddSeat(unittest.TestCase):
+    """T2017-5: add_seat counts the machine's local seats for the id check and the taken names."""
+
+    def test_local_seat_blocks_its_id_and_its_name(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path, loc = os.path.join(tmp.name, 'org.json'), os.path.join(tmp.name, 'org.local.json')
+        seats = [{'id': 'ceo', 'name': 'Bramble', 'role': 'ceo', 'parent': None, 'wake': 'channel', 'match': 'x'}]
+        with open(path, 'w') as f:
+            f.write('{"seats": [\n  ' + json.dumps(seats[0]) + '\n]}\n')
+        taken = managers.org.proper_name('newproj', ['Bramble'])
+        with open(loc, 'w') as f:
+            json.dump({'seats': [{'id': 'acme', 'name': taken, 'role': 'manager', 'parent': 'ceo'}]}, f)
+        with mock.patch.dict(os.environ, {'ORG_LOCAL_FILE': loc}):
+            self.assertTrue(managers.add_seat(path, 'newproj', 'New Proj', 'ceo'))
+            with open(path) as f:
+                before = f.read()
+            new = next(s for s in json.loads(before)['seats'] if s['id'] == 'newproj')
+            self.assertNotEqual(new['name'], taken)
+            self.assertFalse(managers.add_seat(path, 'acme', 'Acme', 'ceo'))
+            with open(path) as f:
+                self.assertEqual(f.read(), before)
 
 
 class TestLanguage(unittest.TestCase):
