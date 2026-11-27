@@ -53,6 +53,10 @@ class Http(unittest.TestCase):
         r = self.conn.getresponse()
         return r, r.read()
 
+    def test_listen_backlog_above_default(self):
+        for cls in (server.Server, server.Server6):
+            self.assertGreaterEqual(cls.request_queue_size, 128, cls.__name__)
+
     def test_gzip_static_and_api(self):
         for path in ("/static/eye.css", "/api/ls"):
             r, body = self.get(path, **{"Accept-Encoding": "gzip"})

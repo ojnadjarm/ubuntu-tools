@@ -169,6 +169,7 @@ class Handler(BaseHTTPRequestHandler):
 class Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+    request_queue_size = 128
 
     def handle_error(self, request, client_address):
         """A client that hung up ends its request quietly; anything else keeps the traceback."""
