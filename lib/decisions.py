@@ -3,13 +3,12 @@ import os
 import re
 
 import memory_store
-from agent_work import agent_work
+from agent_work import _key, agent_work
 
 PROJECTS = {
     "fleet": re.compile(r"\bfleet\b|\bubuntu-tools\b|~/agents/(?:bin|lib|KB|adapters)/", re.I),
     "ailearning": re.compile(r"\bai[- ]?learning\b|\blessons?\b|\bsheets? \d+\b|\bU\d\d\b", re.I),
     "portfolio": re.compile(r"\bportfolio\b", re.I),
-    "vass": re.compile(r"\bvass\b", re.I),
 }
 DIGEST_CHARS = 1200
 
@@ -29,9 +28,14 @@ def path(name):
     return old if (os.path.isfile(old) and not os.path.islink(old)) or not os.path.isfile(new) else new
 
 
+def projects():
+    """PROJECTS plus one entry per protected project name ($PROTECTED_PROJECTS, else its config.env line)."""
+    return dict(PROJECTS, **{n: re.compile(rf"\b{re.escape(n)}\b", re.I) for n in _key("PROTECTED_PROJECTS").split()})
+
+
 def named(text):
-    """Projects the text names, in PROJECTS order."""
-    return [n for n, rx in PROJECTS.items() if rx.search(text or "")]
+    """Projects the text names, in projects() order."""
+    return [n for n, rx in projects().items() if rx.search(text or "")]
 
 
 def unreferenced(text):

@@ -384,7 +384,7 @@ os.makedirs(f"{root}/agents/KB")
 open(f"{root}/aw/decisions/ailearning.md", "w").write("# ledger\n" + "".join(
     f'- 2026-10-{i:02d} · Decision number {i} keeps the sheet as it is, padded to look like a real ledger row · "quote {i}"\n'
     for i in range(1, 31)))
-open(f"{root}/aw/decisions/vass.md", "w").write('- 2026-10-06 · No git writes in his checkout · (owner)\n')
+open(f"{root}/aw/decisions/acme.md", "w").write('- 2026-10-06 · No git writes in his checkout · (owner)\n')
 open(f"{root}/agents/KB/DECISIONS.md", "w").write('- 2026-09-07 · Never push · "never again"\n')
 spawn(("tu6", "worker", "T396 ailearning sheet fix"))
 dt = ctx_of(hook("start", {"agent_id": "dc0001aaaaaaaaaa", "transcript_path": TP4, "agent_type": "worker"})).get("additionalContext", "")
@@ -392,14 +392,19 @@ dg = dt[dt.find("Owner decisions for ailearning"):]
 check(f"decisions: a description naming a project gets its ledger, quotes cut, <= 300 tokens ({len(dg) // 4} est.)",
       "- 2026-10-01 · Decision number 1 keeps the sheet" in dg and '"quote' not in dg and 0 < len(dg) <= 1200)
 check("decisions: a long ledger ends with a pointer to the rest", "more in " + f"{root}/aw/decisions/ailearning.md)" in dg)
-spawn(("tu7", "worker", "vass fleet check"))
-dv = ctx_of(hook("start", {"agent_id": "dc0002aaaaaaaaaa", "transcript_path": TP4, "agent_type": "worker"})).get("additionalContext", "")
+spawn(("tu7", "worker", "acme fleet check"))
+dv = ctx_of(hook("start", {"agent_id": "dc0002aaaaaaaaaa", "transcript_path": TP4, "agent_type": "worker"},
+                 dict(ENV, PROTECTED_PROJECTS="acme"))).get("additionalContext", "")
 check("decisions: every named project is handed over", "No git writes in his checkout" in dv and "Never push" in dv
       and "ailearning" not in dv)
+spawn(("tu9", "worker", "acme fleet check"))
+dn = ctx_of(hook("start", {"agent_id": "dc0004aaaaaaaaaa", "transcript_path": TP4, "agent_type": "worker"},
+                 {**{k: v for k, v in ENV.items() if k != "PROTECTED_PROJECTS"}, "HARNESS_CONFIG": f"{root}/none.env"})).get("additionalContext", "")
+check("decisions: with no protected project the name hands no ledger", "No git writes in his checkout" not in dn and "Never push" in dn)
 spawn(("tu8", "worker", "zzz qqq"))
 check("decisions: no project and no guide prints nothing",
       hook("start", {"agent_id": "dc0003aaaaaaaaaa", "transcript_path": TP4, "agent_type": "worker"}) == "")
-for a in ("dc0001", "dc0002", "dc0003"):
+for a in ("dc0001", "dc0002", "dc0003", "dc0004"):
     hook("stop", {"agent_id": a + "aaaaaaaaaa", "transcript_path": TP4})
 
 TP5 = f"{PROJ}/sess5.jsonl"
