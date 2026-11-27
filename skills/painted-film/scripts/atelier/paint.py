@@ -6,10 +6,10 @@ import numpy as np
 
 from .anchor import NEAR, mix, unit
 
-DEFAULTS = {"max_px": 64.0, "size": 1.4, "aspect": 2.5, "broken": 0.0}
+# colour_levels: the colour taps read the reference 2^n coarser than their spacing (A4: 2, its noise moves whole strokes)
+DEFAULTS = {"max_px": 64.0, "size": 1.4, "aspect": 2.5, "broken": 0.0, "colour_levels": 2.0}
 EPS_W = 0.05  # weight of the plain tap mean when no tap shares the seed's ident
 MIN_OPACITY = 1e-3
-COLOUR_LEVELS = 2  # colour taps read the reference 4x coarser than their spacing: its noise moves whole strokes
 LO = 0.75  # the seed's plane depth at a tap is kept within [LO, 2] times its own depth (grazing planes)
 REACH = 8  # ref px: the window of the hidden pre-test
 
@@ -44,6 +44,7 @@ class Strokes:
     z: np.ndarray  # (k,) f32 view depth, m
     layer: np.ndarray  # (k,) u8, the octave
     order: np.ndarray  # (k,) u64, the seed id
+    zg: np.ndarray  # (k, 2) f32: d(1/z)/d(x, y) per px, the stroke's plane on the picture (A5, the depth test)
 
 
 def _bilinear(img, u, v):
@@ -133,11 +134,14 @@ def solve(ref, seeds, look, size) -> Strokes:
     k = np.nonzero(opacity > MIN_OPACITY)[0]
     k = k[np.lexsort((sid[k], octave[k]))]
     pyr = _pyramid(np.clip(ref.lit, 0.0, 1.0))  # display range: an emitter (lit 60) must not flood its neighbours
-    col = _sample(pyr, tu[k], tv[k], (np.log2(np.maximum(ts[k], 1.0)) + COLOUR_LEVELS)[:, None] * np.ones((len(k), 9)))
+    col = _sample(pyr, tu[k], tv[k], (np.log2(np.maximum(ts[k], 1.0)) + lk["colour_levels"])[:, None] * np.ones((len(k), 9)))
     c1 = ((same[k, :, None] * col).sum(1) + EPS_W * col.mean(1)) / (same[k].sum(1) + EPS_W)[:, None]
     jit = 2.0 * unit(mix(sid[k, None], np.arange(3)[None, :])) - 1.0
     c2 = c1 * (1.0 + lk["broken"] * jit)
     f32 = lambda a: a[k].astype(np.float32)
+    with np.errstate(divide="ignore", invalid="ignore"):  # 1/z on the plane n.X = num is linear in the picture
+        zg = np.column_stack([n[:, 0], -n[:, 1]]) * (sr / fr) / num[:, None]
+    zg = np.where(np.isfinite(zg) & (np.abs(num) > 1e-9)[:, None], zg, 0.0)
     return Strokes(f32((xr + 0.5) / sr - 0.5), f32((yr + 0.5) / sr - 0.5), f32(ang), f32(length), f32(width),
                    ((sid[k] >> np.uint64(8)) & np.uint64(255)).astype(np.uint8), c1.astype(np.float32), c2.astype(np.float32), f32(opacity),
-                   f32(z), octave[k].astype(np.uint8), sid[k].astype(np.uint64))
+                   f32(z), octave[k].astype(np.uint8), sid[k].astype(np.uint64), f32(zg))
