@@ -61,4 +61,13 @@ out=$(mr)
 grep -q 'boot-check' <<<"$out" && nok 'all-OK boot-check does not refuse' "$out" || ok 'all-OK boot-check does not refuse'
 grep -q 'shutdown' "$CALLS" && nok 'no shutdown reached' "$(cat "$CALLS")" || ok 'no shutdown reached'
 
+# 4. EYE_RETIRED=1 (T2041): the Eye's body down is no row, so it neither fails nor refuses a reboot.
+stub systemctl 'case "$*" in *dark-eye*) exit 3 ;; esac; exit 0'
+out=$(bc)
+has 'live Eye down is a FAIL row' "$out" '^FAIL dark-eye body$'
+printf 'EYE_RETIRED=1\n' >>"$HARNESS_CONFIG"
+out=$(bc); rc=$?
+is 'retired Eye down exits 0' "$rc" 0
+grep -q 'dark-eye' <<<"$out" && nok 'retired Eye has no row' "$out" || ok 'retired Eye has no row'
+
 exit $bad

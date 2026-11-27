@@ -3,6 +3,7 @@
 Ticket: T280 · Last verified: 2026-10-20 (T846) by paths, links, `install.sh` usage and source constants (poll 50 s, bus MAX 200, 0.5 s spool poll), no test run; 2026-10-07 by `~/the-dark-eye/bridge/relay/tests/run.sh` (7/7 files, installer sandbox 21/21) and a live switch
 
 ## When to use
+The Eye is retired 2026-11-28 by the owner; bring back: enable the two units (`dark-eye.service`, `eye-relay.service`) and drop `EYE_RETIRED=1` from config.env (T2041).
 Installing the voice channel on a box, adding a brain, or moving its files. Not for the body itself (`bridge/install.sh`).
 
 ## The path we took

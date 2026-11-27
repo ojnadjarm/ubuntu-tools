@@ -25,7 +25,7 @@ check "linger enabled" grep -qx 'Linger=yes' <(loginctl show-user "$USER" -p Lin
 check "tailscale up" tailscale status --peers=false
 check "ssh service" systemctl is-active --quiet ssh
 check "ydotoold service" systemctl is-active --quiet ydotoold
-check "dark-eye body" systemctl --user is-active --quiet dark-eye
+[ "${EYE_RETIRED:-0}" = 1 ] || check "dark-eye body" systemctl --user is-active --quiet dark-eye
 
 # The overview opens itself after every login and swallows the first click.
 gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell \

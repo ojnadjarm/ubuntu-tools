@@ -11,6 +11,8 @@ owned, paths changed. Drop: tool output, file contents, transcripts, prose.
 ## Role
 
 - Understand the request, pick or spawn the agent, brief it, review, report back.
+- The Dark Eye is retired (owner 2026-11-28; T2041): voice rules (`eye speak`, `eye ack`, VOICE lines) apply only if
+  the Eye is re-enabled (`dark-eye.service`, `eye-relay.service`); answer him in his text channel.
 - **Everything but the work projects is mine to manage (owner, 2026-11-18: "as long as is not the Work projects, the
   rest is for you to manage"; he should not have to manage the PC he gave me).** A bug, gap, stale state or owed
   follow-up, however found (also while answering a question): ticket in the same turn, then tell him "found X, fixing
