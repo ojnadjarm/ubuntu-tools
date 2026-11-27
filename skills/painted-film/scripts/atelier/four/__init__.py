@@ -6,7 +6,7 @@ import zlib
 
 import numpy as np
 
-from ..anchor import NEAR, _cull, _normals, _seeds, _tangent_rule, concat, level, mix, split, unit
+from ..anchor import CREASE_COS, MARK, NEAR, _cull, _normals, _seeds, _tangent_rule, concat, creases, level, mix, split, unit
 from ..scene import Mesh, ident_of
 from . import slicer
 
@@ -19,6 +19,7 @@ TET_C = np.array([[0, 1, 2, 2], [0, 1, 1, 2], [0, 0, 1, 2]])  # each tet's corne
 TET_K = np.array([[0, 0, 0, 1], [0, 0, 1, 1], [0, 1, 1, 1]], bool)  # on key k (False) or k+1 (True)
 CHUNK = 3_000_000  # line nodes evaluated at once
 EMERGE = 0.1  # how far (m along the slice's normal) the slice moves past a line's turn while its new strokes fade in
+CREASE_RAMP = 0.1  # a crease's marks fade in as the cosine of its faces' angle falls from CREASE_COS + this to CREASE_COS - this
 
 
 def _area(Q):
@@ -47,8 +48,9 @@ class SeedBank4D:
     its face is a line through the body along the sweep, and it lands where the slice cuts that line (one stroke per
     crossing; the n-th monotone run of the line across the slice adds n to the id)."""
 
-    def __init__(self, body, material, ident, direction, rho0, seed, octaves=8, max_edge=0.5):
+    def __init__(self, body, material, ident, direction, rho0, seed, octaves=8, max_edge=0.5, mark_width=0.02):
         self.body, self.rho0, self.octaves, self.material = body, float(rho0), int(octaves), int(material)
+        self.mark_width = float(mark_width)
         self.seed = int(seed) & 0xFFFFFFFFFFFFFFFF
         c0, perm, step, K, tet0, mp, rest = [], [], [], [], [], [], []
         P = body.P
@@ -86,11 +88,14 @@ class SeedBank4D:
         self.pk = np.arange(len(self.pface)) - np.repeat(np.cumsum(nseg) - nseg, nseg)
         self.koff = np.cumsum(self.K) - self.K
         self.nkey = self._key_normals()
+        self._crease_lines(max_edge)
 
     def _key_normals(self):
         """A 4D normal per face and key: the mean of the face's tets on either side of the key. Lerped along the
-        sweep it turns smoothly where the cut's facets do not (level and stroke direction read it)."""
+        sweep it turns smoothly where the cut's facets do not (level and stroke direction read it). Keeps each tet's
+        unit normal (self.tn, indexed like body.N): a seed's normal reads it instead of solving its tet again."""
         out = np.zeros((int(self.K.sum()), 4))
+        self.tn = np.zeros((len(self.body.T), 4))
         for a in range(0, len(self.pface), 200_000):
             f, k = self.pface[a:a + 200_000], self.pk[a:a + 200_000]
             lo = np.take_along_axis(self.c0[f], self.perm[f], 1) + (k * self.step[f])[:, None]
@@ -98,8 +103,10 @@ class SeedBank4D:
             for j in range(3):
                 c = np.where(TET_K[j], hi[:, TET_C[j]], lo[:, TET_C[j]])
                 m = _normal4(self.body.P[c])
-                m *= np.where((m * self.body.N[self.tet0[f] + (3 * k + j) * self.m[f]]).sum(1) < 0, -1.0, 1.0)[:, None]
+                tet = self.tet0[f] + (3 * k + j) * self.m[f]
+                m *= np.where((m * self.body.N[tet]).sum(1) < 0, -1.0, 1.0)[:, None]
                 m = _unit(m, 0.0)
+                self.tn[tet] = m
                 np.add.at(out, self.koff[f] + k, m)
                 np.add.at(out, self.koff[f] + k + 1, m)
         return _unit(out, 0.0)
@@ -166,6 +173,127 @@ class SeedBank4D:
         o = np.lexsort((k * 3 + j, row))
         return row[o], k[o], j[o], s[o], run[o], fade[o]
 
+    def _point(self, f, b, k, s):
+        """The 4D point at place s between keys k and k+1 of the line (face f, barycentrics b), and the face's corners
+        at both keys."""
+        c_lo = self.c0[f] + (k * self.step[f])[:, None]
+        c_hi = c_lo + self.step[f][:, None]
+        bs = np.take_along_axis(b, self.perm[f], 1)
+        lo_s = np.column_stack([bs[:, 1] + bs[:, 2], bs[:, 2], np.zeros(len(f))])
+        mv = np.clip(s[:, None] - lo_s, 0.0, bs)
+        sc_lo, sc_hi = np.take_along_axis(c_lo, self.perm[f], 1), np.take_along_axis(c_hi, self.perm[f], 1)
+        P4 = self.body.P
+        X = np.einsum("kv,kvd->kd", bs - mv, P4[sc_lo]) + np.einsum("kv,kvd->kd", mv, P4[sc_hi])
+        return X, c_lo, c_hi
+
+    def _crease_lines(self, max_edge):
+        """The swept edges where two recipe faces meet at an angle at some key (ridges of the 4D body), cut into
+        pieces no longer than max_edge at their longest: each crease (f1, f2), the corner of f1 it starts at, its
+        end points at key 0, and its (edge, key) rows."""
+        P, ef, kc, ev, rl, foff = self.body.P, [], [], [], [], 0
+        for p in self.body.parts:
+            F = np.asarray(p.F, np.int64)
+            keys = np.stack([P[p.p0 + k * p.n:p.p0 + (k + 1) * p.n, :3] for k in range(p.K)])
+            rest = int(np.argmax([_area(q[F]).sum() for q in keys]))
+            e, f2, _ = creases(keys[rest], F, 2.0)  # every edge of two faces, welded at the rest key
+            cos = np.stack([(n[f2[:, 0]] * n[f2[:, 1]]).sum(1) for n in (_normals(q[F])[2] for q in keys)])
+            keep = cos.min(0) < CREASE_COS + CREASE_RAMP
+            e, f2 = e[keep], f2[keep]
+            kc.append(np.argmax(F[f2[:, 0]] == e[:, :1], axis=1))
+            ef.append(f2 + foff)
+            ev.append(p.p0 + e)
+            rl.append(np.linalg.norm(keys[:, e[:, 1]] - keys[:, e[:, 0]], axis=2).max(0) if len(e) else np.zeros(0))
+            foff += len(F)
+        cat = lambda a, dt, shape: np.concatenate(a).astype(dt) if a else np.zeros(shape, dt)
+        self.ef, self.ek, self.ev, rl = cat(ef, np.int64, (0, 2)), cat(kc, np.int64, 0), cat(ev, np.int64, (0, 2)), cat(rl, float, 0)
+        n = np.maximum(np.ceil(rl / max_edge).astype(np.int64), 1)
+        self.me = np.repeat(np.arange(len(n)), n)
+        i = np.arange(len(self.me)) - np.repeat(np.cumsum(n) - n, n)
+        self.ms = np.column_stack([i, i + 1]) / n[self.me, None]
+        self.mr = 0.5 * rl[self.me] / n[self.me]  # a piece's half length at its longest
+        self.mfirst = np.r_[0, np.cumsum(n)]
+        nseg = np.maximum(self.K[self.ef[:, 0]] - 1, 0) if len(self.ef) else np.zeros(0, np.int64)
+        self.qe = np.repeat(np.arange(len(nseg)), nseg)
+        self.qk = np.arange(len(self.qe)) - np.repeat(np.cumsum(nseg) - nseg, nseg)
+
+    def marks(self, sl, cam, px_per_stroke):
+        """Mark seeds where the slice cuts the creases' lines (SeedBank's rules): octave j holds sqrt(rho0) * 2^j a metre
+        of the crease at its longest; kind 1 on a convex crease (a lit edge), 2 on a concave one (a joint); a crease
+        fades in as its faces turn to an angle, and a crossing born where its line touches the slice over EMERGE."""
+        if not len(self.qe):
+            return _seeds([], self.material)
+        P4 = self.body.P
+        d = (P4 - sl.o) @ sl.n
+        W, H = cam.size
+        mg, fl, rho = W / 8, cam.lens_mm / cam.sensor_mm * W, np.sqrt(self.rho0)
+        step = self.step[self.ef[self.qe, 0]]
+        a = self.ev[self.qe] + (self.qk * step)[:, None]
+        dd = np.concatenate([d[a], d[a + step[:, None]]], 1)
+        live = np.nonzero((dd.min(1) < 0) & (dd.max(1) >= 0))[0]
+        e, k = self.qe[live], self.qk[live]
+        cnt = self.mfirst[e + 1] - self.mfirst[e]
+        row = np.repeat(np.arange(len(e)), cnt)
+        piece = np.repeat(self.mfirst[e], cnt) + np.arange(cnt.sum()) - np.repeat(np.cumsum(cnt) - cnt, cnt)
+        u = self.ms[piece]
+        lo = a[live][row]
+        hi = lo + step[live][row][:, None]
+        Q = sl.to3(np.stack([(1 - u[:, i:i + 1]) * P4[c[:, 0]] + u[:, i:i + 1] * P4[c[:, 1]]
+                             for c in (lo, hi) for i in (0, 1)], 1))
+        keep, _ = _cull(Q, cam, px_per_stroke, self.rho0)
+        c = Q.mean(1)
+        R = np.linalg.norm(Q - c[:, None], axis=2).max(1)
+        near = np.maximum(np.linalg.norm(c - cam.pos, axis=1) - R, NEAR)
+        top = np.log2(fl * np.hypot(fl, 0.5 * np.hypot(W, H)) / fl / (near * px_per_stroke) / rho)
+        best = np.full(len(self.me), -np.inf)
+        np.maximum.at(best, piece[keep], top[keep])
+        pieces = np.nonzero(best > -np.inf)[0]
+        top = best[pieces]
+        out = []
+        for j in range(2 * self.octaves):
+            sel = pieces[top >= j - 1]
+            if not len(sel):
+                break
+            n = np.floor(2.0 * self.mr[sel] * rho * 2.0 ** j + unit(mix(self.seed, MARK, sel, j, 0xC0))).astype(np.int64)
+            rep = np.repeat(sel, n)
+            if not len(rep):
+                continue
+            ids = mix(self.seed, MARK, rep, j, np.arange(len(rep)) - np.repeat(np.cumsum(n) - n, n))
+            e = self.me[rep]
+            s = self.ms[rep, 0] + unit(mix(ids, 1)) * (self.ms[rep, 1] - self.ms[rep, 0])
+            f1, kc = self.ef[e, 0], self.ek[e]
+            beta = np.zeros((len(rep), 3))
+            beta[np.arange(len(rep)), kc] = 1 - s
+            beta[np.arange(len(rep)), (kc + 1) % 3] = s
+            r, kk, _, sk, run, fade = self._crossings(f1, beta, d)
+            if not len(r):
+                continue
+            e, f1, kc = e[r], f1[r], kc[r]
+            ids = np.where(run == 0, ids[r], mix(ids[r], run))
+            X, c_lo, c_hi = self._point(f1, beta[r], kk, sk)
+            P = sl.to3(X)
+            at_s = lambda f: sl.to3((1 - sk)[:, None, None] * P4[c_lo - self.c0[f1] + self.c0[f]]
+                                    + sk[:, None, None] * P4[c_hi - self.c0[f1] + self.c0[f]])  # a face at s, its order
+            t1, t2 = at_s(f1), at_s(self.ef[e, 1])
+            N1, N2 = (_normals(t)[2] for t in (t1, t2))
+            for Nf, f in ((N1, f1), (N2, self.ef[e, 1])):  # outward, by the hint of the face's first tet at key k
+                Nf *= np.where((Nf * (self.body.N[self.tet0[f] + 3 * kk * self.m[f]] @ sl.E.T)).sum(1) < 0, -1.0, 1.0)[:, None]
+            Ne = _unit(N1 + N2, N1)
+            D = t1[np.arange(len(r)), (kc + 1) % 3] - t1[np.arange(len(r)), kc]
+            Dl = np.linalg.norm(D, axis=1)
+            convex = ((t2.mean(1) - t1.mean(1)) * N1).sum(1) < 0
+            xy, z = cam.project(P)
+            L = np.log2(fl / (np.maximum(z, NEAR) * px_per_stroke) / rho)
+            view = _unit(cam.pos - P, 0.0)
+            front = np.maximum((N1 * view).sum(1), (N2 * view).sum(1))
+            angle = np.clip((CREASE_COS + CREASE_RAMP - (N1 * N2).sum(1)) / (2 * CREASE_RAMP), 0.0, 1.0)
+            op = ((np.ones(len(P)) if j == 0 else np.clip(L - j + 1, 0.0, 1.0)) * np.clip((front + 0.05) / 0.2, 0.0, 1.0)
+                  * angle * fade)
+            ok = (z > NEAR) & (op > 0) & (xy[:, 0] > -mg) & (xy[:, 0] < W + mg) & (xy[:, 1] > -mg) & (xy[:, 1] < H + mg)
+            out.append((ids[ok], P[ok], Ne[ok], D[ok] / np.maximum(Dl[ok], 1e-12)[:, None], np.full(ok.sum(), j),
+                        self.ident[f1[ok]], op[ok], px_per_stroke * 2.0 ** (L[ok] - j), np.where(convex[ok], 1, 2),
+                        np.full(ok.sum(), self.mark_width), Dl[ok]))
+        return _seeds(out, self.material)
+
     def place(self, sl, cam, px_per_stroke):
         """The seeds the view can need, where the slice sl cuts their lines (same rules as SeedBank.place)."""
         P4 = self.body.P
@@ -193,23 +321,16 @@ class SeedBank4D:
             row, k, j, s, run, fade = self._crossings(face, beta, d)
             if not len(row):
                 continue
-            f, b = face[row], beta[row]
+            f = face[row]
             ids = np.where(run == 0, ids[row], mix(ids[row], run))
-            c_lo = self.c0[f] + (k * self.step[f])[:, None]
-            c_hi = c_lo + self.step[f][:, None]
-            bs = np.take_along_axis(b, self.perm[f], 1)
-            lo_s = np.column_stack([bs[:, 1] + bs[:, 2], bs[:, 2], np.zeros(len(f))])
-            mv = np.clip(s[:, None] - lo_s, 0.0, bs)
-            sc_lo, sc_hi = np.take_along_axis(c_lo, self.perm[f], 1), np.take_along_axis(c_hi, self.perm[f], 1)
-            X = np.einsum("kv,kvd->kd", bs - mv, P4[sc_lo]) + np.einsum("kv,kvd->kd", mv, P4[sc_hi])
+            X, c_lo, c_hi = self._point(f, beta[row], k, s)
             P = sl.to3(X)
             tri = sl.to3((1 - s)[:, None, None] * P4[c_lo] + s[:, None, None] * P4[c_hi])  # the face at s, its order
             e1, e2 = tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0]
             nf = np.cross(e1, e2)
-            corners = np.where(TET_K[j], np.take_along_axis(sc_hi, TET_C[j], 1), np.take_along_axis(sc_lo, TET_C[j], 1))
-            m4 = _normal4(P4[corners])
-            hint = self.body.N[self.tet0[f] + (3 * k + j) * self.m[f]] @ sl.E.T
-            N = m4 @ sl.E.T
+            tet = self.tet0[f] + (3 * k + j) * self.m[f]
+            hint = self.body.N[tet] @ sl.E.T
+            N = self.tn[tet] @ sl.E.T
             N *= np.where((N * hint).sum(1) < 0, -1.0, 1.0)[:, None]
             N = _unit(N, _unit(nf, _unit(hint, np.array([0.0, 0.0, 1.0]))))
             key = self.koff[f] + k
@@ -281,7 +402,7 @@ class Scene4D:
         return out + (self.residents.meshes(t) if self.residents is not None else [])
 
     def seeds(self, t, cam, px_per_stroke):
-        """Seeds of every body where the slice cuts their lines, and the residents' own."""
+        """Seeds and marks of every body where the slice cuts their lines, and the residents' own."""
         if not hasattr(self, "_banks"):
             mats = sorted(self.materials)
             self._banks = {}
@@ -291,7 +412,7 @@ class Scene4D:
                                                    self._ident(name, b.attrs, len(b.P)), self.direction.get(name, "course"),
                                                    self.rho0, zlib.crc32(name.encode()), self.octaves)
         sl = self.slice_at(t)
-        parts = [bank.place(sl, cam, px_per_stroke) for bank in self._banks.values()]
+        parts = [p for bank in self._banks.values() for p in (bank.place(sl, cam, px_per_stroke), bank.marks(sl, cam, px_per_stroke))]
         if self.residents is not None:
             parts.append(self.residents.seeds(t, cam, px_per_stroke))
         return concat(parts)

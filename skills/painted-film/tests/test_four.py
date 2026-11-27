@@ -9,7 +9,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "scripts"))
 sys.path.insert(0, HERE)
 
-from atelier.anchor import SeedBank  # noqa: E402
+from atelier.anchor import SeedBank, creases  # noqa: E402
 from atelier.four import Scene4D, SeedBank4D  # noqa: E402
 from atelier.four import slicer as S  # noqa: E402
 from atelier.paint import solve  # noqa: E402
@@ -226,6 +226,106 @@ class Place(unittest.TestCase):
         ref = flat_ref(cam, [(10.0, -4, 4, -4, 4, 7, lambda x, z: np.stack([0.3 + 0.05 * x, 0.4 + 0.04 * z, 0.5 + 0 * x], -1))])
         pics = [DiscMedium().composite(solve(ref, s, LOOK, SIZE), ref, LOOK, SIZE).astype(int) for s in (three, four)]
         self.assertLessEqual(np.abs(pics[0] - pics[1]).max(), 1)
+
+
+def step_wall():
+    """A wall with a step back: a lit edge (convex) and a joint (concave), both 8 m long."""
+    V = np.array([[-4, 10, -4], [0, 10, -4], [0, 10, 4], [-4, 10, 4], [0, 11, -4], [4, 11, -4], [4, 11, 4], [0, 11, 4]], float)
+    F = np.array([[0, 1, 2], [0, 2, 3], [1, 4, 7], [1, 7, 2], [4, 5, 6], [4, 6, 7]])
+    return V, F
+
+
+def bent_box():
+    """A box swept along a path that bends through w and back."""
+    V, F = S.box([-1, -1, -1], [1, 1, 1])
+    s = np.linspace(0, np.pi, 41)
+    return S.tube(np.column_stack([1.6 * np.cos(s), 0 * s, 0 * s, 1.6 * np.sin(s)]), np.full(41, 0.4), V, F)
+
+
+def marks(body, sl, px=6.0, rho0=4.0, cam=CAM):
+    return SeedBank4D(body, 2, 5, "course", rho0, 9).marks(sl, cam, px)
+
+
+def seg_dist(P, A, B):
+    """Distance of each point to the nearest segment (A, B)."""
+    AB = B - A
+    t = np.clip(((P[:, None] - A) * AB).sum(2) / np.maximum((AB * AB).sum(1), 1e-30), 0, 1)
+    return np.linalg.norm(P[:, None] - A - t[..., None] * AB, axis=2).min(1)
+
+
+class Marks(unittest.TestCase):
+    def test_mark_on_cut_crease(self):
+        """Every mark seed lies on a crease of the cut mesh within 1e-4 m, kind 1 on a convex body's edges."""
+        for body, sl in ((tread(), S.Slice(1.5)), (twisted(), S.Slice(0.37)), (tread(), S.Slice(0.7, 0.2)),
+                         (twisted(), S.Slice(-0.6, 0.3, axis=1)), (bent_box(), S.Slice(1.0))):
+            s = marks(body, sl)
+            V, F, _ = S.cut(body, sl)
+            ev, _, _ = creases(V, F)
+            self.assertGreater(len(s.id), 50)
+            self.assertEqual(len(np.unique(s.id)), len(s.id))
+            self.assertLess(seg_dist(s.P, V[ev[:, 0]], V[ev[:, 1]]).max(), 1e-4)
+            self.assertTrue((s.kind == 1).all())
+            self.assertTrue(finite(s) and ((s.opacity > 0) & (s.opacity <= 1)).all())
+            self.assertTrue((s.width_m > 0).all() and (s.length_m > 0).all())
+
+    def test_mark_follows_slide(self):
+        """A tesseract sliding in w: its marks stay put; a cube turning with w: each mark's 3D place is continuous."""
+        a = marks(tesseract(), S.Slice(-0.5))
+        self.assertGreater(len(a.id), 50)
+        for w in np.linspace(-0.49, 0.5, 12):
+            b = marks(tesseract(), S.Slice(w))
+            np.testing.assert_array_equal(a.id, b.id)
+            np.testing.assert_allclose(a.P, b.P, atol=1e-12)
+        prev = marks(twisted(), S.Slice(0.2))
+        for w in np.arange(0.201, 0.21, 0.001):
+            cur = marks(twisted(), S.Slice(w))
+            common, ia, ib = np.intersect1d(prev.id, cur.id, return_indices=True)
+            self.assertGreater(len(common), 0.95 * len(prev.id))
+            self.assertLess(np.linalg.norm(cur.P[ib] - prev.P[ia], axis=1).max(), 0.002)
+            self.assertLess(np.abs(cur.opacity[ib] - prev.opacity[ia]).max(), 0.05)
+            prev = cur
+
+    def test_new_crease_fades_in(self):
+        """A slice coming down onto the top of a bent box: where a crease's line first touches the slice its marks are
+        born faint and grow in as the slice moves on."""
+        cam = Camera.aim([0.0, -6.0, 0.5], [0.0, 0.0, 0.0], 0.0, 30.0, SIZE)
+        prev, born = marks(bent_box(), S.Slice(2.4), 6.0, 4.0, cam), 0
+        for w in np.arange(2.39, 1.6, -0.01):
+            cur = marks(bent_box(), S.Slice(w), 6.0, 4.0, cam)
+            new = ~np.isin(cur.id, prev.id)
+            born += new.sum()
+            if new.any():
+                self.assertLess(cur.opacity[new].max(), 0.2, w)
+            prev = cur
+        self.assertGreater(born, 50)
+
+    def test_marks_w_constant_equal_3d(self):
+        """A body that does not change along w gives the 3D seed bank's marks: lit edge and joint, and the same picture."""
+        V, F = step_wall()
+        cam = Camera.aim([-1.5, 2.0, 0.0], [-0.5, 10.0, 0.0], 0.0, 36.0, SIZE)
+        three = SeedBank(V, F, 3, 7, "course", 0.5, 11).marks(V, cam, 8.0)
+        four = SeedBank4D(S.loft([V, V], [-5.0, 5.0], F), 3, 7, "course", 0.5, 11).marks(S.Slice(0.3), cam, 8.0)
+        self.assertGreater(len(three.id), 50)
+        self.assertEqual(set(three.kind), {1, 2})
+        np.testing.assert_array_equal(three.id, four.id)
+        for k in ("octave", "material", "ident", "kind"):
+            np.testing.assert_array_equal(getattr(three, k), getattr(four, k), k)
+        for k in ("P", "N", "T", "opacity", "px", "width_m", "length_m"):
+            np.testing.assert_allclose(getattr(three, k), getattr(four, k), atol=1e-6, err_msg=k)
+        colour = lambda x, z: np.stack([0.3 + 0.05 * x, 0.4 + 0.04 * z, 0.5 + 0 * x], -1)
+        ref = flat_ref(cam, [(10.0, -4, 0, -4, 4, 7, colour), (11.0, 0, 4, -4, 4, 7, colour)])
+        strokes = [solve(ref, s, LOOK, SIZE) for s in (three, four)]
+        self.assertGreater(len(strokes[0].order), 20)
+        pics = [DiscMedium().composite(st, ref, LOOK, SIZE).astype(int) for st in strokes]
+        self.assertLessEqual(np.abs(pics[0] - pics[1]).max(), 1)
+
+    def test_scene_seeds_carry_marks(self):
+        """Scene4D.seeds gives the bodies' marks with their fill."""
+        sc = Scene4D({"stone": twisted()}, lambda t: S.Slice(0.37), None)
+        sc.rho0, sc.log = 4.0, False
+        s = sc.seeds(0.0, CAM, 6.0)
+        self.assertGreater((s.kind == 1).sum(), 50)
+        self.assertGreater((s.kind == 0).sum(), 50)
 
 
 class Cache(unittest.TestCase):
