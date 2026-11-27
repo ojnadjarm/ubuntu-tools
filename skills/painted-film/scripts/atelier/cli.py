@@ -1,4 +1,4 @@
-"""film: the painted-film command line (A1: check only)."""
+"""film: the painted-film command line (A1: check; A3: ref)."""
 import argparse
 import glob
 import json
@@ -13,6 +13,7 @@ import cv2
 from .metrics import DEFAULT_GATES, gate, lookdist, measure
 
 FRAME = re.compile(r"f_(\d{4})\.png$")
+FRAME_EXR = re.compile(r"^f_(\d{4})\.lit\.exr$")
 FLICK_KEYS = ("mean", "worst_1s", "floor", "excess", "excess_1s", "broad", "pop", "pop_still", "tile")
 
 
@@ -91,6 +92,26 @@ def check(a):
     return 1 if failed else 0
 
 
+def ref(a):
+    """The reference stage: Blender renders the shot's frames to OUT (thin call; the cache comes in A6)."""
+    out = os.path.abspath(a.out)
+    expr = "import sys; sys.path.insert(0, %r); from atelier import ref; ref.main()" % os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))
+    cmd = [os.environ.get("FILM_BLENDER", "blender"), "-b", "--factory-startup", "--python-exit-code", "1",
+           "--python-expr", expr, "--", os.path.abspath(a.shot), out, "--frames", a.frames]
+    cmd += ["--scale", str(a.scale)] if a.scale else []
+    cmd += ["--samples", str(a.samples)] if a.samples else []
+    cmd += ["--seed-pair"] if a.seed_pair else []
+    rc = subprocess.run(cmd).returncode
+    if rc or not a.seed_pair:
+        return rc
+    from . import refio
+    for f in sorted(int(m.group(1)) for m in (FRAME_EXR.search(p) for p in os.listdir(os.path.join(out, "seed2"))) if m):
+        d = refio.seed_diff(refio.load(os.path.join(out, "f_%04d" % f)), refio.load(os.path.join(out, "seed2", "f_%04d" % f)))
+        print("SEED f_%04d seed-pair difference %.4f %% (sigma 2)" % (f, d))
+    return rc
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="film", description="painted-film engine")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -101,7 +122,22 @@ def main(argv=None):
     c.add_argument("--still", action="store_true", help="look measures only, on every picture in the folder")
     c.add_argument("--flow", help="folder the flow is taken from (default: ../ref or ../raw beside the frames, else the frames)")
     c.add_argument("-j", "--jobs", type=int, default=8, help="worker processes (at most 8)")
+    r = sub.add_parser("ref", help="render the reference passes of a shot's frames in Blender (EEVEE)")
+    r.add_argument("shot", metavar="SHOT", help="folder with shot.json (its \"scene\" module exposes scene())")
+    r.add_argument("--out", help="folder for f_NNNN.{lit,albedo,depth,normal,ident}.exr + .json (default: shot.json work/ref)")
+    r.add_argument("--frames", default="0", help="frames, e.g. 24-35 or 24,84")
+    r.add_argument("--draft", action="store_true", help="half size")
+    r.add_argument("--scale", type=float, help="size against the shot's (default: shot.json ref.scale, else 1)")
+    r.add_argument("--samples", type=int, help="EEVEE samples (default: shot.json ref.samples, else 24)")
+    r.add_argument("--seed-pair", action="store_true", help="also render with the sampling pattern moved against the picture; print the difference")
     a = p.parse_args(argv)
+    if a.cmd == "ref":
+        if a.draft:
+            a.scale = 0.5
+        if not a.out:
+            with open(os.path.join(a.shot, "shot.json")) as fh:
+                a.out = os.path.join(os.path.expanduser(json.load(fh)["work"]), "ref")
+        return ref(a)
     a.jobs = max(1, min(8, a.jobs))
     return check(a)
 

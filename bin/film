@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# film — the painted-film engine's command line (skill painted-film); `film check DIR [--target IMG] [--mp4 FILE] [--still]`.
+# film — the painted-film engine's command line (skill painted-film); `film check DIR [--target IMG] [--mp4 FILE] [--still]`, `film ref SHOT [--frames a-b] [--seed-pair]`.
 set -euo pipefail
 SKILL="$(dirname "$(readlink -f "$0")")/../skills/painted-film"
 PY=${FILM_PYTHON:-$HOME/.local/opt/inkwash/bin/python}
