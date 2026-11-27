@@ -7,7 +7,17 @@ import numpy as np
 from .anchor import NEAR, mix, unit
 
 # colour_levels: the colour taps read the reference 2^n coarser than their spacing (A4: 2, its noise moves whole strokes)
-DEFAULTS = {"max_px": 64.0, "size": 1.4, "aspect": 2.5, "broken": 0.0, "colour_levels": 2.0}
+# block: the octaves under the finest are this much wider (a block-in that leaves no bare ground); needs px_per_stroke
+DEFAULTS = {"max_px": 64.0, "size": 1.4, "aspect": 2.5, "broken": 0.0, "colour_levels": 2.0, "block": 1.0,
+            "px_per_stroke": 0.0, "hug": 0.0}  # hug: how hard a stroke shrinks and moves to stay on its own thing
+# marks (picture px): width, length over spacing, reach of the colour taps, value gain of lit edges and joints,
+# true width (px) over which a mark fades in, how hard the taps lean to the light or dark side
+# "weight": how much a mark's opacity and width vary by its id (a drawn line, not a ruled one)
+MARK = {"width": 1.8, "aspect": 2.5, "reach": 3.0, "light": 0.5, "dark": 0.5, "fade": (0.15, 0.6), "power": 4.0,
+        "weight": 0.0}
+MARK_BAND = 0.3  # a mark's depth band against a fill stroke's: an edge just behind a wall must not show through
+MARK_LAYER = 64  # marks are drawn after every fill octave
+LUMA = np.array([0.2126, 0.7152, 0.0722])
 EPS_W = 0.05  # weight of the plain tap mean when no tap shares the seed's ident
 MIN_OPACITY = 1e-3
 LO = 0.75  # the seed's plane depth at a tap is kept within [LO, 2] times its own depth (grazing planes)
@@ -60,6 +70,19 @@ def _bilinear(img, u, v):
             + img[i1, j1] * fu * fv)
 
 
+def _own(ident, u, v, own):
+    """The share of each place's four pixels that carry the seed's ident."""
+    H, W = ident.shape
+    j0, i0 = np.floor(u), np.floor(v)
+    out = np.zeros(u.shape)
+    for dj in (0, 1):
+        for di in (0, 1):
+            pj, pi = j0 + dj, i0 + di
+            jj, ii = np.clip(pj, 0, W - 1).astype(np.int64), np.clip(pi, 0, H - 1).astype(np.int64)
+            out += (1 - np.abs(u - pj)) * (1 - np.abs(v - pi)) * (ident[ii, jj] == own[:, None])
+    return out
+
+
 def _pyramid(lit):
     out = [lit.astype(np.float32)]
     while min(out[-1].shape[:2]) >= 16:
@@ -82,6 +105,7 @@ def _sample(pyr, u, v, lev):
 def solve(ref, seeds, look, size) -> Strokes:
     """Strokes of the seeds on a picture of `size`, coloured and tested against the reference `ref`."""
     lk = {k: float(look.get(k, v)) for k, v in DEFAULTS.items()}
+    mk = dict(MARK, **look.get("mark", {}))
     W, H = size
     cam = ref.camera
     Wr, Hr = cam.size
@@ -92,12 +116,19 @@ def solve(ref, seeds, look, size) -> Strokes:
     z = -c[:, 2]
     zs = np.maximum(z, NEAR)
     xr, yr = cx + fr * c[:, 0] / zs, cy - fr * c[:, 1] / zs
-    width = np.minimum(lk["size"] * seeds.px, lk["max_px"])
+    mark = seeds.kind > 0
+    true = fr / sr * seeds.width_m / zs  # a mark's own width on the picture
+    with np.errstate(divide="ignore"):
+        under = 1.0 + (lk["block"] - 1.0) * np.clip(np.log2(seeds.px / lk["px_per_stroke"]) - 0.5, 0.0, 1.0) if lk["px_per_stroke"] else 1.0
+    heavy = 1.0 - mk["weight"] * unit(mix(seeds.id, 0x77))
+    width = np.where(mark, np.clip(true, mk["width"], 3.0 * mk["width"]) * (0.5 + 0.5 * heavy),
+                     np.minimum(lk["size"] * seeds.px * under, lk["max_px"]))
     a = np.nonzero((z > NEAR) & ~_surely_hidden(ref.depth, xr, yr, zs, width * sr / 3.0))[0]
-    c, z, zs, xr, yr, width = c[a], z[a], zs[a], xr[a], yr[a], width[a]
-    sid, octave, ident = seeds.id[a], seeds.octave[a], seeds.ident[a]
+    c, z, zs, xr, yr, width, mark, true, heavy = c[a], z[a], zs[a], xr[a], yr[a], width[a], mark[a], true[a], heavy[a]
+    sid, octave, ident, kind = seeds.id[a], seeds.octave[a] + MARK_LAYER * mark, seeds.ident[a], seeds.kind[a]
 
-    full = np.minimum(width * lk["aspect"], lk["max_px"])
+    edge = np.maximum(1.5 * fr / sr * seeds.length_m[a] / zs, width)  # a mark is no longer than its edge allows
+    full = np.minimum(np.where(mark, np.minimum(seeds.px[a] * mk["aspect"], edge), width * lk["aspect"]), lk["max_px"])
     t = seeds.T[a] @ cam.R  # rule 5: the tangent on the picture; toward the viewer it shortens to a dab
     dx = fr * (t[:, 0] + c[:, 0] * t[:, 2] / zs) / zs
     dy = -fr * (t[:, 1] + c[:, 1] * t[:, 2] / zs) / zs
@@ -112,7 +143,7 @@ def solve(ref, seeds, look, size) -> Strokes:
     ts = width * sr / 3.0
     off = np.array([(a, b) for b in (-1, 0, 1) for a in (-1, 0, 1)], float)
     tu, tv = xr[:, None] + off[:, 0] * ts[:, None], yr[:, None] + off[:, 1] * ts[:, None]
-    band = _band(zs)[:, None]
+    band = (_band(zs) * np.where(mark, MARK_BAND, 1.0))[:, None]
     vis, same = np.zeros(tu.shape), np.zeros(tu.shape)
     j0, i0 = np.floor(tu), np.floor(tv)
     for dj in (0, 1):
@@ -129,13 +160,27 @@ def solve(ref, seeds, look, size) -> Strokes:
             v = np.clip((np.where(np.isfinite(d), d, 1e9) - zp) / band + 2.0, 0.0, 1.0)
             vis += w * v
             same += w * v * (ref.ident[ii, jj] == ident[:, None])
-    opacity = seeds.opacity[a] * vis.mean(1)
+    opacity = seeds.opacity[a] * vis.mean(1) * np.where(mark, heavy * np.clip((true - mk["fade"][0]) / (mk["fade"][1] - mk["fade"][0]), 0, 1), 1.0)
 
+    own = same.sum(1) / np.maximum(vis.sum(1), 1e-6)  # the share of the footprint in view that is the seed's own thing
+    hug = np.where(mark, 0.0, lk["hug"])
+    grip = np.minimum(hug, 1.0) / (same.sum(1) + EPS_W)
+    xr, yr = xr + grip * (same * (tu - xr[:, None])).sum(1), yr + grip * (same * (tv - yr[:, None])).sum(1)
+    width, length = width * own ** hug, length * own ** hug
     k = np.nonzero(opacity > MIN_OPACITY)[0]
     k = k[np.lexsort((sid[k], octave[k]))]
     pyr = _pyramid(np.clip(ref.lit, 0.0, 1.0))  # display range: an emitter (lit 60) must not flood its neighbours
     col = _sample(pyr, tu[k], tv[k], (np.log2(np.maximum(ts[k], 1.0)) + lk["colour_levels"])[:, None] * np.ones((len(k), 9)))
     c1 = ((same[k, :, None] * col).sum(1) + EPS_W * col.mean(1)) / (same[k].sum(1) + EPS_W)[:, None]
+    m = np.nonzero(mark[k])[0]
+    if len(m):  # a mark reads both sides of its edge and leans to the light one (lit edge) or the dark one (joint)
+        km, lit = k[m], kind[k[m]] == 1
+        tm = np.full(len(m), mk["reach"] * sr)
+        mu, mv = xr[km, None] + off[:, 0] * tm[:, None], yr[km, None] + off[:, 1] * tm[:, None]
+        col = _sample(pyr, mu, mv, np.maximum(np.log2(tm) - 1.0, 0.0)[:, None] * np.ones((len(m), 9)))
+        own = _own(ref.ident, mu, mv, ident[km])
+        w = (own + EPS_W) * (col @ LUMA + 1e-3) ** np.where(lit, mk["power"], -mk["power"])[:, None]
+        c1[m] = (w[..., None] * col).sum(1) / w.sum(1)[:, None] * np.where(lit, 1.0 + mk["light"], 1.0 - mk["dark"])[:, None]
     jit = 2.0 * unit(mix(sid[k, None], np.arange(3)[None, :])) - 1.0
     c2 = c1 * (1.0 + lk["broken"] * jit)
     f32 = lambda a: a[k].astype(np.float32)

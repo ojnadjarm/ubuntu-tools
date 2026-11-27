@@ -74,7 +74,8 @@ def grade(col, flame_ref, L_ref, x, y, sr, g):
     b2 = (b * g["b_k"] + g["b_off"]) * (1 - fl) + (b * g["flame_chroma"] + g["flame_b"]) * fl
     pool = _at(cv2.GaussianBlur(flame_ref, (0, 0), g["glow_sigma"] * sr), x, y, sr)
     gl = g["glow"] * np.clip(pool * 4, 0, 1) * (1 - fl)
-    lab = np.column_stack([L2 + 5 * gl, a2 + 5 * gl, b2 + 18 * gl]).astype(np.float32)
+    pl, pa, pb = g.get("pool", (5.0, 5.0, 18.0))  # what a flame's pool adds in Lab
+    lab = np.column_stack([L2 + pl * gl, a2 + pa * gl, b2 + pb * gl]).astype(np.float32)
     return np.clip(cv2.cvtColor(lab[None], cv2.COLOR_Lab2RGB)[0], 0, 1)
 
 
@@ -111,7 +112,7 @@ class OilMedium:
             f32 = lambda v: np.ascontiguousarray(v, np.float32)  # noqa: E731
             _PAINT(frame.img, frame.hgt, W, H, bank.atlas, bank.off, bank.mw, bank.mh, bank.nlev, bank.bw, float(bank.L), k,
                    f32(st.x), f32(st.y), f32(st.ang), f32(st.length), f32(st.width), var, f32(c1), f32(c2),
-                   f32(np.clip(st.opacity, 0, 1)), np.full(k, br["hs"], np.float32), float(br["level"]), depth,
+                   f32(np.clip(st.opacity, 0, 1)), f32(br["hs"] * np.minimum(1.0, br.get("thick_px", np.inf) / np.maximum(st.width, 1e-6))), float(br["level"]), depth,
                    f32(st.z), f32(st.zg))
         return frame.finish(light=tuple(cv["light"]), relief=cv["relief"], gloss=cv["gloss"], shine=cv["shine"],
                             exposure=cv["exposure"], vignette=cv["vignette"])

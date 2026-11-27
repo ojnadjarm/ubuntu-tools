@@ -158,5 +158,29 @@ class Lod(unittest.TestCase):
             self.assertGreater(st.width.max(), 0.9 * LOOK["max_px"], y)
 
 
+class Marks(unittest.TestCase):
+    def test_mark_strokes(self):
+        """Marks are thin strokes along their edge, drawn after the fill; a lit-edge mark is lighter than the light
+        side, a joint mark darker than the dark side; a mark far thinner than a pixel fades out."""
+        cam = cam_at(0.0, 0.0)
+        side = lambda x, z: np.where(x[:, None] < 0, 0.1, 0.5) * np.ones(3)
+        ref = flat_ref(cam, [(10.0, -20, 20, -20, 20, 1, side)])
+        s = hand_seeds([[0.0, 10.0, 0.0]] * 4 + [[1.0, 10.0, 0.5]], [0.0, 0.0, 1.0], [1, 2, 3, 4, 5])
+        s.kind[:] = 1, 2, 1, 2, 0
+        s.width_m[:] = 0.06, 0.06, 0.06, 0.001, 0.0  # 32 px a metre: 1.9 px, and 0.03 px
+        s.length_m[:] = 2.0, 2.0, 0.25, 2.0, 0.0
+        look = dict(LOOK, mark={"width": 2.0, "aspect": 2.5, "reach": 3.0, "light": 0.5, "dark": 0.5, "fade": [0.15, 0.6]})
+        st = solve(ref, s, look, SIZE)
+        np.testing.assert_array_equal(st.order, [5, 1, 2, 3])
+        self.assertTrue((st.layer[1:] > st.layer[0]).all())
+        self.assertTrue((st.width[1:] <= 3.0).all())
+        np.testing.assert_allclose(st.ang[1:], np.pi / 2, atol=1e-3)
+        self.assertGreater(st.length[1], 3 * st.width[1])
+        self.assertLessEqual(st.length[3], 1.5 * 0.25 * 32 + 1e-3)  # no longer than its edge allows
+        self.assertGreater(st.c1[1].min(), 0.55)
+        self.assertLess(st.c1[2].max(), 0.08)
+        np.testing.assert_allclose(st.opacity[1:], 1.0, atol=1e-3)
+
+
 if __name__ == "__main__":
     unittest.main()

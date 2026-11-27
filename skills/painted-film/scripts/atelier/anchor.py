@@ -6,6 +6,8 @@ from .scene import Seeds
 NEAR = 0.1  # m: the reference's near clip; nearer seeds are not placed
 MIN_FACING = 0.05  # cosine floor of the facing, so grazing surfaces keep a finite level
 U64 = np.uint64
+CREASE_COS = 0.7  # two faces meeting at more than about 45 degrees make a crease
+MARK = 0x3A2C  # in the id of a mark seed
 
 
 def mix(*parts):
@@ -44,6 +46,27 @@ def split(V, F, max_edge):
         mid = 0.5 * (c0 + c1)
         parent = np.concatenate([parent[~big], parent[big], parent[big]])
         B = np.concatenate([B[~big], np.stack([c0, mid, c2], 1), np.stack([mid, c1, c2], 1)])
+
+
+def creases(V, F, cos_max=CREASE_COS):
+    """The edges where exactly two faces meet at an angle: end vertices (e, 2), the two faces (e, 2), convex (e,).
+    Vertices are welded by place; convex supposes outward faces."""
+    _, w = np.unique(np.round(V / 1e-4).astype(np.int64), axis=0, return_inverse=True)
+    Fw = w.reshape(-1)[F]
+    e = np.sort(np.stack([Fw, Fw[:, [1, 2, 0]]], -1).reshape(-1, 2), 1)
+    key = e[:, 0] * (int(Fw.max()) + 1) + e[:, 1]
+    o = np.argsort(key, kind="stable")
+    ks = key[o]
+    first = np.nonzero(np.r_[True, ks[1:] != ks[:-1]])[0]
+    i = first[(np.diff(np.r_[first, len(ks)]) == 2) & (e[o[first], 0] != e[o[first], 1])]
+    h, f2 = o[i], o[i + 1] // 3
+    f1, k = h // 3, h % 3
+    tri = V[F]
+    _, _, N = _normals(tri)
+    keep = ((N[f1] * N[f2]).sum(1) < cos_max) & (np.linalg.norm(N[f1], axis=1) > 0.5) & (np.linalg.norm(N[f2], axis=1) > 0.5)
+    f1, f2, k = f1[keep], f2[keep], k[keep]
+    convex = ((tri[f2].mean(1) - tri[f1].mean(1)) * N[f1]).sum(1) < 0
+    return np.column_stack([F[f1, k], F[f1, (k + 1) % 3]]), np.column_stack([f1, f2]), convex
 
 
 def _tangent_rule(N, direction):
@@ -101,7 +124,7 @@ class SeedBank:
     """Seeds on a 3D surface of fixed topology. Octave j holds rho0 * 4^j seeds per m2 (of the rest surface); a
     seed is (piece, octave, index) and everything about it comes from its id, never from the frame."""
 
-    def __init__(self, V, F, material, ident, direction, rho0, seed, octaves=8, max_edge=0.5):
+    def __init__(self, V, F, material, ident, direction, rho0, seed, octaves=8, max_edge=0.5, mark_width=0.02):
         V, F = np.asarray(V, np.float64), np.asarray(F, np.int64)
         self.F, self.rho0, self.octaves, self.material = F, float(rho0), int(octaves), int(material)
         self.seed = int(seed) & 0xFFFFFFFFFFFFFFFF
@@ -118,6 +141,13 @@ class SeedBank:
         ok = np.abs(det) > 1e-18
         det = np.where(ok, det, 1.0)
         self.ab = np.where(ok[:, None], np.column_stack([(g22 * r1 - g12 * r2) / det, (g11 * r2 - g12 * r1) / det]), 0.0)
+        # marks: each crease cut into pieces no longer than max_edge, (edge, from, to) along it
+        self.ev, self.ef, self.convex = creases(V, F)
+        self.mark_width = float(mark_width)
+        n = np.maximum(np.ceil(np.linalg.norm(V[self.ev[:, 1]] - V[self.ev[:, 0]], axis=1) / max_edge).astype(np.int64), 1)
+        self.me = np.repeat(np.arange(len(n)), n)
+        i = np.arange(len(self.me)) - np.repeat(np.cumsum(n) - n, n)
+        self.ms = np.column_stack([i, i + 1]) / n[self.me, None]
 
     def _visible_pieces(self, V_now, cam, px_per_stroke):
         """Pieces that can be in view and their highest possible level: faces culled first, then their pieces."""
@@ -144,7 +174,9 @@ class SeedBank:
                 continue
             idx = np.arange(len(rep)) - np.repeat(np.cumsum(n) - n, n)
             ids = mix(self.seed, rep, j, idx)
-            u, v = unit(mix(ids, 1)), unit(mix(ids, 2))
+            # an even (R2) sequence per piece and octave, not plain random places: no clumps, fewer bare gaps
+            u = (unit(mix(self.seed, rep, j, 1)) + idx * 0.7548776662466927) % 1.0
+            v = (unit(mix(self.seed, rep, j, 2)) + idx * 0.5698402909980532) % 1.0
             flip = u + v > 1
             u, v = np.where(flip, 1 - u, u), np.where(flip, 1 - v, v)
             bary = (1 - u - v)[:, None] * self.B[rep, 0] + u[:, None] * self.B[rep, 1] + v[:, None] * self.B[rep, 2]
@@ -160,16 +192,67 @@ class SeedBank:
             ok = (z > NEAR) & (op > 0) & (xy[:, 0] > -m) & (xy[:, 0] < W + m) & (xy[:, 1] > -m) & (xy[:, 1] < H + m)
             out.append((ids[ok], P[ok], N[ok], T[ok], np.full(ok.sum(), j), self.ident[face[ok]], op[ok],
                         px_per_stroke * 2.0 ** (L[ok] - j)))
-        return _seeds(out, self.material)
+        return _seeds(out + self._marks(V_now, cam, px_per_stroke), self.material)
+
+    def marks(self, V_now, cam, px_per_stroke) -> Seeds:
+        """The mark seeds alone (place() gives them with the fill)."""
+        return _seeds(self._marks(V_now, cam, px_per_stroke), self.material)
+
+    def _marks(self, V_now, cam, px_per_stroke):
+        """Mark seeds along the creases in view: octave j holds sqrt(rho0) * 2^j a metre, one mark per px_per_stroke
+        of screen; kind 1 on a convex crease (a lit edge), 2 on a concave one (a joint)."""
+        if not len(self.me):
+            return []
+        W, H = cam.size
+        m, f, rho = W / 8, cam.lens_mm / cam.sensor_mm * W, np.sqrt(self.rho0)
+        A, D = V_now[self.ev[:, 0]], V_now[self.ev[:, 1]] - V_now[self.ev[:, 0]]
+        Q = A[self.me, None] + self.ms[:, :, None] * D[self.me, None]
+        keep, _ = _cull(Q[:, [0, 1, 1]], cam, px_per_stroke, self.rho0)
+        pieces = np.nonzero(keep)[0]
+        c = Q[pieces].mean(1)
+        R = 0.5 * np.linalg.norm(Q[pieces, 1] - Q[pieces, 0], axis=1)
+        lo = np.maximum(np.linalg.norm(c - cam.pos, axis=1) - R, NEAR)
+        top = np.log2(f * np.hypot(f, 0.5 * np.hypot(W, H)) / f / (lo * px_per_stroke) / rho)
+        tri = V_now[self.F[self.ef]]
+        N1, N2 = _normals(tri[:, 0])[2], _normals(tri[:, 1])[2]
+        Ne = N1 + N2
+        Ne /= np.maximum(np.linalg.norm(Ne, axis=1), 1e-12)[:, None]
+        Dl = np.linalg.norm(D, axis=1)
+        out = []
+        for j in range(2 * self.octaves):
+            sel = pieces[top >= j - 1]
+            if not len(sel):
+                break
+            n = np.floor(2.0 * R[top >= j - 1] * rho * 2.0 ** j + unit(mix(self.seed, MARK, sel, j, 0xC0))).astype(np.int64)
+            rep = np.repeat(sel, n)
+            if not len(rep):
+                continue
+            ids = mix(self.seed, MARK, rep, j, np.arange(len(rep)) - np.repeat(np.cumsum(n) - n, n))
+            e = self.me[rep]
+            s = self.ms[rep, 0] + unit(mix(ids, 1)) * (self.ms[rep, 1] - self.ms[rep, 0])
+            P = A[e] + s[:, None] * D[e]
+            xy, z = cam.project(P)
+            L = np.log2(f / (np.maximum(z, NEAR) * px_per_stroke) / rho)
+            view = cam.pos - P
+            view /= np.maximum(np.linalg.norm(view, axis=1), 1e-12)[:, None]
+            front = np.maximum((N1[e] * view).sum(1), (N2[e] * view).sum(1))  # an edge of two faces turned away fades
+            op = (np.ones(len(P)) if j == 0 else np.clip(L - j + 1, 0.0, 1.0)) * np.clip((front + 0.05) / 0.2, 0.0, 1.0)
+            ok = (z > NEAR) & (op > 0) & (xy[:, 0] > -m) & (xy[:, 0] < W + m) & (xy[:, 1] > -m) & (xy[:, 1] < H + m)
+            e = e[ok]
+            out.append((ids[ok], P[ok], Ne[e], D[e] / np.maximum(Dl[e], 1e-12)[:, None], np.full(ok.sum(), j),
+                        self.ident[self.ef[e, 0]], op[ok], px_per_stroke * 2.0 ** (L[ok] - j),
+                        np.where(self.convex[e], 1, 2), np.full(ok.sum(), self.mark_width), Dl[e]))
+        return out
 
 
 def _seeds(parts, material):
     if not parts:
         parts = [(np.zeros(0, U64), *(np.zeros((0, 3)),) * 3, np.zeros(0), np.zeros(0), np.zeros(0), np.zeros(0))]
-    ids, P, N, T, octv, ident, op, px = (np.concatenate(c) for c in zip(*parts))
+    parts = [p if len(p) == 11 else p + (np.zeros(len(p[0])),) * 3 for p in parts]  # fill: no kind, width, length
+    ids, P, N, T, octv, ident, op, px, kind, wid, length = (np.concatenate(c) for c in zip(*parts))
     k = len(ids)
     return Seeds(ids.astype(U64), P, N, T, octv.astype(np.uint8), np.full(k, material, np.int16), ident.astype(np.int32),
-                 np.zeros(k, np.uint8), np.zeros(k, np.float32), np.zeros(k, np.float32), np.zeros(k, np.uint8),
+                 kind.astype(np.uint8), wid.astype(np.float32), length.astype(np.float32), np.zeros(k, np.uint8),
                  op.astype(np.float32), px.astype(np.float32))
 
 

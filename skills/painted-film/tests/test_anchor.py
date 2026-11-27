@@ -85,5 +85,38 @@ class Octaves(unittest.TestCase):
         self.assertTrue((s.opacity[s.octave == 0] == 1).all())
 
 
+def box(lo, hi, inward=False):
+    """A box with outward faces (inward: a room seen from inside)."""
+    lo, hi = np.asarray(lo, float), np.asarray(hi, float)
+    V = np.array([[x, y, z] for z in (0, 1) for y in (0, 1) for x in (0, 1)], float) * (hi - lo) + lo
+    F = np.array([[0, 2, 1], [1, 2, 3], [4, 5, 6], [5, 7, 6], [0, 1, 4], [1, 5, 4],
+                  [2, 6, 3], [3, 6, 7], [0, 4, 2], [2, 4, 6], [1, 3, 5], [3, 7, 5]])
+    return V, F[:, ::-1] if inward else F
+
+
+class Marks(unittest.TestCase):
+    def test_marks_on_creases(self):
+        """Mark seeds lie on the creases, along them, with stable ids: lit-edge marks (kind 1) on a box's outer edges,
+        joint marks (kind 2) in a room's corners; a flat wall has none."""
+        b, V = bank()
+        self.assertFalse(b.place(V, cam_at(0.0, 2.0), 8.0).kind.any())
+        for inward, kind in ((False, 1), (True, 2)):
+            V, F = box([-2, 9, -1], [2, 11, 1], inward)
+            b = SeedBank(V, F, 0, 7, "course", 0.5, 5)
+            a, c = b.place(V, cam_at(0.0, 2.0), 8.0), b.place(V, cam_at(1.0, 5.0, 0.4), 8.0)
+            m = a.kind > 0
+            self.assertGreater(m.sum(), 50)
+            self.assertTrue((a.kind[m] == kind).all())
+            self.assertEqual(len(np.unique(a.id)), len(a.id))
+            on = np.isclose(np.abs(a.P[m] - [0, 10, 0]), [2, 1, 1], atol=1e-6)  # on two of the box's planes: an edge
+            self.assertTrue((on.sum(1) == 2).all())
+            np.testing.assert_allclose(np.abs(a.T[m])[~on], 1.0, atol=1e-6)  # along the free axis
+            self.assertTrue((a.width_m[m] > 0).all() and (a.length_m[m] > 0).all())
+            common, ia, ic = np.intersect1d(a.id[m], c.id[c.kind > 0], return_indices=True)
+            self.assertGreater(len(common), 50)
+            np.testing.assert_allclose(a.P[m][ia], c.P[c.kind > 0][ic], atol=1e-6)
+            self.assertTrue(((a.opacity >= 0) & (a.opacity <= 1)).all())
+
+
 if __name__ == "__main__":
     unittest.main()
