@@ -1,18 +1,18 @@
 ---
-name: vass-ticket-video
-description: Spanish narrated antes/después video for a VASS ticket from a JSON shot list (front or back steps, highlights, WS side-by-side); edge Álvaro voice; mp4, stills and guion.md in ~/drop/<ticket>/ with a checked link. Use for "antes video", "después video", "repro video".
+name: workproj-ticket-video
+description: Spanish narrated antes/después video for a work-project ticket from a JSON shot list (front or back steps, highlights, WS side-by-side); edge Álvaro voice; mp4, stills and guion.md in ~/drop/<ticket>/ with a checked link. Use for "antes video", "después video", "repro video".
 ---
 
-Triggers: VASS video, antes/después, replication video, fix video, ticket video, Marina video, campus front video.
+Triggers: work project video, antes/después, replication video, fix video, ticket video, Marina video, campus front video.
 
-# vass-ticket-video: shot list -> narrated mp4 in ~/drop/<ticket>/
+# workproj-ticket-video: shot list -> narrated mp4 in ~/drop/<ticket>/
 
 ```bash
-V=~/.claude/skills/vass-ticket-video/scripts/vass-video
+V=~/.claude/skills/workproj-ticket-video/scripts/workproj-video
 $V --check shots.json                                   # schema only, no browser
 $V shots.json                                           # -> ~/drop/<ticket>/<ticket>-<phase>.mp4 + stills + guion-<phase>.md + index.html, links
 $V shots.json --out ~/drop/<ticket>/try --name x --work /tmp/w   # scratch output, keep intermediates
-~/.claude/skills/vass-ticket-video/tests/selftest.test.sh   # offline selftest (no browser, no network)
+~/.claude/skills/workproj-ticket-video/tests/selftest.test.sh   # offline selftest (no browser, no network)
 ```
 
 Shot list (keep it in `~/agent-work/research/<date>/<T>/`: it names test users, so never in a tracked file):
@@ -38,8 +38,8 @@ Shot list (keep it in `~/agent-work/research/<date>/<T>/`: it names test users, 
 - Selectors: `link:`, `button:`, `tab:` (exact accessible name), `text:`, `css:`. Highlight labels: exact text, `Prefix*`, or `css:`.
 - `ws` runs the function as `user` in the Moodle container at that point in the step order (after the earlier UI steps) and shows only the `pick` fields (dotted paths); token-like
   fields are redacted. Write `say` in natural Spain Spanish, numbers in words ("menos cinco coma treinta y tres").
-- Config (config.env, keys in `config.example.env`): `VASS_STUDENT_PASSWORD`, `VASS_MOODLE_PASSWORD` (default
-  `MOODLE_ADMIN_PASSWORD`), `VASS_FRONT_URL`/`VASS_MOODLE_URL` (default `https://<tailnet-fqdn>:8446` / `:8445`), `VASS_MOODLE_CONTAINER`.
+- Config (config.env, keys in `config.example.env`): `WORKPROJ_STUDENT_PASSWORD`, `WORKPROJ_MOODLE_PASSWORD` (default
+  `MOODLE_ADMIN_PASSWORD`), `WORKPROJ_FRONT_URL`/`WORKPROJ_MOODLE_URL` (default `https://<tailnet-fqdn>:8446` / `:8445`), `WORKPROJ_MOODLE_CONTAINER`.
 - Phases: narration (edge, ~10 s) → ws → recording (real time: the sum of the clips plus page loads) → assemble (~15 s) → links.
 - Every report gives the direct https `.mp4` link (the `mp4:` line the CLI prints), not only the folder.
 
@@ -60,7 +60,7 @@ reuses the antes steps and screens. Write it without
 
 ## Pitfalls
 - Seed the data first (dev DB is fine): the skill films, it does not create attempts or fix code. Después: apply the fix, re-run with `"phase": "despues"`.
-- `mws` refuses the VASS env: `ws` steps use `docker exec -i <container> php` with the skill's `ws.php` instead.
+- `mws` refuses the work project env: `ws` steps use `docker exec -i <container> php` with the skill's `ws.php` instead.
 - Locally only `en` is installed: Moodle back pages show English strings. Never mention it (or any local-environment detail) in the narration or captions (owner 2026-10-30); prefer filming the front.
 - Never show or say time/effort estimates (días, horas, phase durations) in narration or on-screen text (owner 2026-11-02): they are unreliable; use relative wording.
 - Narrate in first person singular as the owner (one developer): "mi recomendación", "propongo", never "nuestra/proponemos" (owner 2026-11-02): videos go to the tech lead and QA.
@@ -68,4 +68,4 @@ reuses the antes steps and screens. Write it without
 - mv-review fails screen recordings on `frozen` and `levels … brng <0.01`; assemble treats those as expected.
 - Never print tokens: Playwright errors carry cookies and JWTs; the scripts print the first error line, redacted.
 - A slow front can time out a `wait` (1 of 6 live runs on 2026-10-29): the error names the step and saves `fail.png` in the work dir; re-run.
-- Full guide: `guide vass-ticket-video`.
+- Full guide: `guide workproj-ticket-video`.

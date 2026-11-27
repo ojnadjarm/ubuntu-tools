@@ -1,4 +1,4 @@
-// shoot.mjs — record a VASS shot list headless, one narration clip per step, marks + stills into <work>.
+// shoot.mjs — record a work-project shot list headless, one narration clip per step, marks + stills into <work>.
 // Usage: node shoot.mjs <shots.json> <work>   (work holds vo/cues.json; writes raw.webm, marks.json, still-*.png)
 //        node shoot.mjs --check <shots.json>  validate the shot list only (no browser)
 import fs from 'node:fs';
@@ -20,7 +20,7 @@ const errs = validate(shots);
 if (errs.length) { console.error(errs.join('\n')); process.exit(1); }
 
 const env = process.env;
-const BASE = { front: env.VASS_FRONT_URL, back: env.VASS_MOODLE_URL };
+const BASE = { front: env.WORKPROJ_FRONT_URL, back: env.WORKPROJ_MOODLE_URL };
 const cues = JSON.parse(fs.readFileSync(path.join(work, 'vo/cues.json'), 'utf8')).clips;
 
 // Pick the first npx Playwright build whose Chromium is installed (a newer build may lack its browser).
@@ -53,21 +53,21 @@ async function skipProfileGate(ctx) {
 }
 
 async function frontLogin(p, email) {
-  if (!env.VASS_STUDENT_PASSWORD) throw new Error('VASS_STUDENT_PASSWORD unset (config.env)');
+  if (!env.WORKPROJ_STUDENT_PASSWORD) throw new Error('WORKPROJ_STUDENT_PASSWORD unset (config.env)');
   await p.goto(BASE.front + '/auth');
   await p.fill('input[name=email]', email);
-  await p.fill('input[name=password]', env.VASS_STUDENT_PASSWORD);
+  await p.fill('input[name=password]', env.WORKPROJ_STUDENT_PASSWORD);
   await p.getByRole('button', { name: 'Acceso', exact: true }).click();
   await p.waitForURL(u => !u.pathname.startsWith('/auth'), { timeout: 30000 });
 }
 
 async function backLogin(p, user) {
-  if (!env.VASS_MOODLE_PASSWORD) throw new Error('VASS_MOODLE_PASSWORD unset (config.env, or MOODLE_ADMIN_PASSWORD)');
+  if (!env.WORKPROJ_MOODLE_PASSWORD) throw new Error('WORKPROJ_MOODLE_PASSWORD unset (config.env, or MOODLE_ADMIN_PASSWORD)');
   await p.goto(BASE.back + '/login/index.php');
   const fatal = await p.locator('body').innerText();
   if (/Fatal error|Permission denied/.test(fatal)) throw new Error('Moodle login page broken: ' + fatal.trim().split('\n')[0]);
   await p.fill('#username', user);
-  await p.fill('#password', env.VASS_MOODLE_PASSWORD);
+  await p.fill('#password', env.WORKPROJ_MOODLE_PASSWORD);
   await p.click('#loginbtn');
   await p.waitForURL(u => !u.pathname.startsWith('/login'), { timeout: 30000 });
 }
@@ -117,10 +117,10 @@ const overlay = (p, o) => p.evaluate((html) => {
   + (o.cols || []).map(c => `<div>${esc(c.label)}<br><b style="font-size:56px;color:${esc(c.color || '#2563eb')}">${esc(c.value)}</b>`
   + `<br><small>${esc(c.note || '')}</small></div>`).join('') + '</div>');
 
-// One external function as a user inside the Moodle container (mws refuses VASS); only the picked fields come back.
+// One external function as a user inside the Moodle container (mws refuses the work project env); only the picked fields come back.
 function runWs(job, wsphp) {
   try {
-    const out = execFileSync('docker', ['exec', '-i', env.VASS_MOODLE_CONTAINER || 'moodle45-app-1', 'php', '--', JSON.stringify(job)],
+    const out = execFileSync('docker', ['exec', '-i', env.WORKPROJ_MOODLE_CONTAINER || 'moodle45-app-1', 'php', '--', JSON.stringify(job)],
       { input: wsphp, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim().split('\n').pop();
     return JSON.parse(out);
   } catch (e) {

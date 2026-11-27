@@ -44,7 +44,7 @@ await runSteps([{ say: 'a', click: 'button:Guardar' }, { say: 'b', ws: [{ fn: 'f
 console.log(log.join(' | '));
 EOF
 is "ws step fetches after the earlier UI step" "$(node "$T/order.mjs")" "click button:Guardar | fetch f | show 6.5"
-ev "vass-video makes no ws call before recording" "! grep -q 'docker exec' '$S/vass-video'"
+ev "workproj-video makes no ws call before recording" "! grep -q 'docker exec' '$S/workproj-video'"
 
 # Redaction of Playwright errors.
 r=$(node -e "import('$S/shotlist.mjs').then(m=>console.log(m.redact(new Error('GET x cookie=a eyJhbGciOi.eyJzdWIi.c2ln wstoken=0123abcd&x=1\nheaders...'))))")
@@ -111,6 +111,6 @@ print(a.review_ok({'fails': ['frozen 8x', 'levels Y 10-249 brng 0.0023']})[0], a
 is "review gate: expected flags pass, black fails" "$g" "True False"
 
 # CLI.
-"$S/vass-video" >/dev/null 2>&1; is "vass-video without args: usage 64" "$?" 64
-"$S/vass-video" --check "$FX/shots.json" >/dev/null 2>&1; is "vass-video --check" "$?" 0
+"$S/workproj-video" >/dev/null 2>&1; is "workproj-video without args: usage 64" "$?" 64
+"$S/workproj-video" --check "$FX/shots.json" >/dev/null 2>&1; is "workproj-video --check" "$?" 0
 exit $bad

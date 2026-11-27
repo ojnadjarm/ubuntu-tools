@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# vass-video — VASS ticket shot list -> Spanish narrated mp4 + stills + guion.md in ~/drop/<ticket>/ + checked https link.
+# workproj-video — work-project ticket shot list -> Spanish narrated mp4 + stills + guion.md in ~/drop/<ticket>/ + checked https link.
 set -uo pipefail
 HERE=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
 . "${HARNESS_HOME:-$HOME/agents}/bin/env.sh"
 
 usage() {
   cat <<'EOF'
-usage: vass-video <shots.json> [--out DIR] [--name BASE] [--work DIR] [--no-drop] [--no-review]
-       vass-video --check <shots.json>
+usage: workproj-video <shots.json> [--out DIR] [--name BASE] [--work DIR] [--no-drop] [--no-review]
+       workproj-video --check <shots.json>
   --out     output folder (default ~/drop/<ticket>/); a scratch folder keeps an existing video safe
   --name    mp4 base name (default <ticket>-<phase>)
   --work    keep intermediates here (default a temp dir, removed on success)
   --no-drop skip the https link check
-Config (config.env): VASS_STUDENT_PASSWORD (front), VASS_MOODLE_PASSWORD (back, default MOODLE_ADMIN_PASSWORD),
-  VASS_FRONT_URL / VASS_MOODLE_URL (default https://<tailnet-fqdn>:8446 / :8445), VASS_MOODLE_CONTAINER.
+Config (config.env): WORKPROJ_STUDENT_PASSWORD (front), WORKPROJ_MOODLE_PASSWORD (back, default MOODLE_ADMIN_PASSWORD),
+  WORKPROJ_FRONT_URL / WORKPROJ_MOODLE_URL (default https://<tailnet-fqdn>:8446 / :8445), WORKPROJ_MOODLE_CONTAINER.
 Exit: 0 done · 1 a phase failed · 64 usage
 EOF
 }
@@ -45,17 +45,17 @@ ANTES=$OUT; [ -f "$ANTES/guion-antes.md" ] || ANTES=${DROP_DIR:-$HOME/drop}/$TIC
 node "$HERE/shotlist.mjs" resolve "$SHOTS" "$ANTES" > "$WORK/shots.json" || exit 1
 SHOTS=$WORK/shots.json
 FQDN=${HARNESS_TAILNET_FQDN:-$HARNESS_HOST}
-export VASS_FRONT_URL=${VASS_FRONT_URL:-https://$FQDN:8446}
-export VASS_MOODLE_URL=${VASS_MOODLE_URL:-https://$FQDN:8445}
-export VASS_MOODLE_PASSWORD=${VASS_MOODLE_PASSWORD:-${MOODLE_ADMIN_PASSWORD:-}}
-export VASS_STUDENT_PASSWORD=${VASS_STUDENT_PASSWORD:-}
-export VASS_MOODLE_CONTAINER=${VASS_MOODLE_CONTAINER:-moodle45-app-1}
+export WORKPROJ_FRONT_URL=${WORKPROJ_FRONT_URL:-https://$FQDN:8446}
+export WORKPROJ_MOODLE_URL=${WORKPROJ_MOODLE_URL:-https://$FQDN:8445}
+export WORKPROJ_MOODLE_PASSWORD=${WORKPROJ_MOODLE_PASSWORD:-${MOODLE_ADMIN_PASSWORD:-}}
+export WORKPROJ_STUDENT_PASSWORD=${WORKPROJ_STUDENT_PASSWORD:-}
+export WORKPROJ_MOODLE_CONTAINER=${WORKPROJ_MOODLE_CONTAINER:-moodle45-app-1}
 KPY=${KOKORO_PY:-$HOME/.local/opt/kokoro/bin/python}
 RENDER=${KOKORO_RENDER:-$HARNESS_HOME/skills/kokoro-narration/render_narration.py}
 
 T0=$(date +%s.%N)
-lap() { printf 'vass-video: %-10s %5.1f s\n' "$1" "$(echo "$(date +%s.%N) - $T0" | bc)"; }
-die() { echo "vass-video: $*" >&2; echo "vass-video: intermediates kept in $WORK" >&2; exit 1; }
+lap() { printf 'workproj-video: %-10s %5.1f s\n' "$1" "$(echo "$(date +%s.%N) - $T0" | bc)"; }
+die() { echo "workproj-video: $*" >&2; echo "workproj-video: intermediates kept in $WORK" >&2; exit 1; }
 
 # 1. narration: one edge clip per step (Alvaro); its duration paces the recording.
 node "$HERE/shotlist.mjs" unit "$SHOTS" > "$WORK/unit.json" || die "unit build failed"
