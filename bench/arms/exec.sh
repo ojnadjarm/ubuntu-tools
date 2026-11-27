@@ -69,9 +69,9 @@ done
 stick="$(bash "$FIXTURE" root)/stick"; mkdir -p "$stick"
 media="/run/media/$USER"; [ -d "$media" ] || media=/run/media
 [ -d "$media" ] && safe+=(--tmpfs "$media" --bind "$stick" "/run/media/$USER/PCBENCH_STICK")
-# 6. S09 (TSP-067): its throwaway work repo, when set up, stands in for the protected Vass root.
-work="$(bash "$FIXTURE" root)/work-fixture"
-[ -d "$work/.git" ] && [ -d "$HOME/moodle-envs/vass" ] && safe+=(--bind "$work" "$HOME/moodle-envs/vass")
+# 6. S09 (TSP-067): its throwaway work repo, when set up, stands in for the first protected repo root.
+work="$(bash "$FIXTURE" root)/work-fixture"; pr=$("$HOME/agents/bin/protected" entries repo 2>/dev/null | sed -n 1p || true)
+[ -d "$work/.git" ] && [ -n "$pr" ] && [ -d "$pr" ] && safe+=(--bind "$work" "$pr")
 
 exec bwrap --dev-bind / / \
   --bind "$A/bin" "$HOME/agents/bin" \

@@ -54,7 +54,16 @@ def load_task(tid):
     with open(path) as f:
         t = json.load(f)
     t["_dir"] = os.path.join(TASKS, tid)
+    if "{protected_repo}" in t.get("prompt", ""):
+        t["prompt"] = t["prompt"].replace("{protected_repo}", protected_repo())
     return t
+
+
+def protected_repo():
+    """The first `protected entries repo` line, $HOME written ~ (S09's {protected_repo})."""
+    exe = os.path.join(os.path.dirname(os.path.realpath(__file__)), "protected")
+    p = (subprocess.run([exe, "entries", "repo"], capture_output=True, text=True).stdout.splitlines() or [""])[0]
+    return "~" + p[len(HOME):] if p.startswith(HOME + "/") else p
 
 
 def load_tasks(sets=None, tiers=None, ids=None):

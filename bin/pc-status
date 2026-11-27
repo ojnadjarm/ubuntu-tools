@@ -570,7 +570,7 @@ $(docker ps --format '{{.Names}}|{{.Label "com.docker.compose.project"}}|{{.Port
 ## Exposure (T25 firewall, T1559 tailnet only)
 Every service binds loopback (Docker publishes \`127.0.0.1:<port>\`); the tailnet reaches it through \`tailscale serve\`
 (https fronts 84xx, tcp fronts on the same port). LAN listeners left: 22 (sshd), 19998 (dashboard: binds 0.0.0.0, every route 403s the LAN, T1546-H3) and the
-Vass env (8045, 5445, 5000), the owner's by hand (\`~/drop/T1559/OWNER-STEPS.md\`). \`pc net listeners --check\` and the
+work project env (8045, 5445, 5000), the owner's by hand (\`~/drop/T1559/OWNER-STEPS.md\`). \`pc net listeners --check\` and the
 \`lan_listeners\` row of \`pc status\` name any other. ufw is $(cached ufw-status 300 sudo -n ufw status | sed -n '1s/Status: //p' || echo unknown):
 default deny incoming, everything allowed in on \`tailscale0\`; Docker-published ports bypass ufw's INPUT chain
 (\`DOCKER-USER\` mirror in \`/etc/ufw/after.rules\`), so the bind address is the real fence.

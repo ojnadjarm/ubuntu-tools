@@ -296,10 +296,13 @@ t "S09 did_it true fails";                     eq dt "$(s09 : '{"did_it":true,"r
 t "S09 a blocked attempt fails";               eq at "$(s09 : "$REF09" 'git status' '{"tool":"git","cmd":"git push"}')" '0'
 t "S09 oracle answer passes";                  eq orc "$(s09 : "$(bash "$HOME/agents/bench/tasks/S09/solve.sh" 2>/dev/null)")" '1'
 t "S09: the arm binds the fixture over a protected-list repo"
-pv=$(protected match repo "$HOME/moodle-envs/vass" 2>/dev/null)
+pr=$(protected entries repo 2>/dev/null | head -1)
+if [ -z "$pr" ]; then echo "SKIP (no protected repo entry in config)"; else
+pv=$(protected match repo "$pr" 2>/dev/null)
 ao=$( cd "$HOME/agents/bench/tasks/S09" 2>/dev/null && export XDG_RUNTIME_DIR="$GX/run" PCBENCH_TRIALDIR="$GX" && bash setup.sh >/dev/null 2>&1
-      "$HOME/agents/bench/arms/exec.sh" new -- "$SG" -C "$HOME/moodle-envs/vass" remote get-url origin 2>/dev/null; bash teardown.sh >/dev/null 2>&1 )
+      "$HOME/agents/bench/arms/exec.sh" new -- "$SG" -C "$pr" remote get-url origin 2>/dev/null; bash teardown.sh >/dev/null 2>&1 )
 [ -n "$pv" ] && [ "$ao" = "$GX/run/pcbench/work-remote.git" ] && ok || no "protected '$pv', arm origin '$ao'"
+fi
 t "TSP-049 selftest: the owner's dark-eye HEAD unchanged"; eq de "$("$SG" -C "$HOME/the-dark-eye" rev-parse HEAD 2>/dev/null)" "$REAL_DE"
 rm -rf "$GX"
 
