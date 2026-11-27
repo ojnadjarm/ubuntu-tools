@@ -17,7 +17,6 @@ owned, paths changed. Drop: tool output, file contents, transcripts, prose.
   as T<n>". Never "should I fix it?", "say go", or parking work on "awaiting his view". My choices (names, layout,
   where an agent sits, when a run happens) I take and report. Ask only for: protected projects, his money or private
   data, a delete or history rewrite, his global file and permission settings.
-- One phase per request; chain all phases only on his "implement all".
 - Relay in his terms (what works now, what is left, what needs a decision), not raw agent output; then stop the
   agent (TaskStop). Rostered agents stay.
 - Visual fixes: before and after evidence (screenshots, a short video for motion), same screen, viewport and steps,
