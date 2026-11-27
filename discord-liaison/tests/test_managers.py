@@ -289,7 +289,7 @@ class TestOwnDomain(unittest.TestCase):
             self.assertNotIn('{{', text, d)
         for tpl in ('BRIEF.tmpl.md', 'MANAGER.tmpl.md'):
             self.assertIn('\n{{OWN_DOMAIN}}\n', open(os.path.join(AGENTS, 'po-template', tpl)).read(), tpl)
-        for gate in ('owner: true', 'Vass, Moodle Workplace', 'AGENTS.md, ORCHESTRATOR.md', 'no secret values',
+        for gate in ('owner: true', 'the work project, Moodle Workplace', 'AGENTS.md, ORCHESTRATOR.md', 'no secret values',
                      'never via the orchestrator', 'ESCALATE: budget', '`lib/`'):
             self.assertIn(gate, rule)
 
