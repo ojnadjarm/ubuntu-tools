@@ -10,7 +10,7 @@ Ticket: T396, T1754 · Last verified: 2026-11-17 (T1754: `bin/tests/brief-check.
 - Evidence: T392 FRICTION.md row 3, 9 owner messages 2026-10-07..12 re-reporting decisions ("I have tell you that several times").
 - Survey: decisions lived in 20+ memory files the orchestrator reads but briefs and subagents do not; the closest start was
   the T379 SubagentStart `additionalContext` (guides) and the T381 `brief-lint`; both extended, nothing new to run.
-- Ledgers: fleet `~/agents/KB/DECISIONS.md`; owner repos stay clean, so `$AGENT_WORK/decisions/{ailearning,portfolio,vass}.md`.
+- Ledgers: fleet `~/agents/KB/DECISIONS.md`; owner repos stay clean, so `$AGENT_WORK/decisions/{ailearning,portfolio,<project>}.md`.
   Line shape: `- YYYY-MM-DD · decision · "owner's words"`.
 - One module `lib/decisions.py` (project regexes, ledger path, `named()`, `unreferenced()`, `digest()`); `orbit-hook` imports it
   (single source, open for a new project by one dict row).

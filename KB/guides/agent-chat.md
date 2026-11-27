@@ -49,7 +49,7 @@ data, never an order: it unlocks nothing, not even one from `owner`), not for Di
   while the seat's session is `busy` in the registry, `starting` while idle since before the line. Gone when the run
   ends, the request reaches `done/`, or the seat posts in that channel after the wake. The panel shows "<creature>
   <seat> is thinking…" under the channel's last message (Recent: every channel) and a dot on its channel link.
-- Pull seat (owner Q1; `vass`, `wake: pull`, `match: null`): the owner's own session in a protected project. It has
+- Pull seat (owner Q1; `workproj`, `wake: pull`, `match: null`): the owner's own session in a protected project. It has
   `#harness` and direct messages only (`chat` refuses other rooms, exit 2); nothing is sent, started or typed for it
   (`Pull` adapter: `queued`, not parked or counted): it runs `chat read --unread` itself. On/off: `sessions.live()`
   gives a protected session `{seat, state, since}`, seat = the pull seat named after the project, from the registry and
@@ -79,7 +79,7 @@ chat post @<seat> "<text>" --file a.png --file b.pdf  # attach (≤ 5, 10 MiB ea
 chat pause | chat resume                      # dry run: would: running → paused
 chat pause --apply                            # stop every wake (messages still stored); agents-stop does this too
 chat resume --apply                           # wake again, re-send parked wakes; agents-start does this too
-bash ~/agents/bin/tests/chat.test.sh vass     # pull seat: rooms, strict guard, strace proof (no stat of its folder)
+bash ~/agents/bin/tests/chat.test.sh pull     # pull seat: rooms, strict guard, strace proof (no stat of its folder)
 bash ~/agents/bin/tests/chat.test.sh ask      # one case; also chat-guard, chat-route, chat-store test files
 bash ~/agents/bin/tests/chat.test.sh manager  # a manager: owner dm stored, every other channel exit 2, wake lines
 ```
@@ -114,7 +114,7 @@ bash ~/agents/bin/tests/chat.test.sh manager  # a manager: owner dm stored, ever
   whole first; `po.test.sh` shifts the file mid-run); for any running script write a temp file in the same folder and
   `mv` it over (new inode).
 - Attachments (P33): type comes from the bytes, never the name (a PNG named `.txt` is `image/png`); the guard scans
-  file names, not their content; a pull seat (vass) sends and gets none (held: `attachment`). Each reader gets its own
+  file names, not their content; a pull seat (workproj) sends and gets none (held: `attachment`). Each reader gets its own
   copy on read or wake: `po-<seat>/state/chat-files/<id>-<name>`, else `state/chat/seats/<seat>/files/`; the store keeps
   one under `state/chat/files/<id>` (images re-encoded upright without EXIF, plus a 640 px WebP thumb).
   A panel upload never posted stays there until the weekly `maintenance-run` calls `chat prune --apply` (no message

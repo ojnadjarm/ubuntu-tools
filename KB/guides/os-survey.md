@@ -15,7 +15,7 @@ run the source command a row names.
   that calls them and reads files directly; no new collectors. From zero because no OS-level aggregate existed.
 - Shape: `SECTIONS` = (name, quick, fn); `probe(label, argv, n/keep/tail/shape)` = one labelled block; `run()` is the only
   place a command starts (timeout `OS_SURVEY_TIMEOUT`, max 10 s; `OS_SURVEY_BIN` = the only command dir, the test seam).
-  Each section fails soft to `n/a: <why>`; 4 threads; rows matching `vass|moodle45` end `(Vass, owner-only)`.
+  Each section fails soft to `n/a: <why>`; 4 threads; rows naming a protected project end `(protected <project>, owner-only)`.
   A timeout kills the probe's whole process group. Footer `N/M sections clean` = sections with no `n/a` row at all.
 - SOLID: one function per section; a new section is one function + one `SECTIONS` row; commands only via `run()`.
 

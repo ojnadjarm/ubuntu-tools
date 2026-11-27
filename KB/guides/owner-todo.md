@@ -7,7 +7,7 @@ A step only the owner can take (sudo/ufw command, a Discord or account setting, 
 add it here instead of burying it in a report. Not for transient alerts (those are pushes, `pc need`) or project tickets (TICKETS.md).
 
 ## The path we took
-Survey: `pc need` lists 24 h pushes (expire, no steps); vass TICKETS.md is per project markdown; nothing kept owner steps with a how-to.
+Survey: `pc need` lists 24 h pushes (expire, no steps); the work project's TICKETS.md is per project markdown; nothing kept owner steps with a how-to.
 Chosen: an append-only ledger + one lib + a thin CLI, shown on the existing dashboard (headline count + Machine › To do sub-tab).
 
 | Module | Role |

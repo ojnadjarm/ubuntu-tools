@@ -24,7 +24,7 @@ Chosen: a deterministic path classifier plus a nightly full run; no model, reuse
   `brief-lint` WARNs when a CHECK runs `test:perf`, `test:all` or `run.sh` without `--only` and the brief has no `Class: engine|full`.
 - Safety net: `fleet-ci-daily` (02:10, the fleet suite) and `tier-nightly` (03:30 user timer, `ci-window --quiet` first): Mooblox HEAD as a
   `git archive` in a temp dir, `npm ci`, `npm test`, the perf gate under `flock /tmp/mooblox-perf.lock timeout 1500` (T1407: 1000 s measured); then `mci full` on
-  every plugin with an mci log since the last pass (never under `~/moodle-envs/vass` or `~/moodle-envs/4.5`). A red row exits 1: the
+  every plugin with an mci log since the last pass (never under `~/moodle-envs/<project>` or `~/moodle-envs/4.5`). A red row exits 1: the
   failed unit shows in `pc status` FAIL and the 08:00 digest; no push of its own.
 
 ## Exact commands

@@ -30,7 +30,7 @@ Protected projects (`protected entries path|text|container`) are filtered by nam
   files in `state/fleet-backup/never.local` (untracked: 2 transcripts that hold a real password). The run excludes
   them, `--check` fails on any hit in any snapshot, `purge` removes them from old snapshots.
 - `config.env` holds passwords, so it is excluded; `state/fleet-backup/config-redacted.txt` (keys kept, credential
-  values `<redacted>`) is backed up instead. Dev and test passwords (local Moodle admin/DB, Vass test student) appear
+  values `<redacted>`) is backed up instead. Dev and test passwords (local Moodle admin/DB, work project test student) appear
   in many briefs, scripts and transcripts: they stay (listed in the T1623 hand-off), no real account behind them.
 
 ## Exact commands

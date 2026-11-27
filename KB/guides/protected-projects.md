@@ -3,12 +3,12 @@
 Ticket: T1513 · Last verified: 2026-11-09 by `bash ~/agents/bin/tests/protected.test.sh` plus work-repo-guard, pc-docker, pc-failures, os-survey tests (fixture project acme)
 
 ## When to use
-A project is not ours to change (Vass, a future institutional one): agents never git-write its repos, never stop/start/
+A project is not ours to change (the work project, a future institutional one): agents never git-write its repos, never stop/start/
 recreate its containers, never reap its files, and its failed units are "protected", not fleet failures.
 Adding one is config only, no code. Not for owner data (`~/agent-work/owner`, backups: `PC_DISK_PROTECT`).
 
 ## The path we took
-Before: "vass" hard-coded in 10 bin files plus `WORK_REPO_ROOTS`. Now one data source, one matcher, consumers ask it:
+Before: the project name hard-coded in 10 bin files plus `WORK_REPO_ROOTS`. Now one data source, one matcher, consumers ask it:
 
 | Layer | Where | Role |
 |---|---|---|
@@ -24,7 +24,7 @@ legacy `WORK_REPO_ROOTS` is project `work` (repos only).
 ## Exact commands
 ```bash
 # Add a project (e.g. an institutional one), in ~/.config/pc-harness/config.env:
-#   PROTECTED_PROJECTS="vass <name>"
+#   PROTECTED_PROJECTS="<project> <name>"
 #   PROTECTED_<NAME>_REPOS="~/<repo-root>"   PROTECTED_<NAME>_CONTAINERS="<name>*"   PROTECTED_<NAME>_UNITS="<name>*"
 protected list                                  # project, kind, entries
 protected match container <name>-db-1           # prints the project; exit 1 when not protected
@@ -43,7 +43,7 @@ Carry the guard to another Claude install (do not install from here):
 ## Pitfalls (measured)
 - A process that inherited `HARNESS_ENV_LOADED=1` from before T1513 skips env.sh and saw nothing protected (pclib gave `^$`); pclib now reads the `PROTECTED_*` lines from config.env whenever `PROTECTED_PROJECTS` is unset.
 - Tests that copy `pclib.sh` alone into a mutant dir (pc-doctor, 6 others) broke on a separate `protected.sh` (185 bytes of stderr): the matcher lives inside pclib.sh.
-- Tests with a temp HOME have no config.env: they must set a fixture (`PROTECTED_PROJECTS=… PROTECTED_<N>_…`); pc-failures lost its vass rows until it did.
+- Tests with a temp HOME have no config.env: they must set a fixture (`PROTECTED_PROJECTS=… PROTECTED_<N>_…`); pc-failures lost its work project rows until it did.
 - `protected match` costs ~70 ms (sources pclib + env.sh); the PreToolUse hook calls it only for a git commit/push with a resolvable dir.
 - Text words must not be common: legacy `work` has none, or every `agent-work` path would be skipped by pc tmp.
 - Docker rows match `container` globs exactly (`4.5` is not `4.55`); text EREs are lowercase, match lowercased values.
@@ -51,4 +51,4 @@ Carry the guard to another Claude install (do not install from here):
 ## Links
 - Code: `~/agents/bin/pclib.sh` (protected projects section), `~/agents/bin/protected`, `~/agents/bin/protectedlib.py`, `~/agents/git-guard/guard.sh`, `~/agents/hooks/sleep-loop-block-impl.py`
 - Tests: `bash ~/agents/bin/tests/protected.test.sh`, `work-repo-guard.test.sh`, `pc-docker.test.sh`, `pc-failures.test.sh`, `os-survey.test.sh`
-- Guides: `guide work-repo-guard`; decisions `~/agent-work/decisions/vass.md`
+- Guides: `guide work-repo-guard`; decisions `~/agent-work/decisions/<project>.md`

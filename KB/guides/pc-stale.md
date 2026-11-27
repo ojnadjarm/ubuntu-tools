@@ -8,7 +8,7 @@ After unattended-upgrades or a maintenance full-upgrade, when `needrestart` list
 ## The path we took
 No verb read needrestart, so `pc stale` is new; it restarts through `pc units restart --system --apply` (T1059: sudo -n, ledgered, guarded) instead of its own systemctl.
 - read: `sudo -n nice -n 19 needrestart -b -r l` (batch, list only, never restarts by itself), NEEDRESTART-SVC lines
-- classify: held = network (NetworkManager, wpa_supplicant, networkd, resolved), access (ssh*, tailscaled, polkit, logind, dbus, user@*), session (gdm, gnome-*), fleet (docker*, containerd, dark-eye*, sentinel*, agent@*, orchestrator), not ours (PC_NOT_OURS, Vass), bluetooth with a connected device; everything else restart
+- classify: held = network (NetworkManager, wpa_supplicant, networkd, resolved), access (ssh*, tailscaled, polkit, logind, dbus, user@*), session (gdm, gnome-*), fleet (docker*, containerd, dark-eye*, sentinel*, agent@*, orchestrator), not ours (PC_NOT_OURS, the work project), bluetooth with a connected device; everything else restart
 - apply: one `pc units restart` per safe unit, then re-read needrestart; exit 1 when a restarted unit is still stale
 
 ## Exact commands

@@ -1,6 +1,6 @@
 # Dashboard office: add a team, a member, a name; the 3D Org page (`staff.json`, `/api/office`)
 
-Ticket: T1601 (01-18), T1658, T1666, T1687, T1755, T1756, T1757, T1759, T1758, T1767 · Last verified: 2026-11-18 by T1767 (CEO floor polish, `tests/test_office_ceo_polish.js` 4, shots `~/drop/T1767/`); 2026-11-17 by T1758 (CEO floor, `tests/test_office_ceo.js` 7, shots `~/drop/T1758/`), T1759 (deck key, `tests/test_office_floor_work.js`, `test_office_floors.py` deck, live `/api/office` 5 floors, shots `~/drop/T1759/`), T1757 (four floors, `tests/test_office_floor_four.js`, `test_office_floors.py` rest, live `/api/office`, shots `~/drop/T1757/` 4 floors × 5 widths), T1756 (floor head, `tests/test_office_floor_model.js`, shots `~/drop/T1756/`), T1755 (`tests/test_office_floor_model.js`, `tests/test_office_floors.py`, live `/api/office` floors, shots 2 floors × 5 widths); 2026-11-11 by T1687 (`tests/test_office_status.js`, `tests/test_section_status.py`, live `/api/office` vass paused), T1666 (`bin/tests/dashboard-office-drag.test.sh`), T1658 (`bin/tests/dashboard-office-chat.test.sh`); 2026-11-10 by T1601-16 (`staff.load()` 3 teams 12 members, live `GET /api/office`
+Ticket: T1601 (01-18), T1658, T1666, T1687, T1755, T1756, T1757, T1759, T1758, T1767 · Last verified: 2026-11-18 by T1767 (CEO floor polish, `tests/test_office_ceo_polish.js` 4, shots `~/drop/T1767/`); 2026-11-17 by T1758 (CEO floor, `tests/test_office_ceo.js` 7, shots `~/drop/T1758/`), T1759 (deck key, `tests/test_office_floor_work.js`, `test_office_floors.py` deck, live `/api/office` 5 floors, shots `~/drop/T1759/`), T1757 (four floors, `tests/test_office_floor_four.js`, `test_office_floors.py` rest, live `/api/office`, shots `~/drop/T1757/` 4 floors × 5 widths), T1756 (floor head, `tests/test_office_floor_model.js`, shots `~/drop/T1756/`), T1755 (`tests/test_office_floor_model.js`, `tests/test_office_floors.py`, live `/api/office` floors, shots 2 floors × 5 widths); 2026-11-11 by T1687 (`tests/test_office_status.js`, `tests/test_section_status.py`, live `/api/office` `workproj` paused), T1666 (`bin/tests/dashboard-office-drag.test.sh`), T1658 (`bin/tests/dashboard-office-chat.test.sh`); 2026-11-10 by T1601-16 (`staff.load()` 3 teams 12 members, live `GET /api/office`
 4 teams incl. Unassigned 1 (`memory-keeper`), `test_office_*.js` green, `GPU=1 tools/shots.mjs` margins at 5 widths)
 
 ## When to use
@@ -63,7 +63,7 @@ Ticket: T1601 (01-18), T1658, T1666, T1687, T1755, T1756, T1757, T1759, T1758, T
   holds the CEO seat (`orchestrator`) is the CEO's floor (`floors.js` `home(P)`): there is then no `main` floor, the
   page opens on it, an unknown `?floor=` falls back to it (`pick`), the desk pool `pool` and any worker of an unknown
   starter stand on it. Listing the CEO seat holds the CEO only, not its tree. Today: 1F Operations (`operations`,
-  `quality`, `improvement`, `finance`, `"rest": ["team"]`), 2F Projects (`mooblox`, `vass`, `"rest": ["po"]`), 3F
+  `quality`, `improvement`, `finance`, `"rest": ["team"]`), 2F Projects (`mooblox`, `workproj`, `"rest": ["po"]`), 3F
   Discord, 4F CEO. Default floor of a newcomer: an org.json seat on no line goes to its nearest listed parent's floor
   below the CEO (a new Discord PO: Discord), else to the `"rest": ["po"]` floor (Projects); a staff team on no line,
   Unassigned included, to the `"rest": ["team"]` floor (Operations); with no `rest` line, the CEO's floor. Without a
@@ -73,7 +73,7 @@ Ticket: T1601 (01-18), T1658, T1666, T1687, T1755, T1756, T1757, T1759, T1758, T
   2), at least 2 rows in all for the pool by the stairs. The renderer and builders have no floor branch.
 - Personal and Work floors (T1759, owner 2026-11-17: "another floor for work related projects", "Personal and Work
   related projects shouldn't have an upper section"): five floors, top to bottom CEO, Discord, Personal projects
-  (`personal`: mooblox, `rest: ["po"]`, so a new PO lands here), Work projects (`work`: vass), Operations. Key
+  (`personal`: mooblox, `rest: ["po"]`, so a new PO lands here), Work projects (`work`: workproj), Operations. Key
   `"deck": false` on a floor line (default true: absent = the raised office) drops the mezzanine column: `floors.js`
   `flat(P)` lists those floors, `view(M, f, P)` sets `deck` and puts nobody up there, `layout.js` `x0Of(M)` starts the
   bays half a GAP from the left wall (`plan.hall.x0`), the desk pool takes a bay (`layout.js` `baysOf(M)` counts it, also in the

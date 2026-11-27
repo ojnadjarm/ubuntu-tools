@@ -21,7 +21,7 @@ T271 ailearning single site	local-sites,learning-site-repo
 T147 finance tracker build	finance-month,/finance-month
 T134 invoicing tool and skill	invoice,/invoice
 T129 context-rot test	context-rot-test,/context-rot
-Vass keepalive (T269)	vass-keepalive
+work project keepalive (T269)	workproj-keepalive
 Need-you resolve verb (T264)	need-resolve,/need-resolve
 Migration runbook (T246)	migration
 Where-am-I trip guide page	trip-guide

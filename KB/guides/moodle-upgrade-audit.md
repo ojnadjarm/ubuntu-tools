@@ -4,7 +4,7 @@ Ticket: T414 · Last verified: 2026-10-20 (T846) by `audit.py --help`, the cache
 
 ## When to use
 Step 1 of the upgrade offer: every add-on checked for a target-release version. Not for core plugins (skipped) and
-never on the 4.5 / Vass env.
+never on the 4.5 / work project env.
 
 ## The path we took
 - Existing: moosh `plugin-list` (lists the directory, no installed-vs-target verdict; not installed here); the admin

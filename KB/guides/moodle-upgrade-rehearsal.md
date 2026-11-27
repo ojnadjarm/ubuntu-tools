@@ -6,7 +6,7 @@ Ticket: T423 · Last verified: 2026-10-20 by T846 read-only audit (`--help`, pat
 Pricing or planning a Moodle upgrade: you need measured step times and a proven rollback. Not for a customer's real site; for its plugin list use /moodle-upgrade-audit.
 
 ## The path we took
-- Existing: /moodle-install builds envs, but its project name is `moodle<MM>`, so `4.5` would recreate the Vass containers. Chosen: its compose/config shape, re-used inside a separate script with its own project `moodle45r` and port 8145.
+- Existing: /moodle-install builds envs, but its project name is `moodle<MM>`, so `4.5` would recreate the work project containers. Chosen: its compose/config shape, re-used inside a separate script with its own project `moodle45r` and port 8145.
 - Steps: maintenance on, backup (pg_dump -Fc, moodledata tgz, code tgz), pg13 -> pg17 restore, code swap, `.env` docroot `/public` + PHP 8.4, `admin/cli/upgrade.php`, theme check, smoke login (logintoken POST, `logout.php` in page).
 
 ## Exact commands

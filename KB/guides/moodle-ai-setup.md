@@ -4,7 +4,7 @@ Ticket: T424 · Last verified: 2026-10-20 by `ai-setup --help`, code read, moodl
 
 ## When to use
 Turning on Moodle's built-in AI (4.5+) for a site: days 3-6 of the Moodle AI offer, or re-checking that a site still
-matches its AI setup. Not for the Vass/4.5 site or the 5.2 dev site (real aicharts key). Custom AI plugins: out of scope.
+matches its AI setup. Not for the work project's 4.5 site or the 5.2 dev site (real aicharts key). Custom AI plugins: out of scope.
 
 ## The path we took
 Survey: core `\core_ai\manager` already has create/update/enable provider instance; placements are plugins

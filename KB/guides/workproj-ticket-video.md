@@ -1,10 +1,10 @@
-# VASS ticket antes/después video in Spanish from a shot list
+# Work-project ticket antes/después video in Spanish from a shot list
 
 Ticket: T1430 (id reused: the 10-30 T1430 is orchestrator-update-restart, brief `T1430-orchestrator-auto-update-restart.md`; this one is `briefs/T1430-report.md`) · Last verified: 2026-10-29 by re-rendering the JIRA-29 antes video through the skill alone (122 s wall) and the offline selftest (36/36)
 
 ## When to use
-Every VASS ticket ships a Spanish "antes" video (bug replicated) and a "después" video (fixed), per the owner rule in the
-VASS memory `vass-repro-and-fix-videos`. Use this for the campus front (:8446), Moodle back pages (:8445) or a WS JSON
+Every work-project ticket ships a Spanish "antes" video (bug replicated) and a "después" video (fixed), per the owner's rule (antes and después video per
+ticket). Use this for the campus front (:8446), Moodle back pages (:8445) or a WS JSON
 side-by-side view. Not for game or promo videos (/motion-video) or English explainers (/kokoro-narration + explainer-engine).
 
 ## The path we took
@@ -18,19 +18,19 @@ T1383/T1424/T1429 Playwright scripts already existed. The skill chains them inst
 | `runner.mjs` | the step loop; a step's `ws` call runs at its place in the order |
 | `shoot.mjs` | headless Chromium `--mute-audio`; logs in to the front by e-mail and the back as admin before recording; each step: action, wait, line starts, highlight/overlay at `{hl}`, still, hold for the clip |
 | `assemble.py` | trims the head to the first line, mixes clips at their marks, captions from word timings, `mv-encode h264-web --burn`, review gate, stills, `guion-<phase>.md`, `index.html` |
-| `vass-video` | the CLI: narration → ws → recording → assemble → `drop-link` |
+| `workproj-video` | the CLI: narration → ws → recording → assemble → `drop-link` |
 
 ## Exact commands
 ```bash
-V=~/.claude/skills/vass-ticket-video/scripts/vass-video
+V=~/.claude/skills/workproj-ticket-video/scripts/workproj-video
 $V --check ~/agent-work/research/<date>/<T>/<ticket>-antes.json
 $V ~/agent-work/research/<date>/<T>/<ticket>-antes.json            # ~/drop/<ticket>/<ticket>-antes.mp4 + links
 $V shots.json --out ~/drop/<ticket>/try --name trial --work /tmp/w  # scratch output, keep intermediates
-~/.claude/skills/vass-ticket-video/tests/selftest.test.sh                # offline, ~11 s
+~/.claude/skills/workproj-ticket-video/tests/selftest.test.sh                # offline, ~11 s
 ```
-Config keys (config.env; documented in `config.example.env`): `VASS_STUDENT_PASSWORD`, `VASS_MOODLE_PASSWORD` (default
-`MOODLE_ADMIN_PASSWORD`), `VASS_FRONT_URL`, `VASS_MOODLE_URL` (default `https://<tailnet-fqdn>:8446` / `:8445`),
-`VASS_MOODLE_CONTAINER`. Shot lists name test users, so they belong in `~/agent-work`, never in a tracked file.
+Config keys (config.env; documented in `config.example.env`): `WORKPROJ_STUDENT_PASSWORD`, `WORKPROJ_MOODLE_PASSWORD` (default
+`MOODLE_ADMIN_PASSWORD`), `WORKPROJ_FRONT_URL`, `WORKPROJ_MOODLE_URL` (default `https://<tailnet-fqdn>:8446` / `:8445`),
+`WORKPROJ_MOODLE_CONTAINER`. Shot lists name test users, so they belong in `~/agent-work`, never in a tracked file.
 
 Owner rule (2026-10-29, corrected): the antes video sits on the same ticket, so después does not show or re-explain the old
 error. It goes straight to the change working, and its length scales with the change: a small fix gets a very short video
@@ -44,7 +44,7 @@ antes steps without their overlays. See SKILL.md for the format. Every report gi
 - `ws` steps used to run before recording, so they showed data from before the on-screen actions (T1432: baremo 9.1
   shown instead of 6.5). Now each `ws` call runs at its place in the step order (`runner.mjs`), after the earlier UI steps.
   It adds about 3 s per call before that step's line starts. The selftest goes red on the old order.
-- `mws` refuses the VASS env ("Vass and 4.5 are never touched"). `ws` steps use `docker exec -i <container> php -- '<job>' < ws.php`
+- `mws` refuses the work project env ("the work project and 4.5 are never touched"). `ws` steps use `docker exec -i <container> php -- '<job>' < ws.php`
   (6.6 s for 2 calls). `call_external_function` from CLI fails with "session has been logged out"; `ws.php` calls the class directly.
 - Playwright errors dump request headers with the session JWT and the Moodle wstoken (T1429 printed one). The scripts print only
   the first line, redacted, and `unrouteAll` before closing a context: closing with a pending `route.fetch` throws exactly that dump.
@@ -57,7 +57,7 @@ antes steps without their overlays. See SKILL.md for the format. Every report gi
 - Local editions are all past `secondcalldate`, so results cards say "último Simulacro"; seed Simulacro attempts and say so.
 - Only `en` is installed locally: back pages show English strings (T1427). Never say so in the narration or captions (owner 2026-10-30). Live classes need `$LIVECLASS_JWT_SECRET` in config.php;
   Vimeo does not play headless, so use a YouTube URL (T1424).
-- 2026-10-29: the VASS `config.php` was mode 600 after a restore from backup (ctime 09:55). Moodle pages died with "Permission
+- 2026-10-29: the work project `config.php` was mode 600 after a restore from backup (ctime 09:55). Moodle pages died with "Permission
   denied" while `login/token.php` and the WS still answered from opcache, so the front kept working. The back login now fails
   fast with "Moodle login page broken".
 - Flaky front: 1 of 6 live runs timed out on a 30 s `wait` (front slow, then fine on re-run). The error names the step and
@@ -68,6 +68,6 @@ antes steps without their overlays. See SKILL.md for the format. Every report gi
   same shot list with `"phase": "despues"`.
 
 ## Links
-- Code: `~/agents/skills/vass-ticket-video/` (SKILL.md, scripts/)
-- Tests: `~/agents/skills/vass-ticket-video/tests/selftest.test.sh` (schema, unit, redaction, assemble on a synthetic recording)
+- Code: `~/agents/skills/workproj-ticket-video/` (SKILL.md, scripts/)
+- Tests: `~/agents/skills/workproj-ticket-video/tests/selftest.test.sh` (schema, unit, redaction, assemble on a synthetic recording)
 - Design / results: `~/agent-work/research/2026-10-29/T1430/` (JIRA-29 shot list, proof run), T1429 report `~/agent-work/briefs/T1429-report.md`

@@ -31,7 +31,7 @@ The seven netdata.conf ids and three go.d.conf ids each chain per file: each und
 ```bash
 pc undo dmamz3o3xzg5 --apply   # netdata.conf: apps.plugin off, transient scopes and veth/br-* skipped (T1122)
 pc undo dmaltvzlauqw --apply   # netdata.conf: apps + cgroups update every 30 → 60 (T1104)
-pc undo dmakich674t0 --apply   # go.d.conf: default_run no, only docker (T1084); undoing it re-polls Vass mongo/redis
+pc undo dmakich674t0 --apply   # go.d.conf: default_run no, only docker (T1084); undoing it re-polls the work project mongo/redis
 pc undo dmakicc62j1g --apply   # netdata.conf: systemd-journal plugin off
 pc undo dmaeq22z7rs7 --apply   # netdata.conf: web threads 2, cgroups discovery 60, statsd off
 pc undo dmaehiyoyser --apply   # netdata.conf: db 10 s, web threads 4, idlejitter off
@@ -40,7 +40,7 @@ pc undo dmae5w0vppse --apply   # netdata.conf: first trim
 pc undo dmae23pc9mma --apply   # netdata.conf: T26 original
 pc undo dmae218vpvtw --apply   # go.d.conf: intelgpu + logind off (removes the file)
 ```
-Out of order, `pc undo` refuses ("is now sha:…, not the ledger's … use --force"); `--force` on an older id also drops every later change to that file. On go.d.conf never `--force` past dmakich674t0: it restores `default_run: yes`, which brings back the Vass polling below.
+Out of order, `pc undo` refuses ("is now sha:…, not the ledger's … use --force"); `--force` on an older id also drops every later change to that file. On go.d.conf never `--force` past dmakich674t0: it restores `default_run: yes`, which brings back the work project polling below.
 
 ## Exact commands
 ```bash
@@ -58,7 +58,7 @@ curl -s 127.0.0.1:19999/api/v1/charts | python3 -c 'import json,sys,collections 
 - CPU time per window grows at idle (low clocks): the previous config measured 650 ms at load 4 and 900 ms at load 0.3. Compare at similar load, and never in the first ~3 min after a restart (one window at +1 min measured 5,448 ms).
 - `wait-for … --until` returns at once on `curl …/info` during a restart: the old process still answers while it stops (~17 s). Wait for a new `ActiveEnterTimestamp`.
 - `/etc/netdata/go.d.conf` replaces the stock one wholesale: keep `enabled`, `default_run`, `max_procs`, with `default_run: no` list only the modules you turn on.
-- go.d auto-detection (`default_run: yes`) polled the Vass mongo/redis containers every 10 s; T1084 set `default_run: no` with only `docker: yes`. Never re-enable mongodb/redis jobs: Vass is never touched.
+- go.d auto-detection (`default_run: yes`) polled the work project mongo/redis containers every 10 s; T1084 set `default_run: no` with only `docker: yes`. Never re-enable mongodb/redis jobs: the work project is never touched.
 
 ## Links
 - Code: /etc/netdata/netdata.conf, /etc/netdata/go.d.conf (backups: ~/agent-work/backups/conf/)

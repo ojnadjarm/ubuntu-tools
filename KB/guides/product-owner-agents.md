@@ -10,7 +10,7 @@ slimmed, `po-new --refresh` on the managers and po-mooblox, `po.test.sh`, `po-wo
 
 ## When to use
 A project that eats the orchestrator's context (Mooblox: 62 % of a week) gets a PO that holds only its context; the
-orchestrator relays with `po-ask`. Not for fleet tooling, work repos (Vass) or rare projects: those stay with the orchestrator.
+orchestrator relays with `po-ask`. Not for fleet tooling, work repos (the work project) or rare projects: those stay with the orchestrator.
 
 ## The path we took
 - A PO is a normal `agent-run` agent `~/agents/po-<p>/` (survey in T1410 §0: fleet persistent agents, CrewAI/MetaGPT

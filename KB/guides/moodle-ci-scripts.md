@@ -3,7 +3,7 @@
 Ticket: T389, T420 (behat --parallel) · Last verified: 2026-10-20 by T846 audit (`mtest --help`, `phpcs-delta --help`, paths, selenium 3.141.59 status); 2026-10-19 by fixture local_t420par (6 features) on 5.2, `tests/mtest-parallel.test.sh` 10/10, `tests/phpcs-delta.test.sh` 4/4
 
 ## When to use
-Any Moodle plugin work in a docker env (`~/moodle-envs/<ver>`, vass on 4.5): running tests after a change, or checking
+Any Moodle plugin work in a docker env (`~/moodle-envs/<ver>`, the work project on 4.5): running tests after a change, or checking
 "no new phpcs errors" on scope-only diffs. Not for the full Bitbucket mirror: that is `/moodle-ci full`.
 
 ## The path we took
@@ -28,7 +28,7 @@ $S/phpcs-delta [--base develop] [plugin-dir]                           # exit 1 
   test relies on a base class another test file `require_once`s: 5 of 18 single-file runs in 12 days. mtest always
   uses `--testsuite <component>_testsuite --filter <class>`.
 - A branch switch changes plugin versions, so the phpunit env goes stale ("initialised for different version"): 8
-  failed runs in 12 days. A reinit is a full reinstall: 200–230 s on 4.5 (vass), 114 s on 5.2.
+  failed runs in 12 days. A reinit is a full reinstall: 200–230 s on 4.5 (the work project), 114 s on 5.2.
 - `init.php` also runs composer self-update/upgrade; mtest passes `--disable-composer`.
 - Behat `--diag` does not check "enabled"; mtest also requires `behat.yml` + `test_environment_enabled.txt`.
 - phpcs-delta matches by sniff + message + line text: a moved pre-existing violation is not new; a violation on an

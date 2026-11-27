@@ -49,7 +49,7 @@ Image build needs network once (apt); the containers never have one. Images `ins
 - On 26.04 install prints `could not enable claude-orchestrator.service` (no nm-online/claude/tmux in the
   image); the file is installed and enabled, only the start fails. Expected.
 - Not in `units/` by decision (T474): `moodle52-cron`, `moodle45-cron` (per-env: hard-coded container names,
-  4.5 is Vass).
+  4.5 is the work project).
 - `orchestrator-pulse` and `pulse-5h-reset` ship in `units/` since T477 (ExecStart sources env.sh, no `bash -l`).
   install.sh never enables a unit named in `UNITS_OFF` (default `orchestrator-pulse.timer`, off by owner 2026-10-18);
   the test asserts `enabled disabled` for the two timers.

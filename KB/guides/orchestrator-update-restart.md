@@ -1,10 +1,10 @@
 # Keep the orchestrator session on the newest Claude Code (restart onto a new version without a reboot)
 
-Ticket: T1430 (id reused: the 10-29 T1430 is vass-ticket-video, `briefs/T1430-report.md`; this one is `briefs/T1430-orchestrator-auto-update-restart.md`) · Last verified: 2026-11-07 by `bin/tests/orchestrator-update-restart.test.sh` (41 checks) and the stuck check on a copy of the real log (fires once)
+Ticket: T1430 (id reused: the 10-29 T1430 is workproj-ticket-video, `briefs/T1430-report.md`; this one is `briefs/T1430-orchestrator-auto-update-restart.md`) · Last verified: 2026-11-07 by `bin/tests/orchestrator-update-restart.test.sh` (41 checks) and the stuck check on a copy of the real log (fires once)
 
 ## When to use
 The auto-updater installed a new Claude Code but the orchestrator pane still runs the old binary. Not for other
-sessions (Vass, liaison jobs) and not for the auto-updater itself.
+sessions (the work project, liaison jobs) and not for the auto-updater itself.
 
 ## The path we took
 - No updater hook exists (the native updater only repoints `~/.local/bin/claude` → `~/.local/share/claude/versions/<v>`),

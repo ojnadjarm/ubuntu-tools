@@ -7,7 +7,7 @@ Before writing a brief or a backlog: take the id from `ticket-id next` (planners
 Not for which wave item shipped: that is `fleet-survey --shipped`.
 
 ## The path we took
-- Existed: nothing allocated ids; planners read history.md by eye. T716/T717 went to both MIRASMANT-26 (Vass briefs)
+- Existed: nothing allocated ids; planners read history.md by eye. T716/T717 went to both MIRASMANT-26 (work project briefs)
   and wave 18 #1/#2; T718 to MIRASMANT-5 (report) and wave 18 #3. Chosen: one read-only Python CLI over the files.
 - Model: a **use** is a brief file, a history line whose subject is the id, an evidence or research dir, a backlog
   heading. An **owner** is a backlog item (`## k. T<n>` heading, brief header `#k (from …/T<p>/BACKLOG.md)`, history
@@ -42,9 +42,9 @@ bash ~/agents/bin/tests/ticket-id.test.sh
   with the real brief. A second brief with another slug and no `#k (from …BACKLOG.md)` header is a second owner.
 - Two unmapped briefs of one id with different first slug words are two owners (T1546-G5): `T1547-auto-hire-…` and
   `T1547-tiny-epic-…` (2026-11-10, 4 min apart) passed as one `brief` before. Live: dups 21 → 62, the new ones real
-  double uses (T27x-T35x Vass + fleet, T1493, T1547-T1551) except T48 (`loop-ticket` + `self-improvement-loop-plan`).
+  double uses (T27x-T35x work project + fleet, T1493, T1547-T1551) except T48 (`loop-ticket` + `self-improvement-loop-plan`).
   Same job under two first words (`gamelyn-x` and `tiny-epic-gamelyn-x`) also reads as two: rename or add a header.
-- A report alone (`T718-report.md`, MIRASMANT-5, 2026-10-20 08:55) counts as a brief: the Vass session never wrote
+- A report alone (`T718-report.md`, MIRASMANT-5, 2026-10-20 08:55) counts as a brief: the work project session never wrote
   a brief. Live 2026-10-20: 3 double uses over 817 brief files, none of them a false alarm.
 - History lines without a leading `- ` (T720, line 903) were missed by fleet-survey until T778; dated dash-less lines now count as shipped.
 - The T747 Moodle backlog uses `## T748 · title` headings: counted for ids (owner `T747:T748`), not as

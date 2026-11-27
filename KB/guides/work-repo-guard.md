@@ -45,4 +45,4 @@ bash ~/agents/bin/tests/work-repo-guard.test.sh
 ## Links
 - Code: `~/agents/git-guard/guard.sh`, `~/agents/git-guard/hooks/`, `~/agents/bin/work-repo-guard`, `~/agents/hooks/sleep-loop-block-impl.py`
 - Tests: `bash ~/agents/bin/tests/work-repo-guard.test.sh` (mktemp HOME, fixture GIT_CONFIG_GLOBAL; selftest checks the real gitconfig sha and work-repo .git mtimes)
-- Decisions: `~/agent-work/decisions/vass.md`
+- Decisions: `~/agent-work/decisions/<project>.md`
