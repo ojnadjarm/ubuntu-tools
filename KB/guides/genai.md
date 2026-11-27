@@ -1,6 +1,6 @@
 # Ask for AI concept art on the owner's Google plan (genai, Antigravity CLI)
 
-Ticket: T2006 · Last verified: 2026-11-27 by bin/tests/genai.test.sh (fake agy; no real agy installed yet)
+Ticket: T2006, T2014 · Last verified: 2026-11-27 by bin/tests/genai.test.sh (fake agy)
 
 ## When to use
 Any fleet agent that needs a concept image (a look to aim at, a character idea, a mood) asks `genai`. A generated image
@@ -19,7 +19,7 @@ refs, backend, model, date). One TSV line per ask in `~/agents/log/genai.tsv`: t
 ```bash
 genai ask --ticket T<n> --need "<what the art is for and what it shows>" [--n 1..4] [--ref img.png]...
 genai doctor        # installed (path, version), signed in, last ask; exit 0 only when an ask can run
-# exit 0 made · 1 backend error · 2 usage · 3 quota exhausted (prints the reset line if agy gave one) · 5 agy missing or not signed in
+# exit 0 made · 1 backend error · 2 usage · 3 quota exhausted ("genai: quota exhausted, resets after 3h44m45s, at 2026-11-27 20:35") · 5 agy missing or not signed in
 ```
 The owner's two steps (agy is not installed yet; `genai` prints them on exit 5):
 1. `curl -fsSL https://antigravity.google/cli/install.sh | bash`
@@ -34,6 +34,10 @@ The owner's two steps (agy is not installed yet; `genai` prints them on exit 5):
 - Reported upstream: `agy -p` can hang or drop stdout without a TTY; `genai` gives agy 600 s (doctor 120 s).
 - `genai doctor` proves sign-in with a one-word text prompt: it spends a little plan quota.
 - Quota is the plan's: a 429 is exit 3, wait for the reset; never retry in a loop.
+- Image quota is small: a few images per window on the Pro plan (exact number unknown); agy answers it as exit 0 with
+  the 429 text in `response`. `genai doctor` prints the last reset from the log, no call spent on it.
+- n images = n agy calls, one after the other (agy's own parallel mode needs RunWorkflow, which headless denies, T2014);
+  a quota answer mid-run stops and keeps what was made (exit 3, paths printed, md `- Made: k of n`).
 - Never read, copy or print agy's token file; no proxy reuses its login outside agy.
 
 ## Links

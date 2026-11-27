@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # genai against a fake agy on a temp PATH and a temp HOME: ask writes n PNGs + the md + one TSV line, two asks run one
 # after the other, a 429 is exit 3 with the reset time, a missing agy is exit 5 with the owner's two steps; doctor codes.
+# One agy call per image, a denied call with no image is retried once, quota text in a JSON answer or mid-run is exit 3.
 set -uo pipefail
 BIN="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 WORK=$(mktemp -d)
@@ -16,7 +17,14 @@ echo "$*" >>"$FAKE_LOG/args"
 case "${FAKE_AGY:-ok}" in
   429) echo 'Error 429 RESOURCE_EXHAUSTED: quota exceeded. Quota resets at 2026-11-28T08:00:00Z' >&2; exit 1 ;;
   auth) echo 'Not signed in: run agy to log in' >&2; exit 1 ;;
+  quota-json) echo '{"response":"Error (HTTP 429): \"You have exhausted your capacity on this model. Your quota will reset after 3h44m45s.\"","model":"m"}'; exit 0 ;;
+  quota-second) [ -f "$FAKE_LOG/made" ] && { echo '{"response":"(HTTP 429): \"You have exhausted your capacity on this model. Your quota will reset after 0h10m0s.\""}'; exit 0; } ;;
+  deny-first) [ -f "$FAKE_LOG/denied" ] || { touch "$FAKE_LOG/denied"; echo '{"response":"","denied_actions":[{"action":"command","display_name":"RunWorkflow"}]}'; exit 0; } ;;
 esac
+if [ "${FAKE_AGY:-}" = multi-denied ] && ! printf '%s' "$*" | grep -qE 'exactly 1 '; then
+  echo '{"response":"","denied_actions":[{"action":"command","display_name":"RunWorkflow"}]}'; exit 0
+fi
+touch "$FAKE_LOG/made"
 echo "start $(date +%s%N)" >>"$FAKE_LOG/order"
 sleep 0.4
 n=$(printf '%s' "$*" | grep -oE 'exactly [0-9]+' | grep -oE '[0-9]+' || echo 1)
@@ -75,6 +83,32 @@ printf '\x89PNG\r\n\x1a\nref' >"$WORK/ref.png"
 "$BIN/genai" ask --ticket T9001 --need 'with a ref' --ref "$WORK/ref.png" >/dev/null
 is 'ref: exit 0' $? 0
 ev 'ref: the ref path reaches agy' 'tail -1 "$WORK/args" | grep -q "$WORK/ref.png"'
+
+FAKE_AGY=quota-json "$BIN/genai" ask --ticket T9001 --need 'x' 2>"$WORK/err" >/dev/null
+is 'quota in a JSON answer on exit 0: exit 3' $? 3
+ev 'quota in a JSON answer: prints the reset after time' 'grep -q "resets after 3h44m45s" "$WORK/err"'
+ev 'quota in a JSON answer: prints the clock time' "grep -q \"at $(date -d '+3 hours 44 minutes 45 seconds' +%Y-%m-%d)\" \"\$WORK/err\""
+
+: >"$WORK/args"
+out=$(FAKE_AGY=multi-denied "$BIN/genai" ask --ticket T9002 --need 'two robots' --n 2); rc=$?
+is 'n=2: exit 0 though agy denies a multi-image ask' $rc 0
+is 'n=2: two PNGs' "$(ls "$WORK/home/drop/T9002/concept/"*.png 2>/dev/null | wc -l)" 2
+is 'n=2: two agy calls, one image each' "$(grep -c 'exactly 1 ' "$WORK/args")" 2
+
+rm -f "$WORK/denied"; : >"$WORK/args"
+FAKE_AGY=deny-first "$BIN/genai" ask --ticket T9003 --need 'x' >/dev/null
+is 'denied_actions with no image: retried, exit 0' $? 0
+is 'denied_actions with no image: two calls' "$(wc -l <"$WORK/args")" 2
+
+rm -f "$WORK/made"
+out=$(FAKE_AGY=quota-second "$BIN/genai" ask --ticket T9004 --need 'x' --n 3 2>"$WORK/err"); rc=$?
+is 'quota mid-run: exit 3' $rc 3
+is 'quota mid-run: keeps the one made' "$(ls "$WORK/home/drop/T9004/concept/"*.png 2>/dev/null | wc -l)" 1
+is 'quota mid-run: prints the PNG and the md' "$(echo "$out" | grep -c "^$WORK/home/drop/T9004/concept/")" 2
+ev 'quota mid-run: md lists what was made' 'grep -q "^- Made: 1 of 3" "$WORK/home/drop/T9004/concept/"*.md'
+
+out=$("$BIN/genai" doctor)
+ev 'doctor: last ask on quota prints the reset time from the log' 'echo "$out" | grep -q "^quota: .*resets at [0-9-]* [0-9:]*"'
 
 out=$("$BIN/genai" doctor); rc=$?
 is 'doctor: exit 0 when an ask can run' $rc 0

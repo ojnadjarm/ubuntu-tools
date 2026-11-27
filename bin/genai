@@ -13,9 +13,10 @@ import time
 
 USAGE = """usage: genai ask --ticket T<n> --need "<what the art is for and what it shows>" [--n 1..4] [--ref img]...
        genai doctor
-ask: one ask at a time (flock), agy -p headless, writes ~/drop/T<n>/concept/<id>-<k>.png and <id>.md, prints the paths,
-logs ts, ticket, seat, n, backend, exit, seconds to ~/agents/log/genai.tsv. A generated image is a concept, never the
-delivered asset. doctor: agy installed, signed in, last ask; exit 0 only when an ask can run.
+ask: one ask at a time (flock), one agy -p headless call per image in sequence, writes ~/drop/T<n>/concept/<id>-<k>.png
+and <id>.md, prints the paths, logs ts, ticket, seat, n, backend, exit, seconds, quota reset to ~/agents/log/genai.tsv.
+A generated image is a concept, never the delivered asset. On quota it stops and keeps what was made (exit 3).
+doctor: agy installed, signed in, last ask (and its quota reset); exit 0 only when an ask can run.
 env: GENAI_AGY (default ~/.local/bin/agy), DROP_DIR (default ~/drop), GENAI_LOG, CHAT_SEAT
 exit 0 made · 1 backend error · 2 usage · 3 quota exhausted · 5 agy missing or not signed in"""
 OWNER_STEPS = """genai: agy is missing or not signed in; the owner's two steps:
@@ -24,7 +25,9 @@ OWNER_STEPS = """genai: agy is missing or not signed in; the owner's two steps:
 # Unproven (no real agy here): flags, headless image tool approval, where images land; read from third-party sources.
 AGY_FLAGS = ["--output-format", "json"]
 IMAGE_EXT = (".png", ".jpg", ".jpeg", ".webp")
-QUOTA = re.compile(r"\b429\b|RESOURCE_EXHAUSTED|quota", re.I)
+QUOTA = re.compile(r"\b429\b|RESOURCE_EXHAUSTED|quota|exhausted your capacity", re.I)
+RESET_AFTER = re.compile(r"reset after (?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?", re.I)
+DENIED = re.compile(r'"denied_actions"\s*:\s*\[\s*\{')
 AUTH = re.compile(r"not (signed|logged) in|sign in|log ?in|unauthori[sz]ed|\b401\b|credential", re.I)
 
 
@@ -48,11 +51,11 @@ def agy(args, cwd=None, timeout=600):
     return r.returncode, r.stdout + r.stderr
 
 
-def run_agy(prompt, n, refs, outdir):
-    """Ask agy for n images saved in outdir; (exit code, output, model, image paths, prompt sent)."""
-    ask = (f"Use your image generation tool to make exactly {n} concept image(s). Save each as a PNG file in "
-           f"{outdir}, named concept-1.png to concept-{n}.png. Do not create or edit any other file and run no shell "
-           "command. ")
+def run_agy(prompt, refs, outdir):
+    """Ask agy for one image saved in outdir; (exit code, output, model, image paths, prompt sent)."""
+    ask = (f"Use your image generation tool directly to make exactly 1 concept image. Save it as a PNG file in "
+           f"{outdir}, named concept-1.png. Do not run a workflow or subagent, do not create or edit any other file "
+           "and run no shell command. ")
     if refs:
         ask += "Keep the design of these reference images: " + ", ".join(refs) + ". "
     ask += "The image: " + prompt
@@ -64,49 +67,68 @@ def run_agy(prompt, n, refs, outdir):
         pass
     found = [os.path.join(outdir, f) for f in sorted(os.listdir(outdir)) if f.lower().endswith(IMAGE_EXT)]
     found += [p for p in re.findall(r"(/[^\s\"']+\.(?:png|jpe?g|webp))", out, re.I) if os.path.isfile(p)]
-    return rc, out, model, list(dict.fromkeys(found))[:n], ask
+    return rc, out, model, list(dict.fromkeys(found))[:1], ask
 
 
 def failure(rc, out):
-    """Map a failed agy run to genai's exit code and print why."""
+    """Map a failed agy run to genai's exit code and print why; (exit code, reset clock time or '-')."""
     if QUOTA.search(out):
+        m = RESET_AFTER.search(out)
+        if m:
+            h, mi, se = (int(x or 0) for x in m.groups())
+            at = time.strftime("%Y-%m-%d %H:%M", time.localtime(time.time() + h * 3600 + mi * 60 + se))
+            print(f"genai: quota exhausted, resets after {h}h{mi}m{se}s, at {at}", file=sys.stderr)
+            return 3, at
         reset = [ln.strip() for ln in out.splitlines() if re.search(r"reset", ln, re.I)]
         print("genai: quota exhausted" + (f"; {reset[0]}" if reset else ""), file=sys.stderr)
-        return 3
+        return 3, "-"
+    if rc == 0:
+        print(f"genai: agy made no image: {out.strip()[-400:]}", file=sys.stderr)
+        return 1, "-"
     if AUTH.search(out):
         print(OWNER_STEPS, file=sys.stderr)
-        return 5
+        return 5, "-"
     print(f"genai: agy exit {rc}: {out.strip()[-400:]}", file=sys.stderr)
-    return 1
+    return 1, "-"
 
 
 def ask(a):
     """Run one ask under the lock and log it."""
     t0 = time.time()
-    rc = do_ask(a)
+    rc, reset = do_ask(a)
     os.makedirs(os.path.dirname(log_path()), exist_ok=True)
     with open(log_path(), "a") as f:
         f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')}\t{a.ticket}\t{os.environ.get('CHAT_SEAT') or '-'}\t{a.n}\tagy\t"
-                f"{rc}\t{time.time() - t0:.1f}\n")
+                f"{rc}\t{time.time() - t0:.1f}\t{reset}\n")
     return rc
 
 
 def do_ask(a):
-    """Call the backend and write the PNGs and the md; genai's exit code."""
+    """Call the backend once per image, keep what was made, write the PNGs and the md; (exit code, reset)."""
     if not os.access(agy_path(), os.X_OK):
         print(OWNER_STEPS, file=sys.stderr)
-        return 5
+        return 5, "-"
     os.makedirs(os.path.dirname(log_path()), exist_ok=True)
     with open(log_path() + ".lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         work = tempfile.mkdtemp(prefix="genai-")
         try:
-            rc, out, model, images, sent = run_agy(a.need, a.n, [os.path.abspath(r) for r in a.ref], work)
-            if rc != 0:
-                return failure(rc, out)
+            images, result = [], (0, "-")
+            for k in range(1, a.n + 1):
+                outdir = os.path.join(work, str(k))
+                for _ in range(2):
+                    shutil.rmtree(outdir, ignore_errors=True)
+                    os.makedirs(outdir)
+                    rc, out, model, made, sent = run_agy(a.need, [os.path.abspath(r) for r in a.ref], outdir)
+                    # A headless denial (e.g. RunWorkflow) makes nothing: one retry.
+                    if made or rc != 0 or QUOTA.search(out) or not DENIED.search(out):
+                        break
+                if rc != 0 or not made:
+                    result = failure(rc, out)
+                    break
+                images += made
             if not images:
-                print(f"genai: agy made no image: {out.strip()[-400:]}", file=sys.stderr)
-                return 1
+                return result
             dest = os.path.join(os.path.expanduser(os.environ.get("DROP_DIR") or "~/drop"), a.ticket, "concept")
             os.makedirs(dest, exist_ok=True)
             cid = base = time.strftime("%Y%m%d-%H%M%S")
@@ -126,10 +148,11 @@ def do_ask(a):
             md = os.path.join(dest, cid + ".md")
             with open(md, "w") as f:
                 f.write(f"CONCEPT, not an asset\n\n- Need: {a.need}\n- Prompt sent: {sent}\n- Refs: "
-                        f"{', '.join(a.ref) or '-'}\n- Backend: agy\n- Model: {model}\n- Date: "
+                        f"{', '.join(a.ref) or '-'}\n- Made: {len(paths)} of {a.n}: "
+                        f"{', '.join(os.path.basename(p) for p in paths)}\n- Backend: agy\n- Model: {model}\n- Date: "
                         f"{time.strftime('%Y-%m-%dT%H:%M:%S')}\n")
             print("\n".join(paths + [md]))
-            return 0
+            return result
         finally:
             shutil.rmtree(work, ignore_errors=True)
 
@@ -149,6 +172,8 @@ def doctor():
     try:
         last = open(log_path()).read().strip().splitlines()[-1].split("\t")
         print(f"last ask: {last[0]} {last[1]} n={last[3]} exit {last[5]} in {last[6]} s")
+        if last[5] == "3" and len(last) > 7 and last[7] != "-":
+            print(f"quota: the last ask ended on quota; resets at {last[7]}")
     except (OSError, IndexError):
         print("last ask: none")
     if rc == 5:
