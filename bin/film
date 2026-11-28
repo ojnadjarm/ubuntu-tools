@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# film — the painted-film engine's command line (skill painted-film); `film check DIR [--target IMG] [--mp4 FILE] [--still]`, `film ref SHOT [--frames a-b] [--seed-pair]`.
+# film — the painted-film engine's command line (skill painted-film): `film check DIR`, and the cached stages
+# `film ref|paint|sheet SHOT --frames a-b`, `film still SHOT 84,300 --pair IMG`, `film encode SHOT OUT.mp4` (each runs the stages before it).
 set -euo pipefail
 case "${1:-}" in
-  -h|--help) echo "usage: film check DIR [--target IMG] [--mp4 FILE] [--still] | film ref SHOT [--frames a-b] [--seed-pair]  (film check -h, film ref -h)"; exit 0 ;;
-  -*) echo "usage: film check|ref ... (film --help)" >&2; exit 2 ;;
+  -h|--help) echo "usage: film check DIR [--target IMG] [--mp4 FILE] [--still] [--flow DIR] | film ref|paint|sheet SHOT [--frames a-b] [--look F] [--draft] | film still SHOT 84,300 [--pair IMG] | film encode SHOT OUT.mp4 [--preset P] [--crf N] [--grain S]  (film <cmd> -h)"; exit 0 ;;
+  -*) echo "usage: film check|ref|paint|still|encode|sheet ... (film --help)" >&2; exit 2 ;;
 esac
 SKILL="$(dirname "$(readlink -f "$0")")/../skills/painted-film"
 PY=${FILM_PYTHON:-$HOME/.local/opt/inkwash/bin/python}
-PYTHONPATH="$SKILL/scripts${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" -m atelier.cli "$@"
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 PYTHONPATH="$SKILL/scripts${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" -m atelier.cli "$@"

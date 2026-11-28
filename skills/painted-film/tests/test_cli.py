@@ -1,0 +1,162 @@
+"""Tests of the film stages (A6): cache keys, frames in any order, the draft size, single-thread workers, the boil."""
+import ctypes
+import dataclasses
+import json
+import os
+import sys
+import tempfile
+import unittest
+
+import numpy as np
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "scripts"))
+sys.path.insert(0, HERE)
+
+from atelier import cli  # noqa: E402
+from test_anchor import bank, cam_at  # noqa: E402
+from test_paint import flat_ref  # noqa: E402
+
+SIZE = (320, 180)
+with open(os.path.join(HERE, "..", "looks", "oil-tight.json")) as fh:
+    LOOK = json.load(fh)
+QUICK = dict(LOOK, px_per_stroke=40.0)  # few strokes: these tests check the stages, not the paint
+
+
+class Plane:
+    """A Scene with one wall of seeds (test_anchor's)."""
+    fps = 24
+
+    def __init__(self):
+        self.b, self.V = bank()
+
+    def seeds(self, t, cam, px_per_stroke):
+        return self.b.place(self.V, cam, px_per_stroke)
+
+
+def ref_at(f, x=None):
+    """The reference of frame f: the camera slides along the wall, or stands at x."""
+    r = flat_ref(cam_at(0.3 + 0.05 * f if x is None else x, 3.0), [(10.0, -4, 4, -4, 4, 7, (0.5, 0.4, 0.3))])
+    return dataclasses.replace(r, meta={"t": f / 24.0})
+
+
+def write(path, text):
+    with open(path, "w") as fh:
+        fh.write(text)
+
+
+def _probe(_):
+    """In a worker: the BLAS library's own thread count and OpenCV's."""
+    import cv2
+    lib = next(ln.split()[-1] for ln in open("/proc/self/maps") if "openblas" in ln)
+    so = ctypes.CDLL(lib)
+    get = next(getattr(so, n) for n in ("scipy_openblas_get_num_threads64_", "openblas_get_num_threads64_",
+                                        "openblas_get_num_threads") if hasattr(so, n))
+    return get(), cv2.getNumThreads()
+
+
+class Cache(unittest.TestCase):
+    def test_cache_keys(self):
+        """An unchanged frame is skipped; a changed shot, look, engine or reference file repaints it."""
+        with tempfile.TemporaryDirectory() as d:
+            shot, eng, out, ref = (os.path.join(d, n) for n in ("shot", "engine", "out", "ref"))
+            for p in (shot, eng, out, ref):
+                os.makedirs(p)
+            write(os.path.join(shot, "shot.json"), '{"scene": "s", "fps": 24}')
+            write(os.path.join(shot, "s.py"), "def scene(): pass\n")
+            look = os.path.join(d, "look.json")
+            write(look, '{"name": "x"}')
+            write(os.path.join(eng, "paint.py"), "A = 1\n")
+            frames = [3, 4, 5]
+            for f in frames:
+                write(os.path.join(ref, "f_%04d.key" % f), "r%d" % f)
+            keys = lambda: {f: cli.paint_key(shot, look, f, SIZE, ref, eng) for f in frames}  # noqa: E731
+
+            def make():
+                todo = cli.stale(out, keys())
+                for f in todo:
+                    write(os.path.join(out, "f_%04d.png" % f), "png")
+                    cli.done(out, f, keys()[f])
+                return todo
+
+            self.assertEqual(make(), frames)
+            self.assertEqual(make(), [])
+            for path, text in ((os.path.join(shot, "s.py"), "def scene(): return 1\n"),
+                               (os.path.join(shot, "shot.json"), '{"scene": "s", "fps": 25}'),
+                               (look, '{"name": "y"}'), (os.path.join(eng, "paint.py"), "A = 2\n")):
+                write(path, text)
+                self.assertEqual(make(), frames, path)
+                self.assertEqual(make(), [])
+            self.assertNotEqual(cli.paint_key(shot, look, 3, (960, 540), ref, eng), keys()[3])
+            write(os.path.join(ref, "f_0004.key"), "new reference")
+            self.assertEqual(make(), [4])
+            os.remove(os.path.join(out, "f_0005.png"))
+            self.assertEqual(make(), [5])
+
+
+class Order(unittest.TestCase):
+    def test_any_order(self):
+        """Frames made in reverse equal frames made in order, byte for byte, with the boil on."""
+        frames, scene = [0, 1, 2, 3, 4], Plane()
+        fwd = {f: cli.paint_frame(scene, ref_at(f), QUICK, SIZE, 24) for f in frames}
+        back = {f: cli.paint_frame(scene, ref_at(f), QUICK, SIZE, 24) for f in reversed(frames)}
+        self.assertGreater(len(np.unique(fwd[0].reshape(-1, 3), axis=0)), 50)
+        for f in frames:
+            np.testing.assert_array_equal(fwd[f], back[f], "frame %d" % f)
+
+
+class Draft(unittest.TestCase):
+    def test_draft_flag(self):
+        """--draft paints 960x540 whatever the shot's size, with the look's pixel sizes halved."""
+        cfg = {"size": [1920, 1080]}
+        self.assertEqual(cli.frame_size(cfg, False), (1920, 1080))
+        self.assertEqual(cli.frame_size(cfg, True), (960, 540))
+        self.assertTrue(cli.parser().parse_args(["paint", "SHOT", "--draft"]).draft)
+        lk = cli.scaled(LOOK, 960)
+        self.assertEqual(lk["px_per_stroke"], LOOK["px_per_stroke"] / 2)
+        self.assertEqual(lk["mark"]["width"], LOOK["mark"]["width"] / 2)
+        self.assertEqual(lk["boil"]["amount"], LOOK["boil"]["amount"] / 2)
+        img = cli.paint_frame(Plane(), ref_at(0), dict(QUICK, px_per_stroke=80.0), (960, 540), 24)
+        self.assertEqual(img.shape, (540, 960, 3))
+
+
+class Workers(unittest.TestCase):
+    def test_workers_single_thread(self):
+        """Each worker runs with one BLAS and one OpenCV thread; the pool size comes from the memory available,
+        at most 4, fewer under 12 GB."""
+        self.assertEqual(cli.pool_size(8, 30000), 4)
+        self.assertEqual(cli.pool_size(2, 30000), 2)
+        self.assertEqual(cli.pool_size(8, 12000), 4)
+        self.assertLess(cli.pool_size(8, 11999), 4)
+        self.assertEqual(cli.pool_size(8, 500), 1)
+        self.assertGreaterEqual(cli.pool_size(8), 1)
+        old = os.environ.get("OPENBLAS_NUM_THREADS")
+        os.environ["OPENBLAS_NUM_THREADS"] = "8"
+        try:
+            with cli.pool(2) as p:
+                got = p.map(_probe, range(2))
+        finally:
+            if old is None:
+                os.environ.pop("OPENBLAS_NUM_THREADS", None)
+            else:
+                os.environ["OPENBLAS_NUM_THREADS"] = old
+        self.assertEqual(got, [(1, 1), (1, 1)])
+
+
+class Boil(unittest.TestCase):
+    def test_boil_alive_and_pure(self):
+        """The boil is on in the look; with a still camera it changes the picture every hold_frames frames and
+        not between; off, the picture holds; it moves fill strokes only."""
+        b = LOOK["boil"]
+        self.assertGreater(b["amount"], 0)
+        hold, scene = int(b["hold_frames"]), Plane()
+        frame = lambda f, lk: cli.paint_frame(scene, ref_at(f, x=0.3), lk, SIZE, 24)  # noqa: E731
+        a0, a1, a2 = frame(0, QUICK), frame(hold - 1, QUICK), frame(hold, QUICK)
+        np.testing.assert_array_equal(a0, a1)
+        self.assertFalse(np.array_equal(a0, a2))
+        off = dict(QUICK, boil=dict(b, amount=0.0))
+        np.testing.assert_array_equal(frame(0, off), frame(hold, off))
+
+
+if __name__ == "__main__":
+    unittest.main()

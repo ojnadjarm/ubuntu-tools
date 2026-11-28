@@ -1,5 +1,5 @@
 """The stroke solver: seeds + reference + look -> strokes on the picture (ARCHITECTURE.md 5, rules 2 to 6). Pure."""
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import cv2
 import numpy as np
@@ -214,3 +214,18 @@ def solve(ref, seeds, look, size) -> Strokes:
                    ((sid[k] >> np.uint64(8)) & np.uint64(255)).astype(np.uint8), c1.astype(np.float32), c2.astype(np.float32), f32(opacity),
                    f32(z), octave[k].astype(np.uint8), sid[k].astype(np.uint64), f32(zg),
                    nw.astype(np.float32))
+
+
+def boil(st, look, frame) -> Strokes:
+    """The look's light boil: every hold_frames frames each fill stroke is re-touched, moved by up to `amount` px and
+    turned so its tips move as much, from a hash of (id, frame // hold_frames); marks hold. Pure: no state."""
+    b = look.get("boil") or {}
+    a = float(b.get("amount", 0.0))
+    if a <= 0.0 or not len(st.order):
+        return st
+    k = int(frame) // int(b.get("hold_frames", 2))
+    fill = np.where(st.layer < MARK_LAYER, a, 0.0)
+    h = lambda salt: (2.0 * unit(mix(st.order, k, salt)) - 1.0) * fill  # noqa: E731
+    turn = h(0xB3) / np.maximum(0.5 * st.length, 1.0)
+    return replace(st, x=(st.x + h(0xB1)).astype(np.float32), y=(st.y + h(0xB2)).astype(np.float32),
+                   ang=np.mod(st.ang + turn, np.pi).astype(np.float32))
