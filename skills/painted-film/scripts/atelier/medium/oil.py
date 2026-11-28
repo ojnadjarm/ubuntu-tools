@@ -34,12 +34,43 @@ def _load_c():
     fp, ip = P(np.float32, flags="C_CONTIGUOUS"), P(np.int32, flags="C_CONTIGUOUS")
     i, fl = ctypes.c_int, ctypes.c_float
     f.argtypes = [fp, fp, i, i, fp, ip, ip, ip, ip, fp, fl, i, fp, fp, fp, fp, fp, ip, fp, fp, fp, fp, fl, fp, fp, fp, fp, fp, fl, fl,
-                  ctypes.c_void_p, fl]
+                  ctypes.c_void_p, fl, ctypes.c_void_p, ctypes.c_void_p]
     f.restype = None
     return f
 
 
 _PAINT = _load_c()
+
+
+def _reach(near, cover, other, r, grow):
+    """The depth r + 1 px around each pixel (grow: the farthest, else the nearest) and the pixel's share within r px of
+    that depth's surface, from each pixel's coverage of its own surface and of its neighbour's (refio.ident_cover):
+    max over the pixels q in reach of share(q) + r - |p - q|, clipped to 0..1 (T2047, rule 5)."""
+    k = r + 1
+    se = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * k + 1,) * 2)
+    morph = cv2.dilate if grow else cv2.erode
+    dm = morph(near, se)
+    ser = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1,) * 2)
+    inner = morph(near, ser) if r > 0 else near
+    off = lambda a: np.abs(a - dm) > 2.0 * (0.005 + 0.005 * dm)  # noqa: E731  (the depth tests' band)
+    # a pixel on that surface itself, or within r of a clean pixel of it, is wholly in reach
+    todo = off(near) & (off(inner) | (cv2.dilate((cover < 1.0).astype(np.uint8), ser) > 0))
+    s = np.ones(near.shape, np.float32)
+    ys, xs = np.nonzero(todo)
+    if len(ys):
+        H, W = near.shape
+        far = near.ravel()[other]
+        d0 = dm[ys, xs]
+        tol = 2.0 * (0.005 + 0.005 * d0)
+        best = np.zeros(len(ys), np.float32)
+        for dy, dx in zip(*np.nonzero(se)):
+            dy, dx = dy - k, dx - k
+            y2, x2 = np.clip(ys + dy, 0, H - 1), np.clip(xs + dx, 0, W - 1)
+            c, gap = cover[y2, x2], r - np.hypot(dy, dx)
+            for dq, nq in ((near[y2, x2], c), (far[y2, x2], 1.0 - c)):
+                best = np.maximum(best, np.where((nq > 0) & (np.abs(dq - d0) <= tol), nq + gap, 0.0))
+        s[ys, xs] = np.clip(best, 0.0, 1.0)
+    return dm, s
 
 
 def _built(key, make):
@@ -109,7 +140,11 @@ class OilMedium:
             depth = near = cv2.resize(np.where(np.isfinite(ref.depth), ref.depth, 1e9).astype(np.float32), (W, H),
                                       interpolation=cv2.INTER_NEAREST)
             r = int(round(look["edge_spill_px"]))
-            if r > 0:
+            soft = ref.cover is not None and ref.cover.shape == (H, W)  # the outline's coverage, at the picture's size
+            smax = smin = None
+            if soft:
+                depth, smax = _reach(near, ref.cover, ref.other, r, True)
+            elif r > 0:
                 depth = cv2.dilate(depth, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))
             f32 = lambda v: np.ascontiguousarray(v, np.float32)  # noqa: E731
             wid = np.maximum(st.width, MIN_PX)
@@ -118,10 +153,13 @@ class OilMedium:
             f0, f1 = look.get("face", (0.0, 0.0))
             over = look.get("overhang_px")
             dmin = None if over is None else f32(cv2.erode(near, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * int(round(over)) + 1,) * 2)))
+            if soft and over is not None:
+                dmin, smin = _reach(near, ref.cover, ref.other, int(round(over)), False)
+            ptr = lambda v: None if v is None else v.ctypes.data  # noqa: E731
             _PAINT(frame.img, frame.hgt, W, H, bank.atlas, bank.off, bank.mw, bank.mh, bank.nlev, bank.bw, float(bank.L), k,
                    f32(st.x), f32(st.y), f32(st.ang), f32(st.length), f32(wid), var, f32(c1), f32(c2),
                    f32(opac), f32(br["hs"] * np.minimum(1.0, br.get("thick_px", np.inf) / wid)), float(br["level"]), depth,
                    f32(st.z), f32(st.zg), f32(cv2.resize(ref.normal, (W, H), interpolation=cv2.INTER_AREA)), f32(st.n),
-                   float(f0), float(f1), None if dmin is None else dmin.ctypes.data, float(look.get("hard", 1.0)))
+                   float(f0), float(f1), ptr(dmin), float(look.get("hard", 1.0)), ptr(smax), ptr(smin))
         return frame.finish(light=tuple(cv["light"]), relief=cv["relief"], gloss=cv["gloss"], shine=cv["shine"],
                             exposure=cv["exposure"], vignette=cv["vignette"])

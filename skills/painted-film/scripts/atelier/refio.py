@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from .scene import Camera, ident_decode
+from .scene import Camera, ident_code, ident_decode
 
 PASSES = ("lit", "albedo", "depth", "normal", "ident")
 _LINES = {0: 1, 2: 1, 3: 16}  # compression NONE, ZIPS, ZIP: scanlines per chunk
@@ -24,6 +24,8 @@ class Ref:
     camera: Camera  # sized to this reference
     scale: float  # reference width / shot width
     meta: dict
+    cover: np.ndarray = None  # (H, W) f32 share of the pixel its ident covers (anti-aliased); None: all 1
+    other: np.ndarray = None  # (H, W) i64 flat index of the nearest pixel of the ident holding the rest
 
 
 def read_exr(path):
@@ -98,6 +100,32 @@ def decode_ident(code, depth, reach=2):
     return out.astype(np.int32)
 
 
+def ident_cover(code, ident, reach=2):
+    """Each pixel's share of its own ident and the flat index of the nearest pixel of the other ident, from the
+    anti-aliased code (a blend of two idents' codes): the outline at its sub-pixel place, where depth and ident step."""
+    H, W = ident.shape
+    cover, other = np.ones((H, W), np.float32), np.arange(H * W, dtype=np.int64).reshape(H, W)
+    ys, xs = np.nonzero(~ident_decode(code)[1])
+    if len(ys):
+        u, inv = np.unique(ident, return_inverse=True)
+        pure = np.where((u > 0)[:, None], ident_code(u), 0.0)[inv.reshape(H, W)]  # nothing writes no code
+        c, a = code[ys, xs].astype(np.float64), pure[ys, xs]
+        best = np.full(len(ys), np.inf)
+        for dy in range(-reach, reach + 1):
+            for dx in range(-reach, reach + 1):
+                y2, x2 = np.clip(ys + dy, 0, H - 1), np.clip(xs + dx, 0, W - 1)
+                b = pure[y2, x2]
+                d = a - b
+                n2 = np.maximum((d * d).sum(1), 1e-12)
+                s = np.clip(((c - b) * d).sum(1) / n2, 0.0, 1.0)
+                e = np.linalg.norm(c - b - s[:, None] * d, axis=1) / np.sqrt(n2) + 1e-6 * (abs(dy) + abs(dx))
+                take = (ident[y2, x2] != ident[ys, xs]) & (e < best)
+                best[take] = e[take]
+                cover[ys[take], xs[take]] = s[take]
+                other[ys[take], xs[take]] = y2[take] * W + x2[take]
+    return cover, other
+
+
 def load(prefix):
     """The reference frame written as prefix.{lit,albedo,depth,normal,ident}.exr and prefix.json."""
     with open(prefix + ".json") as fh:
@@ -105,11 +133,12 @@ def load(prefix):
     c = {p: read_exr("%s.%s.exr" % (prefix, p)) for p in PASSES}
     depth = next(iter(c["depth"].values())).astype(np.float32)
     depth[depth >= 0.99 * meta["clip"][1]] = np.inf
-    ident = decode_ident(_rgb(c["ident"], "RGBA"), depth)
+    code = _rgb(c["ident"], "RGBA")
+    ident = decode_ident(code, depth)
     normal = _rgb(c["normal"], "XYZ")
     normal[ident == 0] = 0
     return Ref(_rgb(c["lit"], "RGB"), _rgb(c["albedo"], "RGB"), depth, normal, ident,
-               Camera.from_json(meta["camera"]), float(meta["scale"]), meta)
+               Camera.from_json(meta["camera"]), float(meta["scale"]), meta, *ident_cover(code, ident))
 
 
 def display(lit):

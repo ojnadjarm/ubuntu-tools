@@ -15,7 +15,7 @@ sys.path.insert(0, HERE)
 from atelier.medium.oil import OilMedium, op  # noqa: E402
 from atelier.paint import Strokes  # noqa: E402
 from test_anchor import cam_at  # noqa: E402
-from test_paint import flat_ref  # noqa: E402
+from test_paint import flat_ref, wall_ref  # noqa: E402
 
 SIZE = (320, 180)
 with open(os.path.join(HERE, "..", "looks", "oil-tight.json")) as fh:
@@ -154,6 +154,24 @@ class Level(unittest.TestCase):
                             SIZE).astype(float) for L in 30.0 * 1.01 ** np.arange(80)]
         d = np.array([np.abs(b - a).mean() for a, b in zip(pics, pics[1:])])
         self.assertLessEqual(d.max(), 3.0 * np.median(d))
+
+
+
+class Steady(unittest.TestCase):
+    def test_cuts_follow_outline(self):
+        """A near wall's outline slides 0.3 px a frame; a stroke on the near wall hanging over it (overhang cut) and
+        one on the far wall behind it (spill cut) ride their walls: the ink each lays changes smoothly (second
+        difference under 0.5 % of it), the cuts following the outline's coverage, not its pixel steps (T2047)."""
+        m = OilMedium()
+        for z, dx in ((10.0, -10.0), (12.0, 4.0)):
+            ink = []
+            for f in range(12):
+                ref = wall_ref(cam_at(0.3 * f * 10.0 / 320.0, 0.0))
+                st = strokes(159.5 - 0.3 * f * 10.0 / z + dx, 90.0, z, colour=(0.9, 0.9, 0.9))
+                st.n[:] = (0.0, -1.0, 0.0)  # cut to its own face
+                empty = m.composite(strokes([], [], []), ref, FLAT, SIZE).astype(float)
+                ink.append(np.abs(m.composite(st, ref, FLAT, SIZE).astype(float) - empty).sum())
+            self.assertLessEqual(np.abs(np.diff(ink, 2)).max(), 0.005 * np.mean(ink), z)
 
 
 if __name__ == "__main__":

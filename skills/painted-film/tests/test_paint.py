@@ -231,5 +231,39 @@ class Hug(unittest.TestCase):
         self.assertLessEqual((c.max() - c.min()) / c.mean(), 0.07)
 
 
+def wall_ref(cam):
+    """A near wall (10 m, x < 0, ident 1, lit 0.5) over a far one (12 m, ident 2, lit 0.1), its outline anti-aliased
+    exactly in lit and in the ident's coverage (as EEVEE's AOV gives it); depth, normal, ident point-sampled."""
+    r = flat_ref(cam, [(10.0, -20, 0.0, -20, 20, 1, (0.5,) * 3), (12.0, -20, 20, -20, 20, 2, (0.1,) * 3)])
+    W, H = cam.size
+    xe = W / 2 - 0.5 + cam.lens_mm / cam.sensor_mm * W * (0.0 - cam.pos[0]) / 10.0
+    j = np.arange(W, dtype=float)
+    a = np.clip(xe - (j - 0.5), 0.0, 1.0)  # each column's share on the near wall
+    r.lit[:] = (0.1 + 0.4 * a)[None, :, None].astype(np.float32)
+    near = r.ident == 1
+    r.cover = np.where(near, a[None, :], 1.0 - a[None, :]).astype(np.float32)
+    r.other = np.arange(H)[:, None] * W + np.where(r.cover < 1, np.clip(np.where(near, j + 1, j - 1), 0, W - 1), j).astype(np.int64)
+    return r
+
+
+class Steady(unittest.TestCase):
+    def test_outline_steady_subpixel(self):
+        """Fill strokes hugging a near wall's outline, the view sliding 0.3 px a frame: each stroke's width, length,
+        place and colour are smooth in time (second difference under 0.1 px, the length 2.5 times that, the colour
+        0.5 of 255), as the outline's coverage moves smoothly; the point-sampled ident and depth step (T2047)."""
+        k = np.arange(30)
+        P = np.column_stack([-0.05 - 0.4 * (k % 6) / 5, np.full(30, 10.0), -0.8 + 1.6 * (k // 6) / 4])
+        seeds = hand_seeds(P, [0.0, 0.0, 1.0], k + 1, px=7.0)
+        look = dict(LOOK, colour_levels=0.0, size=1.0, hug=1.2)
+        runs = [solve(wall_ref(cam_at(0.3 * f * 10.0 / 320.0, 0.0)), seeds, look, SIZE) for f in range(9)]
+        for st in runs:
+            np.testing.assert_array_equal(st.order, runs[0].order)
+        d2 = lambda a: np.abs(np.diff(np.stack(a).astype(float), 2, axis=0)).max()  # noqa: E731
+        self.assertGreater(np.ptp(runs[0].width), 1.0)  # the hug does narrow the strokes at the outline
+        for name, top in (("width", 0.1), ("length", 0.25), ("x", 0.1), ("y", 0.1)):
+            self.assertLessEqual(d2([getattr(st, name) for st in runs]), top, name)
+        self.assertLessEqual(d2([255 * st.c1.mean(1) for st in runs]), 0.5)
+
+
 if __name__ == "__main__":
     unittest.main()

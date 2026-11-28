@@ -77,25 +77,58 @@ def _bilinear(img, u, v):
             + img[i1, j1] * fu * fv)
 
 
-def _box_own(ident, own, u, v, half):
+def _box_own(ident, own, u, v, half, cover=None, other=None, lit=None):
     """The share of each box (centre u, v, half size half, ref px) whose pixels carry the seed's ident: an area,
-    continuous in u, v and half (a summed-area table read bilinearly), never one pixel."""
+    continuous in u, v and half (a summed-area table read bilinearly), never one pixel; a pixel counts by its
+    coverage (cover of its own ident, the rest of the other's) where the reference gives it. With lit: also the
+    mean of lit over that share of the box (the seed's own thing's colour), 0 where the share is 0."""
     H, W = ident.shape
     hb = half[:, None]
     x0, x1 = np.clip(u - hb, -0.5, W - 0.5), np.clip(u + hb, -0.5, W - 0.5)
     y0, y1 = np.clip(v - hb, -0.5, H - 0.5), np.clip(v + hb, -0.5, H - 0.5)
-    out = np.zeros(u.shape)
+    c = 1 if lit is None else 4
+    out = np.zeros(u.shape + (c,))
     o = np.argsort(own, kind="stable")
     for g in np.split(o, np.flatnonzero(np.diff(own[o])) + 1):
         if not len(g):
             continue
         c0, c1 = int(np.floor(x0[g].min() + 0.5)), int(np.ceil(x1[g].max() + 0.5))
         r0, r1 = int(np.floor(y0[g].min() + 0.5)), int(np.ceil(y1[g].max() + 0.5))
-        S = np.zeros((r1 - r0 + 1, c1 - c0 + 1))
-        S[1:, 1:] = (ident[r0:r1, c0:c1] == own[g[0]]).cumsum(0).cumsum(1)
+        S = np.zeros((r1 - r0 + 1, c1 - c0 + 1, c))
+        e = (ident[r0:r1, c0:c1] == own[g[0]]).astype(np.float64)[..., None]
+        m = e if lit is None else np.concatenate([e, e * lit[r0:r1, c0:c1]], -1)
+        if cover is not None:  # a blended pixel: its own side by its coverage, the rest is the other pixel's side
+            cv, q = cover[r0:r1, c0:c1, None], other[r0:r1, c0:c1]
+            eo = (ident.ravel()[q] == own[g[0]])[..., None]
+            m = e * cv + eo * (1.0 - cv)
+            if lit is not None:
+                lo = (1.0 - cv) * lit.reshape(-1, lit.shape[-1])[q]
+                m = np.concatenate([m, e * np.maximum(lit[r0:r1, c0:c1] - lo, 0.0) + eo * lo], -1)
+        S[1:, 1:] = m.cumsum(0).cumsum(1)
         F = lambda x, y: _bilinear(S, x + 0.5 - c0, y + 0.5 - r0)  # noqa: E731
-        out[g] = (F(x1[g], y1[g]) - F(x0[g], y1[g]) - F(x1[g], y0[g]) + F(x0[g], y0[g])) / (4.0 * hb[g] ** 2)
-    return np.clip(out, 0.0, 1.0)
+        out[g] = F(x1[g], y1[g]) - F(x0[g], y1[g]) - F(x1[g], y0[g]) + F(x0[g], y0[g])
+    share = np.clip(out[..., 0] / (4.0 * hb ** 2), 0.0, 1.0)
+    if lit is None:
+        return share
+    return share, out[..., 1:] / np.maximum(out[..., :1], 1e-9) * (out[..., :1] > 1e-9)
+
+
+def _sat(img):
+    """Summed-area table of an (H, W, c) image, (H + 1, W + 1, c) f64, corner (0, 0) at pixel place (-0.5, -0.5)."""
+    S = np.zeros((img.shape[0] + 1, img.shape[1] + 1, img.shape[2]))
+    S[1:, 1:] = img.cumsum(0, dtype=np.float64).cumsum(1)
+    return S
+
+
+def _box_mean(S, u, v, half):
+    """The image's mean over each box (centre u, v, half size half, ref px) from its summed-area table read
+    bilinearly: an area, the same at any sub-pixel phase of an anti-aliased edge (a pyramid read is not)."""
+    H, W = S.shape[0] - 1, S.shape[1] - 1
+    x0, x1 = np.clip(u - half, -0.5, W - 0.5), np.clip(u + half, -0.5, W - 0.5)
+    y0, y1 = np.clip(v - half, -0.5, H - 0.5), np.clip(v + half, -0.5, H - 0.5)
+    F = lambda x, y: _bilinear(S, x + 0.5, y + 0.5)  # noqa: E731
+    a = np.maximum((x1 - x0) * (y1 - y0), 1e-9)[..., None]
+    return (F(x1, y1) - F(x0, y1) - F(x1, y0) + F(x0, y0)) / a
 
 
 def _pyramid(lit):
@@ -159,7 +192,7 @@ def solve(ref, seeds, look, size) -> Strokes:
     off = np.array([(a, b) for b in (-1, 0, 1) for a in (-1, 0, 1)], float)
     tu, tv = xr[:, None] + off[:, 0] * ts[:, None], yr[:, None] + off[:, 1] * ts[:, None]
     band = (_band(zs) * np.where(mark, MARK_BAND, 1.0))[:, None]
-    vis, same = np.zeros(tu.shape), np.zeros(tu.shape)
+    vis = np.zeros(tu.shape)
     j0, i0 = np.floor(tu), np.floor(tv)
     for dj in (0, 1):
         for di in (0, 1):
@@ -173,23 +206,30 @@ def solve(ref, seeds, look, size) -> Strokes:
             zp = np.clip(np.nan_to_num(zp, nan=np.inf, posinf=np.inf, neginf=np.inf), LO * zs[:, None], 2.0 * zs[:, None])
             d = ref.depth[ii, jj]
             v = np.clip((np.where(np.isfinite(d), d, 1e9) - zp) / band + 2.0, 0.0, 1.0)
+            if ref.cover is not None:  # the pixel's own side by its coverage, the other ident's side for the rest (rule 5)
+                cv, d = ref.cover[ii, jj], ref.depth.ravel()[ref.other[ii, jj]]
+                v = cv * v + (1.0 - cv) * np.clip((np.where(np.isfinite(d), d, 1e9) - zp) / band + 2.0, 0.0, 1.0)
             vis += w * v
-            same += w * v * (ref.ident[ii, jj] == ident[:, None])
     opacity = seeds.opacity[a] * vis.mean(1) * np.where(mark, heavy * np.clip((true - mk["fade"][0]) / (mk["fade"][1] - mk["fade"][0]), 0, 1), 1.0)
 
     hug = np.where(mark, 0.0, lk["hug"])
-    share = np.zeros(tu.shape)
-    h = np.nonzero((hug > 0) & (opacity > MIN_OPACITY))[0]
-    share[h] = _box_own(ref.ident, ident[h], tu[h], tv[h], np.maximum(ts[h] / 2.0, 0.5))
+    rgb = np.clip(ref.lit, 0.0, 1.0)  # display range: an emitter (lit 60) must not flood its neighbours
+    share, own_col = np.zeros(tu.shape), np.zeros(tu.shape + (3,))
+    h = np.nonzero(~mark & (opacity > MIN_OPACITY))[0]
+    share[h], own_col[h] = _box_own(ref.ident, ident[h], tu[h], tv[h], np.maximum(ts[h] / 2.0, 0.5), ref.cover, ref.other, rgb)
     own = share.mean(1)  # the share of the footprint that shows the seed's own thing, as an area (rule 5)
     grip = np.minimum(hug, 1.0) / np.maximum(share.sum(1), HUG_FLOOR)
     xr, yr = xr + grip * (share * (tu - xr[:, None])).sum(1), yr + grip * (share * (tv - yr[:, None])).sum(1)
     width, length = width * own ** hug, length * own ** hug
     k = np.nonzero(opacity > MIN_OPACITY)[0]
     k = k[np.lexsort((sid[k], octave[k]))]
-    pyr = _pyramid(np.clip(ref.lit, 0.0, 1.0))  # display range: an emitter (lit 60) must not flood its neighbours
-    col = _sample(pyr, tu[k], tv[k], (np.log2(np.maximum(ts[k], 1.0)) + lk["colour_levels"])[:, None] * np.ones((len(k), 9)))
-    c1 = ((same[k, :, None] * col).sum(1) + EPS_W * col.mean(1)) / (same[k].sum(1) + EPS_W)[:, None]
+    hk = np.maximum(ts[k], 1.0) * 2.0 ** lk["colour_levels"] / 2.0
+    sh, col = share[k], own_col[k]
+    if lk["colour_levels"]:  # colour boxes wider than the hug's
+        sh, col = _box_own(ref.ident, ident[k], tu[k], tv[k], hk, ref.cover, ref.other, rgb)
+    wk = sh * vis[k]  # rules 5 and 7 as areas: each tap's box, the share and colour of the seed's own thing in it
+    plain = _box_mean(_sat(rgb), tu[k, 4], tv[k, 4], ts[k] + hk)  # the whole footprint's
+    c1 = ((wk[..., None] * col).sum(1) + EPS_W * plain) / (wk.sum(1) + EPS_W)[:, None]
     nw = seeds.N[a[k]] * np.where(num[k] > 0, -1.0, 1.0)[:, None]
     if "form" in look:
         light = np.asarray(look["form"]["light"], float)
@@ -200,8 +240,8 @@ def solve(ref, seeds, look, size) -> Strokes:
         km, lit = k[m], kind[k[m]] == 1
         tm = np.full(len(m), mk["reach"] * sr)
         mu, mv = xr[km, None] + off[:, 0] * tm[:, None], yr[km, None] + off[:, 1] * tm[:, None]
-        col = _sample(pyr, mu, mv, np.maximum(np.log2(tm), 0.0)[:, None] * np.ones((len(m), 9)))  # a tap reads its tm
-        own = _box_own(ref.ident, ident[km], mu, mv, tm / 2.0)
+        col = _sample(_pyramid(rgb), mu, mv, np.maximum(np.log2(tm), 0.0)[:, None] * np.ones((len(m), 9)))  # a tap reads its tm
+        own = _box_own(ref.ident, ident[km], mu, mv, tm / 2.0, ref.cover, ref.other)
         w = (own + EPS_W) * (col @ LUMA + 1e-3) ** np.where(lit, mk["power"], -mk["power"])[:, None]
         c1[m] = (w[..., None] * col).sum(1) / w.sum(1)[:, None] * np.where(lit, 1.0 + mk["light"], 1.0 - mk["dark"])[:, None]
     jit = 2.0 * unit(mix(sid[k, None], np.arange(3)[None, :])) - 1.0
