@@ -11,6 +11,7 @@ import sys
 import cv2
 import numpy as np
 
+from .. import diskcache
 from ..anchor import mix, unit
 from ..refio import display
 
@@ -79,6 +80,27 @@ def _built(key, make):
     return _BUILT[key]
 
 
+def _brushes(seed, folder):
+    """oil-paint's BrushBank(seed), read back from the disk cache folder when made before (folder None: made)."""
+    made = []
+
+    def make():
+        made.append(op.BrushBank(seed=seed))
+        b = made[0]
+        out = {"L": b.L, "aspect": b.aspect, "body_w": np.asarray(b.body_w, np.float64), "nlev": [len(p) for p in b.masters]}
+        out.update(("m_%d_%d" % (k, j), m) for k, p in enumerate(b.masters) for j, m in enumerate(p))
+        return out
+    with open(op.__file__, "rb") as fh:
+        d = diskcache.get(folder, "brushes_" + diskcache.key(seed, fh.read()), make)
+    if made:
+        return made[0]
+    b = op.BrushBank.__new__(op.BrushBank)
+    b.L, b.aspect, b.body_w = d["L"], d["aspect"], d["body_w"].tolist()
+    b.masters = [[d["m_%d_%d" % (k, j)] for j in range(n)] for k, n in enumerate(d["nlev"])]
+    b._atlas()
+    return b
+
+
 def _at(img, x, y, sr):
     """img (ref pixels) bilinear at picture places (x, y)."""
     h, w = img.shape
@@ -113,13 +135,22 @@ def grade(col, flame_ref, L_ref, x, y, sr, g):
 
 
 class OilMedium:
-    """Medium protocol (ARCHITECTURE.md 4): composite(strokes, ref, look, size) -> uint8 RGB."""
+    """Medium protocol (ARCHITECTURE.md 4): composite(strokes, ref, look, size) -> uint8 RGB. cache_dir: where the
+    brush bank is kept on disk (None: made in memory only)."""
+
+    def __init__(self, cache_dir=None):
+        self.cache_dir = cache_dir
+
+    def brushes(self, look):
+        """The look's brush bank, made once a process."""
+        seed = look["brush"]["seed"]
+        return _built(("bank", seed), lambda: _brushes(seed, self.cache_dir))
 
     def composite(self, strokes, ref, look, size):
         """Strokes in their fixed order, bristle sprites depth-tested against ref, on linen fixed to the frame."""
         W, H = size
         cv, br = look["canvas"], look["brush"]
-        bank = _built(("bank", br["seed"]), lambda: op.BrushBank(seed=br["seed"]))
+        bank = self.brushes(look)
         linen = _built(("linen", W, H, cv["seed"], cv["period"], tuple(cv["ground"])),
                        lambda: op.Linen(W, H, seed=cv["seed"], period=cv["period"], ground=tuple(cv["ground"])))
         frame = op.Frame(linen, bank)

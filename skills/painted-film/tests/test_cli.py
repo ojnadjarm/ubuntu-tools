@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -14,7 +15,9 @@ sys.path.insert(0, os.path.join(HERE, "..", "scripts"))
 sys.path.insert(0, HERE)
 
 from atelier import cli, paint  # noqa: E402
-from test_anchor import bank, cam_at  # noqa: E402
+from atelier.four import Scene4D  # noqa: E402
+from atelier.four import slicer as S  # noqa: E402
+from test_anchor import bank, cam_at, wall  # noqa: E402
 from test_paint import flat_ref  # noqa: E402
 
 SIZE = (320, 180)
@@ -192,6 +195,35 @@ class Boil(unittest.TestCase):
         self.assertLess(tip.max(), 0.25 * a)
         eps = np.array([paint.boil(st, look, t).x for t in (1.0, 1.0 + 1e-4)])
         self.assertLess(np.abs(eps[1] - eps[0]).max(), 1e-3)  # continuous at any t, not only on frames
+
+
+class Speed(unittest.TestCase):
+    def test_frame_unchanged_by_speedups(self):
+        """The speed-ups change no picture: a 4D wall far wider than the view and a cube turning through w, painted
+        from cached banks with off-picture strokes culled, equal the plain build within 1/255 on 99.9 % of pixels."""
+        V, F = wall(half=20.0)
+        Vc, Fc = S.box([-0.6, -0.6, -0.6], [0.6, 0.6, 0.6])
+        turn = lambda w: Vc @ np.array([[np.cos(w), -np.sin(w), 0], [np.sin(w), np.cos(w), 0], [0, 0, 1]]).T + [0.4, 7.0, 0.2]  # noqa: E731
+        bodies = {"stone": S.loft([V, V], [-5.0, 5.0], F), "iron": S.loft([turn(w) for w in (-1, 0, 1)], [-1.0, 0.0, 1.0], Fc)}
+        cam = cam_at(0.5, 3.0)
+        ref = dataclasses.replace(flat_ref(cam, [(10.0, -20, 20, -20, 20, 1, lambda x, z: np.stack([0.3 + 0.01 * x, 0.4 + 0.01 * z, 0.5 + 0 * x], -1))]),
+                                  meta={"t": 0.5})
+
+        def scene(cache):
+            sc = Scene4D(bodies, lambda t: S.Slice(0.3 * t), None)
+            sc.rho0, sc.log, sc.cache_dir = 4.0, False, cache
+            return sc
+
+        drawn, solve = [], paint.solve
+        with mock.patch.object(paint, "solve", lambda *a: drawn.append(solve(*a)) or drawn[-1]):
+            with mock.patch.object(paint, "CULL_PAD", np.inf):
+                plain = paint.paint_frame(scene(None), ref, QUICK, SIZE).astype(int)
+            with tempfile.TemporaryDirectory() as d:
+                scene(d).seeds(0.0, cam, 1.0)
+                fast = paint.paint_frame(scene(d), ref, QUICK, SIZE).astype(int)
+        self.assertLess(len(drawn[1].order), 0.95 * len(drawn[0].order))  # the cull bites
+        self.assertGreater(len(np.unique(plain.reshape(-1, 3), axis=0)), 50)
+        self.assertGreaterEqual((np.abs(plain - fast).max(2) <= 1).mean(), 0.999)
 
 
 if __name__ == "__main__":

@@ -1,24 +1,25 @@
 """The 4D provider (B1): Scene4D cuts 4D bodies by the frame's slice; SeedBank4D ties each seed to a line through a
 body and places it where the slice cuts that line (ARCHITECTURE.md 6). numpy only: runs in Blender too."""
+import os
 import sys
 import time
 import zlib
 
 import numpy as np
 
+from .. import diskcache
 from ..anchor import (CREASE_COS, MARK, NEAR, _cull, _normals, _seeds, _tangent_rule, concat, creases, inside, level, mix,
                       split, unit)
 from ..scene import Mesh, ident_of
 from . import slicer
 
 E4 = np.eye(4)
-# Weights of the face's sorted corners (a, b, c) on key k (W0) and key k+1 (W1) at the three nodes s = 0, beta_c,
-# beta_b + beta_c that start the three tets of a prism: [a0 b0 c0 c1], [a0 b0 b1 c1], [a0 a1 b1 c1].
-W0 = np.array([[1, 1, 1], [1, 1, 0], [1, 0, 0]], float)
-W1 = 1.0 - W0
+# The three nodes s = 0, beta_c, beta_b + beta_c start the three tets of a prism: [a0 b0 c0 c1], [a0 b0 b1 c1],
+# [a0 a1 b1 c1]; at them the face's sorted corners (a, b, c) weigh on key k: a b c, a b, a; on key k+1: none, c, b c.
 TET_C = np.array([[0, 1, 2, 2], [0, 1, 1, 2], [0, 0, 1, 2]])  # each tet's corners: which sorted corner,
 TET_K = np.array([[0, 0, 0, 1], [0, 0, 1, 1], [0, 1, 1, 1]], bool)  # on key k (False) or k+1 (True)
 CHUNK = 3_000_000  # line nodes evaluated at once
+BLOCK = 65536  # seeds placed at once
 EMERGE = 0.1  # how far (m along the slice's normal) the slice moves past a line's turn while its new strokes fade in
 CREASE_RAMP = 0.1  # a crease's marks fade in as the cosine of its faces' angle falls from CREASE_COS + this to CREASE_COS - this
 
@@ -91,6 +92,22 @@ class SeedBank4D:
         self.nkey = self._key_normals()
         self._crease_lines(max_edge)
 
+    @classmethod
+    def cached(cls, folder, body, *args):
+        """cls(body, *args), read back from the disk cache folder when made before (folder None: made)."""
+        made = []
+
+        def make():
+            made.append(cls(body, *args))
+            return {k: v for k, v in vars(made[0]).items() if k != "body"}
+        parts = [a for p in body.parts for a in (p.F, (p.n, p.K, p.p0, p.t0))]
+        d = diskcache.get(folder, "bank4d_" + diskcache.key(body.P, body.T, body.N, *parts, *args, *_SOURCES), make)
+        if made:
+            return made[0]
+        bank = cls.__new__(cls)
+        bank.__dict__.update(d, body=body)
+        return bank
+
     def _key_normals(self):
         """A 4D normal per face and key: the mean of the face's tets on either side of the key. Lerped along the
         sweep it turns smoothly where the cut's facets do not (level and stroke direction read it). Keeps each tet's
@@ -146,7 +163,9 @@ class SeedBank4D:
                 bs = np.take_along_axis(beta[r], self.perm[f], 1)
                 cs = np.take_along_axis(self.c0[f], self.perm[f], 1)
                 dk = d[cs[:, None, :] + (np.arange(Kv)[None, :, None] * self.step[f][:, None, None])]  # (s, K, 3)
-                D = np.einsum("sv,iv,skv->ski", bs, W0, dk[:, :-1]) + np.einsum("sv,iv,skv->ski", bs, W1, dk[:, 1:])
+                lo, hi = bs[:, None, :] * dk[:, :-1], bs[:, None, :] * dk[:, 1:]  # the nodes' weights
+                D = np.stack([(lo[..., 0] + lo[..., 1]) + lo[..., 2], (lo[..., 0] + lo[..., 1]) + hi[..., 2],
+                              lo[..., 0] + (hi[..., 1] + hi[..., 2])], -1)
                 seq = np.concatenate([D.reshape(len(r), -1), (bs * dk[:, -1]).sum(1)[:, None]], 1)
                 neg = seq < 0
                 slope = np.sign(np.diff(seq, axis=1))
@@ -310,41 +329,47 @@ class SeedBank4D:
             if not len(rep):
                 continue
             idx = np.arange(len(rep)) - np.repeat(np.cumsum(n) - n, n)
-            ids = mix(self.seed, rep, jo, idx)
-            u = (unit(mix(self.seed, rep, jo, 1)) + idx * 0.7548776662466927) % 1.0  # SeedBank's even (R2) places
-            v = (unit(mix(self.seed, rep, jo, 2)) + idx * 0.5698402909980532) % 1.0
-            flip = u + v > 1
-            u, v = np.where(flip, 1 - u, u), np.where(flip, 1 - v, v)
-            beta = np.einsum("kc,kcd->kd", np.column_stack([1 - u - v, u, v]), self.B[rep])
-            face = self.parent[rep]
-            row, k, j, s, run, fade = self._crossings(face, beta, d)
-            if not len(row):
-                continue
-            f = face[row]
-            ids = np.where(run == 0, ids[row], mix(ids[row], run))
-            X, c_lo, c_hi = self._point(f, beta[row], k, s)
-            P = sl.to3(X)
-            tri = sl.to3((1 - s)[:, None, None] * P4[c_lo] + s[:, None, None] * P4[c_hi])  # the face at s, its order
-            e1, e2 = tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0]
-            nf = np.cross(e1, e2)
-            tet = self.tet0[f] + (3 * k + j) * self.m[f]
-            hint = self.body.N[tet] @ sl.E.T
-            N = self.tn[tet] @ sl.E.T
-            N *= np.where((N * hint).sum(1) < 0, -1.0, 1.0)[:, None]
-            N = _unit(N, _unit(nf, _unit(hint, np.array([0.0, 0.0, 1.0]))))
-            key = self.koff[f] + k
-            Ns = _unit(((1 - s)[:, None] * self.nkey[key] + s[:, None] * self.nkey[key + 1]) @ sl.E.T, N)
-            Ns *= np.where((Ns * N).sum(1) < 0, -1.0, 1.0)[:, None]
-            T = self.ab[f, :1] * e1 + self.ab[f, 1:] * e2
-            T = _unit(T - (T * Ns).sum(1, keepdims=True) * Ns, _unit(np.cross(Ns, [0.31, 0.42, 0.85]), np.array([1.0, 0, 0])))
-            g = np.maximum(0.5 * np.linalg.norm(nf, axis=1) / np.maximum(self.rest_area[f], 1e-300), 1e-12)
-            L, z = level(P, Ns, cam, px_per_stroke, self.rho0 / g)  # the cut's own density: rho0 over its stretch
-            op = (np.ones(len(P)) if jo == 0 else np.clip(L - jo + 1, 0.0, 1.0)) * fade
-            xy, _ = cam.project(P)
-            ok = (z > NEAR) & (op > 0) & inside(xy, cam)
-            out.append((ids[ok], P[ok], N[ok], T[ok], np.full(ok.sum(), jo), self.ident[f[ok]], op[ok],
-                        px_per_stroke * 2.0 ** (L[ok] - jo)))
+            for b in range(0, len(rep), BLOCK):  # in blocks: the temporaries stay in the CPU's cache; the same numbers
+                rb, ib = rep[b:b + BLOCK], idx[b:b + BLOCK]
+                ids = mix(self.seed, rb, jo, ib)
+                u = (unit(mix(self.seed, rb, jo, 1)) + ib * 0.7548776662466927) % 1.0  # SeedBank's even (R2) places
+                v = (unit(mix(self.seed, rb, jo, 2)) + ib * 0.5698402909980532) % 1.0
+                flip = u + v > 1
+                u, v = np.where(flip, 1 - u, u), np.where(flip, 1 - v, v)
+                beta = np.einsum("kc,kcd->kd", np.column_stack([1 - u - v, u, v]), self.B[rb])
+                face = self.parent[rb]
+                row, k, j, s, run, fade = self._crossings(face, beta, d)
+                if not len(row):
+                    continue
+                f = face[row]
+                ids = np.where(run == 0, ids[row], mix(ids[row], run))
+                X, c_lo, c_hi = self._point(f, beta[row], k, s)
+                P = sl.to3(X)
+                tri = sl.to3((1 - s)[:, None, None] * P4[c_lo] + s[:, None, None] * P4[c_hi])  # the face at s, its order
+                e1, e2 = tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0]
+                nf = np.cross(e1, e2)
+                tet = self.tet0[f] + (3 * k + j) * self.m[f]
+                hint = self.body.N[tet] @ sl.E.T
+                N = self.tn[tet] @ sl.E.T
+                N *= np.where((N * hint).sum(1) < 0, -1.0, 1.0)[:, None]
+                N = _unit(N, _unit(nf, _unit(hint, np.array([0.0, 0.0, 1.0]))))
+                key = self.koff[f] + k
+                Ns = _unit(((1 - s)[:, None] * self.nkey[key] + s[:, None] * self.nkey[key + 1]) @ sl.E.T, N)
+                Ns *= np.where((Ns * N).sum(1) < 0, -1.0, 1.0)[:, None]
+                T = self.ab[f, :1] * e1 + self.ab[f, 1:] * e2
+                T = _unit(T - (T * Ns).sum(1, keepdims=True) * Ns, _unit(np.cross(Ns, [0.31, 0.42, 0.85]), np.array([1.0, 0, 0])))
+                g = np.maximum(0.5 * np.linalg.norm(nf, axis=1) / np.maximum(self.rest_area[f], 1e-300), 1e-12)
+                L, z = level(P, Ns, cam, px_per_stroke, self.rho0 / g)  # the cut's own density: rho0 over its stretch
+                op = (np.ones(len(P)) if jo == 0 else np.clip(L - jo + 1, 0.0, 1.0)) * fade
+                xy, _ = cam.project(P)
+                ok = (z > NEAR) & (op > 0) & inside(xy, cam)
+                out.append((ids[ok], P[ok], N[ok], T[ok], np.full(ok.sum(), jo), self.ident[f[ok]], op[ok],
+                            px_per_stroke * 2.0 ** (L[ok] - jo)))
         return _seeds(out, self.material)
+
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_SOURCES = [open(os.path.join(_HERE, n), "rb").read() for n in ("__init__.py", os.path.join("..", "anchor.py"))]  # a bank's makers
 
 
 class Scene4D:
@@ -354,6 +379,7 @@ class Scene4D:
     rho0, octaves, direction = 0.25, 8, {}  # seed density of the coarsest octave (a m2), octaves, material -> rule
     fps, duration, materials, world = 24, 0.0, {}, {}
     log = True
+    cache_dir = None  # where the seed banks are kept on disk (film sets <work>/cache); None: made in memory only
 
     def __init__(self, bodies, slice_at, residents=None):
         self.bodies, self.slice_at, self.residents = dict(bodies), slice_at, residents
@@ -400,18 +426,22 @@ class Scene4D:
                   file=sys.stderr, flush=True)
         return out + (self.residents.meshes(t) if self.residents is not None else [])
 
-    def seeds(self, t, cam, px_per_stroke):
-        """Seeds and marks of every body where the slice cuts their lines, and the residents' own."""
+    def banks(self):
+        """The bodies' seed banks, made once (read back from cache_dir when made before)."""
         if not hasattr(self, "_banks"):
             mats = sorted(self.materials)
             self._banks = {}
             for name, b in sorted(self.bodies.items()):
                 if b.parts:
-                    self._banks[name] = SeedBank4D(b, mats.index(name) if name in mats else 0,
-                                                   self._ident(name, b.attrs, len(b.P)), self.direction.get(name, "course"),
-                                                   self.rho0, zlib.crc32(name.encode()), self.octaves)
+                    self._banks[name] = SeedBank4D.cached(self.cache_dir, b, mats.index(name) if name in mats else 0,
+                                                          self._ident(name, b.attrs, len(b.P)), self.direction.get(name, "course"),
+                                                          self.rho0, zlib.crc32(name.encode()), self.octaves)
+        return self._banks
+
+    def seeds(self, t, cam, px_per_stroke):
+        """Seeds and marks of every body where the slice cuts their lines, and the residents' own."""
         sl = self.slice_at(t)
-        parts = [p for bank in self._banks.values() for p in (bank.place(sl, cam, px_per_stroke), bank.marks(sl, cam, px_per_stroke))]
+        parts = [p for bank in self.banks().values() for p in (bank.place(sl, cam, px_per_stroke), bank.marks(sl, cam, px_per_stroke))]
         if self.residents is not None:
             parts.append(self.residents.seeds(t, cam, px_per_stroke))
         return concat(parts)

@@ -3,7 +3,9 @@ import inspect
 import json
 import os
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 import cv2
 import numpy as np
@@ -12,6 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "scripts"))
 sys.path.insert(0, HERE)
 
+from atelier.medium import oil  # noqa: E402
 from atelier.medium.oil import OilMedium, op  # noqa: E402
 from atelier.paint import Strokes  # noqa: E402
 from test_anchor import cam_at  # noqa: E402
@@ -172,6 +175,27 @@ class Steady(unittest.TestCase):
                 empty = m.composite(strokes([], [], []), ref, FLAT, SIZE).astype(float)
                 ink.append(np.abs(m.composite(st, ref, FLAT, SIZE).astype(float) - empty).sum())
             self.assertLessEqual(np.abs(np.diff(ink, 2)).max(), 0.005 * np.mean(ink), z)
+
+
+class BankCache(unittest.TestCase):
+    def test_brush_bank_read_back(self):
+        """With a cache folder the brush bank is made once: a new process (here: the in-memory banks dropped) reads it
+        back without making a brush, and paints the same picture byte for byte."""
+        ref = flat_ref(cam_at(0.0, 0.0), [FAR, NEAR])
+        st = strokes([60.0, 160.0, 250.0], [50.0, 90.0, 130.0], [6.0, 10.0, 10.0], ang=0.4)
+        kept = dict(oil._BUILT)
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                oil._BUILT.clear()
+                a = OilMedium(d).composite(st, ref, LOOK, SIZE)
+                oil._BUILT.clear()
+                with mock.patch.object(op.BrushBank, "_make", side_effect=AssertionError("brush made again")):
+                    b = OilMedium(d).composite(st, ref, LOOK, SIZE)
+                np.testing.assert_array_equal(a, b)
+                np.testing.assert_array_equal(a, OilMedium().composite(st, ref, LOOK, SIZE))
+        finally:
+            oil._BUILT.clear()
+            oil._BUILT.update(kept)
 
 
 if __name__ == "__main__":

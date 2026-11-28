@@ -226,6 +226,7 @@ def renderer(a, cfg, work):
         n = cli.pool_size(min(a.jobs, len(todo)))
         if n > 1:
             with cli.pool(n) as p:
+                p.apply(cli.warm, (a.shot, todo[0][2]))
                 return list(p.imap(_job, todo))
         return [_job(j) for j in todo]
 

@@ -1,7 +1,9 @@
 """Tests of the 4D provider: seeds on lines through 4D bodies, placed where the slice cuts them; the cut cache."""
 import os
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -350,6 +352,37 @@ class Cache(unittest.TestCase):
                 self.assertEqual(ms[name].material, name)
             cached.append(sc.cut_stats[1])
         self.assertEqual(cached, [0, 2, 0, 0, 2, 0, 0, 2, 0, 2])  # the same slice again; flesh left behind past w 1
+
+
+class BankCache(unittest.TestCase):
+    def test_second_frame_builds_no_bank(self):
+        """With a cache folder a body's seed bank is built once: a later frame, a new scene (another worker or run) reads
+        it back and places the same seeds byte for byte without building; a changed body builds its own."""
+        built, init = [], SeedBank4D.__init__
+
+        def counting(self, *a, **k):
+            built.append(1)
+            init(self, *a, **k)
+
+        def scene(body, cache):
+            sc = Scene4D({"stone": body}, lambda t: S.Slice(0.1 + 0.2 * t), None)
+            sc.rho0, sc.log, sc.cache_dir = 4.0, False, cache
+            return sc
+
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(SeedBank4D, "__init__", counting):
+            fresh = scene(twisted(), None).seeds(1.0, CAM, 6.0)
+            self.assertEqual(len(built), 1)
+            first = scene(twisted(), d)
+            first.seeds(0.0, CAM, 6.0)
+            self.assertEqual(len(built), 2)
+            first.seeds(1.0, CAM, 6.0)
+            again = scene(twisted(), d).seeds(1.0, CAM, 6.0)
+            self.assertEqual(len(built), 2)
+            self.assertGreater(len(again.id), 100)
+            for k in fresh.__dataclass_fields__:
+                np.testing.assert_array_equal(getattr(fresh, k), getattr(again, k), k)
+            scene(twisted(0.5), d).seeds(1.0, CAM, 6.0)
+            self.assertEqual(len(built), 3)
 
 
 if __name__ == "__main__":

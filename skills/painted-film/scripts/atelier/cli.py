@@ -213,11 +213,23 @@ _SCENE = {}
 
 
 def scene_of(shot):
-    """The shot's Scene, made once a process."""
+    """The shot's Scene, made once a process; what no frame changes is kept on disk in <work>/cache."""
     if "s" not in _SCENE:
         sys.path.insert(0, os.path.abspath(shot))
-        _SCENE["s"] = importlib.import_module(shot_cfg(shot).get("scene", "shot")).scene()
+        cfg = shot_cfg(shot)
+        _SCENE["s"] = importlib.import_module(cfg.get("scene", "shot")).scene()
+        _SCENE["s"].cache_dir = os.path.join(os.path.expanduser(cfg["work"]), "cache") if cfg.get("work") else None
     return _SCENE["s"]
+
+
+def warm(shot, look):
+    """In one worker before the others start: the shot's seed banks and the look's brush bank made and written to the
+    disk cache, so a pool makes them once and each other worker reads them back."""
+    from .medium.oil import OilMedium
+    sc = scene_of(shot)
+    if hasattr(sc, "banks"):
+        sc.banks()
+    OilMedium(sc.cache_dir).brushes(look)
 
 
 def _paint_job(job):
@@ -292,6 +304,7 @@ def paint(a):
     jobs = [(a.shot, look, size, ref_dir, out, f, keys[f]) for f in todo]
     if n > 1:
         with pool(n) as p:
+            p.apply(warm, (a.shot, look))
             cpu = list(p.imap_unordered(_paint_job, jobs, chunksize=1))
     else:
         cpu = [_paint_job(j) for j in jobs]

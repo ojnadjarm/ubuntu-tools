@@ -24,6 +24,8 @@ MIN_OPACITY = 1e-3
 HUG_FLOOR = 1.8  # the least tap share the hug's grip divides by: a stroke with a sliver of its own thing barely moves
 LO = 0.75  # the seed's plane depth at a tap is kept within [LO, 2] times its own depth (grazing planes)
 REACH = 8  # ref px: the window of the hidden pre-test
+BLOCK = 65536  # seeds whose visibility is read at once
+CULL_PAD = 4.0  # picture px past a stroke's farthest possible reach (sprite, hug, boil) at which it is still drawn
 
 
 def _band(z):
@@ -171,7 +173,13 @@ def solve(ref, seeds, look, size) -> Strokes:
     heavy = 1.0 - mk["weight"] * unit(mix(seeds.id, 0x77))
     width = np.where(mark, np.clip(true, mk["width"], 3.0 * mk["width"]) * (0.5 + 0.5 * heavy),
                      np.minimum(lk["size"] * seeds.px * under, lk["max_px"]))
-    a = np.nonzero((z > NEAR) & ~_surely_hidden(ref.depth, xr, yr, zs, width * sr / 3.0))[0]
+    # off the picture: a stroke whose sprite (at most its longest side plus two widths), moved by the hug (a tap) and
+    # the boil, cannot reach the picture is dropped before its colour is read
+    long = np.maximum(width, np.minimum(np.where(mark, seeds.px * mk["aspect"], width * lk["aspect"]), lk["max_px"]))
+    pad = long + 2.0 * np.maximum(width, 2.0) + width / 3.0 + float((look.get("boil") or {}).get("amount", 0.0)) + CULL_PAD
+    xp, yp = (xr + 0.5) / sr - 0.5, (yr + 0.5) / sr - 0.5
+    on = (xp > -pad) & (xp < W - 1 + pad) & (yp > -pad) & (yp < H - 1 + pad)
+    a = np.nonzero(on & (z > NEAR) & ~_surely_hidden(ref.depth, xr, yr, zs, width * sr / 3.0))[0]
     c, z, zs, xr, yr, width, mark, true, heavy = c[a], z[a], zs[a], xr[a], yr[a], width[a], mark[a], true[a], heavy[a]
     sid, octave, ident, kind = seeds.id[a], seeds.octave[a] + MARK_LAYER * mark, seeds.ident[a], seeds.kind[a]
 
@@ -193,23 +201,26 @@ def solve(ref, seeds, look, size) -> Strokes:
     tu, tv = xr[:, None] + off[:, 0] * ts[:, None], yr[:, None] + off[:, 1] * ts[:, None]
     band = (_band(zs) * np.where(mark, MARK_BAND, 1.0))[:, None]
     vis = np.zeros(tu.shape)
-    j0, i0 = np.floor(tu), np.floor(tv)
-    for dj in (0, 1):
-        for di in (0, 1):
-            pj, pi = j0 + dj, i0 + di
-            w = (1 - np.abs(tu - pj)) * (1 - np.abs(tv - pi))
-            jj, ii = np.clip(pj, 0, Wr - 1).astype(np.int64), np.clip(pi, 0, Hr - 1).astype(np.int64)
-            ray = np.stack([(pj - cx) / fr, -(pi - cy) / fr, -np.ones_like(pj)], -1)
-            den = (n[:, None, :] * ray).sum(-1)
-            with np.errstate(divide="ignore", invalid="ignore"):
-                zp = np.where(np.abs(den) > 1e-9, num[:, None] / den, np.inf)
-            zp = np.clip(np.nan_to_num(zp, nan=np.inf, posinf=np.inf, neginf=np.inf), LO * zs[:, None], 2.0 * zs[:, None])
-            d = ref.depth[ii, jj]
-            v = np.clip((np.where(np.isfinite(d), d, 1e9) - zp) / band + 2.0, 0.0, 1.0)
-            if ref.cover is not None:  # the pixel's own side by its coverage, the other ident's side for the rest (rule 5)
-                cv, d = ref.cover[ii, jj], ref.depth.ravel()[ref.other[ii, jj]]
-                v = cv * v + (1.0 - cv) * np.clip((np.where(np.isfinite(d), d, 1e9) - zp) / band + 2.0, 0.0, 1.0)
-            vis += w * v
+    for b in range(0, len(a), BLOCK):  # in blocks: the temporaries stay in the CPU's cache; the same numbers
+        q = slice(b, b + BLOCK)
+        tq, vq, nq, numq, zq, bq = tu[q], tv[q], n[q], num[q], zs[q], band[q]
+        j0, i0 = np.floor(tq), np.floor(vq)
+        for dj in (0, 1):
+            for di in (0, 1):
+                pj, pi = j0 + dj, i0 + di
+                w = (1 - np.abs(tq - pj)) * (1 - np.abs(vq - pi))
+                jj, ii = np.clip(pj, 0, Wr - 1).astype(np.int64), np.clip(pi, 0, Hr - 1).astype(np.int64)
+                ray = np.stack([(pj - cx) / fr, -(pi - cy) / fr, -np.ones_like(pj)], -1)
+                den = (nq[:, None, :] * ray).sum(-1)
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    zp = np.where(np.abs(den) > 1e-9, numq[:, None] / den, np.inf)
+                zp = np.clip(np.nan_to_num(zp, nan=np.inf, posinf=np.inf, neginf=np.inf), LO * zq[:, None], 2.0 * zq[:, None])
+                d = ref.depth[ii, jj]
+                v = np.clip((np.where(np.isfinite(d), d, 1e9) - zp) / bq + 2.0, 0.0, 1.0)
+                if ref.cover is not None:  # the pixel's own side by its coverage, the other ident's side for the rest (rule 5)
+                    cv, d = ref.cover[ii, jj], ref.depth.ravel()[ref.other[ii, jj]]
+                    v = cv * v + (1.0 - cv) * np.clip((np.where(np.isfinite(d), d, 1e9) - zp) / bq + 2.0, 0.0, 1.0)
+                vis[q] += w * v
     opacity = seeds.opacity[a] * vis.mean(1) * np.where(mark, heavy * np.clip((true - mk["fade"][0]) / (mk["fade"][1] - mk["fade"][0]), 0, 1), 1.0)
 
     hug = np.where(mark, 0.0, lk["hug"])
@@ -298,7 +309,7 @@ def paint_frame(scene, ref, look, size, window=None):
     lk, t, c = scaled(look, size[0]), ref.meta["t"], ref.camera
     cam = Camera(c.pos, c.R, c.lens_mm, c.sensor_mm, tuple(size), tuple(window) if window else None)
     st = boil(solve(ref, scene.seeds(t, cam, lk["px_per_stroke"]), lk, size), lk, t)
-    img = OilMedium().composite(st, ref, lk, size)
+    img = OilMedium(getattr(scene, "cache_dir", None)).composite(st, ref, lk, size)
     if window:
         x, y, w, h = window
         img = img[y:y + h, x:x + w]
