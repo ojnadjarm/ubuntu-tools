@@ -360,9 +360,10 @@ def parser():
     e.add_argument("--preset", help="mv-encode preset (default: the look's encode.preset), e.g. av1-10, hevc-10, h264-master")
     e.add_argument("--crf", type=int, help="CRF (default: the look's encode.crf, else the preset's)")
     e.add_argument("--grain", type=float, help="temporal luma noise added before the encode (ffmpeg noise strength)")
-    q = sub.add_parser("qa", help="judge a change in seconds: golden pair, close-up, wedge, 1 s strip, plain stills, first-middle-last")
-    q.add_argument("check", choices=("pair", "crop", "wedge", "strip", "clay", "fml"), help="the check")
-    q.add_argument("shot", metavar="SHOT", help="folder with shot.json (its \"qa\" block: golden frames and loupes)")
+    q = sub.add_parser("qa", help="judge a change in seconds: golden pair, close-up, wedge, 1 s strip, plain stills, "
+                                  "first-middle-last, the code-made turntable")
+    q.add_argument("check", choices=("pair", "crop", "wedge", "strip", "clay", "fml", "turntable"), help="the check")
+    q.add_argument("shot", metavar="SHOT", nargs="?", help="folder with shot.json (its \"qa\" block: golden frames and loupes)")
     q.add_argument("--look", default="oil-tight", help="look file, or a look name in the engine's looks/")
     q.add_argument("--work", help="work folder (default: shot.json work); references in <work>[/draft]/ref")
     q.add_argument("-j", "--jobs", type=int, default=4, help="paint workers (at most 4, fewer under 12 GB available)")

@@ -1,6 +1,7 @@
 """film qa: judge a change on fixed frames, close-ups and 1 s loops in seconds (Q1 of T2051); every check prints its seconds."""
 import argparse
 import contextlib
+import hashlib
 import json
 import os
 import subprocess
@@ -54,9 +55,9 @@ def heat(dmap, b=None):
 
 
 def sheet(cells, labels, path, cols=4, title=None):
-    """RGB cells on a grid, cols a row, each at the first cell's width with its label above it (a None cell is left
-    blank); the title on top."""
-    cw = next(c for c in cells if c is not None).shape[1]
+    """RGB cells on a grid, cols a row, each at the first cell's width (480 px at most) with its label above it (a None
+    cell is left blank); the title on top."""
+    cw = min(next(c for c in cells if c is not None).shape[1], 480)
     cells = [c if c is None or c.shape[1] == cw else
              cv2.resize(c, (cw, round(c.shape[0] * cw / c.shape[1])), interpolation=cv2.INTER_AREA) for c in cells]
     ch = max(c.shape[0] for c in cells if c is not None)
@@ -231,7 +232,26 @@ def renderer(a, cfg, work):
     return render
 
 
+def turntable_shot(work):
+    """A shot folder in work whose scene is the engine's turntable fixture; the fixture's hash in its module keys the cache."""
+    src = os.path.normpath(os.path.join(cli.ENGINE, "..", "..", "fixtures"))
+    with open(os.path.join(src, "turntable.py"), "rb") as fh:
+        sha = hashlib.sha256(fh.read()).hexdigest()[:16]
+    shot = os.path.join(work, "shot")
+    os.makedirs(shot, exist_ok=True)
+    with open(os.path.join(shot, "shot.json"), "w") as fh:
+        json.dump({"name": "turntable", "scene": "table", "fps": 24, "size": [480, 270], "work": work}, fh)
+    with open(os.path.join(shot, "table.py"), "w") as fh:
+        fh.write("# fixtures/turntable.py %s\nimport sys\nsys.path.insert(0, %r)\nfrom turntable import scene  # noqa: E402,F401\n"
+                 % (sha, src))
+    return shot
+
+
 def main(a):
+    if a.check == "turntable":
+        a.shot = turntable_shot(os.path.expanduser(a.work or os.path.join(GOLDEN, "turntable")))
+    elif not a.shot:
+        sys.exit("film qa %s: SHOT is needed" % a.check)
     cfg = cli.shot_cfg(a.shot)
     with open(cli.look_path(a.look)) as fh:
         base = json.load(fh)
@@ -291,4 +311,10 @@ def main(a):
         last = round(cli.scene_of(a.shot).duration * cfg.get("fps", 24)) - 1
         fml(render, [0, last // 2, last], look, draft, os.path.join(out, "fml.jpg"))
         print("QA %s" % os.path.join(out, "fml.jpg"))
+    elif a.check == "turntable":
+        with timed("turntable"):
+            frames = list(range(0, 24, 3))
+            pics = render([(f, look, full, None) for f in frames])
+            sheet(pics, ["turn %d deg" % (15 * f) for f in frames], os.path.join(out, "turntable.jpg"))
+        print("QA %s" % os.path.join(out, "turntable.jpg"))
     return 0
