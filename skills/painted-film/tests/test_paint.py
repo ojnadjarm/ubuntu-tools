@@ -197,6 +197,18 @@ class Form(unittest.TestCase):
         self.assertLess(away.c1[0].max(), 0.7 * plain.c1[0].min())
         np.testing.assert_allclose(plain.n[0], [0.0, -1.0, 0.0], atol=1e-6)
 
+    def test_glaze_air_over_form(self):
+        """With "glaze" and an air pass the form light shapes the surface's share only and the air is added unshaped;
+        without form the colour is the same as unglazed."""
+        cam = cam_at(0.0, 0.0)
+        ref = flat_ref(cam, [(10.0, -20, 20, -20, 20, 1, (0.5, 0.5, 0.5))])
+        ref.air = np.full_like(ref.lit, 0.2)
+        s = hand_seeds([[0.0, 10.0, 0.0]], [1.0, 0.0, 0.0], [1], N=(0.0, 1.0, 0.0))
+        form = dict(LOOK, form={"light": [0.0, -1.0, 0.0], "gain": 0.5})
+        np.testing.assert_allclose(solve(ref, s, dict(LOOK, glaze=1), SIZE).c1[0], 0.5, atol=1e-3)
+        np.testing.assert_allclose(solve(ref, s, form, SIZE).c1[0], 0.5 * 1.5, atol=1e-3)
+        np.testing.assert_allclose(solve(ref, s, dict(form, glaze=1), SIZE).c1[0], 0.3 * 1.5 + 0.2, atol=1e-3)
+
 
 class Hug(unittest.TestCase):
     def test_hug_steady_as_it_hides(self):

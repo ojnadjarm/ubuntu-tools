@@ -26,6 +26,7 @@ class Ref:
     meta: dict
     cover: np.ndarray = None  # (H, W) f32 share of the pixel its ident covers (anti-aliased); None: all 1
     other: np.ndarray = None  # (H, W) i64 flat index of the nearest pixel of the ident holding the rest
+    air: np.ndarray = None  # (H, W, 3) linear f32: the haze's own light, part of lit; None: not rendered
 
 
 def read_exr(path):
@@ -137,8 +138,9 @@ def load(prefix):
     ident = decode_ident(code, depth)
     normal = _rgb(c["normal"], "XYZ")
     normal[ident == 0] = 0
+    air = _rgb(read_exr(prefix + ".air.exr"), "RGB") if "air" in meta.get("passes", ()) else None
     return Ref(_rgb(c["lit"], "RGB"), _rgb(c["albedo"], "RGB"), depth, normal, ident,
-               Camera.from_json(meta["camera"]), float(meta["scale"]), meta, *ident_cover(code, ident))
+               Camera.from_json(meta["camera"]), float(meta["scale"]), meta, *ident_cover(code, ident), air)
 
 
 def display(lit):

@@ -11,6 +11,8 @@ from .anchor import NEAR, mix, unit
 DEFAULTS = {"max_px": 64.0, "size": 1.4, "aspect": 2.5, "broken": 0.0, "colour_levels": 2.0, "block": 1.0,
             "px_per_stroke": 0.0, "hug": 0.0}  # hug: how hard a stroke shrinks and moves to stay on its own thing
 # "form": {"light": world vector, "gain": g}: a fill's colour times 1 + g * (its normal . light), the painter's own light
+# "glaze": with the reference's air pass (shot "ref": {"air": true}), form and marks shape the surface's light only and
+# the haze's own light lies over it, as a glaze over the painted stone
 # marks (picture px): width, length over spacing, reach of the colour taps, value gain of lit edges and joints,
 # true width (px) over which a mark fades in, how hard the taps lean to the light or dark side
 # "weight": how much a mark's opacity and width vary by its id (a drawn line, not a ruled one)
@@ -88,7 +90,7 @@ def _box_own(ident, own, u, v, half, cover=None, other=None, lit=None):
     hb = half[:, None]
     x0, x1 = np.clip(u - hb, -0.5, W - 0.5), np.clip(u + hb, -0.5, W - 0.5)
     y0, y1 = np.clip(v - hb, -0.5, H - 0.5), np.clip(v + hb, -0.5, H - 0.5)
-    c = 1 if lit is None else 4
+    c = 1 if lit is None else 1 + lit.shape[-1]
     out = np.zeros(u.shape + (c,))
     o = np.argsort(own, kind="stable")
     for g in np.split(o, np.flatnonzero(np.diff(own[o])) + 1):
@@ -225,9 +227,14 @@ def solve(ref, seeds, look, size) -> Strokes:
 
     hug = np.where(mark, 0.0, lk["hug"])
     rgb = np.clip(ref.lit, 0.0, 1.0)  # display range: an emitter (lit 60) must not flood its neighbours
-    share, own_col = np.zeros(tu.shape), np.zeros(tu.shape + (3,))
+    surf = img = rgb
+    if look.get("glaze") and ref.air is not None:  # the haze apart: form and marks shape the surface, the air lies over it
+        air = np.minimum(np.clip(ref.air, 0.0, None), rgb)
+        surf = rgb - air
+        img = np.concatenate([surf, air], -1)
+    share, own_col = np.zeros(tu.shape), np.zeros(tu.shape + img.shape[-1:])
     h = np.nonzero(~mark & (opacity > MIN_OPACITY))[0]
-    share[h], own_col[h] = _box_own(ref.ident, ident[h], tu[h], tv[h], np.maximum(ts[h] / 2.0, 0.5), ref.cover, ref.other, rgb)
+    share[h], own_col[h] = _box_own(ref.ident, ident[h], tu[h], tv[h], np.maximum(ts[h] / 2.0, 0.5), ref.cover, ref.other, img)
     own = share.mean(1)  # the share of the footprint that shows the seed's own thing, as an area (rule 5)
     grip = np.minimum(hug, 1.0) / np.maximum(share.sum(1), HUG_FLOOR)
     xr, yr = xr + grip * (share * (tu - xr[:, None])).sum(1), yr + grip * (share * (tv - yr[:, None])).sum(1)
@@ -237,10 +244,11 @@ def solve(ref, seeds, look, size) -> Strokes:
     hk = np.maximum(ts[k], 1.0) * 2.0 ** lk["colour_levels"] / 2.0
     sh, col = share[k], own_col[k]
     if lk["colour_levels"]:  # colour boxes wider than the hug's
-        sh, col = _box_own(ref.ident, ident[k], tu[k], tv[k], hk, ref.cover, ref.other, rgb)
+        sh, col = _box_own(ref.ident, ident[k], tu[k], tv[k], hk, ref.cover, ref.other, img)
     wk = sh * vis[k]  # rules 5 and 7 as areas: each tap's box, the share and colour of the seed's own thing in it
-    plain = _box_mean(_sat(rgb), tu[k, 4], tv[k, 4], ts[k] + hk)  # the whole footprint's
+    plain = _box_mean(_sat(img), tu[k, 4], tv[k, 4], ts[k] + hk)  # the whole footprint's
     c1 = ((wk[..., None] * col).sum(1) + EPS_W * plain) / (wk.sum(1) + EPS_W)[:, None]
+    c1, veil = c1[:, :3], c1[:, 3:] if img is not rgb else 0.0
     nw = seeds.N[a[k]] * np.where(num[k] > 0, -1.0, 1.0)[:, None]
     if "form" in look:
         light = np.asarray(look["form"]["light"], float)
@@ -251,10 +259,11 @@ def solve(ref, seeds, look, size) -> Strokes:
         km, lit = k[m], kind[k[m]] == 1
         tm = np.full(len(m), mk["reach"] * sr)
         mu, mv = xr[km, None] + off[:, 0] * tm[:, None], yr[km, None] + off[:, 1] * tm[:, None]
-        col = _sample(_pyramid(rgb), mu, mv, np.maximum(np.log2(tm), 0.0)[:, None] * np.ones((len(m), 9)))  # a tap reads its tm
+        col = _sample(_pyramid(surf), mu, mv, np.maximum(np.log2(tm), 0.0)[:, None] * np.ones((len(m), 9)))  # a tap reads its tm
         own = _box_own(ref.ident, ident[km], mu, mv, tm / 2.0, ref.cover, ref.other)
         w = (own + EPS_W) * (col @ LUMA + 1e-3) ** np.where(lit, mk["power"], -mk["power"])[:, None]
         c1[m] = (w[..., None] * col).sum(1) / w.sum(1)[:, None] * np.where(lit, 1.0 + mk["light"], 1.0 - mk["dark"])[:, None]
+    c1 = c1 + veil
     jit = 2.0 * unit(mix(sid[k, None], np.arange(3)[None, :])) - 1.0
     c2 = c1 * (1.0 + lk["broken"] * jit)
     f32 = lambda a: a[k].astype(np.float32)

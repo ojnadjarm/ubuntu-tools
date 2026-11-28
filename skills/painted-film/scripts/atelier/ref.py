@@ -32,6 +32,11 @@ class RefCfg:
     vol_tile: str = "8"
     shadow_res: float = 0.04  # m; Blender's 1 mm default costs 4x here
     clip: tuple = (0.1, 200.0)
+    air: bool = False  # also the haze's own light as a pass (air.exr): the paint can glaze it over the surfaces
+
+
+def passes(cfg):
+    return PASSES + ((("air", "Volume Direct", "RGBA", "16"),) if cfg.air else ())
 
 
 class _Stage:
@@ -74,7 +79,9 @@ class _Stage:
         rl = ng.nodes.new("CompositorNodeRLayers")
         self.out = ng.nodes.new("CompositorNodeOutputFile")
         self.out.format.media_type = "IMAGE"  # one file per pass: a multilayer file is multi-part
-        for name, src, kind, depth in PASSES:
+        if cfg.air:
+            vl.eevee.use_pass_volume_direct = True
+        for name, src, kind, depth in passes(cfg):
             it = self.out.file_output_items.new(kind, name)
             it.override_node_format = True
             f = it.format
@@ -330,10 +337,10 @@ def render(scene, t, prefix, cfg):
     t2 = time.time()
     cam.size = (W, H)
     meta = dict(t=t, scale=cfg.scale, samples=cfg.samples, pattern_shift=list(cfg.pattern_shift), clip=list(cfg.clip), camera=cam.to_json(),
-                passes=[p[0] for p in PASSES], build_s=round(t1 - t0, 3), render_s=round(t2 - t1, 3))
+                passes=[p[0] for p in passes(cfg)], build_s=round(t1 - t0, 3), render_s=round(t2 - t1, 3))
     with open(prefix + ".json", "w") as fh:
         json.dump(meta, fh, indent=1)
-    n = sum(os.path.exists("%s.%s.exr" % (prefix, p[0])) for p in PASSES)
+    n = sum(os.path.exists("%s.%s.exr" % (prefix, p[0])) for p in passes(cfg))
     print("REF %s t=%.3f passes %d build %.2fs render %.2fs frame %.2fs" % (os.path.basename(prefix), t, n, t1 - t0, t2 - t1,
                                                                             time.time() - t0), flush=True)
 
