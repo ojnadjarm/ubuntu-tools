@@ -7,6 +7,39 @@
 
 #define MAXLEV 8
 
+/* The sprite (alpha, streak, height) averaged over one picture pixel's footprint in sprite pixels (du by dv about
+   u, v): nu by nv bilinear taps, those off the sprite count as empty. A stroke thinner than its sprite's pixels is read
+   as an area, never at one point (rules 7 and 9). */
+static void foot(const float *m, int mw, int mh, float u, float v, float du, float dv, float *out)
+{
+    int nu = (int)ceilf(du), nv = (int)ceilf(dv);
+    if (nu < 1) nu = 1;
+    if (nu > 4) nu = 4;
+    if (nv < 1) nv = 1;
+    if (nv > 16) nv = 16;
+    float a = 0.0f, st = 0.0f, he = 0.0f;
+    for (int j = 0; j < nv; j++) {
+        float vv = nv > 1 ? v + dv * ((j + 0.5f) / nv - 0.5f) : v;
+        if (vv < 0.0f || vv >= mh - 1.001f) continue;
+        for (int i = 0; i < nu; i++) {
+            float uu = nu > 1 ? u + du * ((i + 0.5f) / nu - 0.5f) : u;
+            if (uu < 0.0f || uu >= mw - 1.001f) continue;
+            int iu = (int)uu, iv = (int)vv;
+            float fu = uu - iu, fv = vv - iv;
+            const float *p00 = m + ((long)iv * mw + iu) * 3;
+            const float *p01 = p00 + 3, *p10 = p00 + (long)mw * 3, *p11 = p10 + 3;
+            float w00 = (1 - fu) * (1 - fv), w01 = fu * (1 - fv), w10 = (1 - fu) * fv, w11 = fu * fv;
+            a += p00[0] * w00 + p01[0] * w01 + p10[0] * w10 + p11[0] * w11;
+            st += p00[1] * w00 + p01[1] * w01 + p10[1] * w10 + p11[1] * w11;
+            he += p00[2] * w00 + p01[2] * w01 + p10[2] * w10 + p11[2] * w11;
+        }
+    }
+    float k = 1.0f / (nu * nv);
+    out[0] = a * k;
+    out[1] = st * k;
+    out[2] = he * k;
+}
+
 void paint_strokes(float *img, float *hgt, int W, int H, const float *atlas, const int *off, const int *mw_, const int *mh_,
                    const int *nlev, const float *body_w, float L, int n, const float *x, const float *y, const float *ang,
                    const float *len, const float *wid, const int *var, const float *c1, const float *c2, const float *op,
@@ -15,12 +48,21 @@ void paint_strokes(float *img, float *hgt, int W, int H, const float *atlas, con
 {
     for (int i = 0; i < n; i++) {
         float o = op[i];
-        if (o <= 0.004f || wid[i] < 0.6f) continue;
+        if (o <= 0.004f || wid[i] <= 0.0f) continue;
         int k = var[i];
         float sx = len[i] / L;
-        int lev = 0;
-        while (lev + 1 < nlev[k] && sx * (float)(1 << (lev + 1)) <= 1.25f) lev++;
-        int li = k * MAXLEV + lev;
+        /* rule 5: the sprite's level is a ramp between two levels, never a choice that jumps as the length changes;
+           centred half a level finer than the old choice (lev with sx 2^(lev+1) <= 1.25), so as sharp on the whole */
+        float lam = log2f(0.4419417f / sx);
+        if (lam < 0.0f) lam = 0.0f;
+        if (lam > (float)(nlev[k] - 1)) lam = (float)(nlev[k] - 1);
+        int lev = (int)lam, lev2 = lev + 1 < nlev[k] ? lev + 1 : lev;
+        float fr = lam - (float)lev;
+        int li = k * MAXLEV + lev, li2 = k * MAXLEV + lev2;
+        const float *m2 = atlas + off[li2];
+        int mw2 = mw_[li2], mh2 = mh_[li2];
+        float sc2 = (float)(1 << lev2);
+        float isx2 = L / sc2 / len[i], isy2 = body_w[k] / sc2 / wid[i], cmx2 = mw2 * 0.5f, cmy2 = mh2 * 0.5f;
         const float *m = atlas + off[li];
         int mw = mw_[li], mh = mh_[li];
         float sc = (float)(1 << lev);
@@ -30,8 +72,8 @@ void paint_strokes(float *img, float *hgt, int W, int H, const float *atlas, con
         float hh = 0.5f * (fabsf(s) * mw * sxl + fabsf(c) * mh * syl);
         float cx = x[i], cy = y[i];
         float iz0 = 1.0f / z[i], gx = zg[2 * i], gy = zg[2 * i + 1], izlo = 0.5f * iz0, izhi = iz0 / 0.75f;
-        int x0 = (int)floorf(cx - hw), x1 = (int)ceilf(cx + hw);
-        int y0 = (int)floorf(cy - hh), y1 = (int)ceilf(cy + hh);
+        int x0 = (int)floorf(cx - hw) - 1, x1 = (int)ceilf(cx + hw) + 1;
+        int y0 = (int)floorf(cy - hh) - 1, y1 = (int)ceilf(cy + hh) + 1;
         if (x1 < 0 || y1 < 0 || x0 >= W || y0 >= H) continue;
         if (x0 < 0) x0 = 0;
         if (y0 < 0) y0 = 0;
@@ -43,8 +85,8 @@ void paint_strokes(float *img, float *hgt, int W, int H, const float *atlas, con
         float hsc = o * hs[i] * wid[i] * 0.5f;
         float nx = sn[3 * i], ny = sn[3 * i + 1], nz = sn[3 * i + 2];
         int cut = nx * nx + ny * ny + nz * nz > 0.25f;
-        float ulo = (0.0f - cmx) / isx, uhi = (mw - 1.001f - cmx) / isx;
-        float vlo = (0.0f - cmy) / isy, vhi = (mh - 1.001f - cmy) / isy;
+        float ulo = (0.0f - cmx) / isx - 1.0f, uhi = (mw - 1.001f - cmx) / isx + 1.0f;
+        float vlo = (0.0f - cmy) / isy - 1.0f, vhi = (mh - 1.001f - cmy) / isy + 1.0f;
         for (int py = y0; py <= y1; py++) {
             float dy = py - cy;
             float *row = img + (long)py * W * 3;
@@ -62,13 +104,13 @@ void paint_strokes(float *img, float *hgt, int W, int H, const float *atlas, con
                 float dx = px - cx;
                 float u = (c * dx + s * dy) * isx + cmx;
                 float v = (-s * dx + c * dy) * isy + cmy;
-                if (u < 0.0f || v < 0.0f || u >= mw - 1.001f || v >= mh - 1.001f) continue;
-                int iu = (int)u, iv = (int)v;
-                float fu = u - iu, fv = v - iv;
-                const float *p00 = m + ((long)iv * mw + iu) * 3;
-                const float *p01 = p00 + 3, *p10 = p00 + (long)mw * 3, *p11 = p10 + 3;
-                float w00 = (1 - fu) * (1 - fv), w01 = fu * (1 - fv), w10 = (1 - fu) * fv, w11 = fu * fv;
-                float a = p00[0] * w00 + p01[0] * w01 + p10[0] * w10 + p11[0] * w11;
+                float f1v[3], f2v[3] = {0.0f, 0.0f, 0.0f};
+                foot(m, mw, mh, u, v, isx, isy, f1v);
+                if (fr > 0.0f)
+                    foot(m2, mw2, mh2, (c * dx + s * dy) * isx2 + cmx2, (-s * dx + c * dy) * isy2 + cmy2, isx2, isy2, f2v);
+                float a = f1v[0] + (f2v[0] - f1v[0]) * fr;
+                float st = f1v[1] + (f2v[1] - f1v[1]) * fr;
+                float he = f1v[2] + (f2v[2] - f1v[2]) * fr;
                 if (a < 0.002f) continue;
                 a = fminf(a * hard, 1.0f);
                 /* the plane's depth here, kept within [0.75, 2] times the stroke's own (grazing planes) */
@@ -90,8 +132,6 @@ void paint_strokes(float *img, float *hgt, int W, int H, const float *atlas, con
                         if (vis < 1.0f) a *= vis;
                     }
                 }
-                float st = p00[1] * w00 + p01[1] * w01 + p10[1] * w10 + p11[1] * w11;
-                float he = p00[2] * w00 + p01[2] * w01 + p10[2] * w10 + p11[2] * w11;
                 a *= o;
                 float *q = row + px * 3;
                 q[0] += (r1 + dr * st - q[0]) * a;

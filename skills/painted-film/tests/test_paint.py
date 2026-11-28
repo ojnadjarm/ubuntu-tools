@@ -198,5 +198,38 @@ class Form(unittest.TestCase):
         np.testing.assert_allclose(plain.n[0], [0.0, -1.0, 0.0], atol=1e-6)
 
 
+class Hug(unittest.TestCase):
+    def test_hug_steady_as_it_hides(self):
+        """A hugging stroke on a part beside a coplanar neighbour, which a near wall slides over, changes its size and
+        place in small steps (T2043, rule 5): its own share is an area, never a ratio of point tests."""
+        own = (10.0, -20, 0.45, -20, 20, 1, (0.5, 0.5, 0.5))
+        nb = (10.0, 0.45, 20, -20, 20, 3, (0.5, 0.5, 0.5))
+        near = (5.0, -20, 0.0, -20, 20, 2, (0.2, 0.2, 0.2))
+        seeds = hand_seeds([[0.3, 10.0, 0.0]], [1.0, 0.0, 0.0], [42], px=12.0)
+        w, x = [], []
+        for c in np.arange(0.0, 0.6, 0.005):
+            cam = cam_at(-c, 0.0)
+            st = solve(flat_ref(cam, [own, nb, near]), seeds, dict(LOOK, hug=1.2), SIZE)
+            p, _ = cam.project(seeds.P)
+            w.append(float(st.width[0]) if len(st.order) else np.nan)
+            x.append(float(st.x[0] - p[0, 0]) if len(st.order) else np.nan)
+        dw, dx = np.nan_to_num(np.abs(np.diff(w))), np.nan_to_num(np.abs(np.diff(x)))  # steps while it is drawn
+        self.assertGreater(w[0], 10.0)
+        self.assertLessEqual(dw.max(), 2.0)
+        self.assertLessEqual(dx.max(), 2.0)
+
+    def test_mark_colour_steady_on_grain(self):
+        """A lit-edge mark on a fine grain that moves with it keeps its colour within 7 % as the view slides 0.13 px
+        a step (T2043, rule 7): each of its taps reads the area it stands for, never one pixel."""
+        grain = lambda x, z: (np.where(x < 0, 0.1, 0.5 + 0.2 * np.sign(np.sin(2 * np.pi * x * 32 / 1.3)  # noqa: E731
+                                                                         * np.sin(2 * np.pi * z * 32 / 1.3))))[:, None] * np.ones(3)
+        s = hand_seeds([[0.0, 10.0, 0.0]], [0.0, 0.0, 1.0], [1])
+        s.kind[:], s.width_m[:], s.length_m[:] = 1, 0.06, 2.0
+        look = dict(LOOK, mark={"width": 2.0, "aspect": 2.5, "reach": 3.0, "light": 0.5, "dark": 0.5, "fade": [0.15, 0.6]})
+        c = np.array([solve(flat_ref(cam_at(d, 0.0), [(10.0, -20, 20, -20, 20, 1, grain)]), s, look, SIZE).c1[0].mean()
+                      for d in np.arange(0.0, 0.1, 0.004)])
+        self.assertLessEqual((c.max() - c.min()) / c.mean(), 0.07)
+
+
 if __name__ == "__main__":
     unittest.main()

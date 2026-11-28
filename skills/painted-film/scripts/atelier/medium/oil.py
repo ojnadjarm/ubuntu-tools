@@ -19,6 +19,7 @@ import oilpaint as op  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 _BUILT = {}  # brush banks and linens by their parameters: built once, never written to
+MIN_PX = 1.5  # rule 9: no stroke is drawn thinner (px); a thinner one is drawn MIN_PX wide with its ink kept
 
 
 def _load_c():
@@ -111,13 +112,15 @@ class OilMedium:
             if r > 0:
                 depth = cv2.dilate(depth, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))
             f32 = lambda v: np.ascontiguousarray(v, np.float32)  # noqa: E731
+            wid = np.maximum(st.width, MIN_PX)
+            opac = np.clip(st.opacity, 0, 1) * np.minimum(st.width / MIN_PX, 1.0)
             # T2038: "face" (cosine ramp of the face cut), "overhang_px" (a stroke's reach past its outline), "hard"
             f0, f1 = look.get("face", (0.0, 0.0))
             over = look.get("overhang_px")
             dmin = None if over is None else f32(cv2.erode(near, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * int(round(over)) + 1,) * 2)))
             _PAINT(frame.img, frame.hgt, W, H, bank.atlas, bank.off, bank.mw, bank.mh, bank.nlev, bank.bw, float(bank.L), k,
-                   f32(st.x), f32(st.y), f32(st.ang), f32(st.length), f32(st.width), var, f32(c1), f32(c2),
-                   f32(np.clip(st.opacity, 0, 1)), f32(br["hs"] * np.minimum(1.0, br.get("thick_px", np.inf) / np.maximum(st.width, 1e-6))), float(br["level"]), depth,
+                   f32(st.x), f32(st.y), f32(st.ang), f32(st.length), f32(wid), var, f32(c1), f32(c2),
+                   f32(opac), f32(br["hs"] * np.minimum(1.0, br.get("thick_px", np.inf) / wid)), float(br["level"]), depth,
                    f32(st.z), f32(st.zg), f32(cv2.resize(ref.normal, (W, H), interpolation=cv2.INTER_AREA)), f32(st.n),
                    float(f0), float(f1), None if dmin is None else dmin.ctypes.data, float(look.get("hard", 1.0)))
         return frame.finish(light=tuple(cv["light"]), relief=cv["relief"], gloss=cv["gloss"], shine=cv["shine"],

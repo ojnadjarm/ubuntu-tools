@@ -21,6 +21,7 @@ MARK_LAYER = 64  # marks are drawn after every fill octave
 LUMA = np.array([0.2126, 0.7152, 0.0722])
 EPS_W = 0.05  # weight of the plain tap mean when no tap shares the seed's ident
 MIN_OPACITY = 1e-3
+HUG_FLOOR = 1.8  # the least tap share the hug's grip divides by: a stroke with a sliver of its own thing barely moves
 LO = 0.75  # the seed's plane depth at a tap is kept within [LO, 2] times its own depth (grazing planes)
 REACH = 8  # ref px: the window of the hidden pre-test
 
@@ -76,17 +77,25 @@ def _bilinear(img, u, v):
             + img[i1, j1] * fu * fv)
 
 
-def _own(ident, u, v, own):
-    """The share of each place's four pixels that carry the seed's ident."""
+def _box_own(ident, own, u, v, half):
+    """The share of each box (centre u, v, half size half, ref px) whose pixels carry the seed's ident: an area,
+    continuous in u, v and half (a summed-area table read bilinearly), never one pixel."""
     H, W = ident.shape
-    j0, i0 = np.floor(u), np.floor(v)
+    hb = half[:, None]
+    x0, x1 = np.clip(u - hb, -0.5, W - 0.5), np.clip(u + hb, -0.5, W - 0.5)
+    y0, y1 = np.clip(v - hb, -0.5, H - 0.5), np.clip(v + hb, -0.5, H - 0.5)
     out = np.zeros(u.shape)
-    for dj in (0, 1):
-        for di in (0, 1):
-            pj, pi = j0 + dj, i0 + di
-            jj, ii = np.clip(pj, 0, W - 1).astype(np.int64), np.clip(pi, 0, H - 1).astype(np.int64)
-            out += (1 - np.abs(u - pj)) * (1 - np.abs(v - pi)) * (ident[ii, jj] == own[:, None])
-    return out
+    o = np.argsort(own, kind="stable")
+    for g in np.split(o, np.flatnonzero(np.diff(own[o])) + 1):
+        if not len(g):
+            continue
+        c0, c1 = int(np.floor(x0[g].min() + 0.5)), int(np.ceil(x1[g].max() + 0.5))
+        r0, r1 = int(np.floor(y0[g].min() + 0.5)), int(np.ceil(y1[g].max() + 0.5))
+        S = np.zeros((r1 - r0 + 1, c1 - c0 + 1))
+        S[1:, 1:] = (ident[r0:r1, c0:c1] == own[g[0]]).cumsum(0).cumsum(1)
+        F = lambda x, y: _bilinear(S, x + 0.5 - c0, y + 0.5 - r0)  # noqa: E731
+        out[g] = (F(x1[g], y1[g]) - F(x0[g], y1[g]) - F(x1[g], y0[g]) + F(x0[g], y0[g])) / (4.0 * hb[g] ** 2)
+    return np.clip(out, 0.0, 1.0)
 
 
 def _pyramid(lit):
@@ -168,10 +177,13 @@ def solve(ref, seeds, look, size) -> Strokes:
             same += w * v * (ref.ident[ii, jj] == ident[:, None])
     opacity = seeds.opacity[a] * vis.mean(1) * np.where(mark, heavy * np.clip((true - mk["fade"][0]) / (mk["fade"][1] - mk["fade"][0]), 0, 1), 1.0)
 
-    own = same.sum(1) / np.maximum(vis.sum(1), 1e-6)  # the share of the footprint in view that is the seed's own thing
     hug = np.where(mark, 0.0, lk["hug"])
-    grip = np.minimum(hug, 1.0) / (same.sum(1) + EPS_W)
-    xr, yr = xr + grip * (same * (tu - xr[:, None])).sum(1), yr + grip * (same * (tv - yr[:, None])).sum(1)
+    share = np.zeros(tu.shape)
+    h = np.nonzero((hug > 0) & (opacity > MIN_OPACITY))[0]
+    share[h] = _box_own(ref.ident, ident[h], tu[h], tv[h], np.maximum(ts[h] / 2.0, 0.5))
+    own = share.mean(1)  # the share of the footprint that shows the seed's own thing, as an area (rule 5)
+    grip = np.minimum(hug, 1.0) / np.maximum(share.sum(1), HUG_FLOOR)
+    xr, yr = xr + grip * (share * (tu - xr[:, None])).sum(1), yr + grip * (share * (tv - yr[:, None])).sum(1)
     width, length = width * own ** hug, length * own ** hug
     k = np.nonzero(opacity > MIN_OPACITY)[0]
     k = k[np.lexsort((sid[k], octave[k]))]
@@ -188,8 +200,8 @@ def solve(ref, seeds, look, size) -> Strokes:
         km, lit = k[m], kind[k[m]] == 1
         tm = np.full(len(m), mk["reach"] * sr)
         mu, mv = xr[km, None] + off[:, 0] * tm[:, None], yr[km, None] + off[:, 1] * tm[:, None]
-        col = _sample(pyr, mu, mv, np.maximum(np.log2(tm) - 1.0, 0.0)[:, None] * np.ones((len(m), 9)))
-        own = _own(ref.ident, mu, mv, ident[km])
+        col = _sample(pyr, mu, mv, np.maximum(np.log2(tm), 0.0)[:, None] * np.ones((len(m), 9)))  # a tap reads its tm
+        own = _box_own(ref.ident, ident[km], mu, mv, tm / 2.0)
         w = (own + EPS_W) * (col @ LUMA + 1e-3) ** np.where(lit, mk["power"], -mk["power"])[:, None]
         c1[m] = (w[..., None] * col).sum(1) / w.sum(1)[:, None] * np.where(lit, 1.0 + mk["light"], 1.0 - mk["dark"])[:, None]
     jit = 2.0 * unit(mix(sid[k, None], np.arange(3)[None, :])) - 1.0

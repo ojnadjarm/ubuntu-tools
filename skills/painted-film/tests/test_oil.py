@@ -128,5 +128,33 @@ class Canvas(unittest.TestCase):
         self.assertGreater(a[away].std(), 0.5)  # the weave is there, not a flat fill
 
 
+class Thin(unittest.TestCase):
+    def test_thin_stroke_steady(self):
+        """A stroke under 1.5 px lays the same ink wherever it sits on the pixel grid, and its ink falls smoothly with
+        its width, never cut (T2043, rules 5 and 9)."""
+        ref = flat_ref(cam_at(0.0, 0.0), [FAR])
+        m = OilMedium()
+        empty = m.composite(strokes([], [], []), ref, FLAT, SIZE).astype(float)
+        ink = lambda y, w: np.abs(m.composite(strokes(160.0, y, 10.0, length=40.0, width=w, colour=(0.9, 0.9, 0.9)),  # noqa: E731
+                                              ref, FLAT, SIZE).astype(float) - empty).sum()
+        by_place = np.array([ink(90.0 + d, 1.0) for d in np.arange(0.0, 1.0, 0.125)])
+        by_width = np.array([ink(90.25, w) for w in np.arange(0.3, 1.6, 0.1)])
+        self.assertLessEqual(by_place.std() / by_place.mean(), 0.1)
+        self.assertGreater(by_width[0], 0.0)
+        self.assertLessEqual(np.abs(np.diff(by_width / by_width.max())).max(), 0.2)
+
+
+class Level(unittest.TestCase):
+    def test_sprite_level_ramp(self):
+        """A stroke growing 1 % a frame changes the picture by about as much every frame: its sprite's level is a
+        ramp, never a jump (T2043, rule 5)."""
+        ref = flat_ref(cam_at(0.0, 0.0), [FAR])
+        m = OilMedium()
+        pics = [m.composite(strokes(160.0, 90.0, 10.0, length=L, width=L / 2.3, colour=(0.9, 0.7, 0.4)), ref, FLAT,
+                            SIZE).astype(float) for L in 30.0 * 1.01 ** np.arange(80)]
+        d = np.array([np.abs(b - a).mean() for a, b in zip(pics, pics[1:])])
+        self.assertLessEqual(d.max(), 3.0 * np.median(d))
+
+
 if __name__ == "__main__":
     unittest.main()
