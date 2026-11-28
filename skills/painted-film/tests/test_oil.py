@@ -78,6 +78,19 @@ class Face(unittest.TestCase):
         free = on(st, {k: v for k, v in look.items() if k != "face"})
         self.assertGreater(free[80:100, 135:155].mean(), 0.8)
 
+    def test_air_frees_far_strokes(self):
+        """With the look's "air" a stroke past its far distance paints across a crease (share "face" 0 keeps the cut);
+        a stroke nearer than its near distance is cut as before."""
+        ref = flat_ref(cam_at(0.0, 0.0), [FAR])
+        ref.normal[:, :160] = (1.0, 0.0, 0.0)
+        m = OilMedium()
+        look = dict(FLAT, face=[0.5, 0.8], air={"z": [6.0, 9.0], "face": 0.0, "body": 0.2, "broken": 0.2})
+        empty = m.composite(strokes([], [], []), ref, look, SIZE).astype(int)
+        on = lambda s: np.abs(m.composite(s, ref, look, SIZE).astype(int) - empty).max(2) > 0
+        far, near = strokes(160.0, 90.0, 10.0), strokes(160.0, 90.0, 5.0)
+        far.n = near.n = np.array([[0.0, -1.0, 0.0]], np.float32)
+        self.assertGreater(on(far)[80:100, 135:155].mean(), 0.8)
+        self.assertFalse(on(near)[:, :158].any())
 
     def test_thin_face_is_filled(self):
         """A face thinner than the look's "face_min_px" is painted with the face round it; without the key it stays bare."""

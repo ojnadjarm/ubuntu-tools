@@ -162,6 +162,12 @@ class OilMedium:
             flame = op.smooth((L_ref - g["flame_lo"]) / (g["flame_hi"] - g["flame_lo"]))
             col = grade(display(st.c1), flame, L_ref, st.x, st.y, sr, g)
             jit = unit(mix(st.order[:, None], np.arange(6)[None, :])).astype(np.float32)
+            # "air": {"z": (z0, z1), "broken", "body", "face"}: from z0 to z1 m a stroke's broken colour and its body fall
+            # to these shares of their own, and only this share of the strokes keeps the face cut (distance painted thin and calm)
+            air = look.get("air")
+            far = op.smooth((st.z - air["z"][0]) / (air["z"][1] - air["z"][0])) if air else 0.0
+            if air:
+                jit = (0.5 + (jit - 0.5) * (1.0 - (1.0 - air.get("broken", 1.0)) * far)[:, None]).astype(np.float32)
             c1 = op.broken(col, jit, look["broken"], shadow_tint=look["shadow_tint"], light_tint=look["light_tint"],
                            tints=look["tints"])
             c2 = op.broken(col, jit[:, ::-1], look["broken"], tints=0)
@@ -190,6 +196,10 @@ class OilMedium:
             body = br["hs"]  # brush "light": the paint stands that much thicker in the lights than in the darks
             if br.get("light"):
                 body = body * (1.0 + br["light"] * (2.0 * op.smooth(col @ np.array([0.2126, 0.7152, 0.0722], np.float32) / 0.5) - 1.0))
+            sn = st.n
+            if air:
+                body = body * (1.0 - (1.0 - air.get("body", 1.0)) * far)
+                sn = np.where((unit(mix(st.order, 0xA1)) < (1.0 - air.get("face", 1.0)) * far)[:, None], 0.0, sn)
             normal = cv2.resize(ref.normal, (W, H), interpolation=cv2.INTER_AREA)
             thin = min(int(round(look.get("face_min_px", 0))), 2)  # a face thinner than this is cut with the face round it:
             if thin > 0:  # no stroke of its own can fill it, and the face cut would leave it bare ground
@@ -197,7 +207,7 @@ class OilMedium:
             _PAINT(frame.img, frame.hgt, W, H, bank.atlas, bank.off, bank.mw, bank.mh, bank.nlev, bank.bw, float(bank.L), k,
                    f32(st.x), f32(st.y), f32(st.ang), f32(st.length), f32(wid), var, f32(c1), f32(c2),
                    f32(opac), f32(body * np.minimum(1.0, br.get("thick_px", np.inf) / wid)), float(br["level"]), depth,
-                   f32(st.z), f32(st.zg), f32(normal), f32(st.n),
+                   f32(st.z), f32(st.zg), f32(normal), f32(sn),
                    float(f0), float(f1), ptr(dmin), float(look.get("hard", 1.0)), ptr(smax), ptr(smin))
         return frame.finish(light=tuple(cv["light"]), relief=cv["relief"], gloss=cv["gloss"], shine=cv["shine"],
                             exposure=cv["exposure"], vignette=cv["vignette"])
