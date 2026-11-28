@@ -112,6 +112,7 @@ class Light:
     haze: float = 1.0  # how much it lights the haze (volume factor)
     cone: float = 0.8  # spot: the cone's full angle, rad
     blend: float = 0.3  # spot: the share of the cone its edge fades over
+    only: tuple = ()  # the materials it lights (none: all); every part still shades it
 
 
 @dataclass
@@ -135,7 +136,8 @@ class Scene(Protocol):
     fps: int
     duration: float
     materials: dict  # name -> {"color": (r, g, b), "emission": strength, "rough": 0..1, "metal": 0..1, "layers": [...] (ref._Stage.layers),
-    #   "unseen": True (it casts its shadow and is not in the picture), "haze": density (a body of air, no surface)}
+    #   "unseen": True (it casts its shadow and is not in the picture), "haze": density (a body of air, no surface;
+    #   with "emission" it glows of itself)}
     world: dict  # {"color": (r, g, b), "strength", "haze": density, "anisotropy", "air": (r, g, b), "air_strength"}
 
     def meshes(self, t: float) -> list: ...

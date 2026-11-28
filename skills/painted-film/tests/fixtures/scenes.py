@@ -119,3 +119,25 @@ class Beside(Stained):
 
     def lights(self, t):
         return [Light("spot", pos=(0.0, 0.0, 0.0), rot=(np.pi / 2, 0.0, 0.0), watts=5000.0, cone=0.3, blend=0.1, shadow=True)]
+
+
+class Only(Stained):
+    """The wall and a block before it, both seen; a spot off the middle that lights only the wall: the block stays dark
+    and still shades the wall."""
+    materials = {"wall": {"color": (0.8, 0.8, 0.8)}, "block": {"color": (0.8, 0.8, 0.8)}}
+
+    def meshes(self, t):
+        q = np.array([[0.2, 5, -0.5], [0.8, 5, -0.5], [0.8, 5, 0.5], [0.2, 5, 0.5]], float)
+        return super().meshes(t) + [mesh("block", q, np.array([[0, 2, 1], [0, 3, 2]]), "block", 6)]
+
+    def lights(self, t):
+        return [Light("spot", pos=(1.0, 0.0, 0.0), rot=(np.pi / 2, 0.0, 0.0), watts=5000.0, cone=0.3, blend=0.1, shadow=True, only=("wall",))]
+
+
+class Glow(Beside):
+    """No light at all; the block of haze glows of itself."""
+    materials = {"wall": {"color": (0.8, 0.8, 0.8)}, "plate": {"color": (0, 0, 0), "unseen": True},
+                 "mist": {"color": (1, 1, 1), "haze": 2.0, "emission": 0.5}}
+
+    def lights(self, t):
+        return []

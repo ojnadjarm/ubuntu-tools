@@ -63,6 +63,7 @@ class _Stage:
         self.mats = {m: self.material(m, d) for m, d in scene.materials.items()}
         self.unseen = {m: bool(d.get("unseen")) for m, d in scene.materials.items()}  # casts its shadow, is in no pass
         self.objs, self.hash, self.lights = {}, {}, []
+        self.mat_of, self.only = {}, {}  # object name -> material; a light's `only` -> the collection it lights
         cd = bpy.data.cameras.new("cam")
         cd.clip_start, cd.clip_end, cd.sensor_fit = cfg.clip[0], cfg.clip[1], "HORIZONTAL"
         self.cam = bpy.data.objects.new("cam", cd)
@@ -122,7 +123,14 @@ class _Stage:
             vs.inputs["Color"].default_value = (*d["color"], 1)
             vs.inputs["Density"].default_value = d["haze"]
             vs.inputs["Anisotropy"].default_value = d.get("anisotropy", 0.0)
-            t.links.new(vs.outputs[0], t.nodes.new("ShaderNodeOutputMaterial").inputs["Volume"])
+            sh = vs.outputs[0]
+            if d.get("emission", 0.0):  # it glows of itself too
+                em, ad = t.nodes.new("ShaderNodeEmission"), t.nodes.new("ShaderNodeAddShader")
+                em.inputs[0].default_value, em.inputs[1].default_value = (*d["color"], 1), d["emission"]
+                t.links.new(sh, ad.inputs[0])
+                t.links.new(em.outputs[0], ad.inputs[1])
+                sh = ad.outputs[0]
+            t.links.new(sh, t.nodes.new("ShaderNodeOutputMaterial").inputs["Volume"])
             return m
         tone = t.nodes.new("ShaderNodeAttribute")
         tone.attribute_name = "tone"
@@ -223,6 +231,10 @@ class _Stage:
             o = self.objs[m.name] = bpy.data.objects.new(m.name, bpy.data.meshes.new(m.name))
             self.sc.collection.objects.link(o)
             o.visible_camera = not self.unseen.get(m.material, False)
+            self.mat_of[m.name] = m.material
+            for key, c in self.only.items():
+                if m.material in key:
+                    c.objects.link(o)
         o.hide_render = False
         if self.hash.get(m.name) == h.digest():
             return
@@ -267,7 +279,17 @@ class _Stage:
         else:
             d.size = L.radius
         o.location, o.rotation_euler = tuple(L.pos), tuple(L.rot)
+        o.light_linking.receiver_collection = self.lit_by(tuple(sorted(L.only))) if L.only else None
         o.hide_render = False
+
+    def lit_by(self, key):
+        """The collection of every object made of the materials in `key` (a light that lights only them)."""
+        if key not in self.only:
+            c = self.only[key] = bpy.data.collections.new("only:" + ",".join(key))
+            for name, mat in self.mat_of.items():
+                if mat in key:
+                    c.objects.link(self.objs[name])
+        return self.only[key]
 
 
 _STAGE = {}

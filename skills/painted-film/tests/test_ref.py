@@ -116,6 +116,33 @@ class Beside(unittest.TestCase):
         self.assertGreater(r.lit[:, :W // 2].max(), 0.01)
 
 
+@unittest.skipUnless(shutil.which(os.environ.get("FILM_BLENDER", "blender")), "no blender")
+class Only(unittest.TestCase):
+    def test_light_only_on_its_materials(self):
+        """A light with `only` lights the wall and not the block before it; the block still shades the wall."""
+        with tempfile.TemporaryDirectory() as t:
+            out = os.path.join(t, "out")
+            self.assertEqual(cli.main(["ref", shot(t, "s", "Only"), "--out", out, "--frames", "0"]), 0)
+            r = refio.load(os.path.join(out, "f_0000"))
+        self.assertTrue((r.ident[120:150, 270:315] == 6).all())
+        self.assertLess(r.lit[120:150, 270:315].max(), 1e-3)  # the block: not lit
+        self.assertGreater(r.lit[125:145, 335:360].min(), 0.05)  # the wall in the cone
+        self.assertLess(r.lit[125:145, 225:255].max(), 1e-3)  # the block's shadow on it
+
+
+@unittest.skipUnless(shutil.which(os.environ.get("FILM_BLENDER", "blender")), "no blender")
+class Glow(unittest.TestCase):
+    def test_haze_body_glows(self):
+        """A body of haze with `emission` glows with no light; the rest of the picture stays black."""
+        with tempfile.TemporaryDirectory() as t:
+            out = os.path.join(t, "out")
+            self.assertEqual(cli.main(["ref", shot(t, "s", "Glow"), "--out", out, "--frames", "0"]), 0)
+            r = refio.load(os.path.join(out, "f_0000"))
+        W = r.lit.shape[1]
+        self.assertGreater(r.lit[:, :W // 2].max(), 0.01)
+        self.assertLess(r.lit[:, W // 2 + 4:].max(), 1e-3)
+
+
 class Decode(unittest.TestCase):
     def test_ident_follows_depth_at_blended_edges(self):
         """An anti-aliased edge band takes the ident of the side its (unfiltered) depth belongs to."""
