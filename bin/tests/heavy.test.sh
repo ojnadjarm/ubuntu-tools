@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# T775: heavy against a stub systemd-run on PATH — scope argv, cwd/env, rc passthrough, summary line, ledger, nice fallback.
+# T775: heavy against a stub systemd-run on PATH — scope argv, cwd/env, rc passthrough, summary line, ledger, nice fallback; T2061: heavy idle on a fixture cgroup.
 set -uo pipefail
 BIN="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
@@ -107,5 +107,29 @@ hv at --cancel T5 2>/dev/null; is 'cancel of nothing rc 1' "$?" 1
 hv at 'not a time' --ticket T7 -- true 2>/dev/null; is 'bad OnCalendar rc 2' "$?" 2
 hv at daily --ticket 7 -- true 2>/dev/null;       is 'bad ticket rc 2' "$?" 2
 hv at daily --ticket T7 2>/dev/null;              is 'no command rc 2' "$?" 2
+
+
+# 6. heavy idle (T2061): fixture cgroup dir and ledger; active scope, ended-since rows (any UTC offset), wait, usage.
+export HEAVY_CGROUP="$WORK/cg" HEAVY_EVERY=0.1
+mkdir -p "$WORK/cg/fleet-ci-daily.service"
+IL="$WORK/idle.jsonl"; now=$(date +%s)
+printf '{"ts":"%s","rc":0}\nnot json\n' "$(TZ=UTC date -Is -d @$((now - 100)))" >"$IL"
+out=$(HEAVY_LOG="$IL" "$BIN/heavy" idle); rc=$?
+is 'idle: no scope, a service only -> rc 0, silent' "$rc $out" '0 '
+out=$(HEAVY_LOG="$IL" "$BIN/heavy" idle --since $((now - 50))); is 'idle: row ended before --since -> rc 0' "$?" 0
+mkdir "$WORK/cg/run-p1-i1.scope"
+out=$(HEAVY_LOG="$IL" "$BIN/heavy" idle); rc=$?
+is 'busy: an active scope -> rc 3 and the count' "$rc $out" '3 heavy: busy, 1 active'
+(sleep 0.3; rmdir "$WORK/cg/run-p1-i1.scope") &
+HEAVY_LOG="$IL" "$BIN/heavy" idle --wait 5 >/dev/null; is 'wait: rc 0 once the scope ends' "$?" 0
+wait
+printf '{"ts":"%s","rc":0}\n' "$(TZ=Asia/Kolkata date -Is -d @$((now - 20)))" >>"$IL"
+out=$(HEAVY_LOG="$IL" "$BIN/heavy" idle --since $((now - 50))); rc=$?
+is 'since: a row ended after EPOCH (+05:30) -> rc 3' "$rc $out" "3 heavy: busy, 0 active, 1 ended since $(date -d @$((now - 50)) +%T)"
+HEAVY_LOG="$IL" "$BIN/heavy" idle --since $((now - 10)) >/dev/null; is 'since: rows before EPOCH -> rc 0' "$?" 0
+mkdir "$WORK/cg/run-p2-i2.scope"
+out=$(HEAVY_LOG="$IL" timeout 5 "$BIN/heavy" idle --wait 1); rc=$?
+is 'wait: still busy after S -> rc 3' "$rc $out" '3 heavy: busy, 1 active'
+"$BIN/heavy" idle --wait soon 2>/dev/null; is 'idle: bad --wait rc 2' "$?" 2
 
 exit $bad

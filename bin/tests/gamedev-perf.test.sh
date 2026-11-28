@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2016,SC2034  # ok() evals its single-quoted checks
-# T520/T548/T617/T687/T744/T786/T857/T902/T949: gamedev-perf maps a stub perfgate's and a stub cpp-ci's pass/skip/regress to rc 0/0/1 (cpp culprit pass named), fetches assets once, locks out a second run, discards rows on a mid-run load spike, CPU pressure peak or GPU client, skips while the GPU is busy, checks each cpp pass against perf-budgets.json (line, csv column, red creative-ci row, rc unchanged), counts timing-gate skip rows (--skips), compares two runs per pass (--compare), shows per-pass drift over the last rows (--trend) and its edge cases (extra fields, missing or non-object budgets, NaN, WARN after the pass lines).
+# T520/T548/T617/T687/T744/T786/T857/T902/T949: gamedev-perf maps a stub perfgate's and a stub cpp-ci's pass/skip/regress to rc 0/0/1 (cpp culprit pass named), fetches assets once, locks out a second run, discards rows on a mid-run load spike, CPU pressure peak or GPU client, skips while the GPU is busy, checks each cpp pass against perf-budgets.json, waits out or discards on a `heavy run` (T2061) (line, csv column, red creative-ci row, rc unchanged), counts timing-gate skip rows (--skips), compares two runs per pass (--compare), shows per-pass drift over the last rows (--trend) and its edge cases (extra fields, missing or non-object budgets, NaN, WARN after the pass lines).
 set -uo pipefail
 BIN="$HOME/agents/bin/gamedev-perf"
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
@@ -16,6 +16,7 @@ if [ -n "${STUB_HOLD:-}" ]; then touch "$STUB_HOLD.started"; while [ ! -e "$STUB
 [ -n "${STUB_SPIKE:-}" ] && echo "20.00 18.00 9.00 3/900 1" >"$GAMEDEV_LOADAVG"
 [ -n "${STUB_PSI:-}" ] && echo "some avg10=$STUB_PSI avg60=5.00 avg300=2.00 total=1" >"$GAMEDEV_PSI"
 [ -n "${STUB_GPU:-}" ] && cp -r "$GPU_BUSY/." "$QUIET_FDINFO/"
+[ -n "${STUB_HEAVY:-}" ] && echo "{\"ts\":\"$(date -Is)\",\"rc\":0}" >>"$HEAVY_LOG"
 case $STUB_RC in
   0) echo "row" >>"$csv"; echo "PERFGATE PASS median_fps=100" ;;
   1) echo "row" >>"$csv"; echo "PERFGATE FAIL median_fps=50 < floor=90" ;;
@@ -26,7 +27,9 @@ EOF
 chmod +x "$W/slice/assets.sh" "$W/perfgate"
 mkdir -p "$W/gt"; echo 1234 >"$W/gt/rps_RP0_freq_mhz"
 export PERFGATE_GT="$W/gt" GAMEDEV_PERFGATE="$W/perfgate" GAMEDEV_SLICE="$W/slice" GAMEDEV_PERF_DIR="$W/state" STUB_LOG="$W/gate.log" \
-	GAMEDEV_LOADAVG="$W/loadavg" GAMEDEV_PSI="$W/psi" GAMEDEV_LOAD_EVERY=0.1 GAMEDEV_GPU_EVERY=0.1 QUIET_FDINFO="$W/fd" GPU_BUSY="$W/fd-busy"
+	GAMEDEV_LOADAVG="$W/loadavg" GAMEDEV_PSI="$W/psi" GAMEDEV_LOAD_EVERY=0.1 GAMEDEV_GPU_EVERY=0.1 QUIET_FDINFO="$W/fd" GPU_BUSY="$W/fd-busy" \
+	HEAVY_CGROUP="$W/cg" HEAVY_LOG="$W/heavy.jsonl" HEAVY_EVERY=0.1 GAMEDEV_HEAVY_WAIT_S=1
+mkdir -p "$W/cg"
 # stub cpp-ci: STUB_CPP pass|regress|skip|buildfail; logs stages|out|project|sources|seeded csv lines; perf appends a cpp row like cpp-ci
 mkdir -p "$W/tpl/src"; echo 'int main() {}' >"$W/tpl/src/main.cpp"
 cat >"$W/cppci" <<'EOF'
@@ -132,6 +135,11 @@ ok "second concurrent run prints busy with the holder pid" 'grep -qx "busy: anot
 ok "first concurrent run completes and writes its row" '[ $rca = 0 ] && [ "$(wc -l <"$W/state/perf.csv")" = $((rows + 1)) ]'
 STUB_RC=0 "$BIN" --collect >/dev/null 2>&1
 ok "quiet run after the lock is freed writes a row" '[ "$(wc -l <"$W/state/perf.csv")" = $((rows + 2)) ]'
+rows=$((rows + 2)) g=$(grep -c . "$W/gate.log")
+mkdir "$W/cg/run-p1-i1.scope"; STUB_RC=0 "$BIN" --collect >"$W/out" 2>&1; rc=$?; rmdir "$W/cg/run-p1-i1.scope"
+ok "T2061: heavy run active -> rc 0, skip line, gate not called, no row" '[ $rc = 0 ] && grep -qx "skip heavy runs: 1 active, no row" "$W/out" && [ "$(grep -c . "$W/gate.log")" = $g ] && [ "$(wc -l <"$W/state/perf.csv")" = "$rows" ]'
+STUB_RC=0 STUB_CPP=regress STUB_HEAVY=1 "$BIN" --collect >"$W/out" 2>&1; rc=$?
+ok "T2061: heavy run ended mid-run -> rc 0 (regression not judged), rows discarded" '[ $rc = 0 ] && grep -q "^skip heavy runs mid-run: 0 active, 1 ended since .*, rows discarded$" "$W/out" && [ "$(wc -l <"$W/state/perf.csv")" = "$rows" ]'
 "$BIN" --bogus >/dev/null 2>&1; ok "unknown arg -> rc 2" '[ $? = 2 ]'
 "$BIN" >"$W/out" 2>&1; ok "no arg prints the csv tail" '[ $? = 0 ] && grep -q row "$W/out"'
 

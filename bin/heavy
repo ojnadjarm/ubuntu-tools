@@ -14,6 +14,9 @@ usage: heavy at <OnCalendar> --ticket T<n> [--desc TEXT] [--apply] -- <cmd> [arg
   Schedules `heavy run --ticket T<n> -- <cmd>` as heavy-T<n>.{timer,service} in ~/.config/systemd/user
   (Persistent=true: survives a reboot, a missed run fires on wake); the run removes both units after.
   Without --apply prints `would: ...`. --list: ticket, next elapse, persistent|transient, cmd.
+usage: heavy idle [--wait S] [--since EPOCH]
+  rc 0 when no heavy run is active (a scope in fleet-heavy.slice) and, with --since, none ended at or after EPOCH
+  (log/heavy.jsonl); else rc 3 and `heavy: busy, N active[, M ended since HH:MM:SS]`. --wait polls up to S s.
 EOF
 }
 
@@ -100,8 +103,34 @@ at_main() {
   echo "rollback: heavy at --cancel $ticket"
 }
 
+CG="${HEAVY_CGROUP:-/sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/fleet.slice/fleet-heavy.slice}"
+
+# idle_main — rc 0 when no heavy run is active (or, with --since, ended after EPOCH); rc 3 busy, for perf gates (T2061).
+idle_main() {
+  local wait=0 since= n m t0=$SECONDS
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --wait|--since) [[ ${2:-} =~ ^[0-9]+$ ]] || { usage >&2; return 2; }
+        case $1 in --wait) wait=$2;; --since) since=$2;; esac; shift 2;;
+      *) usage >&2; return 2;;
+    esac
+  done
+  while :; do
+    n=$(compgen -G "$CG/*.scope" | wc -l) m=0
+    [ -n "$since" ] && m=$(tail -n 500 "$LOG" 2>/dev/null | jq -nR --argjson s "$since" '[inputs | fromjson? | .ts // empty
+      | (.[0:19] + "Z" | fromdate) - ((.[19:20] + "1" | tonumber) * ((.[20:22] | tonumber) * 3600 + (.[23:25] | tonumber) * 60))
+      | select(. >= $s)] | length')
+    [ "$n" = 0 ] && [ "${m:-0}" = 0 ] && return 0
+    [ $((SECONDS - t0)) -lt "$wait" ] || break
+    sleep "${HEAVY_EVERY:-15}"
+  done
+  echo "heavy: busy, $n active${since:+, $m ended since $(date -d "@$since" +%T)}"
+  return 3
+}
+
 case "${1:-}" in
   run) shift;;
+  idle) shift; idle_main "$@"; exit $?;;
   at) shift; at_main "$@"; exit $?;;
   -h|--help) usage; exit 0;;
   *) usage >&2; exit 2;;

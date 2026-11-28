@@ -7,6 +7,7 @@
 # T1001: a perf-budgets.json pass with ms <= 0 is refused by every mode that reads budgets (rc 2 naming the key).
 # T744: each cpp row is checked against the template's perf-budgets.json (the one place for pass budgets): `budget=ok|over:<pass>=<ms>/<budget>` on the line and in perf-cpp.csv's trailing budget column, a red creative-ci row when over; rc unchanged.
 # T1495: --collect pins the GPU clock to RP0 for the perfgate run (--pin-gpu, restored by the gate) when gt0 sysfs is readable.
+# T2061: --collect measures only when no `heavy run` is active (waits up to 1200 s, else skip); a heavy run active or ended mid-run discards the rows.
 set -uo pipefail
 S=$HOME/.claude/skills/gamedev
 gate=${GAMEDEV_PERFGATE:-$S/scripts/godot-perfgate.sh}
@@ -283,7 +284,10 @@ cfail=0
 if ! rsync -a --exclude build --exclude ci "$tpl/" "$cpp/" || ! "$cppci" --out "$cout" --stages "configure build" "$cpp" >"$cout/build.out" 2>&1 9>&-; then
 	echo "cpp build failed, no cpp row ($cout/build.out)"; cfail=1
 fi
+heavy=$(dirname "$(readlink -f "$0")")/heavy
+hb=$("$heavy" idle --wait "${GAMEDEV_HEAVY_WAIT_S:-1200}") || { echo "skip heavy runs: ${hb#heavy: busy, }, no row"; exit 0; }
 QUIET_LOADAVG=$loadavg quiet-gate --max-per-cpu 0.5 --max-load1 "${GAMEDEV_MAX_LOAD:-}" --wait "${GAMEDEV_SETTLE_S:-300}" >/dev/null
+t0=$(date +%s)
 
 sample() {
 	cut -d' ' -f1 "$loadavg" >>"$run/.load"
@@ -302,6 +306,7 @@ rc=$?
 kill "$sampler" "$gsampler" 2>/dev/null; sampler="" gsampler=""; sample; qg_gpu_pct $$ >>"$run/.gpu"
 [ -d "$run/.godot" ] && rsync -a --delete "$run/.godot/" "$cache/.godot/"
 [ "$rc" = 3 ] && { echo "skip machine busy, no row (load1 $(cut -d' ' -f1 "$loadavg"))"; exit 0; }
+hb=$("$heavy" idle --since "$t0") || { echo "skip heavy runs mid-run: ${hb#heavy: busy, }, rows discarded"; exit 0; }
 peak=$(sort -g "$run/.load" | tail -n 1)
 if awk -v l="$peak" -v m="$maxload" 'BEGIN {exit !(l >= m)}'; then
 	echo "skip load1 peaked at $peak >= $maxload mid-run, rows discarded"; exit 0

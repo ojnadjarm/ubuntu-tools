@@ -16,6 +16,7 @@ Any heavy run an agent starts by hand: renders (Blender, Remotion, motion-video)
 | last stderr line | `heavy: <s> wall, <s> cpu (scope\|nice), ticket T<n>` (cpu = the command's user+sys) |
 | `bin/heavy at <OnCalendar> --ticket T<n> [--desc T] [--apply] -- <cmd>` | heavy-T<n>.{timer,service} in `~/.config/systemd/user`: `Persistent=true`, ExecStart `heavy run --ticket T<n> -- <cmd>`, ExecStopPost `heavy at --cancel T<n>` (both files gone after the run); dry run prints `would:`; last line `rollback: heavy at --cancel T<n>` |
 | `heavy at --list` / `--cancel T<n>` | ticket, next elapse, persistent\|transient, cmd / stop+disable, remove files, daemon-reload |
+| `heavy idle [--wait S] [--since EPOCH]` | rc 0 when no `*.scope` is in fleet-heavy.slice (and, with `--since`, no ledger row ended at or after EPOCH), else rc 3 `heavy: busy, N active[, M ended since T]`; the perf gates (`gamedev-perf --collect`, tier-nightly's Mooblox gate) wait with it and discard a measurement a heavy run overlapped (T2061) |
 | `log/heavy.jsonl` | one row a run: ts, ticket, mode, cwd, cmd, rc, wall_s, cpu_s (`HEAVY_LOG` overrides) |
 | `units/fleet.slice`, `units/fleet-heavy.slice` | `CPUWeight=idle` |
 | `fleet-ci-daily.service`, `gamedev-perf.service` | `Slice=fleet-heavy.slice` |
@@ -45,6 +46,7 @@ nice -n 19 bash ~/agents/bin/tests/heavy.test.sh
 - `heavy at --apply` refuses when a transient `heavy-T<n>` exists (the /run copy outranks ~/.config): `systemctl --user stop heavy-T<n>.timer` first (no `pc` verb stops a user timer).
 - `Persistent=true` with a one-shot date: a run missed while off or asleep fires once on boot/wake; the ExecStopPost cancel then removes the units, so it never repeats. `daemon-reload` from ExecStopPost works (live smoke 2026-10-20).
 - The scope's stdout is logged under the scope unit, not `heavy-T<n>.service`: identifier `heavy`: `journalctl --user -t heavy -g <text>` (2026-10-20: `smoke-ran` under `run-p….scope`); rc and times in `log/heavy.jsonl`.
+- A nightly perf gate shares fleet-heavy.slice (idle weight) with `heavy run` renders: on 2026-11-28 four render cores (load1 4.96, gate cap 0.5 x 16 = 8) made every cpp pass ~1.85x slower (gpu_ms_p50 0.87 -> 1.61) and red; hence `heavy idle` before and after measuring (T2061).
 - New CLI: `~/agents/install.sh --links` (done 2026-10-20) or live sessions get "command not found".
 
 ## Links

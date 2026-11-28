@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tier-nightly on a throwaway Mooblox-shaped repo, stub npm and mci, temp state and logs: rows, red exit, the protected project never run, one pass per mci log.
+# tier-nightly on a throwaway Mooblox-shaped repo, stub npm and mci, temp state and logs: rows, red exit, the protected project never run, one pass per mci log; T2061: perf gate skipped (not red) when a heavy run is active or overlapped a red gate (fixture cgroup and ledger).
 set -uo pipefail
 BIN="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 . "$HOME/agents/bin/tests/lib/assert.sh"
@@ -7,15 +7,16 @@ T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 export GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 mkdir -p "$T/repo/client" "$T/bin" "$T/state/moodle-harness/logs/local_a" "$T/state/moodle-harness/logs/local_v" "$T/plugins/a" "$T/envs/acme/local/v"
 echo '{}' >"$T/repo/client/package.json"; git -C "$T/repo" init -q && git -C "$T/repo" add -A && git -C "$T/repo" commit -qm base
-printf '#!/bin/sh\necho "npm $* in $PWD" >> "%s/calls"\ncase "$1 $2" in "run test:perf") exit "${RED_PERF:-0}";; esac\n' "$T" >"$T/bin/npm"
+printf '#!/bin/sh\necho "npm $* in $PWD" >> "%s/calls"\ncase "$1 $2" in "run test:perf") [ "${RED_PERF:-0}" = 0 ] || echo "FAIL demo low: fps 41 >= 58"; seq 20
+  [ -n "${HEAVY_DURING:-}" ] && echo "{\\"ts\\":\\"$(date -Is)\\",\\"rc\\":0}" >>"$HEAVY_LOG"; exit "${RED_PERF:-0}";; esac\n' "$T" >"$T/bin/npm"
 printf '#!/bin/sh\necho "mci $*" >> "%s/calls"\nexit "${RED_MCI:-0}"\n' "$T" >"$T/mci"
 chmod +x "$T/bin/npm" "$T/mci"
 L="$T/state/moodle-harness/logs"
 echo "$T/plugins/a" >"$L/local_a/mci-1.log.plugin"; echo "$T/envs/acme/local/v" >"$L/local_v/mci-1.log.plugin"
 echo "$T/gone" >"$L/local_a/mci-2.log.plugin"
-echo '0.10 0.10 0.10 1/100 1' >"$T/loadavg"
+echo '0.10 0.10 0.10 1/100 1' >"$T/loadavg"; mkdir -p "$T/cg"
 run() { : >"$T/calls"; env PATH="$T/bin:$PATH" HOME="$T/home" XDG_STATE_HOME="$T/state" CI_UNITS= CI_LOADAVG="$T/loadavg" CI_QUIET_EVERY=1 \
-  TIER_MOOBLOX="$T/repo" TIER_MCI="$T/mci" TIER_STATE="$T/st" TIER_LOGDIR="$T/log" TIER_PERF_LOCK="$T/perf.lock" TIER_NEVER="$T/envs/acme" \
+  HEAVY_CGROUP="$T/cg" HEAVY_LOG="$T/heavy.jsonl" HEAVY_EVERY=0.1 TIER_HEAVY_WAIT_S=1 TIER_MOOBLOX="$T/repo" TIER_MCI="$T/mci" TIER_STATE="$T/st" TIER_LOGDIR="$T/log" TIER_PERF_LOCK="$T/perf.lock" TIER_NEVER="$T/envs/acme" \
   "$@" "$BIN/tier-nightly" >"$T/out" 2>&1; echo $?; }
 
 [ "${T#/tmp/}" != "$T" ] || [ "${T#"${TMPDIR:-/tmp}"}" != "$T" ] && ok 'sandbox: temp repo, state and logs' || { nok sandbox "$T"; exit 1; }
@@ -29,6 +30,13 @@ is 'second pass: no mci run since the last pass' "$(run env; grep -c '^mci' "$T/
 touch "$L/local_a/mci-1.log.plugin"
 is 'red perf gate: rc 1 and FAIL' "$(run env RED_PERF=1; tail -1 "$T/out")" $'1\ntier-nightly: FAIL 3/4 rows'
 is 'a red row names the perf gate' "$(grep -c '^mooblox .* perf gate *1 ' "$T/out")" 1
+is 'T2061: a red row keeps its FAIL line past the tail' "$(grep -c '^FAIL demo low: fps 41 >= 58' "$T/out")" 1
+mkdir "$T/cg/run-p1-i1.scope"
+is 'T2061: heavy run active: rc 0, gate not run' "$(run env RED_PERF=1; grep -c '^npm run test:perf' "$T/calls")" $'0\n0'
+is 'T2061: heavy run active: perf gate row skip' "$(grep -c '^mooblox .* perf gate *skip ' "$T/out") $(grep -c '^tier-nightly: perf gate not judged, heavy runs: 1 active$' "$T/out")" '1 1'
+rmdir "$T/cg/run-p1-i1.scope"
+is 'T2061: red gate while a heavy run ended mid-gate: rc 0, row skip' "$(run env RED_PERF=1 HEAVY_DURING=1; grep -c '^mooblox .* perf gate *skip ' "$T/out")" $'0\n1'
+is 'T2061: green gate while a heavy run ended mid-gate stays 0' "$(run env HEAVY_DURING=1; grep -c '^mooblox .* perf gate *0 ' "$T/out")" $'0\n1'
 touch "$L/local_a/mci-1.log.plugin"
 is 'red mci: rc 1' "$(run env RED_MCI=1)" 1
 "$BIN/tier-nightly" --bogus >/dev/null 2>&1; is 'bad argument: rc 2' $? 2

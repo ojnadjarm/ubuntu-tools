@@ -14,7 +14,8 @@ case "${1:-}" in
   -h|--help) cat <<EOF
 usage: tier-nightly    one pass, after ci-window --quiet (load < 4, no fleet CI unit active):
   1. Mooblox HEAD ($REPO, a git archive in a temp dir, npm ci): npm test, then the perf gate under
-     flock $LOCK timeout 1500 (npm run test:perf; T1407 measured 1000 s with one core busy)
+     flock $LOCK timeout 1500 (npm run test:perf; T1407 measured 1000 s with one core busy), only with no
+     heavy run active (heavy idle, waits up to 1800 s); busy, or a red gate while a heavy run overlapped: row skip (T2061)
   2. mci full on every Moodle plugin with an mci log (<log>.plugin) newer than the last pass (first pass: 24 h);
      never under: $NEVER
 The fleet suite is fleet-ci-daily's (02:10). Output: $OUTDIR/<date>.txt; exit 1 when any row is red, so the
@@ -30,7 +31,7 @@ exec > >(tee -a "$OUTDIR/$(date +%F).txt") 2>&1
 echo "tier-nightly $(date '+%F %T')"
 "$BIN/ci-window" --quiet
 rows=() red=0
-row() { rows+=("$(printf '%-44s %-4s %5s s' "$1" "$2" "$3")"); [ "$2" = 0 ] || red=$((red + 1)); }
+row() { rows+=("$(printf '%-44s %-4s %5s s' "$1" "$2" "$3")"); [ "$2" = 0 ] || [ "$2" = skip ] || red=$((red + 1)); }
 timed() { local t0=$SECONDS; "${@:2}"; local rc=$?; row "$1" "$rc" $((SECONDS - t0)); return "$rc"; }
 
 if git -C "$REPO" rev-parse --verify -q HEAD >/dev/null 2>&1; then
@@ -39,7 +40,16 @@ if git -C "$REPO" rev-parse --verify -q HEAD >/dev/null 2>&1; then
   git -C "$REPO" archive HEAD | tar -x -C "$tmp"
   if timed "mooblox $head npm ci" bash -c "cd '$tmp/client' && nice -n 19 npm ci --prefer-offline --no-audit --no-fund >/dev/null"; then
     timed "mooblox $head npm test" bash -c "set -o pipefail; cd '$tmp/client' && nice -n 19 npm test 2>&1 | tail -5"
-    timed "mooblox $head perf gate" flock "$LOCK" timeout 1500 bash -c "set -o pipefail; cd '$tmp/client' && npm run test:perf 2>&1 | tail -15"
+    t0=$SECONDS
+    if ! hb=$("$BIN/heavy" idle --wait "${TIER_HEAVY_WAIT_S:-1800}"); then rc=skip
+    else
+      s0=$(date +%s)
+      flock "$LOCK" timeout 1500 bash -c "set -o pipefail; cd '$tmp/client' && npm run test:perf 2>&1 | awk '{l[NR] = \$0} END {for (i = 1; i <= NR; i++) if (i > NR - 15 || l[i] ~ /^FAIL /) print l[i]}'"
+      rc=$?
+      [ "$rc" != 0 ] && ! hb=$("$BIN/heavy" idle --since "$s0") && rc=skip
+    fi
+    [ "$rc" = skip ] && echo "tier-nightly: perf gate not judged, heavy runs: ${hb#heavy: busy, }"
+    row "mooblox $head perf gate" "$rc" $((SECONDS - t0))
   fi
   rm -rf "$tmp"
 else
