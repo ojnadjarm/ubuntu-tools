@@ -22,6 +22,7 @@ FRAME_EXR = re.compile(r"^f_(\d{4})\.lit\.exr$")
 ENGINE = os.path.dirname(os.path.abspath(__file__))
 LOOKS = os.path.join(ENGINE, "..", "..", "looks")
 NOT_REF = ("cli.py", "paint.py", "medium", "metrics")  # engine parts the reference pass does not run
+NOT_PAINT = ("cli.py", "metrics")  # engine parts a painted frame does not depend on
 MB_PER_WORKER = 3000  # a paint worker holds 2 to 4.5 GB (T2019 lead's note): 4 workers need 12 GB available
 FLICK_KEYS = ("mean", "worst_1s", "floor", "excess", "excess_1s", "broad", "pop", "pop_still", "tile")
 
@@ -121,11 +122,12 @@ def shot_files(shot):
 
 
 def engine_files(root=ENGINE, ref_only=False):
-    """The engine's code files (for the reference: only the parts Blender runs)."""
-    out = []
+    """The engine's code files a stage's output depends on (the reference: only the parts Blender runs; the paint:
+    all but the command line and the metrics)."""
+    skip, out = NOT_REF if ref_only else NOT_PAINT, []
     for d, dirs, names in os.walk(root):
-        dirs[:] = sorted(n for n in dirs if n != "__pycache__" and not (ref_only and n in NOT_REF))
-        out += [os.path.join(d, n) for n in sorted(names) if n.endswith((".py", ".c")) and not (ref_only and n in NOT_REF)]
+        dirs[:] = sorted(n for n in dirs if n != "__pycache__" and n not in skip)
+        out += [os.path.join(d, n) for n in sorted(names) if n.endswith((".py", ".c")) and n not in skip]
     return out
 
 
@@ -185,18 +187,6 @@ def frame_size(cfg, draft):
     return (W // 2, H // 2) if draft else (W, H)
 
 
-def scaled(look, W):
-    """The look's pixel sizes (given for 1920 wide) for a picture W wide."""
-    k, lk = W / 1920.0, dict(look)
-    for key in ("px_per_stroke", "max_px", "edge_spill_px", "overhang_px"):
-        if key in lk:
-            lk[key] = lk[key] * k
-    for key, subs in (("mark", ("width", "reach")), ("grade", ("glow_sigma", "local_sigma")), ("boil", ("amount",))):
-        if key in lk:
-            lk[key] = dict(lk[key], **{s: lk[key][s] * k for s in subs if s in lk[key]})
-    return lk
-
-
 def pool_size(asked, avail_mb=None):
     """Workers of a pool: at most asked and 4, one per MB_PER_WORKER available (fewer under 12 GB), at least 1."""
     if avail_mb is None:
@@ -216,30 +206,18 @@ def pool(n):
     return multiprocessing.get_context("spawn").Pool(n, initializer=_worker_init)
 
 
-def paint_frame(scene, ref, look, size, fps):
-    """One painted frame, (H, W, 3) uint8 RGB: a pure function of the scene, its reference frame, the look and the size."""
-    from .medium.oil import OilMedium
-    from .paint import boil, solve
-    from .scene import Camera
-    if look.get("medium", "oil") != "oil":
-        sys.exit("film: no medium %r" % look["medium"])
-    lk, t, c = scaled(look, size[0]), ref.meta["t"], ref.camera
-    cam = Camera(c.pos, c.R, c.lens_mm, c.sensor_mm, tuple(size))
-    st = boil(solve(ref, scene.seeds(t, cam, lk["px_per_stroke"]), lk, size), lk, int(round(t * fps)))
-    return OilMedium().composite(st, ref, lk, size)
-
-
 _SCENE = {}
 
 
 def _paint_job(job):
-    shot, look, size, fps, ref_dir, out, f, key = job
+    shot, look, size, ref_dir, out, f, key = job
     from . import refio
+    from .paint import paint_frame
     if "s" not in _SCENE:
         sys.path.insert(0, os.path.abspath(shot))
         _SCENE["s"] = importlib.import_module(shot_cfg(shot).get("scene", "shot")).scene()
     t0 = time.process_time()
-    img = paint_frame(_SCENE["s"], refio.load(os.path.join(ref_dir, "f_%04d" % f)), look, size, fps)
+    img = paint_frame(_SCENE["s"], refio.load(os.path.join(ref_dir, "f_%04d" % f)), look, size)
     p = os.path.join(out, "f_%04d" % f)
     cv2.imwrite(p + ".part.png", img[..., ::-1])
     os.replace(p + ".part.png", p + ".png")
@@ -296,14 +274,14 @@ def paint(a):
     lp = look_path(a.look)
     with open(lp) as fh:
         look = json.load(fh)
-    size, fps = frame_size(cfg, a.draft), cfg.get("fps", 24)
+    size = frame_size(cfg, a.draft)
     keys = {f: paint_key(a.shot, lp, f, size, ref_dir) for f in frames_of(a.frames)}
     todo = stale(out, keys)
     os.makedirs(out, exist_ok=True)
     n = pool_size(min(a.jobs, len(todo))) if todo else 0
     print("PAINT %d of %d frames at %dx%d, look %s, %d workers -> %s" % (len(todo), len(keys), size[0], size[1], lp, n, out),
           flush=True)
-    jobs = [(a.shot, look, size, fps, ref_dir, out, f, keys[f]) for f in todo]
+    jobs = [(a.shot, look, size, ref_dir, out, f, keys[f]) for f in todo]
     if n > 1:
         with pool(n) as p:
             cpu = list(p.imap_unordered(_paint_job, jobs, chunksize=1))

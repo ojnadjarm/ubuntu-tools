@@ -12,6 +12,6 @@
  "brush": {"seed": 7, "hs": 0.7, "level": 0.8, "thick_px": 10.0},
  "canvas": {"seed": 3, "period": 4.6, "ground": [0.13, 0.14, 0.17], "light": [-0.55, -0.62, 0.56], "relief": 0.5,
             "gloss": 0.06, "shine": 28.0, "exposure": 1.0, "vignette": 0.30},
- "boil": {"amount": 0.5, "hold_frames": 2},
+ "boil": {"amount": 0.5, "period": 3.0},
  "encode": {"preset": "av1-10", "crf": 16, "grain": 0}
 }

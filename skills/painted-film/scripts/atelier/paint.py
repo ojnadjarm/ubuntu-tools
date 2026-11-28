@@ -216,16 +216,45 @@ def solve(ref, seeds, look, size) -> Strokes:
                    nw.astype(np.float32))
 
 
-def boil(st, look, frame) -> Strokes:
-    """The look's light boil: every hold_frames frames each fill stroke is re-touched, moved by up to `amount` px and
-    turned so its tips move as much, from a hash of (id, frame // hold_frames); marks hold. Pure: no state."""
+def boil(st, look, t) -> Strokes:
+    """The look's light boil: each fill stroke drifts by up to `amount` px and turns so its tips move as much, along
+    two slow sines a channel (frequencies 0.5 to 1 over `period` s, phases from its id), a smooth function of t (s):
+    no stroke is re-touched or swapped on a frame (rule 5); marks hold. Pure: no state."""
     b = look.get("boil") or {}
     a = float(b.get("amount", 0.0))
     if a <= 0.0 or not len(st.order):
         return st
-    k = int(frame) // int(b.get("hold_frames", 2))
     fill = np.where(st.layer < MARK_LAYER, a, 0.0)
-    h = lambda salt: (2.0 * unit(mix(st.order, k, salt)) - 1.0) * fill  # noqa: E731
+
+    def h(salt):
+        u = [unit(mix(st.order, salt, k)) for k in range(4)]
+        w = 2.0 * np.pi * (0.5 + 0.5 * np.array(u[:2])) / float(b.get("period", 3.0))
+        return 0.5 * (np.sin(w[0] * t + 2.0 * np.pi * u[2]) + np.sin(w[1] * t + 2.0 * np.pi * u[3])) * fill
+
     turn = h(0xB3) / np.maximum(0.5 * st.length, 1.0)
     return replace(st, x=(st.x + h(0xB1)).astype(np.float32), y=(st.y + h(0xB2)).astype(np.float32),
                    ang=np.mod(st.ang + turn, np.pi).astype(np.float32))
+
+
+def scaled(look, W):
+    """The look's pixel sizes (given for 1920 wide) for a picture W wide."""
+    k, lk = W / 1920.0, dict(look)
+    for key in ("px_per_stroke", "max_px", "edge_spill_px", "overhang_px"):
+        if key in lk:
+            lk[key] = lk[key] * k
+    for key, subs in (("mark", ("width", "reach")), ("grade", ("glow_sigma", "local_sigma")), ("boil", ("amount",))):
+        if key in lk:
+            lk[key] = dict(lk[key], **{s: lk[key][s] * k for s in subs if s in lk[key]})
+    return lk
+
+
+def paint_frame(scene, ref, look, size):
+    """One painted frame, (H, W, 3) uint8 RGB: a pure function of the scene, its reference frame, the look and the size."""
+    from .medium.oil import OilMedium
+    from .scene import Camera
+    if look.get("medium", "oil") != "oil":
+        raise SystemExit("film: no medium %r" % look["medium"])
+    lk, t, c = scaled(look, size[0]), ref.meta["t"], ref.camera
+    cam = Camera(c.pos, c.R, c.lens_mm, c.sensor_mm, tuple(size))
+    st = boil(solve(ref, scene.seeds(t, cam, lk["px_per_stroke"]), lk, size), lk, t)
+    return OilMedium().composite(st, ref, lk, size)

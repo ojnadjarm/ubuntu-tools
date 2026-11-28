@@ -13,7 +13,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "scripts"))
 sys.path.insert(0, HERE)
 
-from atelier import cli  # noqa: E402
+from atelier import cli, paint  # noqa: E402
 from test_anchor import bank, cam_at  # noqa: E402
 from test_paint import flat_ref  # noqa: E402
 
@@ -57,7 +57,8 @@ def _probe(_):
 
 class Cache(unittest.TestCase):
     def test_cache_keys(self):
-        """An unchanged frame is skipped; a changed shot, look, engine or reference file repaints it."""
+        """An unchanged frame is skipped; a changed shot, look, engine or reference file repaints it; the command
+        line and the metrics are not the paint: an edit to them repaints nothing."""
         with tempfile.TemporaryDirectory() as d:
             shot, eng, out, ref = (os.path.join(d, n) for n in ("shot", "engine", "out", "ref"))
             for p in (shot, eng, out, ref):
@@ -67,6 +68,9 @@ class Cache(unittest.TestCase):
             look = os.path.join(d, "look.json")
             write(look, '{"name": "x"}')
             write(os.path.join(eng, "paint.py"), "A = 1\n")
+            write(os.path.join(eng, "cli.py"), "B = 1\n")
+            os.makedirs(os.path.join(eng, "metrics"))
+            write(os.path.join(eng, "metrics", "flick.py"), "C = 1\n")
             frames = [3, 4, 5]
             for f in frames:
                 write(os.path.join(ref, "f_%04d.key" % f), "r%d" % f)
@@ -87,6 +91,9 @@ class Cache(unittest.TestCase):
                 write(path, text)
                 self.assertEqual(make(), frames, path)
                 self.assertEqual(make(), [])
+            for path, text in ((os.path.join(eng, "cli.py"), "B = 2\n"), (os.path.join(eng, "metrics", "flick.py"), "C = 2\n")):
+                write(path, text)
+                self.assertEqual(make(), [], path)
             self.assertNotEqual(cli.paint_key(shot, look, 3, (960, 540), ref, eng), keys()[3])
             write(os.path.join(ref, "f_0004.key"), "new reference")
             self.assertEqual(make(), [4])
@@ -98,8 +105,8 @@ class Order(unittest.TestCase):
     def test_any_order(self):
         """Frames made in reverse equal frames made in order, byte for byte, with the boil on."""
         frames, scene = [0, 1, 2, 3, 4], Plane()
-        fwd = {f: cli.paint_frame(scene, ref_at(f), QUICK, SIZE, 24) for f in frames}
-        back = {f: cli.paint_frame(scene, ref_at(f), QUICK, SIZE, 24) for f in reversed(frames)}
+        fwd = {f: paint.paint_frame(scene, ref_at(f), QUICK, SIZE) for f in frames}
+        back = {f: paint.paint_frame(scene, ref_at(f), QUICK, SIZE) for f in reversed(frames)}
         self.assertGreater(len(np.unique(fwd[0].reshape(-1, 3), axis=0)), 50)
         for f in frames:
             np.testing.assert_array_equal(fwd[f], back[f], "frame %d" % f)
@@ -112,11 +119,11 @@ class Draft(unittest.TestCase):
         self.assertEqual(cli.frame_size(cfg, False), (1920, 1080))
         self.assertEqual(cli.frame_size(cfg, True), (960, 540))
         self.assertTrue(cli.parser().parse_args(["paint", "SHOT", "--draft"]).draft)
-        lk = cli.scaled(LOOK, 960)
+        lk = paint.scaled(LOOK, 960)
         self.assertEqual(lk["px_per_stroke"], LOOK["px_per_stroke"] / 2)
         self.assertEqual(lk["mark"]["width"], LOOK["mark"]["width"] / 2)
         self.assertEqual(lk["boil"]["amount"], LOOK["boil"]["amount"] / 2)
-        img = cli.paint_frame(Plane(), ref_at(0), dict(QUICK, px_per_stroke=80.0), (960, 540), 24)
+        img = paint.paint_frame(Plane(), ref_at(0), dict(QUICK, px_per_stroke=80.0), (960, 540))
         self.assertEqual(img.shape, (540, 960, 3))
 
 
@@ -145,17 +152,46 @@ class Workers(unittest.TestCase):
 
 class Boil(unittest.TestCase):
     def test_boil_alive_and_pure(self):
-        """The boil is on in the look; with a still camera it changes the picture every hold_frames frames and
-        not between; off, the picture holds; it moves fill strokes only."""
+        """The boil is on in the look; with a still camera it changes the picture at every frame (a drift, never a
+        hold then a jump); off, the picture holds; it moves fill strokes only."""
         b = LOOK["boil"]
         self.assertGreater(b["amount"], 0)
-        hold, scene = int(b["hold_frames"]), Plane()
-        frame = lambda f, lk: cli.paint_frame(scene, ref_at(f, x=0.3), lk, SIZE, 24)  # noqa: E731
-        a0, a1, a2 = frame(0, QUICK), frame(hold - 1, QUICK), frame(hold, QUICK)
-        np.testing.assert_array_equal(a0, a1)
-        self.assertFalse(np.array_equal(a0, a2))
+        scene = Plane()
+        frame = lambda f, lk: paint.paint_frame(scene, ref_at(f, x=0.3), lk, SIZE)  # noqa: E731
+        a0, a1, a2 = frame(0, QUICK), frame(1, QUICK), frame(2, QUICK)
+        self.assertFalse(np.array_equal(a0, a1))
+        self.assertFalse(np.array_equal(a1, a2))
         off = dict(QUICK, boil=dict(b, amount=0.0))
-        np.testing.assert_array_equal(frame(0, off), frame(hold, off))
+        np.testing.assert_array_equal(frame(0, off), frame(2, off))
+
+    def test_boil_smooth_in_time(self):
+        """Rule 5: each fill stroke drifts as a smooth function of t, within the amount: no step at any t, a
+        frame-to-frame move far under the amount, a second difference (what the flicker measure sees) near 0."""
+        a = 0.5
+        look = {"boil": dict(LOOK["boil"], amount=a)}
+        n = 400
+        st = paint.Strokes(*(np.zeros(n, np.float32),) * 5, np.zeros(n, np.uint8), np.zeros((n, 3), np.float32),
+                           np.zeros((n, 3), np.float32), np.ones(n, np.float32), np.ones(n, np.float32),
+                           np.where(np.arange(n) < n - 50, 0, paint.MARK_LAYER).astype(np.uint8),
+                           np.arange(n, dtype=np.uint64) * np.uint64(7919), np.zeros((n, 2), np.float32))
+        st = dataclasses.replace(st, length=np.full(n, 20.0, np.float32))
+        ts = np.arange(0, 4 * 24 + 1) / 24.0
+        x = np.array([paint.boil(st, look, t).x for t in ts])
+        y = np.array([paint.boil(st, look, t).y for t in ts])
+        ang = np.array([paint.boil(st, look, t).ang for t in ts])
+        fill = np.arange(n) < n - 50
+        np.testing.assert_array_equal(x[:, ~fill], 0)
+        self.assertLessEqual(np.abs(x).max(), a + 1e-6)
+        self.assertGreater(np.abs(x[:, fill]).max(), 0.5 * a)  # alive: the drift spans its amount
+        step = np.hypot(np.diff(x, axis=0), np.diff(y, axis=0))[:, fill]
+        self.assertGreater(step.min(), 0.0)  # it moves at every frame
+        self.assertLess(step.max(), 0.25 * a)  # never a jump
+        d2 = np.abs(x[2:] - 2 * x[1:-1] + x[:-2])[:, fill]
+        self.assertLess(d2.max(), 0.02 * a)
+        tip = 10.0 * np.abs((np.diff(ang, axis=0) + np.pi / 2) % np.pi - np.pi / 2)[:, fill]
+        self.assertLess(tip.max(), 0.25 * a)
+        eps = np.array([paint.boil(st, look, t).x for t in (1.0, 1.0 + 1e-4)])
+        self.assertLess(np.abs(eps[1] - eps[0]).max(), 1e-3)  # continuous at any t, not only on frames
 
 
 if __name__ == "__main__":
