@@ -1,6 +1,8 @@
 /* Stroke compositor of the oil medium, from oil-paint's oilc.c: inverse-warps each bristle sprite (bilinear, pyramid
    level by scale) and lays it on the frame (colour over, paint height partly levelled then added). A5: each sprite pixel
-   is depth-tested: the stroke's plane depth there against dmax, the reference depth dilated by edge_spill_px. */
+   is depth-tested: the stroke's plane depth there against dmax, the reference depth dilated by edge_spill_px.
+   T2038: a stroke with a normal sn is cut to its own face (the reference normal nref agrees with sn, ramp f0..f1) and
+   to dmin (the reference depth eroded: how far it may hang over its outline); hard steepens the sprite's alpha. */
 #include <math.h>
 
 #define MAXLEV 8
@@ -8,7 +10,8 @@
 void paint_strokes(float *img, float *hgt, int W, int H, const float *atlas, const int *off, const int *mw_, const int *mh_,
                    const int *nlev, const float *body_w, float L, int n, const float *x, const float *y, const float *ang,
                    const float *len, const float *wid, const int *var, const float *c1, const float *c2, const float *op,
-                   const float *hs, float level, const float *dmax, const float *z, const float *zg)
+                   const float *hs, float level, const float *dmax, const float *z, const float *zg, const float *nref,
+                   const float *sn, float f0, float f1, const float *dmin, float hard)
 {
     for (int i = 0; i < n; i++) {
         float o = op[i];
@@ -38,6 +41,8 @@ void paint_strokes(float *img, float *hgt, int W, int H, const float *atlas, con
         float r1 = c1[3 * i], g1 = c1[3 * i + 1], b1 = c1[3 * i + 2];
         float dr = c2[3 * i] - r1, dg = c2[3 * i + 1] - g1, db = c2[3 * i + 2] - b1;
         float hsc = o * hs[i] * wid[i] * 0.5f;
+        float nx = sn[3 * i], ny = sn[3 * i + 1], nz = sn[3 * i + 2];
+        int cut = nx * nx + ny * ny + nz * nz > 0.25f;
         float ulo = (0.0f - cmx) / isx, uhi = (mw - 1.001f - cmx) / isx;
         float vlo = (0.0f - cmy) / isy, vhi = (mh - 1.001f - cmy) / isy;
         for (int py = y0; py <= y1; py++) {
@@ -65,11 +70,26 @@ void paint_strokes(float *img, float *hgt, int W, int H, const float *atlas, con
                 float w00 = (1 - fu) * (1 - fv), w01 = fu * (1 - fv), w10 = (1 - fu) * fv, w11 = fu * fv;
                 float a = p00[0] * w00 + p01[0] * w01 + p10[0] * w10 + p11[0] * w11;
                 if (a < 0.002f) continue;
+                a = fminf(a * hard, 1.0f);
                 /* the plane's depth here, kept within [0.75, 2] times the stroke's own (grazing planes) */
                 float iz = fminf(fmaxf(iz0 + gx * dx + gy * dy, izlo), izhi), zt = 1.0f / iz;
                 float vis = (dmax[(long)py * W + px] - zt) / (0.005f + 0.005f * zt) + 2.0f;
                 if (vis <= 0.0f) continue;
                 if (vis < 1.0f) a *= vis;
+                if (cut) {
+                    if (dmin) {
+                        vis = (zt - dmin[(long)py * W + px]) / (0.005f + 0.005f * zt) + 2.0f;
+                        if (vis <= 0.0f) continue;
+                        if (vis < 1.0f) a *= vis;
+                    }
+                    const float *nr = nref + ((long)py * W + px) * 3;
+                    float l2 = nr[0] * nr[0] + nr[1] * nr[1] + nr[2] * nr[2];
+                    if (f1 > f0 && l2 > 0.04f) {
+                        vis = ((nr[0] * nx + nr[1] * ny + nr[2] * nz) / sqrtf(l2) - f0) / (f1 - f0);
+                        if (vis <= 0.0f) continue;
+                        if (vis < 1.0f) a *= vis;
+                    }
+                }
                 float st = p00[1] * w00 + p01[1] * w01 + p10[1] * w10 + p11[1] * w11;
                 float he = p00[2] * w00 + p01[2] * w01 + p10[2] * w10 + p11[2] * w11;
                 a *= o;

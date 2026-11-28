@@ -182,5 +182,21 @@ class Marks(unittest.TestCase):
         np.testing.assert_allclose(st.opacity[1:], 1.0, atol=1e-3)
 
 
+class Form(unittest.TestCase):
+    def test_form_light(self):
+        """The look's form light makes a face turned to it lighter than one turned away (no key: untouched); a
+        stroke carries its seed's normal turned to the viewer."""
+        cam = cam_at(0.0, 0.0)
+        ref = flat_ref(cam, [(10.0, -20, 20, -20, 20, 1, (0.3, 0.3, 0.3))])
+        s = hand_seeds([[0.0, 10.0, 0.0]], [1.0, 0.0, 0.0], [1], N=(0.0, 1.0, 0.0))
+        plain = solve(ref, s, LOOK, SIZE)
+        to = solve(ref, s, dict(LOOK, form={"light": [0.0, -1.0, 0.0], "gain": 0.5}), SIZE)
+        away = solve(ref, s, dict(LOOK, form={"light": [0.0, 1.0, 0.0], "gain": 0.5}), SIZE)
+        np.testing.assert_allclose(plain.c1[0], 0.3, atol=1e-3)
+        self.assertGreater(to.c1[0].min(), 1.3 * plain.c1[0].max())
+        self.assertLess(away.c1[0].max(), 0.7 * plain.c1[0].min())
+        np.testing.assert_allclose(plain.n[0], [0.0, -1.0, 0.0], atol=1e-6)
+
+
 if __name__ == "__main__":
     unittest.main()

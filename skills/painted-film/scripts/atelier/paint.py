@@ -10,6 +10,7 @@ from .anchor import NEAR, mix, unit
 # block: the octaves under the finest are this much wider (a block-in that leaves no bare ground); needs px_per_stroke
 DEFAULTS = {"max_px": 64.0, "size": 1.4, "aspect": 2.5, "broken": 0.0, "colour_levels": 2.0, "block": 1.0,
             "px_per_stroke": 0.0, "hug": 0.0}  # hug: how hard a stroke shrinks and moves to stay on its own thing
+# "form": {"light": world vector, "gain": g}: a fill's colour times 1 + g * (its normal . light), the painter's own light
 # marks (picture px): width, length over spacing, reach of the colour taps, value gain of lit edges and joints,
 # true width (px) over which a mark fades in, how hard the taps lean to the light or dark side
 # "weight": how much a mark's opacity and width vary by its id (a drawn line, not a ruled one)
@@ -55,6 +56,11 @@ class Strokes:
     layer: np.ndarray  # (k,) u8, the octave
     order: np.ndarray  # (k,) u64, the seed id
     zg: np.ndarray  # (k, 2) f32: d(1/z)/d(x, y) per px, the stroke's plane on the picture (A5, the depth test)
+    n: np.ndarray = None  # (k, 3) f32 world normal turned to the viewer, 0 for a mark (the medium's face cut)
+
+    def __post_init__(self):
+        if self.n is None:
+            self.n = np.zeros((len(self.order), 3), np.float32)
 
 
 def _bilinear(img, u, v):
@@ -172,6 +178,11 @@ def solve(ref, seeds, look, size) -> Strokes:
     pyr = _pyramid(np.clip(ref.lit, 0.0, 1.0))  # display range: an emitter (lit 60) must not flood its neighbours
     col = _sample(pyr, tu[k], tv[k], (np.log2(np.maximum(ts[k], 1.0)) + lk["colour_levels"])[:, None] * np.ones((len(k), 9)))
     c1 = ((same[k, :, None] * col).sum(1) + EPS_W * col.mean(1)) / (same[k].sum(1) + EPS_W)[:, None]
+    nw = seeds.N[a[k]] * np.where(num[k] > 0, -1.0, 1.0)[:, None]
+    if "form" in look:
+        light = np.asarray(look["form"]["light"], float)
+        c1 *= np.maximum(1.0 + look["form"]["gain"] * (nw @ (light / np.linalg.norm(light))), 0.0)[:, None]
+    nw[mark[k]] = 0.0
     m = np.nonzero(mark[k])[0]
     if len(m):  # a mark reads both sides of its edge and leans to the light one (lit edge) or the dark one (joint)
         km, lit = k[m], kind[k[m]] == 1
@@ -189,4 +200,5 @@ def solve(ref, seeds, look, size) -> Strokes:
     zg = np.where(np.isfinite(zg) & (np.abs(num) > 1e-9)[:, None], zg, 0.0)
     return Strokes(f32((xr + 0.5) / sr - 0.5), f32((yr + 0.5) / sr - 0.5), f32(ang), f32(length), f32(width),
                    ((sid[k] >> np.uint64(8)) & np.uint64(255)).astype(np.uint8), c1.astype(np.float32), c2.astype(np.float32), f32(opacity),
-                   f32(z), octave[k].astype(np.uint8), sid[k].astype(np.uint64), f32(zg))
+                   f32(z), octave[k].astype(np.uint8), sid[k].astype(np.uint64), f32(zg),
+                   nw.astype(np.float32))

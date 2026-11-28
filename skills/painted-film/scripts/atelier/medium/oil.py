@@ -32,7 +32,8 @@ def _load_c():
     P = np.ctypeslib.ndpointer
     fp, ip = P(np.float32, flags="C_CONTIGUOUS"), P(np.int32, flags="C_CONTIGUOUS")
     i, fl = ctypes.c_int, ctypes.c_float
-    f.argtypes = [fp, fp, i, i, fp, ip, ip, ip, ip, fp, fl, i, fp, fp, fp, fp, fp, ip, fp, fp, fp, fp, fl, fp, fp, fp]
+    f.argtypes = [fp, fp, i, i, fp, ip, ip, ip, ip, fp, fl, i, fp, fp, fp, fp, fp, ip, fp, fp, fp, fp, fl, fp, fp, fp, fp, fp, fl, fl,
+                  ctypes.c_void_p, fl]
     f.restype = None
     return f
 
@@ -104,15 +105,20 @@ class OilMedium:
             per = len(bank.masters) // len(bank.ASPECTS)
             cls = int(np.abs(np.log(look["aspect"] / np.array(bank.ASPECTS))).argmin())
             var = (cls * per + (unit(mix(st.order, 0xB2)) * per).astype(np.int64)).astype(np.int32)
-            depth = cv2.resize(np.where(np.isfinite(ref.depth), ref.depth, 1e9).astype(np.float32), (W, H),
-                               interpolation=cv2.INTER_NEAREST)
+            depth = near = cv2.resize(np.where(np.isfinite(ref.depth), ref.depth, 1e9).astype(np.float32), (W, H),
+                                      interpolation=cv2.INTER_NEAREST)
             r = int(round(look["edge_spill_px"]))
             if r > 0:
                 depth = cv2.dilate(depth, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))
             f32 = lambda v: np.ascontiguousarray(v, np.float32)  # noqa: E731
+            # T2038: "face" (cosine ramp of the face cut), "overhang_px" (a stroke's reach past its outline), "hard"
+            f0, f1 = look.get("face", (0.0, 0.0))
+            over = look.get("overhang_px")
+            dmin = None if over is None else f32(cv2.erode(near, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * int(round(over)) + 1,) * 2)))
             _PAINT(frame.img, frame.hgt, W, H, bank.atlas, bank.off, bank.mw, bank.mh, bank.nlev, bank.bw, float(bank.L), k,
                    f32(st.x), f32(st.y), f32(st.ang), f32(st.length), f32(st.width), var, f32(c1), f32(c2),
                    f32(np.clip(st.opacity, 0, 1)), f32(br["hs"] * np.minimum(1.0, br.get("thick_px", np.inf) / np.maximum(st.width, 1e-6))), float(br["level"]), depth,
-                   f32(st.z), f32(st.zg))
+                   f32(st.z), f32(st.zg), f32(cv2.resize(ref.normal, (W, H), interpolation=cv2.INTER_AREA)), f32(st.n),
+                   float(f0), float(f1), None if dmin is None else dmin.ctypes.data, float(look.get("hard", 1.0)))
         return frame.finish(light=tuple(cv["light"]), relief=cv["relief"], gloss=cv["gloss"], shine=cv["shine"],
                             exposure=cv["exposure"], vignette=cv["vignette"])
