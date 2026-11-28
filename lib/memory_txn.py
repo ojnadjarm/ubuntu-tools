@@ -225,6 +225,12 @@ def apply(store, staging, car=None):
 
     new = files(staging)
     take = sorted({r for r in new if new[r] != now.get(r)} | {r for r in notes if r in now})
+    late = files(store.root)  # another writer may have changed the store while the gate ran
+    late = [r for r in take if late.get(r) != now.get(r)]
+    if late:
+        print("\n".join(f"apply · red · {r} · changed in the store while apply ran: stage again" for r in late))
+        print("apply · red · nothing moved; the notes stay in the inbox")
+        return 1
     rej_dir = os.path.join(agent_work(), "memory-keeper", "rejected")
     for r in take:
         if r in new:
