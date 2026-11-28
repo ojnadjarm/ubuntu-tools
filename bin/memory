@@ -80,6 +80,8 @@ def note(store, seat, args):
     """Write one inbox note; the source is stamped here from the seat, never by the writer."""
     if args.domain:
         unknown(store, [args.domain])
+    if args.core and args.domain:
+        die("--core or --domain, not both: --core is for his general way, --domain for one project")
     quoted = [next(g for g in m.groups() if g) for m in QUOTED.finditer(args.text)]
     if args.quote is FROM_TEXT:
         if not quoted:
@@ -87,8 +89,13 @@ def note(store, seat, args):
         args.quote = max(quoted, key=len)
     elif args.quote is None and quoted and memory_route.owner_seat(seat, store):
         print("memory: the text quotes someone; if these are his words, stamp them: add --quote", file=sys.stderr)
-    fields = [("source", memory_route.source_for(seat, args.quote is not None, store)), ("seat", seat or "-"),
-              ("domain", args.domain or "-"), ("date", time.strftime("%Y-%m-%dT%H:%M:%S%z")),
+    source = memory_route.source_for(seat, args.quote is not None, store)
+    if args.core and source != "owner":
+        die("--core needs his own words stating it as general (--quote from his seat); a lesson from one task files at its narrowest scope")
+    where = memory_route.domains_for(os.getcwd(), seat, os.environ, store)
+    fields = [("source", source), ("seat", seat or "-"), ("domain", args.domain or "-"), ("task", args.task or "-"),
+              ("where", ",".join(where) or "-"), ("scope", "core" if args.core else "narrowest"),
+              ("date", time.strftime("%Y-%m-%dT%H:%M:%S%z")),
               ("session", os.environ.get("CLAUDE_CODE_SESSION_ID") or "-"), ("text", " ".join(args.text.split()))]
     if args.quote is not None:
         fields.append(("quote", json.dumps(args.quote, ensure_ascii=False)))
@@ -298,6 +305,8 @@ def main():
     p.add_argument("domains", nargs="*")
     p = sub.add_parser("note", help="drop one lesson (at most 1,024 B) in the inbox")
     p.add_argument("--domain")
+    p.add_argument("--task", help="the ticket it was said in (T<n>)")
+    p.add_argument("--core", action="store_true", help="he stated it as his general way: needs --quote from his seat")
     p.add_argument("text")
     p.add_argument("--quote", nargs="?", const=FROM_TEXT,
                    help="the exact words it rests on; alone: the longest quotation in the text")

@@ -9,7 +9,7 @@ from functools import lru_cache
 
 BIN = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "bin")
 sys.path.insert(0, BIN)
-import memory_store  # noqa: E402
+import memory_scope, memory_store  # noqa: E402
 import protectedlib  # noqa: E402
 import redact  # noqa: E402
 from memory_transcript import _norm, owner_words  # noqa: E402
@@ -271,7 +271,7 @@ def quiz_rows(store, before):
     return memory_quiz.lint(store)
 
 
-CHECKERS = [budgets, ids, line_format, secrets, machine_values, untrusted, provenance, experience_only, concepts, quiz_rows]
+CHECKERS = [budgets, ids, line_format, secrets, machine_values, untrusted, provenance, experience_only, concepts, quiz_rows, *memory_scope.CHECKERS]
 ON_DEMAND = {"quiz": quiz, "quiz-changed": quiz_changed}
 
 
