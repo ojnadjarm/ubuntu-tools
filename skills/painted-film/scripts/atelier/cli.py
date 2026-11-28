@@ -1,4 +1,4 @@
-"""film: the painted-film command line (A1: check; A3: ref; A6: the cached stages paint, still, encode, sheet)."""
+"""film: the painted-film command line (A1: check; A3: ref; A6: the cached stages paint, encode; Q1: qa)."""
 import argparse
 import glob
 import hashlib
@@ -22,7 +22,7 @@ FRAME_EXR = re.compile(r"^f_(\d{4})\.lit\.exr$")
 ENGINE = os.path.dirname(os.path.abspath(__file__))
 LOOKS = os.path.join(ENGINE, "..", "..", "looks")
 NOT_REF = ("cli.py", "paint.py", "medium", "metrics")  # engine parts the reference pass does not run
-NOT_PAINT = ("cli.py", "metrics")  # engine parts a painted frame does not depend on
+NOT_PAINT = ("cli.py", "qa.py", "metrics")  # engine parts a painted frame does not depend on
 MB_PER_WORKER = 3000  # a paint worker holds 2 to 4.5 GB (T2019 lead's note): 4 workers need 12 GB available
 FLICK_KEYS = ("mean", "worst_1s", "floor", "excess", "excess_1s", "broad", "pop", "pop_still", "tile")
 
@@ -136,7 +136,10 @@ def digest(paths, *extra):
     h = hashlib.sha256(json.dumps(extra).encode())
     for p in paths:
         with open(p, "rb") as fh:
-            h.update(b"\0" + os.path.basename(p).encode() + b"\0" + fh.read())
+            data = fh.read()
+        if os.path.basename(p) == "shot.json":  # its qa block chooses what to look at, not what is painted
+            data = json.dumps({k: v for k, v in json.loads(data).items() if k != "qa"}, sort_keys=True).encode()
+        h.update(b"\0" + os.path.basename(p).encode() + b"\0" + data)
     return h.hexdigest()[:24]
 
 
@@ -209,15 +212,20 @@ def pool(n):
 _SCENE = {}
 
 
+def scene_of(shot):
+    """The shot's Scene, made once a process."""
+    if "s" not in _SCENE:
+        sys.path.insert(0, os.path.abspath(shot))
+        _SCENE["s"] = importlib.import_module(shot_cfg(shot).get("scene", "shot")).scene()
+    return _SCENE["s"]
+
+
 def _paint_job(job):
     shot, look, size, ref_dir, out, f, key = job
     from . import refio
     from .paint import paint_frame
-    if "s" not in _SCENE:
-        sys.path.insert(0, os.path.abspath(shot))
-        _SCENE["s"] = importlib.import_module(shot_cfg(shot).get("scene", "shot")).scene()
     t0 = time.process_time()
-    img = paint_frame(_SCENE["s"], refio.load(os.path.join(ref_dir, "f_%04d" % f)), look, size)
+    img = paint_frame(scene_of(shot), refio.load(os.path.join(ref_dir, "f_%04d" % f)), look, size)
     p = os.path.join(out, "f_%04d" % f)
     cv2.imwrite(p + ".part.png", img[..., ::-1])
     os.replace(p + ".part.png", p + ".png")
@@ -292,24 +300,6 @@ def paint(a):
     return 0
 
 
-def still(a):
-    """Painted stills of the listed frames (the paint stage), each beside the target with --pair."""
-    a.frames = a.which
-    rc = paint(a)
-    if rc or not a.pair:
-        return rc
-    target, out = cv2.imread(os.path.expanduser(a.pair)), dirs(a)[1]
-    if target is None:
-        sys.exit("film still: cannot read %s" % a.pair)
-    for f in frames_of(a.which):
-        img = cv2.imread(os.path.join(out, "f_%04d.png" % f))
-        h = img.shape[0]
-        t = cv2.resize(target, (round(target.shape[1] * h / target.shape[0]), h), interpolation=cv2.INTER_AREA)
-        cv2.imwrite(os.path.join(out, "pair_%04d.png" % f), cv2.hconcat([img, t]))
-        print("STILL %s" % os.path.join(out, "pair_%04d.png" % f))
-    return 0
-
-
 def encode(a):
     """The encode stage: the paint stage first (cached), then the frames in one file with mv-encode's encoder
     settings. The look's "encode" block is the default: preset, crf, grain (temporal luma noise before the encode)."""
@@ -335,26 +325,6 @@ def encode(a):
         print("ENCODE %s: %s crf %s grain %s, %d frames, %d bytes, %.1f s" % (a.mp4, e["preset"], e.get("crf"), e.get("grain", 0),
                                                                           len(fs), os.path.getsize(a.mp4), time.time() - t0))
     return rc
-
-
-def sheet(a):
-    """A contact sheet of the painted frames: up to 6 across the range, 3 a row, each with its number."""
-    out = dirs(a)[1]
-    have = [f for f in frames_of(a.frames) if os.path.exists(os.path.join(out, "f_%04d.png" % f))]
-    if not have:
-        sys.exit("film sheet: no painted frames in %s" % out)
-    pick = sorted({have[round(i * (len(have) - 1) / 5)] for i in range(6)})
-    tiles = []
-    for f in pick:
-        img = cv2.imread(os.path.join(out, "f_%04d.png" % f))
-        img = cv2.resize(img, (640, round(640 * img.shape[0] / img.shape[1])), interpolation=cv2.INTER_AREA)
-        cv2.putText(img, "f_%04d" % f, (12, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
-        tiles.append(img)
-    tiles += [np.zeros_like(tiles[0])] * (-len(tiles) % 3)
-    path = os.path.join(out, "sheet.png")
-    cv2.imwrite(path, cv2.vconcat([cv2.hconcat(tiles[i:i + 3]) for i in range(0, len(tiles), 3)]))
-    print("SHEET %s (%s)" % (path, ", ".join("f_%04d" % f for f in pick)))
-    return 0
 
 
 def parser():
@@ -385,15 +355,27 @@ def parser():
     r.add_argument("--samples", type=int, help="EEVEE samples (default: shot.json ref.samples, else 24)")
     r.add_argument("--seed-pair", action="store_true", help="also render with the sampling pattern moved against the picture; print the difference")
     stage("paint", "reference (cached), then paint the frames to <work>/<look name>/f_NNNN.png; cached")
-    s = stage("still", "paint single frames; with --pair, each beside the target", frames=False)
-    s.add_argument("which", metavar="FRAMES", help="frames, e.g. 84,300")
-    s.add_argument("--pair", metavar="TARGET", help="target picture to set beside each still (pair_NNNN.png)")
     e = stage("encode", "reference and paint (cached), then encode the frames to one file")
     e.add_argument("mp4", metavar="OUT.mp4")
     e.add_argument("--preset", help="mv-encode preset (default: the look's encode.preset), e.g. av1-10, hevc-10, h264-master")
     e.add_argument("--crf", type=int, help="CRF (default: the look's encode.crf, else the preset's)")
     e.add_argument("--grain", type=float, help="temporal luma noise added before the encode (ffmpeg noise strength)")
-    stage("sheet", "contact sheet of the painted frames (sheet.png beside them)")
+    q = sub.add_parser("qa", help="judge a change in seconds: golden pair, close-up, wedge, 1 s strip, plain stills, first-middle-last")
+    q.add_argument("check", choices=("pair", "crop", "wedge", "strip", "clay", "fml"), help="the check")
+    q.add_argument("shot", metavar="SHOT", help="folder with shot.json (its \"qa\" block: golden frames and loupes)")
+    q.add_argument("--look", default="oil-tight", help="look file, or a look name in the engine's looks/")
+    q.add_argument("--work", help="work folder (default: shot.json work); references in <work>[/draft]/ref")
+    q.add_argument("-j", "--jobs", type=int, default=4, help="paint workers (at most 4, fewer under 12 GB available)")
+    q.add_argument("--set", action="append", metavar="KEY=JSON", help="a look key changed for this check, e.g. mark.width=3.5")
+    q.add_argument("--golden", help="golden folder (default: ~/agent-work/motion/golden/<shot name>/<engine commit>)")
+    q.add_argument("--loupe", help="a close-up named in shot.json qa.loupes")
+    q.add_argument("--frame", type=int, help="the close-up's frame (with --window)")
+    q.add_argument("--window", metavar="X,Y,W,H", help="the close-up, picture px of the full size")
+    q.add_argument("--key", help="wedge: the look key, e.g. mark.width")
+    q.add_argument("--values", help="wedge: up to 9 JSON values, comma separated")
+    q.add_argument("--n", type=int, default=24, help="strip: frames (default 24, 1 s)")
+    q.add_argument("--frames", help="clay: frames (default: shot.json qa.golden)")
+    q.add_argument("--out", help="folder for the check's pictures (default <work>/qa/<check>)")
     return p
 
 
@@ -405,7 +387,10 @@ def main(argv=None):
         a.out = a.out or dirs(a)[0]
         return ref(a)
     if a.cmd != "check":
-        return {"paint": paint, "still": still, "encode": encode, "sheet": sheet}[a.cmd](a)
+        if a.cmd == "qa":
+            from . import qa
+            return qa.main(a)
+        return {"paint": paint, "encode": encode}[a.cmd](a)
     a.jobs = max(1, min(8, a.jobs))
     return check(a)
 

@@ -288,13 +288,18 @@ def scaled(look, W):
     return lk
 
 
-def paint_frame(scene, ref, look, size):
-    """One painted frame, (H, W, 3) uint8 RGB: a pure function of the scene, its reference frame, the look and the size."""
+def paint_frame(scene, ref, look, size, window=None):
+    """One painted frame, (H, W, 3) uint8 RGB: a pure function of the scene, its reference frame, the look and the size.
+    With window = (x0, y0, w, h) picture px: only that part, (h, w, 3), from the seeds that can touch it."""
     from .medium.oil import OilMedium
     from .scene import Camera
     if look.get("medium", "oil") != "oil":
         raise SystemExit("film: no medium %r" % look["medium"])
     lk, t, c = scaled(look, size[0]), ref.meta["t"], ref.camera
-    cam = Camera(c.pos, c.R, c.lens_mm, c.sensor_mm, tuple(size))
+    cam = Camera(c.pos, c.R, c.lens_mm, c.sensor_mm, tuple(size), tuple(window) if window else None)
     st = boil(solve(ref, scene.seeds(t, cam, lk["px_per_stroke"]), lk, size), lk, t)
-    return OilMedium().composite(st, ref, lk, size)
+    img = OilMedium().composite(st, ref, lk, size)
+    if window:
+        x, y, w, h = window
+        img = img[y:y + h, x:x + w]
+    return img

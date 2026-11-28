@@ -6,7 +6,8 @@ import zlib
 
 import numpy as np
 
-from ..anchor import CREASE_COS, MARK, NEAR, _cull, _normals, _seeds, _tangent_rule, concat, creases, level, mix, split, unit
+from ..anchor import (CREASE_COS, MARK, NEAR, _cull, _normals, _seeds, _tangent_rule, concat, creases, inside, level, mix,
+                      split, unit)
 from ..scene import Mesh, ident_of
 from . import slicer
 
@@ -225,7 +226,7 @@ class SeedBank4D:
         P4 = self.body.P
         d = (P4 - sl.o) @ sl.n
         W, H = cam.size
-        mg, fl, rho = W / 8, cam.lens_mm / cam.sensor_mm * W, np.sqrt(self.rho0)
+        fl, rho = cam.lens_mm / cam.sensor_mm * W, np.sqrt(self.rho0)
         step = self.step[self.ef[self.qe, 0]]
         a = self.ev[self.qe] + (self.qk * step)[:, None]
         dd = np.concatenate([d[a], d[a + step[:, None]]], 1)
@@ -288,7 +289,7 @@ class SeedBank4D:
             angle = np.clip((CREASE_COS + CREASE_RAMP - (N1 * N2).sum(1)) / (2 * CREASE_RAMP), 0.0, 1.0)
             op = ((np.ones(len(P)) if j == 0 else np.clip(L - j + 1, 0.0, 1.0)) * np.clip((front + 0.05) / 0.2, 0.0, 1.0)
                   * angle * fade)
-            ok = (z > NEAR) & (op > 0) & (xy[:, 0] > -mg) & (xy[:, 0] < W + mg) & (xy[:, 1] > -mg) & (xy[:, 1] < H + mg)
+            ok = (z > NEAR) & (op > 0) & inside(xy, cam)
             out.append((ids[ok], P[ok], Ne[ok], D[ok] / np.maximum(Dl[ok], 1e-12)[:, None], np.full(ok.sum(), j),
                         self.ident[f1[ok]], op[ok], px_per_stroke * 2.0 ** (L[ok] - j), np.where(convex[ok], 1, 2),
                         np.full(ok.sum(), self.mark_width), Dl[ok]))
@@ -299,8 +300,6 @@ class SeedBank4D:
         P4 = self.body.P
         d = (P4 - sl.o) @ sl.n
         pieces, top = self._visible_pieces(d, sl, cam, px_per_stroke)
-        W, H = cam.size
-        mg = W / 8
         out = []
         for jo in range(self.octaves):
             sel = pieces[top >= jo - 1]
@@ -342,7 +341,7 @@ class SeedBank4D:
             L, z = level(P, Ns, cam, px_per_stroke, self.rho0 / g)  # the cut's own density: rho0 over its stretch
             op = (np.ones(len(P)) if jo == 0 else np.clip(L - jo + 1, 0.0, 1.0)) * fade
             xy, _ = cam.project(P)
-            ok = (z > NEAR) & (op > 0) & (xy[:, 0] > -mg) & (xy[:, 0] < W + mg) & (xy[:, 1] > -mg) & (xy[:, 1] < H + mg)
+            ok = (z > NEAR) & (op > 0) & inside(xy, cam)
             out.append((ids[ok], P[ok], N[ok], T[ok], np.full(ok.sum(), jo), self.ident[f[ok]], op[ok],
                         px_per_stroke * 2.0 ** (L[ok] - jo)))
         return _seeds(out, self.material)

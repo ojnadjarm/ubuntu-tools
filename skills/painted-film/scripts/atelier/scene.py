@@ -60,6 +60,16 @@ class Camera:
     lens_mm: float
     sensor_mm: float
     size: tuple  # (W, H) px; the sensor width spans W
+    window: tuple = None  # (x0, y0, w, h) px of the picture: only seeds that can touch it are placed (film qa)
+
+    def bounds(self):
+        """Where a seed can touch the picture, (x0, x1, y0, y1) px: the picture grown by W/8, or the window grown by
+        W/12 (the look's longest stroke, max_px 160 of 1920)."""
+        W, H = self.size
+        if self.window is None:
+            return -W / 8, W + W / 8, -W / 8, H + W / 8
+        x, y, w, h = self.window
+        return x - W / 12, x + w + W / 12, y - W / 12, y + h + W / 12
 
     @classmethod
     def aim(cls, pos, aim, roll, lens_mm, size, sensor_mm=36.0, up=(0.0, 0.0, 1.0)):

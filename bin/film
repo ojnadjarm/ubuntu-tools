@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # film — the painted-film engine's command line (skill painted-film): `film check DIR`, and the cached stages
-# `film ref|paint|sheet SHOT --frames a-b`, `film still SHOT 84,300 --pair IMG`, `film encode SHOT OUT.mp4` (each runs the stages before it).
+# `film ref|paint SHOT --frames a-b`, `film encode SHOT OUT.mp4` (each runs the stages before it), and `film qa CHECK SHOT`.
 set -euo pipefail
 case "${1:-}" in
-  -h|--help) echo "usage: film check DIR [--target IMG] [--mp4 FILE] [--still] [--flow DIR] | film ref|paint|sheet SHOT [--frames a-b] [--look F] [--draft] | film still SHOT 84,300 [--pair IMG] | film encode SHOT OUT.mp4 [--preset P] [--crf N] [--grain S]  (film <cmd> -h)"; exit 0 ;;
-  -*) echo "usage: film check|ref|paint|still|encode|sheet ... (film --help)" >&2; exit 2 ;;
+  -h|--help) echo "usage: film check DIR [--target IMG] [--mp4 FILE] [--still] [--flow DIR] | film ref|paint SHOT [--frames a-b] [--look F] [--draft] | film qa pair|crop|wedge|strip|clay|fml SHOT [--set K=V] [--loupe N] | film encode SHOT OUT.mp4 [--preset P] [--crf N] [--grain S]  (film <cmd> -h)"; exit 0 ;;
+  -*) echo "usage: film check|ref|paint|encode|qa ... (film --help)" >&2; exit 2 ;;
 esac
 SKILL="$(dirname "$(readlink -f "$0")")/../skills/painted-film"
 PY=${FILM_PYTHON:-$HOME/.local/opt/inkwash/bin/python}

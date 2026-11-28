@@ -112,12 +112,23 @@ def _cull(Q, cam, px_per_stroke, rho0):
     W, H = cam.size
     f = cam.lens_mm / cam.sensor_mm * W
     keep = -cc[:, 2] + R > NEAR
-    for axis, half in ((0, W / 2 + W / 8), (1, H / 2 + W / 8)):  # side planes, margin W/8 px
-        for s in (1.0, -1.0):
-            keep &= (s * f * cc[:, axis] + half * cc[:, 2]) / np.hypot(f, half) <= R
+    if cam.window is None:  # side planes, margin W/8 px
+        sides = ((0, -(W / 2 + W / 8), W / 2 + W / 8), (1, -(H / 2 + W / 8), H / 2 + W / 8))
+    else:  # the window's side planes, from the picture's centre (camera up is picture y down)
+        x0, x1, y0, y1 = cam.bounds()
+        sides = ((0, x0 - (W / 2 - 0.5), x1 - (W / 2 - 0.5)), (1, (H / 2 - 0.5) - y1, (H / 2 - 0.5) - y0))
+    for axis, lo, hi in sides:
+        keep &= (f * cc[:, axis] + hi * cc[:, 2]) / np.hypot(f, hi) <= R
+        keep &= (-f * cc[:, axis] - lo * cc[:, 2]) / np.hypot(f, lo) <= R
     lo = np.maximum(np.linalg.norm(c - cam.pos, axis=1) - R, NEAR)
     corner = np.hypot(f, 0.5 * np.hypot(W, H)) / f  # 1 / cos of the view's widest angle
     return keep, 0.5 * np.log2(f * f * corner / (lo * lo * px_per_stroke ** 2) / rho0)
+
+
+def inside(xy, cam):
+    """Picture places (k, 2) where a seed can touch the picture or the camera's window."""
+    x0, x1, y0, y1 = cam.bounds()
+    return (xy[:, 0] > x0) & (xy[:, 0] < x1) & (xy[:, 1] > y0) & (xy[:, 1] < y1)
 
 
 class SeedBank:
@@ -161,8 +172,6 @@ class SeedBank:
         """The seeds the view can need, at their places on the surface V_now (same topology as at construction)."""
         V_now = np.asarray(V_now, np.float64)
         pieces, top = self._visible_pieces(V_now, cam, px_per_stroke)
-        W, H = cam.size
-        m = W / 8
         out = []
         for j in range(self.octaves):
             sel = pieces[top >= j - 1]
@@ -189,7 +198,7 @@ class SeedBank:
             L, z = level(P, N, cam, px_per_stroke, self.rho0)
             op = np.ones(len(P)) if j == 0 else np.clip(L - j + 1, 0.0, 1.0)
             xy, _ = cam.project(P)
-            ok = (z > NEAR) & (op > 0) & (xy[:, 0] > -m) & (xy[:, 0] < W + m) & (xy[:, 1] > -m) & (xy[:, 1] < H + m)
+            ok = (z > NEAR) & (op > 0) & inside(xy, cam)
             out.append((ids[ok], P[ok], N[ok], T[ok], np.full(ok.sum(), j), self.ident[face[ok]], op[ok],
                         px_per_stroke * 2.0 ** (L[ok] - j)))
         return _seeds(out + self._marks(V_now, cam, px_per_stroke), self.material)
@@ -204,7 +213,7 @@ class SeedBank:
         if not len(self.me):
             return []
         W, H = cam.size
-        m, f, rho = W / 8, cam.lens_mm / cam.sensor_mm * W, np.sqrt(self.rho0)
+        f, rho = cam.lens_mm / cam.sensor_mm * W, np.sqrt(self.rho0)
         A, D = V_now[self.ev[:, 0]], V_now[self.ev[:, 1]] - V_now[self.ev[:, 0]]
         Q = A[self.me, None] + self.ms[:, :, None] * D[self.me, None]
         keep, _ = _cull(Q[:, [0, 1, 1]], cam, px_per_stroke, self.rho0)
@@ -237,7 +246,7 @@ class SeedBank:
             view /= np.maximum(np.linalg.norm(view, axis=1), 1e-12)[:, None]
             front = np.maximum((N1[e] * view).sum(1), (N2[e] * view).sum(1))  # an edge of two faces turned away fades
             op = (np.ones(len(P)) if j == 0 else np.clip(L - j + 1, 0.0, 1.0)) * np.clip((front + 0.05) / 0.2, 0.0, 1.0)
-            ok = (z > NEAR) & (op > 0) & (xy[:, 0] > -m) & (xy[:, 0] < W + m) & (xy[:, 1] > -m) & (xy[:, 1] < H + m)
+            ok = (z > NEAR) & (op > 0) & inside(xy, cam)
             e = e[ok]
             out.append((ids[ok], P[ok], Ne[e], D[e] / np.maximum(Dl[e], 1e-12)[:, None], np.full(ok.sum(), j),
                         self.ident[self.ef[e, 0]], op[ok], px_per_stroke * 2.0 ** (L[ok] - j),
