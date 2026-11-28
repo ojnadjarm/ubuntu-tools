@@ -187,10 +187,17 @@ class OilMedium:
             if soft and over is not None:
                 dmin, smin = _reach(near, ref.cover, ref.other, int(round(over)), False)
             ptr = lambda v: None if v is None else v.ctypes.data  # noqa: E731
+            body = br["hs"]  # brush "light": the paint stands that much thicker in the lights than in the darks
+            if br.get("light"):
+                body = body * (1.0 + br["light"] * (2.0 * op.smooth(col @ np.array([0.2126, 0.7152, 0.0722], np.float32) / 0.5) - 1.0))
+            normal = cv2.resize(ref.normal, (W, H), interpolation=cv2.INTER_AREA)
+            thin = min(int(round(look.get("face_min_px", 0))), 2)  # a face thinner than this is cut with the face round it:
+            if thin > 0:  # no stroke of its own can fill it, and the face cut would leave it bare ground
+                normal = cv2.medianBlur(np.ascontiguousarray(normal, np.float32), 2 * thin + 1)
             _PAINT(frame.img, frame.hgt, W, H, bank.atlas, bank.off, bank.mw, bank.mh, bank.nlev, bank.bw, float(bank.L), k,
                    f32(st.x), f32(st.y), f32(st.ang), f32(st.length), f32(wid), var, f32(c1), f32(c2),
-                   f32(opac), f32(br["hs"] * np.minimum(1.0, br.get("thick_px", np.inf) / wid)), float(br["level"]), depth,
-                   f32(st.z), f32(st.zg), f32(cv2.resize(ref.normal, (W, H), interpolation=cv2.INTER_AREA)), f32(st.n),
+                   f32(opac), f32(body * np.minimum(1.0, br.get("thick_px", np.inf) / wid)), float(br["level"]), depth,
+                   f32(st.z), f32(st.zg), f32(normal), f32(st.n),
                    float(f0), float(f1), ptr(dmin), float(look.get("hard", 1.0)), ptr(smax), ptr(smin))
         return frame.finish(light=tuple(cv["light"]), relief=cv["relief"], gloss=cv["gloss"], shine=cv["shine"],
                             exposure=cv["exposure"], vignette=cv["vignette"])

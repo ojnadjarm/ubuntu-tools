@@ -85,6 +85,37 @@ class Ref(unittest.TestCase):
         self.assertLessEqual(refio.seed_diff(a, b, sigma=2.0), 0.010)
 
 
+@unittest.skipUnless(shutil.which(os.environ.get("FILM_BLENDER", "blender")), "no blender")
+class Layers(unittest.TestCase):
+    def test_layers_and_spot(self):
+        """A material's layer breaks its one colour into both (the albedo runs from the layer's black to the stone's
+        white); a spot lights its cone and not the wall beside it."""
+        with tempfile.TemporaryDirectory() as t:
+            out = os.path.join(t, "out")
+            self.assertEqual(cli.main(["ref", shot(t, "s", "Stained"), "--out", out, "--frames", "0"]), 0)
+            r = refio.load(os.path.join(out, "f_0000"))
+        a = r.albedo[..., 0]
+        self.assertLess(np.percentile(a, 2), 0.05)
+        self.assertGreater(np.percentile(a, 98), 0.75)
+        H, W = a.shape
+        self.assertGreater(r.lit[H // 2 - 20:H // 2 + 20, W // 2 - 20:W // 2 + 20].max(), 0.2)
+        self.assertLess(r.lit[:, :W // 6].max(), 1e-3)
+
+
+class Beside(unittest.TestCase):
+    def test_unseen_shades_and_haze_has_no_surface(self):
+        """An unseen plate shades the wall and is in no pass; a body of haze glows in the light and has no depth."""
+        with tempfile.TemporaryDirectory() as t:
+            out = os.path.join(t, "out")
+            self.assertEqual(cli.main(["ref", shot(t, "s", "Beside"), "--out", out, "--frames", "0"]), 0)
+            r = refio.load(os.path.join(out, "f_0000"))
+        W = r.lit.shape[1]
+        self.assertGreater(r.depth.min(), 9.9)
+        self.assertTrue((r.ident == 5).all())
+        self.assertLess(r.lit[:, W // 2 + 4:].max(), 1e-3)
+        self.assertGreater(r.lit[:, :W // 2].max(), 0.01)
+
+
 class Decode(unittest.TestCase):
     def test_ident_follows_depth_at_blended_edges(self):
         """An anti-aliased edge band takes the ident of the side its (unfiltered) depth belongs to."""

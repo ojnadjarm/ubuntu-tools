@@ -102,14 +102,16 @@ class Camera:
 
 @dataclass
 class Light:
-    kind: str  # "point" | "sun" | "area"
+    kind: str  # "point" | "sun" | "area" | "spot"
     pos: tuple = (0.0, 0.0, 0.0)
-    rot: tuple = (0.0, 0.0, 0.0)  # Euler XYZ, rad (sun and area aim down their local -z)
+    rot: tuple = (0.0, 0.0, 0.0)  # Euler XYZ, rad (sun, area and spot aim down their local -z)
     color: tuple = (1.0, 1.0, 1.0)
     watts: float = 100.0  # sun: strength in W/m2
     radius: float = 0.1  # point: m; sun: angular diameter, rad; area: edge of the square, m
     shadow: bool = True
     haze: float = 1.0  # how much it lights the haze (volume factor)
+    cone: float = 0.8  # spot: the cone's full angle, rad
+    blend: float = 0.3  # spot: the share of the cone its edge fades over
 
 
 @dataclass
@@ -132,7 +134,8 @@ class Seeds:
 class Scene(Protocol):
     fps: int
     duration: float
-    materials: dict  # name -> {"color": (r, g, b), "emission": strength, "rough": 0..1, "metal": 0..1}
+    materials: dict  # name -> {"color": (r, g, b), "emission": strength, "rough": 0..1, "metal": 0..1, "layers": [...] (ref._Stage.layers),
+    #   "unseen": True (it casts its shadow and is not in the picture), "haze": density (a body of air, no surface)}
     world: dict  # {"color": (r, g, b), "strength", "haze": density, "anisotropy", "air": (r, g, b), "air_strength"}
 
     def meshes(self, t: float) -> list: ...

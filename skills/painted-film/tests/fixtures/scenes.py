@@ -89,3 +89,33 @@ class Room(Base):
         return [Light("point", pos=(-3.0, 7.0, 3.3), color=(1.0, 0.56, 0.2), watts=120.0, radius=0.07, haze=0.25),
                 Light("point", pos=(2.5, 10.0, 3.8), color=(1.0, 0.56, 0.2), watts=120.0, radius=0.07, haze=0.25),
                 Light("area", pos=(0.0, 4.0, 5.8), color=(0.5, 0.64, 1.0), watts=150.0, radius=4.0, shadow=False, haze=0.0)]
+
+
+class Stained(Base):
+    """A wall facing the camera, its material a white stone with a black layer, lit by one spot at its middle."""
+    materials = {"wall": {"color": (0.8, 0.8, 0.8), "layers": [{"color": (0.0, 0.0, 0.0), "scale": 1.0, "lo": 0.45, "hi": 0.55}]}}
+    world = {"color": (0.0, 0.0, 0.0), "strength": 0.0, "haze": 0.0}
+
+    def meshes(self, t):
+        V = np.array([[-20, 10, -12], [20, 10, -12], [20, 10, 12], [-20, 10, 12]], float)
+        return [mesh("wall", V, np.array([[0, 2, 1], [0, 3, 2]]), "wall", 5)]
+
+    def camera(self, t):
+        return Camera.aim([0.0, 0.0, 0.0], [0.0, 1.0, 0.0], 0.0, 40.0, self.size)
+
+    def lights(self, t):
+        return [Light("spot", pos=(0.0, 0.0, 0.0), rot=(np.pi / 2, 0.0, 0.0), watts=5000.0, cone=0.3, blend=0.1, shadow=False)]
+
+
+class Beside(Stained):
+    """The wall plain, a plate that is not in the picture between it and the spot, a block of haze in the left of the cone."""
+    materials = {"wall": {"color": (0.8, 0.8, 0.8)}, "plate": {"color": (0, 0, 0), "unseen": True}, "mist": {"color": (1, 1, 1), "haze": 2.0}}
+
+    def meshes(self, t):
+        q = np.array([[-3, 5, -3], [3, 5, -3], [3, 5, 3], [-3, 5, 3]], float)
+        b = np.array([[x, y, z] for x in (-1.0, -0.1) for y in (2.0, 4.0) for z in (-0.5, 0.5)])
+        F = np.array([[0, 1, 3], [0, 3, 2], [4, 7, 5], [4, 6, 7], [0, 5, 1], [0, 4, 5], [2, 3, 7], [2, 7, 6], [0, 2, 6], [0, 6, 4], [1, 5, 7], [1, 7, 3]])
+        return super().meshes(t) + [mesh("plate", q, np.array([[0, 2, 1], [0, 3, 2]]), "plate", 6), mesh("mist", b, F, "mist", 7)]
+
+    def lights(self, t):
+        return [Light("spot", pos=(0.0, 0.0, 0.0), rot=(np.pi / 2, 0.0, 0.0), watts=5000.0, cone=0.3, blend=0.1, shadow=True)]

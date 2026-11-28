@@ -79,6 +79,20 @@ class Face(unittest.TestCase):
         self.assertGreater(free[80:100, 135:155].mean(), 0.8)
 
 
+    def test_thin_face_is_filled(self):
+        """A face thinner than the look's "face_min_px" is painted with the face round it; without the key it stays bare."""
+        ref = flat_ref(cam_at(0.0, 0.0), [FAR])
+        ref.normal[:, 170:172] = (1.0, 0.0, 0.0)
+        m = OilMedium()
+        look = dict(FLAT, face=[0.5, 0.8])
+        empty = m.composite(strokes([], [], []), ref, look, SIZE).astype(int)
+        st = strokes(170.0, 90.0, 10.0)
+        st.n = np.array([[0.0, -1.0, 0.0]], np.float32)
+        on = lambda lk: np.abs(m.composite(st, ref, lk, SIZE).astype(int) - empty).max(2) > 0
+        self.assertFalse(on(look)[:, 170:172].any())
+        self.assertGreater(on(dict(look, face_min_px=2))[85:95, 170:172].mean(), 0.8)
+
+
 class Pure(unittest.TestCase):
     def test_composite_pure(self):
         """Two calls give equal pictures; a call between them on another frame changes nothing; inputs untouched."""

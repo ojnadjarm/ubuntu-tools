@@ -61,6 +61,7 @@ class _Stage:
             a.name, a.type = name, kind
         self.world(scene.world)
         self.mats = {m: self.material(m, d) for m, d in scene.materials.items()}
+        self.unseen = {m: bool(d.get("unseen")) for m, d in scene.materials.items()}  # casts its shadow, is in no pass
         self.objs, self.hash, self.lights = {}, {}, []
         cd = bpy.data.cameras.new("cam")
         cd.clip_start, cd.clip_end, cd.sensor_fit = cfg.clip[0], cfg.clip[1], "HORIZONTAL"
@@ -116,6 +117,13 @@ class _Stage:
         m.use_nodes = True
         t = m.node_tree
         t.nodes.clear()
+        if d.get("haze"):  # a body of air: it scatters light and has no surface (in no pass but the lit one)
+            vs = t.nodes.new("ShaderNodeVolumeScatter")
+            vs.inputs["Color"].default_value = (*d["color"], 1)
+            vs.inputs["Density"].default_value = d["haze"]
+            vs.inputs["Anisotropy"].default_value = d.get("anisotropy", 0.0)
+            t.links.new(vs.outputs[0], t.nodes.new("ShaderNodeOutputMaterial").inputs["Volume"])
+            return m
         tone = t.nodes.new("ShaderNodeAttribute")
         tone.attribute_name = "tone"
         idv, idc = t.nodes.new("ShaderNodeAttribute"), t.nodes.new("ShaderNodeAttribute")
@@ -127,6 +135,8 @@ class _Stage:
         b = t.nodes.new("ShaderNodeBsdfPrincipled")
         t.links.new(base.outputs[0], b.inputs["Base Color"])
         b.inputs["Roughness"].default_value = d.get("rough", 0.8)
+        if d.get("layers"):
+            self.layers(t, d, base, b)
         b.inputs["Metallic"].default_value = d.get("metal", 0.0)
         if d.get("emission", 0.0):
             t.links.new(base.outputs[0], b.inputs["Emission Color"])
@@ -138,6 +148,67 @@ class _Stage:
             o.aov_name = aov
             t.links.new(sock, o.inputs[kind])
         return m
+
+    def layers(self, t, d, base, b):
+        """The material's layers (stain, moss, lime, damp): each mixes the colour toward its own, and the roughness
+        toward its "rough", where a noise of the world place (cycles a metre: "scale", a number or one an axis)
+        passes "lo".."hi", times "amount"; with "up": only where the normal's z is between its two values."""
+        N = t.nodes.new
+        geo = N("ShaderNodeNewGeometry")
+        up = N("ShaderNodeSeparateXYZ")
+        t.links.new(geo.outputs["Normal"], up.inputs[0])
+        col = N("ShaderNodeRGB")
+        col.outputs[0].default_value = (*d["color"], 1)
+        col, rough = col.outputs[0], None
+        for i, ly in enumerate(d["layers"]):
+            at = N("ShaderNodeVectorMath")
+            at.operation = "MULTIPLY"
+            t.links.new(geo.outputs["Position"], at.inputs[0])
+            at.inputs[1].default_value = tuple(np.broadcast_to(np.asarray(ly.get("scale", 1.0), float), 3))
+            off = N("ShaderNodeVectorMath")  # each layer its own place in the noise
+            t.links.new(at.outputs[0], off.inputs[0])
+            off.inputs[1].default_value = (17.3 * i + 3.1, 9.7 * i + 1.3, 23.9 * i + 7.7)
+            nz = N("ShaderNodeTexNoise")
+            nz.inputs["Scale"].default_value = 1.0
+            nz.inputs["Detail"].default_value = ly.get("detail", 3.0)
+            nz.inputs["Roughness"].default_value = ly.get("grain", 0.55)
+            t.links.new(off.outputs[0], nz.inputs["Vector"])
+            mask = self.ramp(t, nz.outputs[0], ly.get("lo", 0.45), ly.get("hi", 0.6), ly.get("amount", 1.0))
+            if "up" in ly:
+                m = N("ShaderNodeMath")
+                m.operation = "MULTIPLY"
+                t.links.new(mask, m.inputs[0])
+                t.links.new(self.ramp(t, up.outputs["Z"], *ly["up"], 1.0), m.inputs[1])
+                mask = m.outputs[0]
+            mx = N("ShaderNodeMix")
+            mx.data_type = "RGBA"
+            t.links.new(mask, mx.inputs[0])
+            t.links.new(col, mx.inputs[6])
+            mx.inputs[7].default_value = (*ly["color"], 1)
+            col = mx.outputs[2]
+            if "rough" in ly:
+                mr = N("ShaderNodeMix")
+                mr.data_type = "FLOAT"
+                t.links.new(mask, mr.inputs[0])
+                if rough is None:
+                    mr.inputs[2].default_value = d.get("rough", 0.8)
+                else:
+                    t.links.new(rough, mr.inputs[2])
+                mr.inputs[3].default_value = ly["rough"]
+                rough = mr.outputs[0]
+        t.links.new(col, base.inputs[0])
+        if rough is not None:
+            t.links.new(rough, b.inputs["Roughness"])
+
+    @staticmethod
+    def ramp(t, sock, lo, hi, gain):
+        """0 at lo, gain at hi, smooth between, clamped."""
+        r = t.nodes.new("ShaderNodeMapRange")
+        r.interpolation_type = "SMOOTHSTEP"
+        t.links.new(sock, r.inputs["Value"])
+        r.inputs["From Min"].default_value, r.inputs["From Max"].default_value = lo, hi
+        r.inputs["To Min"].default_value, r.inputs["To Max"].default_value = 0.0, gain
+        return r.outputs[0]
 
     def mesh(self, m):
         """Make or refresh the object of a Mesh; skip the upload when its data did not change."""
@@ -151,6 +222,7 @@ class _Stage:
         if o is None:
             o = self.objs[m.name] = bpy.data.objects.new(m.name, bpy.data.meshes.new(m.name))
             self.sc.collection.objects.link(o)
+            o.visible_camera = not self.unseen.get(m.material, False)
         o.hide_render = False
         if self.hash.get(m.name) == h.digest():
             return
@@ -184,9 +256,11 @@ class _Stage:
         if o.data.type != L.kind.upper():
             o.data.type = L.kind.upper()
         d = o.data
+        if L.kind == "spot":
+            d.spot_size, d.spot_blend = L.cone, L.blend
         d.color, d.energy, d.use_shadow, d.volume_factor = tuple(L.color), L.watts, L.shadow, L.haze
         d.shadow_maximum_resolution = self.cfg.shadow_res
-        if L.kind == "point":
+        if L.kind in ("point", "spot"):
             d.shadow_soft_size = L.radius
         elif L.kind == "sun":
             d.angle = L.radius

@@ -432,7 +432,7 @@ class Scene4D:
             mats = sorted(self.materials)
             self._banks = {}
             for name, b in sorted(self.bodies.items()):
-                if b.parts:
+                if b.parts and not any(self.materials.get(name, {}).get(k) for k in ("unseen", "haze")):  # what is not painted has no seeds
                     self._banks[name] = SeedBank4D.cached(self.cache_dir, b, mats.index(name) if name in mats else 0,
                                                           self._ident(name, b.attrs, len(b.P)), self.direction.get(name, "course"),
                                                           self.rho0, zlib.crc32(name.encode()), self.octaves)

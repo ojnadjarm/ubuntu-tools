@@ -290,7 +290,7 @@ def boil(st, look, t) -> Strokes:
 def scaled(look, W):
     """The look's pixel sizes (given for 1920 wide) for a picture W wide."""
     k, lk = W / 1920.0, dict(look)
-    for key in ("px_per_stroke", "max_px", "edge_spill_px", "overhang_px"):
+    for key in ("px_per_stroke", "max_px", "edge_spill_px", "overhang_px", "face_min_px"):
         if key in lk:
             lk[key] = lk[key] * k
     for key, subs in (("mark", ("width", "reach")), ("grade", ("glow_sigma", "local_sigma")), ("boil", ("amount",))):
