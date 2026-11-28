@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # film — the painted-film engine's command line (skill painted-film); `film check DIR [--target IMG] [--mp4 FILE] [--still]`, `film ref SHOT [--frames a-b] [--seed-pair]`.
 set -euo pipefail
+case "${1:-}" in
+  -h|--help) echo "usage: film check DIR [--target IMG] [--mp4 FILE] [--still] | film ref SHOT [--frames a-b] [--seed-pair]  (film check -h, film ref -h)"; exit 0 ;;
+  -*) echo "usage: film check|ref ... (film --help)" >&2; exit 2 ;;
+esac
 SKILL="$(dirname "$(readlink -f "$0")")/../skills/painted-film"
 PY=${FILM_PYTHON:-$HOME/.local/opt/inkwash/bin/python}
 PYTHONPATH="$SKILL/scripts${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" -m atelier.cli "$@"

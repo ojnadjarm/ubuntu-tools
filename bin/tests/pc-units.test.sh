@@ -486,8 +486,8 @@ rm -rf "${SX:?}" "${M:?}"
 ## --- live: fleet, cost, guard --------------------------------------------
 "$U" fleet --json | jq -e 'map(.unit)|index("sentinel-check.timer")' >/dev/null
 is 'fleet --json lists the roster (sentinel-check.timer present)' "$?" 0
-"$U" cost dark-eye --user --json | jq -e '.mem_mb>0 and has("psi")' >/dev/null
-is 'cost dark-eye --user --json has mem_mb>0 and psi' "$?" 0
+"$U" cost agents-dashboard --user --json | jq -e '.mem_mb>0 and has("psi")' >/dev/null
+is 'cost agents-dashboard --user --json has mem_mb>0 and psi' "$?" 0
 
 "$U" restart ssh --apply >/dev/null 2>&1
 is 'restart ssh --apply is refused (guard)' "$?" 3

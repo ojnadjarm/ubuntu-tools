@@ -21,7 +21,7 @@ bpy.app.handlers.render_pre.append(dump)' -P "$SHOT" -- "$FX/k$1/frame_" 2>&1 | 
 ok "$(is "$(knobs 0)" "512 1.0 1 6 64 False 16 100 True")" "final knobs unchanged: pool 512, shadow res 1.0, 6 steps, 64 volume samples, no persistent data, 16-bit, look on"
 ok "$(is "$(knobs 1)" "16 0.25 1 1 1 True 8 50 False")" "draft knobs: pool 16, shadow res 0.25, floor samples, persistent data, 8-bit, look off"
 
-if ! quiet-gate --max-load1 "${MAX_LOAD1:-}" --max-per-cpu "${MAX_PER_CPU:-0.25}" --gpu --wait "${GATE_WAIT:-300}" >/dev/null; then
+if ! quiet-gate --max-load1 "${MAX_LOAD1:-}" --max-per-cpu "${MAX_PER_CPU:-0.25}" --gpu --wait "${GATE_WAIT:-120}" >/dev/null; then
   echo "SKIP draft speed: machine busy (load $(cut -d' ' -f1 /proc/loadavg))"
   echo "mv-draft-speed: $((n - bad))/$n passed"
   [[ $bad == 0 ]]; exit
